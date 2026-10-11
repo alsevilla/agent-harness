@@ -472,4 +472,74 @@ async function runNodeSuite() {
 			t.stop();
 		}
 	});
+
+	// Real TuiAltScreen host mirroring interactive-mode: the editor sits in a slot, the subagent overlay opens above it, and an extension prompt can take the slot and focus while the overlay stays visible.
+	function overlayOverEditor() {
+		const term: any = { start(i: any) { this.onInput = i; }, stop() {}, drainInput: async () => {}, write() {}, columns: 120, rows: 40, kittyProtocolActive: false, moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {}, clearScreen() {}, setTitle() {}, setProgress() {}, setProgramStatus() {} };
+		const t: any = new tui.TuiAltScreen(term, false, undefined, { mouse: true });
+		const keys: { editor: string[]; selector: string[] } = { editor: [], selector: [] };
+		const editor: any = { focused: false, invalidate() {}, render: () => ["EDITOR"], handleInput: (d: string) => keys.editor.push(d) };
+		const selector: any = { focused: false, invalidate() {}, render: () => ["SELECTOR"], handleInput: (d: string) => keys.selector.push(d) };
+		const slot = new tui.Container(); slot.addChild(editor); t.addChild(slot); t.setFocus(editor); t.start();
+		const handlers: Record<string, (event: unknown, ctx: unknown) => void> = {};
+		const pi = { on: (name: string, fn: (event: unknown, ctx: unknown) => void) => { handlers[name] = fn; }, registerCommand() {}, registerShortcut() {}, getSettings: () => ({ fullscreenScrollbar: "auto" }) };
+		const m: any = new monitor.WorkerMonitor(pi as never);
+		const ctx: any = { hasUI: true, ui: { setWidget() {}, onTerminalInput: (fn: any) => t.addInputListener(fn), custom(factory: any, options: any) {
+			return new Promise<void>(resolve => {
+				// Mirrors showExtensionCustom: an overlay closes through hideOverlay(), not through its handle.
+				const done = () => { t.hideOverlay(); resolve(); };
+				const view = factory(t, theme, null, done);
+				const overlay = t.showOverlay(view, options.overlayOptions);
+				options.onHandle?.(overlay);
+				t.renderNow(true);
+			});
+		} } };
+		handlers.session_start!({}, ctx);
+		const r = m.store.begin("worker", "Focus task", "provider/model", "high");
+		m.store.started(r.id);
+		m.store.event(r.id, { type: "message_start", message: { role: "assistant" } });
+		m.store.event(r.id, { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: Array.from({ length: 150 }, (_, i) => `line ${i + 1}`).join("\n\n") } });
+		const opened: Promise<void> = m.open();
+		t.renderNow(true);
+		const feed = (d: string) => { term.onInput(d); t.renderNow(true); };
+		// Mirrors showExtensionSelector: the prompt replaces the editor slot and takes focus while the overlay stays open.
+		const showSelector = () => { slot.clear(); slot.addChild(selector); t.setFocus(selector); t.renderNow(true); };
+		const settle = () => Promise.race([opened, new Promise(resolve => setTimeout(resolve, 50))]);
+		return { t, editor, selector, keys, feed, showSelector, settle, teardown() { handlers.session_shutdown!({}, ctx); t.stop(); } };
+	}
+
+	// Left-button press at the top-left corner, outside the centred overlay (SGR mouse, press only).
+	const outsidePress = "\x1b[<0;1;1M";
+
+	test("outside dismissal leaves a prompt that replaced the editor focused and reachable", async () => {
+		const h = overlayOverEditor();
+		try {
+			h.showSelector();
+			h.feed(outsidePress);
+			await h.settle();
+			assert.equal(h.t.hasOverlay(), false, "outside press closes the overlay");
+			assert.equal(h.t.getFocusedComponent(), h.selector, "focus stays on the prompt, not the editor it replaced");
+			assert.deepEqual(h.keys.selector, [], "the dismissal click is consumed, not delivered to the prompt");
+			h.feed("\r");
+			h.feed("y");
+			assert.deepEqual(h.keys.selector, ["\r", "y"], "Enter and y reach the prompt");
+			assert.deepEqual(h.keys.editor, [], "the editor receives no keys while the prompt is open");
+		} finally {
+			h.teardown();
+		}
+	});
+
+	test("outside dismissal with the overlay focused returns focus and keys to the editor", async () => {
+		const h = overlayOverEditor();
+		try {
+			h.feed(outsidePress);
+			await h.settle();
+			assert.equal(h.t.hasOverlay(), false, "outside press closes the overlay");
+			assert.equal(h.t.getFocusedComponent(), h.editor, "focus returns to the editor that was focused before the overlay");
+			h.feed("y");
+			assert.deepEqual(h.keys.editor, ["y"], "keys reach the editor");
+		} finally {
+			h.teardown();
+		}
+	});
 }

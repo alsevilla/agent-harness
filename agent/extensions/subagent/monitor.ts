@@ -554,9 +554,7 @@ export class WorkerMonitor {
           // Only a primary-button press: movement, release, and wheel input do not dismiss.
           if ((button & 3) !== 0 || (button & 96) !== 0) return;
           if (outside) {
-            // Model/editor changes can move focus away while this overlay remains visible.
-            // Raise this specific overlay before done() removes the top overlay.
-            handle.focus();
+            // Keep focus where it is: a prompt may own it, and hideOverlay() restores focus only while this overlay holds it.
             close?.();
             // Consume the dismissal click so it cannot accidentally activate the main screen.
             return {consume: true};
