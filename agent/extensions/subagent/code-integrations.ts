@@ -145,6 +145,13 @@ export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(
 }
 
 // extraTools are per-launch grants (e.g. request_decision); they are appended to the role's own allowlist only.
+/** Runtime note for the installed package only; empty in the live profile. Maps bundled skill paths and states the catalogs that are not bundled. */
+export function packageResourceGuidance(root: string | null): string {
+	if (!root) return "";
+	const skills = path.join(root, "skills").split(path.sep).join("/");
+	return `\n\nPackage resources: ~/.pi/agent/skills/engineering-harness/ and ~/.pi/agent/skills/agent-creation/ resolve to ${skills}/engineering-harness/ and ${skills}/agent-creation/. Precedence: these bundled paths take effect over any profile path in the role text. Backend, frontend, graphify, browser and RFID skill catalogs are not bundled; any instruction to read them is unavailable, so use the project's own guidance or other available generic guidance instead. Roles not bundled in this package (hardware-integration, attendance-domain-specialist, event-reconciliation-specialist, messaging-specialist, privacy-compliance-specialist) are never dispatched.`;
+}
+
 export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = []): boolean {
   const config = JSON.parse(fs.readFileSync(new URL("./integrations.json", import.meta.url), "utf8")) as IntegrationConfig;
   if (!config.roles.includes(agent.name)) {

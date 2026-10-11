@@ -31,6 +31,13 @@ export const contextLabel = (r: WorkerRecord) => r.context === undefined ? "Awai
 export function fullscreenScrollbarMode(value: unknown): ScrollViewScrollbar {
   return value === "always" || value === "hidden" ? value : "auto";
 }
+// Overlay placement shared by the subagent inspector and the /subagent roles window.
+export const SUBAGENT_WINDOW_OPTIONS = { width: "98%", maxHeight: "94%", anchor: "center" as const, margin: 1 };
+// Window frame shared with the roles picker: border rows, blank rows inside the border when pad is set, one bordered row per line.
+export function frameWindow(painted: string[], outerWidth: number, border: (text: string) => string, pad: boolean): string[] {
+  const blank = pad ? [border("│") + " ".repeat(outerWidth - 2) + border("│")] : [];
+  return [border("╭" + "─".repeat(outerWidth - 2) + "╮"), ...blank, ...painted.map(line => border("│") + " " + line + " " + border("│")), ...blank, border("╰" + "─".repeat(outerWidth - 2) + "╯")];
+}
 // Mirrors pi-tui layout.js getScrollbarGeometry, which is not exported. Upgrade to that export if pi-tui publishes it.
 export function scrollbarThumb(track: number, content: number, scrollTop: number): {top: number; height: number} {
   const height = Math.max(Math.min(2, track), Math.min(track, Math.round((track * track) / Math.max(1, content))));
@@ -345,8 +352,7 @@ export class WorkerInspector implements Component {
       return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
     });
     if (!framed) return painted;
-    const edge = (text: string) => this.theme.fg("border", text);
-    return [edge("╭" + "─".repeat(outerWidth - 2) + "╮"), edge("│") + " ".repeat(outerWidth - 2) + edge("│"), ...painted.map(line => edge("│") + " " + line + " " + edge("│")), edge("│") + " ".repeat(outerWidth - 2) + edge("│"), edge("╰" + "─".repeat(outerWidth - 2) + "╯")];
+    return frameWindow(painted, outerWidth, text => this.theme.fg("border", text), true);
   }
   handleInput(data: string) {
     if (matchesKey(data, Key.escape)) { this.done(); return; }
@@ -443,6 +449,7 @@ export class WorkerMonitor {
   control?: (args: string, ctx: ExtensionContext) => Promise<void>;
   private ctx?: ExtensionContext;
   private overlayOpen = false;
+  private menuOpen = false;
   private positions = new Map<string, ReadingPosition>();
   private timer?: ReturnType<typeof setInterval>;
   constructor(private readonly pi: ExtensionAPI) {
@@ -479,12 +486,42 @@ export class WorkerMonitor {
       if (this.timer) clearInterval(this.timer); this.timer = undefined;
       this.store.listeners.clear(); this.ctx = undefined;
     });
-    pi.registerCommand("subagent", { description: "Open live subagent inspector", handler: async (args, ctx) => { this.ctx = ctx; if (args.trim() && this.control) await this.control(args, ctx); else await this.open(); } });
+    pi.registerCommand("subagent", { description: "Open live subagent inspector", handler: async (args, ctx) => { this.ctx = ctx; const text = args.trim(); if (!text) await this.menu(ctx); else if (text === "create" || text.startsWith("create ")) await this.create(ctx, text.slice(6)); else if (this.control) await this.control(args, ctx); else await this.open(); } });
     pi.registerShortcut("ctrl+shift+w", { description: "Inspect running subagents", handler: async ctx => { this.ctx = ctx; await this.open(); } });
+  }
+  /** Bare /subagent with UI: Inspect (first, preselected) or Edit roles; the roles editor is lazy-imported here only. */
+  private async menu(ctx: ExtensionContext) {
+    if (!ctx.hasUI) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, roles, create, or /subagent to inspect", "info"); return; }
+    if (this.overlayOpen || this.menuOpen) return;
+    this.menuOpen = true;
+    const inspect = `Inspect workers (${this.store.records.size})`;
+    let choice: string | undefined;
+    try {
+      const { pickFrom, editRoleConfig } = await import("./roles-editor.ts");
+      choice = await pickFrom(ctx as any, "Subagent workers", [inspect, "Edit roles", "Create agent"], { searchable: false });
+      if (choice === "Edit roles") await editRoleConfig(ctx as any);
+      else if (choice === "Create agent") await (await import("./agent-create.ts")).runAgentCreate(ctx as any, "");
+    } finally {
+      this.menuOpen = false;
+    }
+    // Inspect runs after the menu guard is released, because open() refuses while menuOpen.
+    if (choice !== inspect) return;
+    if (this.store.records.size === 0) ctx.ui.notify("No subagent workers yet.", "info");
+    else await this.open();
+  }
+  /** `/subagent create`: holds the menu guard for the whole flow (prompts and execution), so open() and the menu are refused meanwhile. */
+  async create(ctx: ExtensionContext, args: string) {
+    if (this.overlayOpen || this.menuOpen) { ctx.ui.notify("A subagent window is already open; close it first.", "warning"); return; }
+    this.menuOpen = true;
+    try {
+      await (await import("./agent-create.ts")).runAgentCreate(ctx as any, args);
+    } finally {
+      this.menuOpen = false;
+    }
   }
   async open(id?: string) {
     const ctx = this.ctx;
-    if (!ctx?.hasUI || this.overlayOpen || this.store.records.size === 0) return;
+    if (!ctx?.hasUI || this.overlayOpen || this.menuOpen || this.store.records.size === 0) return;
     this.overlayOpen = true;
     let unsubscribe: (() => void) | undefined;
     let unsubscribeInput: (() => void) | undefined;
@@ -499,7 +536,7 @@ export class WorkerMonitor {
         const redraw = () => tui.requestRender(); this.store.listeners.add(redraw);
         unsubscribe = () => this.store.listeners.delete(redraw);
         return inspector;
-      }, { overlay: true, overlayOptions: { width: "98%", maxHeight: "94%", anchor: "center", margin: 1 }, onHandle: handle => {
+      }, { overlay: true, overlayOptions: { ...SUBAGENT_WINDOW_OPTIONS }, onHandle: handle => {
         const outsideClick = (data: string) => {
           // Focus loss ends hover and any captured drag; the listener returns nothing, so Pi still sees the event.
           if (data === "\x1b[O") { inspector?.clearPointer(); return; }

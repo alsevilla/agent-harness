@@ -12,20 +12,26 @@ import type { AgentConfig } from "../agents.ts";
 
 const agentsUrl = new URL("../agents.ts", import.meta.url).href;
 const indexUrl = new URL("../index.ts", import.meta.url).href;
+const backgroundUrl = new URL("../background.ts", import.meta.url).href;
 const doublesUrl = new URL("./fixtures/runtime-doubles.mjs", import.meta.url).href;
 const indexDependencies = new Set([
 	"node:child_process",
 	"@earendil-works/pi-ai",
 	"typebox",
-	"./background.ts",
 	"./monitor.ts",
 	"./code-integrations.ts",
 	"./build-env.ts",
 ]);
 
+// Launch-state stub for the provider cooldown entry: its pi-ai/compat import is not resolvable from this node test.
+const entryStubUrl = `data:text/javascript,${encodeURIComponent(
+	"export default function providerCooldownEntry() {}\nexport function registerProviderCooldown() {}\nexport async function runProviderCooldownCommand() { return { message: '', type: 'info' }; }\nexport async function providerLaunchState(model) { return globalThis.__piProviderLaunch(model); }\nexport async function guardRefusalReplayable(model, errorMessage) { return globalThis.__piGuardRefusal(model, errorMessage); }",
+)}`;
+
 registerHooks({
 	resolve(specifier, context, nextResolve) {
 		if (specifier === "@earendil-works/pi-coding-agent") return { url: doublesUrl, shortCircuit: true };
+		if (context.parentURL === indexUrl && specifier === "./provider-cooldown-entry.ts") return { url: entryStubUrl, shortCircuit: true };
 		if (context.parentURL === indexUrl && indexDependencies.has(specifier)) return { url: doublesUrl, shortCircuit: true };
 		return nextResolve(specifier, context);
 	},
@@ -64,8 +70,16 @@ interface RunResult {
 
 let discoverAgents: typeof import("../agents.ts").discoverAgents;
 let runSingleAgent: (...args: unknown[]) => Promise<RunResult>;
+// Usage ledger helpers from the production background module (same module instance index.ts imports).
+let bg: any;
 let attempts: string[] = [];
 let spawnPlan: (model: string) => SpawnPlan = () => success();
+// Launch state per declared model; the default launches everything (provider cooldown entry stub).
+let launchPlan: (model: string) => { state: string; replayable?: boolean } = () => ({ state: "launch" });
+(globalThis as { __piProviderLaunch?: (model: string) => unknown }).__piProviderLaunch = (model) => launchPlan(model);
+// The parent's own store verdict on a child's guard refusal (provider-cooldown-entry guardRefusalReplayable stub).
+let guardPlan: (model: string, message?: string) => boolean = () => false;
+(globalThis as { __piGuardRefusal?: (model: string, message?: string) => boolean }).__piGuardRefusal = (model, message) => guardPlan(model, message);
 
 // Records every child launch in order; the model is the value following --model.
 (globalThis as { __piSubagentFakeSpawn?: (args: string[]) => SpawnPlan }).__piSubagentFakeSpawn = (args) => {
@@ -98,11 +112,14 @@ const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 before(async () => {
 	({ discoverAgents } = await import(agentsUrl));
 	({ runSingleAgent } = await import(indexUrl));
+	bg = await import(backgroundUrl);
 });
 
 beforeEach(() => {
 	attempts = [];
 	spawnPlan = () => success();
+	launchPlan = () => ({ state: "launch" });
+	guardPlan = () => false;
 });
 
 after(() => {
@@ -205,6 +222,19 @@ test("task failures, tool activity and aborted stop reasons never reach the fall
 	attempts = [];
 	spawnPlan = () => ({ events: [assistant("aborted", "", "503 unavailable")], exitCode: 1 });
 	await run(fx.nested, agents, "guarded");
+	assert.deepEqual(attempts, [PRIMARY]);
+});
+
+test("an INCOMPLETE stop with provider-looking text never reaches the fallback chain", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "cut-short", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	const agents = discover(fx.nested);
+	spawnPlan = () => ({ events: [assistant("length", "partial", "429 Too Many Requests")], exitCode: 1 });
+	await run(fx.nested, agents, "cut-short");
+	assert.deepEqual(attempts, [PRIMARY]);
+	attempts = [];
+	spawnPlan = () => ({ events: [assistant("length", "partial", "429 Too Many Requests")], exitCode: 0 });
+	await run(fx.nested, agents, "cut-short");
 	assert.deepEqual(attempts, [PRIMARY]);
 });
 
@@ -337,4 +367,262 @@ test("project frontmatter stays authoritative and is not overridden by roles.jso
 	assert.deepEqual(agent.fallbackModel, ["github-copilot/claude-sonnet-5.5"]);
 	assert.equal(agent.thinking, "high");
 	assert.deepEqual(agent.tools, ["read", "bash"]);
+});
+
+// ---- Provider cooldown pre-spawn check: a declared provider in cooldown never launches a child --------------------------
+
+test("provider cooldown: a replayable cooling primary launches no child and moves to the declared fallback", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "cool", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	launchPlan = (model) => (model === PRIMARY ? { state: "cooling", replayable: true } : { state: "launch" });
+	const result = await run(fx.nested, discover(fx.nested), "cool");
+	assert.deepEqual(attempts, [LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.match(result.stderr, /Model openai-codex\/gpt-6\.1-sol skipped \(provider cooldown cooling\); retried with openai-codex\/gpt-6-luna/);
+});
+
+test("provider cooldown: a non-replayable cooldown (auth block) never spawns and never falls back", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "blocked", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	launchPlan = (model) => (model === PRIMARY ? { state: "blocked", replayable: false } : { state: "launch" });
+	const result = await run(fx.nested, discover(fx.nested), "blocked");
+	assert.deepEqual(attempts, []);
+	assert.equal(result.exitCode, 1);
+	assert.match(result.stderr, /not launched: provider cooldown blocked/);
+});
+
+test("provider cooldown: the chain skips each replayable cooling fallback and stops at the declared list", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "chain-cool", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	launchPlan = (model) => (model === PRIMARY || model === LUNA ? { state: "cooling", replayable: true } : { state: "launch" });
+	const result = await run(fx.nested, discover(fx.nested), "chain-cool");
+	assert.deepEqual(attempts, [COPILOT_LUNA]);
+	assert.equal(result.exitCode, 0);
+});
+
+test("provider cooldown: when every declared model is cooling nothing spawns and the run fails", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "all-cool", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	launchPlan = () => ({ state: "cooling", replayable: true });
+	const result = await run(fx.nested, discover(fx.nested), "all-cool");
+	assert.deepEqual(attempts, []);
+	assert.equal(result.exitCode, 1);
+	assert.match(result.stderr, /Model github-copilot\/gpt-6-luna not launched: provider cooldown cooling/);
+});
+
+test("provider cooldown: a cooling primary whose fallback is non-replayable stops without spawning the fallback", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "unreplayable", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	launchPlan = (model) => (model === PRIMARY ? { state: "cooling", replayable: true } : { state: "cooling", replayable: false });
+	const result = await run(fx.nested, discover(fx.nested), "unreplayable");
+	assert.deepEqual(attempts, []);
+	assert.equal(result.exitCode, 1);
+});
+
+// ---- R2/R3/R5 parent proofs: guard refusals replay only through the parent store; probe-busy is reversible admission ----
+
+const GUARD_COOLING = "provider cooldown cooling";
+
+test("R2: a guard refusal the parent store still calls replayable advances to the declared fallback, once", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "refused", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	guardPlan = (model, message) => model === PRIMARY && message === GUARD_COOLING;
+	spawnPlan = (model) => (model === PRIMARY ? { events: [assistant("error", "", GUARD_COOLING)], exitCode: 1 } : success());
+	const result = await run(fx.nested, discover(fx.nested), "refused");
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.model, LUNA);
+});
+
+test("R2: the guard marker alone is not enough: a refusal the parent store does not confirm stops the chain", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "unconfirmed", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	guardPlan = () => false;
+	spawnPlan = () => ({ events: [assistant("error", "", GUARD_COOLING)], exitCode: 1 });
+	const result = await run(fx.nested, discover(fx.nested), "unconfirmed");
+	assert.deepEqual(attempts, [PRIMARY]);
+	assert.equal(result.exitCode, 1);
+});
+
+test("R2: a confirmed guard refusal after tool activity, an abort or a length stop never replays", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "refusal-guarded", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	const agents = discover(fx.nested);
+	guardPlan = () => true;
+	spawnPlan = () => ({ events: [{ type: "tool_execution_start" }, assistant("error", "", GUARD_COOLING)], exitCode: 1 });
+	await run(fx.nested, agents, "refusal-guarded");
+	assert.deepEqual(attempts, [PRIMARY]);
+	attempts = [];
+	spawnPlan = () => ({ events: [assistant("aborted", "", GUARD_COOLING)], exitCode: 1 });
+	await run(fx.nested, agents, "refusal-guarded");
+	assert.deepEqual(attempts, [PRIMARY]);
+	attempts = [];
+	spawnPlan = () => ({ events: [assistant("length", "partial", GUARD_COOLING)], exitCode: 1 });
+	await run(fx.nested, agents, "refusal-guarded");
+	assert.deepEqual(attempts, [PRIMARY]);
+});
+
+test("R3: a probe-busy primary moves to the declared fallbacks in order and is never spawned", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "busy", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	launchPlan = (model) => (model === PRIMARY || model === LUNA ? { state: "probe-busy", replayable: true } : { state: "launch" });
+	const result = await run(fx.nested, discover(fx.nested), "busy");
+	assert.deepEqual(attempts, [COPILOT_LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.match(result.stderr, /Model openai-codex\/gpt-6\.1-sol skipped \(provider cooldown probe-busy\)/);
+});
+
+test("R3: an unavailable store blocks the whole declared chain, fail-closed", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "unavailable", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	launchPlan = () => ({ state: "unavailable", replayable: false });
+	const result = await run(fx.nested, discover(fx.nested), "unavailable");
+	assert.deepEqual(attempts, []);
+	assert.equal(result.exitCode, 1);
+	assert.match(result.stderr, /not launched: provider cooldown unavailable/);
+});
+
+test("R5: an abort that lands during the provider launch check spawns nothing and launches no fallback", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "precheck-abort", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	const controller = new AbortController();
+	launchPlan = (model) => {
+		if (model === PRIMARY) controller.abort();
+		return { state: "launch" };
+	};
+	await assert.rejects(run(fx.nested, discover(fx.nested), "precheck-abort", controller.signal), /Subagent was aborted/);
+	assert.deepEqual(attempts, []);
+});
+
+test("R5: an abort during the check of a replayable cooling primary does not start the fallback recursion", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "cooling-abort", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	const controller = new AbortController();
+	launchPlan = (model) => {
+		if (model === PRIMARY) controller.abort();
+		return model === PRIMARY ? { state: "cooling", replayable: true } : { state: "launch" };
+	};
+	await assert.rejects(run(fx.nested, discover(fx.nested), "cooling-abort", controller.signal), /Subagent was aborted/);
+	assert.deepEqual(attempts, []);
+});
+
+// ---- All-job usage ledger: settled logical jobs, physical attempts, session fencing (production runSingleAgent path) ----
+const ZERO_SLICE = { attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0, completed: 0, failed: 0, aborted: 0 };
+function scoped(cwd: string, agents: AgentConfig[], name: string, dispatch: Record<string, unknown>, signal?: AbortSignal): Promise<RunResult> {
+	return runSingleAgent(cwd, dispatch, agents, name, "task", undefined, undefined, signal, undefined, (results: unknown[]) => ({ results }));
+}
+
+test("usage: a fallback attempt is counted once per physical launch and cache arithmetic is not double-counted", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-fallback", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	spawnPlan = (model) => (model === PRIMARY ? unavailable("503 provider unavailable", usage(10, 4, 14, 0.5, 20, 5)) : success(usage(7, 2, 9, 0.25, 30, 1)));
+	const scope = bg.newUsageScope();
+	const result = await scoped(fx.nested, discover(fx.nested), "usage-fallback", { usageScope: scope });
+	assert.equal(result.exitCode, 0);
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(scope.running, 0);
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 2, turns: 2, input: 17, output: 6, cacheRead: 50, cacheWrite: 6, cost: 0.75, completed: 1 });
+	assert.deepEqual(scope.background, ZERO_SLICE);
+});
+
+test("usage: in-flight jobs are excluded; message_update never charges; background jobs settle into the background slice", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-bg", { model: PRIMARY });
+	const scope = bg.newUsageScope();
+	let midFlight: unknown;
+	spawnPlan = () => ({
+		events: [
+			{ type: "message_update", message: { role: "assistant", content: [], usage: usage(99, 99, 198, 9) } },
+			assistant("stop", "done", undefined, usage(2, 3, 5, 0.25)),
+		],
+		exitCode: 0,
+		afterSpawn: () => { midFlight = { running: scope.running, turns: scope.background.turns }; },
+	});
+	await scoped(fx.nested, discover(fx.nested), "usage-bg", { usageScope: scope, jobId: "bg-1" });
+	assert.deepEqual(midFlight, { running: 1, turns: 0 });
+	assert.equal(scope.running, 0);
+	assert.deepEqual(scope.background, { ...ZERO_SLICE, attempts: 1, turns: 1, input: 2, output: 3, cost: 0.25, completed: 1 });
+	assert.deepEqual(scope.foreground, ZERO_SLICE);
+});
+
+test("usage: a foreground abort keeps the finalized turn and settles as aborted", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-abort", { model: PRIMARY });
+	const controller = new AbortController();
+	const scope = bg.newUsageScope();
+	spawnPlan = () => ({ events: [assistant("stop", "partial", undefined, usage(4, 1, 5, 0.1))], hang: true, afterSpawn: () => controller.abort() });
+	await assert.rejects(scoped(fx.nested, discover(fx.nested), "usage-abort", { usageScope: scope }, controller.signal), /Subagent was aborted/);
+	assert.equal(scope.running, 0);
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 1, turns: 1, input: 4, output: 1, cost: 0.1, aborted: 1 });
+});
+
+test("usage: unpriced turns are excluded from cost and zero-cost turns with tokens are flagged, not called free", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-price", { model: PRIMARY });
+	const scope = bg.newUsageScope();
+	spawnPlan = () => ({
+		events: [
+			assistant("stop", "a", undefined, { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0 } as unknown as Usage),
+			assistant("stop", "b", undefined, usage(3, 0, 3, 0)),
+		],
+		exitCode: 0,
+	});
+	await scoped(fx.nested, discover(fx.nested), "usage-price", { usageScope: scope });
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 1, turns: 2, input: 4, output: 1, unpricedTurns: 1, zeroCostTurns: 1, completed: 1 });
+});
+
+test("usage: a launch refused by provider cooldown counts a settled failed job with zero attempts", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-refused", { model: PRIMARY });
+	launchPlan = () => ({ state: "unavailable", replayable: false });
+	const scope = bg.newUsageScope();
+	await scoped(fx.nested, discover(fx.nested), "usage-refused", { usageScope: scope });
+	assert.deepEqual(attempts, []);
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, failed: 1 });
+});
+
+test("usage: a background fallback job counts both physical attempts in the background slice only", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-bg-fallback", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	spawnPlan = (model) => (model === PRIMARY ? unavailable("503 provider unavailable", usage(10, 4, 14, 0.5, 20, 5)) : success(usage(7, 2, 9, 0.25, 30, 1)));
+	const scope = bg.newUsageScope();
+	const result = await scoped(fx.nested, discover(fx.nested), "usage-bg-fallback", { usageScope: scope, jobId: "bg-2" });
+	assert.equal(result.exitCode, 0);
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(scope.running, 0);
+	assert.deepEqual(scope.background, { ...ZERO_SLICE, attempts: 2, turns: 2, input: 17, output: 6, cacheRead: 50, cacheWrite: 6, cost: 0.75, completed: 1 });
+	assert.deepEqual(scope.foreground, ZERO_SLICE);
+});
+
+test("usage: a job that settles after a session reset charges only its launch scope, never the new one", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-stale", { model: PRIMARY });
+	const runtime = new bg.BackgroundWorkers({ on() {}, sendMessage() {} }, {});
+	const launchScope = runtime.usage;
+	spawnPlan = () => ({ events: [assistant("stop", "done", undefined, usage(2, 3, 5, 0.25))], exitCode: 0, afterSpawn: () => runtime.reset() });
+	await scoped(fx.nested, discover(fx.nested), "usage-stale", { usageScope: launchScope, jobId: "bg-1" });
+	assert.notEqual(runtime.usage, launchScope);
+	assert.deepEqual(runtime.usage.background, ZERO_SLICE);
+	assert.equal(runtime.usage.running, 0);
+	assert.deepEqual(launchScope.background, { ...ZERO_SLICE, attempts: 1, turns: 1, input: 2, output: 3, cost: 0.25, completed: 1 });
+});
+
+test("usage: the summary is plain, deterministic and separates settled, running and unpriced state", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "usage-text", { model: PRIMARY });
+	const scope = bg.newUsageScope();
+	spawnPlan = () => ({ events: [assistant("stop", "done", undefined, usage(2, 3, 5, 0.25))], exitCode: 0 });
+	await scoped(fx.nested, discover(fx.nested), "usage-text", { usageScope: scope });
+	const before = JSON.stringify(scope);
+	const text = bg.formatUsageSummary(scope);
+	assert.equal(JSON.stringify(scope), before, "formatting must not charge or mutate");
+	assert.equal(bg.formatUsageSummary(scope), text);
+	assert.match(text, /Foreground: 1 settled agent task \(1 completed, 0 failed, 0 aborted\); 1 attempt; 1 turn/);
+	assert.match(text, /input 2 \| output 3 \| cacheRead 0 \| cacheWrite 0/);
+	assert.match(text, /cost: \$0\.2500 reported/);
+	assert.match(text, /Background: none settled/);
+	assert.match(text, /not a bill/);
+	assert.doesNotMatch(text, /NaN|free/);
+	assert.equal(bg.formatUsageSummary(bg.newUsageScope()).includes("No delegated agent tasks yet this run"), true);
+	assert.match(bg.formatUsageSummary({ ...bg.newUsageScope(), running: 1 }), /Pending: 1 agent task incl\. queued, excluded until settled/);
 });

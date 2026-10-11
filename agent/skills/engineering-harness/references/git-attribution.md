@@ -8,7 +8,7 @@ Git configuration merely to set that identity.
 When the user authorizes creating a commit, include each of these trailers once at
 the end of its commit message, separated from the message body by a blank line:
 
-Co-Authored-By: Codex <267193182+codex@users.noreply.github.com>
+Co-Authored-By: Codex <noreply@openai.com>
 Co-Authored-By: Claude <noreply@anthropic.com>
 
 When the user authorizes creating or updating a pull request, include this footer

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
+import { boundBackgroundCompletion, expandRetainedResult } from "./compact-handoff.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
 export class RpcWorker {
@@ -9,7 +10,10 @@ export class RpcWorker {
   private pending = new Map<string, {resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>}>();
   closed = false;
   private writes = new Set<(error: Error) => void>(); // decision responses whose stream write has not been confirmed
-  constructor(readonly proc: ChildProcess, readonly controlPath?: string) { proc.stdin?.on("error", error => this.close(error.message)); }
+  readonly proc: ChildProcess;
+  readonly controlPath?: string;
+  // Explicit fields, not parameter properties: Node's strip-only TypeScript mode (no transform) must load this file.
+  constructor(proc: ChildProcess, controlPath?: string) { this.proc = proc; this.controlPath = controlPath; proc.stdin?.on("error", error => this.close(error.message)); }
   send(type: string, message?: string): Promise<any> {
     if (this.closed || !this.proc.stdin?.writable) return Promise.reject(new Error("Worker has finished or disconnected"));
     const id = `control-${++this.sequence}`;
@@ -57,33 +61,103 @@ export class RpcWorker {
   }
 }
 
+// Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text, prompts or model roles). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
+export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number }
+export interface UsageSlice extends UsageTotals { completed: number; failed: number; aborted: number }
+export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice }
+const zeroTotals = (): UsageTotals => ({ attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0 });
+const zeroSlice = (): UsageSlice => ({ ...zeroTotals(), completed: 0, failed: 0, aborted: 0 });
+export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice() });
+// One logical job (one runSingleAgent request). Finalized message_end usage only; finalizes once; physical attempts counted at spawn.
+export class LogicalUsage {
+  private totals = zeroTotals(); private open = true;
+  private scope: UsageScope; private slice: "foreground" | "background";
+  constructor(scope: UsageScope, background: boolean) { this.scope = scope; this.slice = background ? "background" : "foreground"; scope.running++; }
+  attempt() { if (this.open) this.totals.attempts++; }
+  turn(usage: any) {
+    if (!this.open) return;
+    const t = this.totals; t.turns++;
+    if (!usage) { t.unpricedTurns++; return; }
+    const n = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
+    const input = n(usage.input), output = n(usage.output), cacheRead = n(usage.cacheRead), cacheWrite = n(usage.cacheWrite);
+    t.input += input; t.output += output; t.cacheRead += cacheRead; t.cacheWrite += cacheWrite;
+    const cost = usage.cost?.total;
+    if (!Number.isFinite(cost)) { t.unpricedTurns++; return; }
+    t.cost += cost;
+    if (cost === 0 && input + output + cacheRead + cacheWrite > 0) t.zeroCostTurns++;
+  }
+  settle(status: "completed" | "failed" | "aborted") {
+    if (!this.open) return;
+    this.open = false; this.scope.running--;
+    const slice = this.scope[this.slice]; const t = this.totals;
+    for (const key of Object.keys(t) as (keyof UsageTotals)[]) slice[key] += t[key];
+    slice[status]++;
+  }
+}
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+function costText(s: UsageSlice): string {
+  if (s.turns === 0) return "n/a (no finalized turns)";
+  if (s.unpricedTurns === s.turns) return "not reported (no turn priced)";
+  let text = `$${s.cost.toFixed(4)} reported`;
+  if (s.unpricedTurns) text += `; ${plural(s.unpricedTurns, "turn")} not priced, excluded`;
+  if (s.zeroCostTurns) text += `; ${plural(s.zeroCostTurns, "zero-cost turn")} with tokens, may be unpriced`;
+  return text;
+}
+function sliceLines(name: string, s: UsageSlice): string[] {
+  const jobs = s.completed + s.failed + s.aborted;
+  if (jobs === 0) return [`${name}: none settled`];
+  const tokens = `input ${s.input.toLocaleString("en-US")} | output ${s.output.toLocaleString("en-US")} | cacheRead ${s.cacheRead.toLocaleString("en-US")} | cacheWrite ${s.cacheWrite.toLocaleString("en-US")}`;
+  return [
+    `${name}: ${plural(jobs, "settled agent task")} (${s.completed} completed, ${s.failed} failed, ${s.aborted} aborted); ${plural(s.attempts, "attempt")}; ${plural(s.turns, "turn")}`,
+    `  ${tokens}`,
+    `  cost: ${costText(s)}`,
+  ];
+}
+// Plain text for /subagent usage: fixed labels, numeric aggregates only.
+export function formatUsageSummary(scope: UsageScope): string {
+  const settled = scope.foreground.completed + scope.foreground.failed + scope.foreground.aborted + scope.background.completed + scope.background.failed + scope.background.aborted;
+  const lines = ["Subagent usage: this Pi run only (in memory; resets on reload or session change).", "Reported by provider or catalog; not a bill. Settled agent tasks only."];
+  if (settled === 0 && scope.running === 0) return [...lines, "No delegated agent tasks yet this run."].join("\n");
+  lines.push(...sliceLines("Foreground", scope.foreground), ...sliceLines("Background", scope.background));
+  if (scope.running > 0) lines.push(`Pending: ${plural(scope.running, "agent task")} incl. queued, excluded until settled`);
+  return lines.join("\n");
+}
+
 interface Job {
   id: string; generation: number; state: "running" | "completed" | "failed" | "aborted";
-  controller: AbortController; workerIds: string[]; result?: any; pendingSteers: string[]; paused?: boolean;
+  controller: AbortController; workerIds: string[]; nodes: Map<string, string>; result?: any; pendingSteers: string[]; paused?: boolean; waiting?: string;
 }
 export class BackgroundWorkers {
   jobs = new Map<string, Job>();
   clients = new Map<string, RpcWorker>();
   private controllers = new Map<string, AbortController>();
   private steering = new Map<string, string[]>();
+  private waitingKeys = new Map<string, Set<string>>(); // per-DAG-node queued claims; the job shows waiting while any remains
   private generation = 0;
+  usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
   private sequence = 0;
   private slots = 0;
   private queue: {signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void; abort: () => void}[] = [];
-  constructor(private pi: ExtensionAPI, readonly monitor: WorkerMonitor, private decisions = new DecisionRelay()) {
+  private pi: ExtensionAPI;
+  readonly monitor: WorkerMonitor;
+  private decisions: DecisionRelay;
+  // Explicit fields, not parameter properties (strip-only Node must load this file).
+  constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay()) {
+    this.pi = pi; this.monitor = monitor; this.decisions = decisions;
     pi.on("session_start", () => this.reset());
     pi.on("session_shutdown", () => this.reset());
   }
   reset() {
     this.settleDecisions(this.decisions.clear("session-reset"));
     this.generation++;
+    this.usage = newUsageScope();
     for (const job of this.jobs.values()) job.controller.abort();
     for (const controller of this.controllers.values()) controller.abort();
-    this.jobs.clear(); this.clients.clear(); this.controllers.clear(); this.steering.clear();
+    this.jobs.clear(); this.clients.clear(); this.controllers.clear(); this.steering.clear(); this.waitingKeys.clear();
   }
-  async acquire(signal?: AbortSignal): Promise<() => void> {
+  async acquire(limit: number, signal?: AbortSignal): Promise<() => void> {
     if (signal?.aborted) throw new Error("Subagent was aborted");
-    if (this.slots < 4) { this.slots++; return this.releaseOnce(); }
+    if (this.slots < limit) { this.slots++; return this.releaseOnce(); }
     return new Promise((resolve, reject) => {
       const item = {signal, resolve, reject, abort: () => { this.queue = this.queue.filter(x => x !== item); reject(new Error("Subagent was aborted")); }};
       this.queue.push(item); signal?.addEventListener("abort", item.abort, {once: true});
@@ -101,7 +175,7 @@ export class BackgroundWorkers {
   start(run: (signal: AbortSignal, jobId: string) => Promise<any>) {
     if ([...this.jobs.values()].filter(j => j.state === "running").length >= 16) throw new Error("16 background jobs are already active; finish or stop a job first");
     const id = `bg-${++this.sequence}`;
-    const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], pendingSteers: []};
+    const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: []};
     this.jobs.set(id, job);
     void (async () => {
       try {
@@ -116,7 +190,7 @@ export class BackgroundWorkers {
       if (job.generation !== this.generation) return;
       const output = (job.result.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
       try {
-        await this.pi.sendMessage({customType: "subagent-completion", content: `Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output.slice(0, 50000)}${output.length > 50000 ? "\n[Remaining output available via subagent_control result.]" : ""}`, display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
+        await this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
       } catch { /* Session can close while its completion is being delivered. */ }
       const finished = [...this.jobs.values()].filter(j => j.state !== "running");
       for (const old of finished.slice(0, Math.max(0, finished.length - 64))) {
@@ -131,7 +205,14 @@ export class BackgroundWorkers {
     const held = [...this.monitor.store.records.values()].find(r => !r.endedAt && (r.state === "paused" || r.state === "pausing") && roles.includes(r.name));
     if (held) throw new Error("Worker " + held.id + " (" + held.name + ") is paused. Resume or cancel it before launching another worker with that role.");
   }
-  note(jobId: string, workerId: string) { this.jobs.get(jobId)?.workerIds.push(workerId); }
+  setWaiting(jobId: string, waiting?: string, key = "") {
+    const job = this.jobs.get(jobId); if (!job) return;
+    const keys = this.waitingKeys.get(jobId) ?? new Set<string>();
+    if (waiting) keys.add(key); else keys.delete(key);
+    if (keys.size) this.waitingKeys.set(jobId, keys); else this.waitingKeys.delete(jobId);
+    job.waiting = keys.size ? (waiting ?? job.waiting) : undefined;
+  }
+  note(jobId: string, workerId: string, node?: string) { const job = this.jobs.get(jobId); if (!job) return; job.workerIds.push(workerId); if (node !== undefined) job.nodes.set(workerId, node); }
   attach(jobId: string, workerId: string, client: RpcWorker, controller: AbortController) {
     this.clients.set(workerId, client); this.controllers.set(workerId, controller);
     const job = this.jobs.get(jobId);
@@ -246,13 +327,15 @@ export class BackgroundWorkers {
     } catch { /* Session can close while its decision notice is delivered. */ }
   }
   list() {
-    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, paused: !!j.paused, workers: j.workerIds.map(id => {
+    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
       const r = this.monitor.store.records.get(id);
-      return {id, name: r?.name, model: r?.reportedModel ?? r?.model, state: r?.state ?? "history expired", activity: r?.activity};
+      return {id, node: j.nodes.get(id), name: r?.name, model: r?.reportedModel ?? r?.model, state: r?.state ?? "history expired", activity: r?.activity};
     })}));
   }
   result(target: string) {
     const job = this.jobs.get(target); if (!job) throw new Error("Unknown job " + target);
-    return job.result ?? {content: [{type: "text", text: `Job ${target} is still running. Continue other work; completion will arrive automatically.`}]};
+    if (!job.result) return {content: [{type: "text", text: `Job ${target} is still running. Continue other work; completion will arrive automatically.`}]};
+    const full = expandRetainedResult(job.result); // explicit recovery is lossless and never bounded
+    return full === null ? job.result : {...job.result, content: [{type: "text", text: full}]};
   }
 }

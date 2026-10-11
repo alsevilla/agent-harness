@@ -6,7 +6,7 @@
    be bypassed by calling the task localized or by generic "proceed" language.
 2. If a material decision or requirement is unresolved, stop affected writes and
    return the missing decision. Do not invent product/persistence/security semantics.
-3. Main session: launch rust-worker/frontend-worker for non-trivial implementation.
+3. Main session: launch backend-worker/frontend-worker/general-worker for non-trivial implementation.
    Only standalone T0 work outside assigned implementation/recovery may be edited
    directly. Compiler/reviewer fixes and failed edits within delegated work remain
    worker-owned, even when mechanical. Inspect failures, then steer the active worker
@@ -23,7 +23,10 @@
 6. Return RED/GREEN commands and outcomes (or exception/replacement evidence),
    the exact candidate, changed files, checks/results, missing evidence and
    residual risk. The main session selects independent Verify/Review using global
-   criteria; worker confidence is not independent verification.
+   criteria; worker confidence is not independent verification. For a dirty candidate,
+   cite HEAD plus a scoped diff hash or changed-file content hashes identifying the
+   tested bytes (including relevant untracked source); a changed-path list alone is
+   not byte identity. Later relevant changes invalidate that evidence.
 
 Do not automatically run Scout, specialists, tester, or reviewer. Read relevant
 sections of `references/extended.md` only for complex execution/isolation/recovery.
