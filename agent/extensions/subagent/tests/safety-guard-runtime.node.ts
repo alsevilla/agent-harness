@@ -3,7 +3,7 @@
 // A real installed Pi CLI child loads the production guard entry via claimChildGuard plus a scratch faux provider generated under STAGE1_PROBE_SCRATCH (or os.tmpdir()). Observed through tool_execution_end; no real credentials, network or model calls.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -53,15 +53,16 @@ export default function (pi) {
 type Step = { tool: string; args: Record<string, unknown>; id: string } | { text: string };
 interface ToolEnd { toolName: string; isError: boolean; text: string }
 
-async function runChild(script: Step[], envOverride?: { [CHILD_GRANT_ENV]: string }, mintGrants?: (store: ReturnType<typeof createGrantStore>) => void, role = "probe-role"): Promise<{ ends: ToolEnd[]; stderr: string }> {
+async function runChild(script: Step[], envOverride?: { [CHILD_GRANT_ENV]: string }, mintGrants?: (store: ReturnType<typeof createGrantStore>) => void, role = "probe-role", options: { dir?: string; withLeases?: boolean } = {}): Promise<{ ends: ToolEnd[]; stderr: string }> {
 	const scriptFile = path.join(root, `script-${Math.random().toString(36).slice(2)}.json`);
 	fs.writeFileSync(scriptFile, JSON.stringify(script));
 	const store = createGrantStore();
 	mintGrants?.(store);
-	const guard = claimChildGuard(store, role, canonicalCwd(workspace), guardFile);
+	const dir = options.dir ?? workspace;
+	const guard = claimChildGuard(store, role, canonicalCwd(dir), guardFile, undefined, options.withLeases === true);
 	const env = guard.childEnv({ ...process.env, PI_CODING_AGENT_DIR: agentDir, PROBE_SCRIPT: scriptFile });
 	if (envOverride) Object.assign(env, envOverride);
-	const proc = spawn(process.execPath, [piCli, "--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--offline", "--provider", "probe-faux", "--model", "probe-model", "--extension", fauxFile, "--extension", guard.entry], { cwd: workspace, env, stdio: ["pipe", "pipe", "pipe"] });
+	const proc = spawn(process.execPath, [piCli, "--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--offline", "--provider", "probe-faux", "--model", "probe-model", "--extension", fauxFile, "--extension", guard.entry], { cwd: dir, env, stdio: ["pipe", "pipe", "pipe"] });
 	let stderr = "";
 	proc.stderr.on("data", (chunk) => { stderr += chunk; });
 	const ends: ToolEnd[] = [];
@@ -79,6 +80,25 @@ async function runChild(script: Step[], envOverride?: { [CHILD_GRANT_ENV]: strin
 	const timeout = new Promise<void>((_, reject) => { timer = setTimeout(() => reject(new Error(`child RPC timed out; stderr: ${stderr.slice(0, 400)}`)), 90_000); });
 	try { await Promise.race([settled, timeout]); } finally { clearTimeout(timer); proc.stdin.end(); proc.kill(); }
 	return { ends, stderr };
+}
+
+// Hermetic git: no user or system config reaches fixture repos or the guard's live binding. Origin is a nonexistent local path, so a permitted push can only fail locally.
+const GIT_CFG = path.join(fs.mkdtempSync(path.join(scratchBase, "push-lease-cfg-")), "gitconfig");
+fs.writeFileSync(GIT_CFG, "");
+process.env.GIT_CONFIG_GLOBAL = GIT_CFG;
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+const ORIGIN = path.join(root, "absent-origin.git");
+function makeRepo(dir: string): string {
+	fs.mkdirSync(dir, { recursive: true });
+	const git = (...args: string[]) => {
+		const run = spawnSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true });
+		assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stderr}`);
+	};
+	git("init", "-q");
+	git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "init");
+	git("branch", "feat/x");
+	git("remote", "add", "origin", ORIGIN);
+	return canonicalCwd(dir);
 }
 
 const RM = "rm -rf probe-absent-dir";
@@ -128,15 +148,16 @@ const approve = { confirm: async () => true };
 const refuse = { confirm: async () => false };
 const throwing = { confirm: async () => { throw new Error("stub dialog failure"); } };
 
-async function openMain(steps: SdkStep[], opts: { ui?: { confirm: (...a: any[]) => Promise<any> }; mode?: string; tokensPerSecond?: number } = {}) {
+async function openMain(steps: SdkStep[], opts: { ui?: { confirm: (...a: any[]) => Promise<any> }; mode?: string; tokensPerSecond?: number; repo?: boolean; dir?: string } = {}) {
 	const { pi, ai } = await sdk();
-	const main = fs.mkdtempSync(path.join(scratchBase, "s1-main-"));
+	const main = opts.dir ?? fs.mkdtempSync(path.join(scratchBase, "s1-main-"));
 	const agentDir = path.join(main, "agent");
 	const cwd = path.join(main, "project");
 	fs.mkdirSync(agentDir, { recursive: true });
 	fs.mkdirSync(cwd, { recursive: true });
 	fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ fixtureSentinel: MAIN_SENTINEL }));
 	fs.writeFileSync(path.join(cwd, ".env"), `FIXTURE=${MAIN_SENTINEL}\n`);
+	if (opts.repo && !fs.existsSync(path.join(cwd, ".git"))) makeRepo(cwd);
 	const fixtures = [path.join(agentDir, "auth.json"), path.join(cwd, ".env")];
 	const before = fixtures.map(sha);
 	const core = ai.createFauxCore({ api: "stage1-faux-api", provider: "stage1-faux", models: [{ id: "stage1-model", name: "stage1" }], tokensPerSecond: opts.tokensPerSecond });
@@ -157,7 +178,7 @@ async function openMain(steps: SdkStep[], opts: { ui?: { confirm: (...a: any[]) 
 	const results = () => session.messages.filter((m: any) => m.role === "toolResult").map((m: any) => ({ tool: m.toolName, isError: m.isError === true, text: textOf(m.content) }));
 	const run = async (prompt = "probe") => { await session.prompt(prompt); return results(); };
 	const unchanged = () => fixtures.every((p, i) => sha(p) === before[i]);
-	return { core, session, cwd, agentDir, confirms, run, results, unchanged, cleanup: () => { session.dispose(); fs.rmSync(main, { recursive: true, force: true }); } };
+	return { core, session, cwd, agentDir, confirms, run, results, unchanged, shutdown: () => (session.extensionRunner.hasHandlers("session_shutdown") ? session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }) : undefined), cleanup: () => { session.dispose(); if (!opts.dir) fs.rmSync(main, { recursive: true, force: true }); } };
 }
 
 test("main A (simulated TUI): risky bash with no grant is blocked, no dialog, raw command not echoed", { timeout: 120_000 }, async () => {
@@ -325,4 +346,184 @@ test("main M (simulated TUI): env-prefix and git -C forms are now blocked withou
 		assert.match(r[0].text, /Blocked by harness safety guard/);
 		assert.match(r[1].text, /Blocked by harness safety guard/);
 	} finally { s.cleanup(); }
+});
+
+// Release-engineer PR-branch push lease (session-only, trusted main). Confirmations are counted through the simulated TUI.
+test("main P (simulated TUI): push_branch asks once per binding; the identical request reuses it without a dialog", { timeout: 120_000 }, async () => {
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "p0" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "p1" }, { text: "done" }], { ui: approve, repo: true });
+	try {
+		const r = await s.run();
+		assert.equal(s.confirms.length, 1);
+		assert.match(String(s.confirms[0][1]), /Branch: feat\/x/);
+		assert.equal(r[0].isError, false, r[0].text);
+		assert.equal(r[1].isError, false);
+		assert.match(r[1].text, /Already authorized/);
+	} finally { s.cleanup(); }
+});
+
+test("main Q (simulated TUI): refused, cancelled and throwing dialogs mint no lease; the next request asks again", { timeout: 180_000 }, async () => {
+	const uis = [["refuse", refuse], ["undefined", { confirm: async () => undefined }], ["throws", throwing]] as const;
+	for (const [label, ui] of uis) {
+		const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "q0" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "q1" }, { text: "done" }], { ui, repo: true });
+		try {
+			const r = await s.run();
+			assert.equal(s.confirms.length, 2, label);
+			assert.ok(r.length >= 2 && r[0].isError && r[1].isError, label);
+			assert.doesNotMatch(r.map((x: any) => x.text).join("\n"), /Already authorized/, label);
+		} finally { s.cleanup(); }
+	}
+});
+
+test("main R (simulated TUI): invalid push_branch shapes never reach the dialog", { timeout: 300_000 }, async () => {
+	const bad: Array<[string, Record<string, unknown>, string?]> = [
+		["protected master", { push_branch: { branch: "master" } }],
+		["protected release family", { push_branch: { branch: "release/1" } }],
+		["push_branch with operations", { push_branch: { branch: "feat/x" }, operations: [{ kind: "shell", value: MAIN_RM }] }],
+		["non-main role", { push_branch: { branch: "feat/x" }, role: "general-worker" }],
+		["ttl with push_branch", { push_branch: { branch: "feat/x" }, ttl_minutes: 5 }],
+		["non-repository folder", { push_branch: { branch: "feat/x", cwd: ".." } }],
+		["rpc mode", { push_branch: { branch: "feat/x" } }, "rpc"],
+	];
+	for (const [label, args, mode] of bad) {
+		const s = await openMain([{ tool: "request_authorization", args, id: "r0" }, { text: "done" }], { ui: approve, repo: true, mode });
+		try {
+			const r = await s.run();
+			assert.equal(s.confirms.length, 0, label);
+			assert.equal(r[0].isError, true, label);
+		} finally { s.cleanup(); }
+	}
+});
+
+test("main T (simulated TUI): /revoke-authorization withdraws the session lease; the next request asks again", { timeout: 180_000 }, async () => {
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "t0" }, { text: "one" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "t1" }, { text: "two" }], { ui: approve, repo: true });
+	try {
+		await s.run();
+		assert.equal(s.confirms.length, 1);
+		await s.session.prompt("/revoke-authorization");
+		const r = await s.run("again");
+		assert.equal(s.confirms.length, 2, "revoke made the next request prompt again");
+		assert.equal(r[r.length - 1].isError, false, r[r.length - 1].text);
+	} finally { s.cleanup(); }
+});
+
+// Index-level lease lifecycle (real extension wiring, not unit fakes): abort keeps the lease, shutdown drops it, a binding change during the dialog mints nothing, and only user/package-source release-engineer launches receive a lease.
+test("lease lifecycle (index): an approved push lease survives an agent abort; the next identical request is Already authorized with no dialog", { timeout: 180_000 }, async () => {
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "n0" }, { text: "x ".repeat(300) }], { ui: approve, repo: true, tokensPerSecond: 20 });
+	try {
+		let aborted = false;
+		s.session.subscribe((e: any) => { if (e.type === "tool_execution_end" && e.toolName === "request_authorization" && !aborted) { aborted = true; void s.session.abort(); } });
+		await s.run();
+		assert.equal(aborted, true);
+		assert.equal(s.confirms.length, 1);
+		const { ai } = await sdk();
+		s.core.setResponses([ai.fauxAssistantMessage(ai.fauxToolCall("request_authorization", { push_branch: { branch: "feat/x" } }, { id: "n1" })), ai.fauxAssistantMessage(ai.fauxText("done"))]);
+		const r = await s.run("again");
+		assert.equal(s.confirms.length, 1, "abort kept the lease: no second dialog");
+		assert.equal(r[r.length - 1].isError, false, r[r.length - 1].text);
+		assert.match(r[r.length - 1].text, /^Already authorized this session: release-engineer may push feat\/x /);
+	} finally { s.cleanup(); }
+});
+
+test("lease lifecycle (index): session shutdown drops the approved lease; a new session on the same binding asks again", { timeout: 180_000 }, async () => {
+	const dir = fs.mkdtempSync(path.join(scratchBase, "s1-shutdown-"));
+	try {
+		const first = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "y0" }, { text: "done" }], { ui: approve, repo: true, dir });
+		try { await first.run(); assert.equal(first.confirms.length, 1); } finally { await first.shutdown(); first.cleanup(); }
+		const second = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "y1" }, { text: "done" }], { ui: approve, repo: true, dir });
+		try {
+			const r = await second.run();
+			assert.equal(second.confirms.length, 1, "shutdown revoked the lease: asked again");
+			assert.equal(r[0].isError, false, r[0].text);
+			assert.doesNotMatch(r[0].text, /Already authorized/);
+		} finally { second.cleanup(); }
+	} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("lease lifecycle (index): a binding change during the dialog mints no lease; the next request asks again against the new binding", { timeout: 180_000 }, async () => {
+	const dir = fs.mkdtempSync(path.join(scratchBase, "s1-drift-"));
+	const repoDir = path.join(dir, "project");
+	let calls = 0;
+	const ui = { confirm: async () => { calls += 1; if (calls === 1) spawnSync("git", ["remote", "set-url", "origin", "https://example.test/owner/moved.git"], { cwd: repoDir, windowsHide: true }); return true; } };
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "v0" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "v1" }, { text: "done" }], { ui, repo: true, dir });
+	try {
+		const r = await s.run();
+		assert.equal(s.confirms.length, 2, "no lease from the drifted approval: the next request asks again");
+		assert.equal(r[0].isError, true);
+		assert.match(r[0].text, /repository binding changed during approval; no lease minted\./);
+		assert.equal(r[1].isError, false, r[1].text);
+		assert.doesNotMatch(r[1].text, /Already authorized/);
+	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("lease lifecycle (index): only a user- or package-source release-engineer launch receives the lease; a project-source impostor gets none", { timeout: 240_000 }, async () => {
+	const dir = fs.mkdtempSync(path.join(scratchBase, "s1-launch-"));
+	const probe = path.join(dir, "launch-probe.cjs");
+	// Stands in for the child CLI: records the PI_SAFETY_GRANTS envelope it was launched with, then settles.
+	fs.writeFileSync(probe, [
+		'const fs = require("node:fs");',
+		'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
+		'  let msg; try { msg = JSON.parse(line); } catch { return; }',
+		'  if (msg.type !== "prompt") return;',
+		'  fs.writeFileSync(process.env.PI_LAUNCH_PROBE, JSON.stringify({ guard: process.env.PI_SAFETY_GRANTS ?? null }));',
+		'  process.stdout.write(JSON.stringify({ id: msg.id, type: "response", command: "prompt", success: true }) + "\\n");',
+		'  process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");',
+		'});',
+	].join("\n"));
+	const argv1 = process.argv[1];
+	const launchEnv = process.env.PI_LAUNCH_PROBE;
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "w0" }, { text: "done" }], { ui: approve, repo: true, dir });
+	const agentFile = path.join(s.cwd, ".pi", "agents", "release-engineer.md");
+	fs.mkdirSync(path.dirname(agentFile), { recursive: true });
+	fs.writeFileSync(agentFile, "---\nname: release-engineer\ndescription: project-source impostor\n---\nNo prompt.\n");
+	const leases = (guard: string | null) => (guard === null ? [] : JSON.parse(guard).leases ?? []);
+	const { ai } = await sdk();
+	process.argv[1] = probe;
+	try {
+		await s.run();
+		assert.equal(s.confirms.length, 1);
+		process.env.PI_LAUNCH_PROBE = path.join(dir, "project.json");
+		s.core.setResponses([ai.fauxAssistantMessage(ai.fauxToolCall("subagent", { agent: "release-engineer", agentScope: "project", task: "probe", confirmProjectAgents: false, background: false }, { id: "w1" })), ai.fauxAssistantMessage(ai.fauxText("done"))]);
+		await s.run("launch project");
+		assert.ok(fs.existsSync(path.join(dir, "project.json")), `launch did not reach the child: ${JSON.stringify(s.results())}`);
+		const project = JSON.parse(fs.readFileSync(path.join(dir, "project.json"), "utf8"));
+		assert.equal(leases(project.guard).length, 0, "project-source release-engineer gets no lease");
+		process.env.PI_LAUNCH_PROBE = path.join(dir, "user.json");
+		s.core.setResponses([ai.fauxAssistantMessage(ai.fauxToolCall("subagent", { agent: "release-engineer", agentScope: "user", task: "probe", confirmProjectAgents: false, background: false }, { id: "w2" })), ai.fauxAssistantMessage(ai.fauxText("done"))]);
+		await s.run("launch user");
+		assert.ok(fs.existsSync(path.join(dir, "user.json")), `user-scope launch did not reach the child: ${JSON.stringify(s.results())}`);
+		const user = JSON.parse(fs.readFileSync(path.join(dir, "user.json"), "utf8"));
+		assert.equal(leases(user.guard).length, 1, "user/package-source release-engineer receives the lease");
+	} finally {
+		process.argv[1] = argv1;
+		if (launchEnv === undefined) delete process.env.PI_LAUNCH_PROBE; else process.env.PI_LAUNCH_PROBE = launchEnv;
+		s.cleanup();
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// Child side: the lease copy is used only by a legitimate release-engineer child of the same candidate, through the strict normal-push form, with a live binding check.
+test("child lease (runtime): a release-engineer child with the lease pushes its exact branch; master stays blocked; the live binding must match", { timeout: 240_000 }, async () => {
+	const repo = makeRepo(path.join(root, "lease-repo"));
+	const script: Step[] = [{ tool: "bash", args: { command: "git push origin feat/x" }, id: "x1" }, { tool: "bash", args: { command: "git push -u origin feat/x" }, id: "x2" }, { tool: "bash", args: { command: "git push origin master" }, id: "x3" }, { text: "done" }];
+	const { ends, stderr } = await runChild(script, undefined, (store) => { store.mintLease({ candidate: repo, pushUrl: ORIGIN, branch: "feat/x" }); }, "release-engineer", { dir: repo, withLeases: true });
+	assert.equal(ends.length, 3, stderr);
+	assert.doesNotMatch(ends[0].text, /Blocked by harness safety guard/);
+	assert.doesNotMatch(ends[1].text, /Blocked by harness safety guard/);
+	assert.match(ends[2].text, /Blocked by harness safety guard \[GIT_PUBLISH\]/);
+	const drift = makeRepo(path.join(root, "lease-drift-repo"));
+	const driftRun = await runChild([{ tool: "bash", args: { command: "git push origin feat/x" }, id: "y1" }, { text: "done" }], undefined, (store) => { store.mintLease({ candidate: drift, pushUrl: ORIGIN, branch: "feat/x" }); spawnSync("git", ["config", "push.followTags", "true"], { cwd: drift }); }, "release-engineer", { dir: drift, withLeases: true });
+	assert.equal(driftRun.ends.length, 1, driftRun.stderr);
+	assert.match(driftRun.ends[0].text, /Blocked by harness safety guard/, "followTags refuses the live binding");
+});
+
+test("child lease (runtime): project-source agents and other roles get no lease copy; the same push stays blocked", { timeout: 240_000 }, async () => {
+	const repo = makeRepo(path.join(root, "lease-scope-repo"));
+	const script: Step[] = [{ tool: "bash", args: { command: "git push origin feat/x" }, id: "z1" }, { text: "done" }];
+	const mint = (store: ReturnType<typeof createGrantStore>) => { store.mintLease({ candidate: repo, pushUrl: ORIGIN, branch: "feat/x" }); };
+	const project = await runChild(script, undefined, mint, "release-engineer", { dir: repo, withLeases: false });
+	assert.equal(project.ends.length, 1, project.stderr);
+	assert.match(project.ends[0].text, /Blocked by harness safety guard/, "project-source agent");
+	const other = await runChild(script, undefined, mint, "general-worker", { dir: repo, withLeases: true });
+	assert.equal(other.ends.length, 1, other.stderr);
+	assert.match(other.ends[0].text, /Blocked by harness safety guard/, "other role");
 });

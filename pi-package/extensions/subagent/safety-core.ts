@@ -1,5 +1,6 @@
 // Stage 1 safety core: pure guard rules, a bounded lexical shell matcher and a single-use in-memory grant store.
 // Not an OS sandbox and not a shell parser: documented bypasses (scripts, env, aliases, variables, operator shell) are in subagent/README.md.
+import * as childProcess from "node:child_process"; // namespace import: test doubles that stub only `spawn` still link
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -486,8 +487,13 @@ export interface GrantStore {
 	consume(scope: GuardScope, candidate: string, op: GuardOp): boolean;
 	claim(role: string, candidate: string): GrantRecord[];
 	importRecords(records: GrantRecord[]): void;
-	revokeAll(): void;
+	revokeAll(includeLeases?: boolean): void;
 	size(): number;
+	mintLease(request: { candidate: string; pushUrl: string; branch: string }): PushLease;
+	hasLease(candidate: string, branch: string, pushUrl: string): boolean;
+	copyLeases(candidate: string): PushLease[];
+	importLeases(incoming: PushLease[]): void;
+	leaseCount(): number;
 }
 
 function validateRecord(value: unknown): GrantRecord {
@@ -499,6 +505,7 @@ function validateRecord(value: unknown): GrantRecord {
 
 export function createGrantStore(now: () => number = () => Date.now()): GrantStore {
 	let records: GrantRecord[] = [];
+	let leases: PushLease[] = [];
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
@@ -532,8 +539,29 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			const valid = incoming.map(validateRecord);
 			records.push(...valid);
 		},
-		revokeAll() {
+		revokeAll(includeLeases = false) {
 			records = [];
+			if (includeLeases) leases = [];
+		},
+		mintLease({ candidate, pushUrl, branch }) {
+			if (!path.isAbsolute(candidate)) throw new TypeError("candidate must be absolute");
+			const lease = validateLease({ role: LEASE_ROLE, candidate: canonicalCwd(candidate), pushUrl, branch });
+			const existing = leases.find((l) => sameLease(l, lease));
+			if (existing) return { ...existing };
+			leases.push(lease);
+			return { ...lease };
+		},
+		hasLease(candidate, branch, pushUrl) {
+			return leases.some((l) => foldPath(l.candidate) === foldPath(candidate) && l.branch === branch && l.pushUrl === pushUrl);
+		},
+		copyLeases(candidate) {
+			return leases.filter((l) => foldPath(l.candidate) === foldPath(candidate)).map((l) => ({ ...l }));
+		},
+		importLeases(incoming) {
+			for (const lease of incoming.map((l) => validateLease(l))) if (!leases.some((l) => sameLease(l, lease))) leases.push(lease);
+		},
+		leaseCount() {
+			return leases.length;
 		},
 		size() {
 			return records.length;
@@ -543,8 +571,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
-export function serializeGrants(records: GrantRecord[]): string {
-	return JSON.stringify({ v: 1, grants: records });
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = []): string {
+	return JSON.stringify(leases.length ? { v: 1, grants: records, leases } : { v: 1, grants: records });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -553,9 +581,103 @@ export function loadChildGrants(text: string): GrantRecord[] {
 	return parsed.grants.map(validateRecord);
 }
 
+// Release-engineer PR-branch push lease: a trusted-main approval binds candidate, origin push URL and one feature branch. Session-only (memory), no expiry, never written to disk or config.
+export const LEASE_ROLE = "release-engineer";
+export interface PushLease { role: string; candidate: string; pushUrl: string; branch: string }
+
+const PUSH_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/;
+const PROTECTED_BRANCH = /(^|\/)(master|main|head|trunk|develop|releases?|prod|production)([-._\/]|$)/i;
+const PUSH_TIMEOUT_MS = 5000;
+
+// ASCII feature branch names only; protected families and ref forms that could be options, refspecs, wildcards or tags are refused.
+export function validatePushBranch(name: string): string {
+	if (typeof name !== "string" || name.length < 1 || name.length > 100 || !PUSH_BRANCH.test(name)) throw new RangeError("branch must be an ASCII feature name");
+	if (/\.\.|\/\/|\/\.|\.lock(\/|$)|[./]$/.test(name) || PROTECTED_BRANCH.test(name)) throw new RangeError("branch is malformed or protected");
+	return name;
+}
+
+// Whole-command normal push forms only. Anything else (flags, refspecs, other remotes, compounds, quoting) is not a normal push.
+export function parseNormalPush(command: string): { branch: string } | undefined {
+	const match = /^git push (?:(?:-u|--set-upstream) )?origin (\S+)$/.exec(String(command));
+	if (!match) return undefined;
+	try {
+		return { branch: validatePushBranch(match[1]) };
+	} catch {
+		return undefined;
+	}
+}
+
+function assertPushUrl(url: string): void {
+	if (typeof url !== "string" || !url) throw new TypeError("push URL missing");
+	assertDisplayable(url);
+	// Only standard public SSH forms (ssh://git@host/... and git@host:path) may carry a userinfo; every other credential-bearing form, token-only included, refuses.
+	const credentialed = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(url) || /^[^/:]*@/.test(url);
+	if (credentialed && !/^(ssh:\/\/git@[^/?#@]+\/|git@[^/?#@:]+:)/i.test(url)) throw new RangeError("push URL with embedded credentials is not authorizable");
+}
+
+// Fixed argv, no shell. Unset config (exit 1) is an empty list; any other failure or timeout is undefined, which callers treat as refusal.
+function gitRead(cwd: string, args: string[]): string[] | undefined {
+	try {
+		return childProcess.execFileSync("git", args, { cwd, encoding: "utf8", timeout: PUSH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/).filter(Boolean);
+	} catch (error) {
+		return args[0] === "config" && (error as { status?: number }).status === 1 ? [] : undefined;
+	}
+}
+
+// Live binding: repo root is the candidate, exactly one push URL for origin, no mirror, push.followTags or custom receivepack, and the branch resolves only to refs/heads/<branch> (not a same-named tag). Any read problem refuses.
+export function livePushUrl(candidate: string, branch: string): string | undefined {
+	const top = gitRead(candidate, ["rev-parse", "--show-toplevel"]);
+	if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(canonicalCwd(candidate))) return undefined;
+	const urls = gitRead(candidate, ["remote", "get-url", "--push", "--all", "origin"]);
+	const mirror = gitRead(candidate, ["config", "--type=bool", "--get-all", "remote.origin.mirror"]);
+	const followTags = gitRead(candidate, ["config", "--type=bool", "--get-all", "push.followTags"]);
+	const receive = gitRead(candidate, ["config", "--get-all", "remote.origin.receivepack"]);
+	const pushurls = gitRead(candidate, ["config", "--get-all", "remote.origin.pushurl"]);
+	// Effective submodule recursion (push.recurseSubmodules, and submodule.recurse) would push other repos: only unset or false is allowed.
+	const recurse = gitRead(candidate, ["config", "--type=bool", "--get-all", "push.recurseSubmodules"]);
+	const submodules = gitRead(candidate, ["config", "--type=bool", "--get-all", "submodule.recurse"]);
+	const ref = gitRead(candidate, ["rev-parse", "--symbolic-full-name", branch]);
+	// An explicit remote.origin.pushurl is never part of the approved binding, even a single one (it replaces the fetch URL for pushes).
+	if (urls?.length !== 1 || !mirror || !followTags || !receive || !pushurls || pushurls.length || !recurse || !submodules || ref?.length !== 1) return undefined;
+	if (mirror.includes("true") || followTags.includes("true") || recurse.includes("true") || submodules.includes("true") || receive.length || ref[0] !== `refs/heads/${branch}`) return undefined;
+	return urls[0];
+}
+
+// Trusted-main lease target: canonical candidate, live push URL and validated branch; undefined when the folder is not a verified repo.
+export function pushBranchTarget(cwd: string, branch: string): { candidate: string; pushUrl: string; branch: string } | undefined {
+	if (!path.isAbsolute(cwd)) throw new TypeError("push target cwd must be absolute");
+	validatePushBranch(branch);
+	const candidate = canonicalCwd(cwd);
+	assertDisplayable(candidate);
+	const pushUrl = livePushUrl(candidate, branch);
+	if (pushUrl === undefined) return undefined;
+	assertPushUrl(pushUrl);
+	return { candidate, pushUrl, branch };
+}
+
+function sameLease(a: PushLease, b: PushLease): boolean {
+	return foldPath(a.candidate) === foldPath(b.candidate) && a.branch === b.branch && a.pushUrl === b.pushUrl;
+}
+
+function validateLease(value: unknown): PushLease {
+	const l = value as PushLease;
+	if (!l || typeof l !== "object" || l.role !== LEASE_ROLE || typeof l.candidate !== "string" || !path.isAbsolute(l.candidate)) throw new TypeError("invalid push lease");
+	assertPushUrl(l.pushUrl);
+	return { role: LEASE_ROLE, candidate: l.candidate, pushUrl: l.pushUrl, branch: validatePushBranch(l.branch) };
+}
+
+export function loadChildLeases(text: string): PushLease[] {
+	const parsed = JSON.parse(text) as { v?: number; leases?: unknown };
+	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
+	if (parsed.leases === undefined) return [];
+	if (!Array.isArray(parsed.leases)) throw new TypeError("invalid lease list");
+	return parsed.leases.map((l) => validateLease(l));
+}
+
 export interface ChildGuardLaunch {
 	entry: string;
 	grantCount: number;
+	leaseCount: number;
 	childEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 }
 
@@ -563,15 +685,18 @@ export interface ChildGuardLaunch {
 export interface ClaimWindow { open: boolean }
 
 // Claims this role's grants for one child spawn (single use) and returns the guard entry plus the child's environment.
-export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }): ChildGuardLaunch {
+export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false): ChildGuardLaunch {
 	if (!fs.existsSync(guardFile)) throw new Error("Safety guard missing: child launch refused (fail closed).");
 	const mayClaim = window.open;
 	window.open = false;
 	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
-	const value = claimed.length ? serializeGrants(claimed) : undefined;
+	// Lease copies are non-consuming: every legitimate release-engineer spawn of this candidate gets them, including fallback and later spawns.
+	const leases = withLeases && role === LEASE_ROLE ? store.copyLeases(canonicalCwd(candidate)) : [];
+	const value = claimed.length || leases.length ? serializeGrants(claimed, leases) : undefined;
 	return {
 		entry: guardFile,
 		grantCount: claimed.length,
+		leaseCount: leases.length,
 		childEnv(base) {
 			const env: NodeJS.ProcessEnv = { ...base };
 			delete env[CHILD_GRANT_ENV];
@@ -583,11 +708,25 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 
 export interface GuardBlock { block: true; reason: string }
 
-// Shared hook logic for main and child: allow, consume one exact grant, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string }, toolName: string, input: Record<string, unknown>, cwd: string): GuardBlock | undefined {
+// A child release-engineer push that matches a live lease: exact normal push, only GIT_PUBLISH, live binding must equal the lease. Non-consuming; any throw or mismatch refuses.
+function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const normal = parseNormalPush(decision.op.command);
+	if (!normal) return false;
+	try {
+		const url = liveUrl(decision.op.cwd, normal.branch);
+		return url !== undefined && store.hasLease(decision.op.cwd, normal.branch, url);
+	} catch {
+		return false;
+	}
+}
+
+// Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir);
 	if (decision.action === "allow") return undefined;
 	if (decision.grantable && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
+	if (guard.scope === "child" && leasedPush(guard.store, decision, liveUrl)) return undefined;
 	const how = decision.grantable ? "needs exact operator authorization via request_authorization" : "not grantable to a model: use the operator out-of-band";
 	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}.` };
 }

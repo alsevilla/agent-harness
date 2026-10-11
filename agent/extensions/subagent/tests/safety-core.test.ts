@@ -451,3 +451,238 @@ test("production argv (P1) controls: quoted, ordinary and no-operator backslash 
 		assert.deepEqual(rules(command), [], command);
 	}
 });
+
+// Branch push lease (release-engineer only). RED: validatePushBranch, parseNormalPush, livePushUrl, pushBranchTarget, loadChildLeases, LEASE_ROLE and the lease store methods are not implemented yet.
+const { validatePushBranch, parseNormalPush, livePushUrl, pushBranchTarget, loadChildLeases, LEASE_ROLE } = core as any;
+// Hermetic git: no user or system config (push.followTags, mirror, pushurl) reaches these fixtures. The URL is config only; no test pushes or touches the network.
+const EMPTY_GITCONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "push-lease-cfg-")), "gitconfig");
+fs.writeFileSync(EMPTY_GITCONFIG, "");
+process.env.GIT_CONFIG_GLOBAL = EMPTY_GITCONFIG;
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+const PUSH_URL = "https://example.test/owner/repo.git";
+const git = (dir: string, ...args: string[]) => {
+	const run = spawnSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true });
+	assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stderr}`);
+	return run.stdout;
+};
+function repoFixture(): string {
+	const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "push-lease-")));
+	git(dir, "init", "-q");
+	git(dir, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "init");
+	git(dir, "branch", "feat/x");
+	git(dir, "remote", "add", "origin", PUSH_URL);
+	return dir;
+}
+const GUARD_FILE = path.join(import.meta.dirname, "..", "safety-guard-entry.ts");
+const childGuard = (store: unknown) => ({ scope: "child" as const, store, agentDir });
+const blocked = (value: unknown) => (value as { block?: boolean } | undefined)?.block === true;
+
+test("push lease: validatePushBranch accepts feature names and refuses protected, unsafe or non-ASCII names", () => {
+	for (const name of ["feat/x", "fix-1", "a.b_c/d", "x", "a".repeat(100)]) assert.equal(validatePushBranch(name), name, name);
+	for (const name of ["master", "MAIN", "HEAD", "head", "trunk", "develop", "release/1", "prod", "production", "-x", "/x", ".x", "x/", "x.", "x.lock", "a..b", "a//b", "a/.b", "a b", "a:b", "a+b", "a~1", "a^", "a?", "a*", "a[", "a\\b", "a@{1}", "x\u00e9", "x\u200b", "", "a".repeat(101)]) {
+		assert.throws(() => validatePushBranch(name), RangeError, JSON.stringify(name));
+	}
+});
+
+test("push lease: parseNormalPush accepts only the three whole-command forms; every other push shape is not a normal push", () => {
+	assert.deepEqual(parseNormalPush("git push origin feat/x"), { branch: "feat/x" });
+	assert.deepEqual(parseNormalPush("git push -u origin feat/x"), { branch: "feat/x" });
+	assert.deepEqual(parseNormalPush("git push --set-upstream origin feat/x"), { branch: "feat/x" });
+	for (const command of ["git push origin master", "git push origin HEAD", "git push -f origin feat/x", "git push --force origin feat/x", "git push --force-with-lease origin feat/x", "git push origin +feat/x", "git push origin feat/x:master", "git push origin :feat/x", "git push --delete origin feat/x", "git push --mirror origin", "git push --all origin", "git push --tags origin feat/x", "git push --no-verify origin feat/x", "git push -o x origin feat/x", "git push --receive-pack=x origin feat/x", "git push --push-option=x origin feat/x", "git push origin feat/x extra", "git push upstream feat/x", "git push https://example.test/owner/repo.git feat/x", "git push origin feat/x --tags", "git -C d push origin feat/x", "git -c x=y push origin feat/x", "env X=1 git push origin feat/x", "git push origin feat/x && git push origin master", "git push origin feat/x;", "git push origin 'feat/x'", "git push origin \"feat/x\"", "git push origin feat/x\n", "git push origin feat/x |cat", "git push origin feat/x$(id)", "git push origin feat/x`id`", "git  push origin feat/x", " git push origin feat/x", "git push origin feat/x ", "git push origin feat/x\u200b", "GIT PUSH origin feat/x", "git push origin feat/x\tx"]) {
+		assert.equal(parseNormalPush(command), undefined, JSON.stringify(command));
+	}
+});
+
+test("push lease: a child lease allows the exact normal push for bash and powershell, repeatedly and without consuming it", () => {
+	const repo = repoFixture();
+	const store = core.createGrantStore();
+	store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	for (const command of ["git push origin feat/x", "git push -u origin feat/x", "git push --set-upstream origin feat/x"]) {
+		for (const tool of ["bash", "powershell"]) {
+			for (let i = 0; i < 2; i++) assert.equal(guardToolCall(childGuard(store), tool, { command }, repo), undefined, `${tool} ${command} #${i}`);
+		}
+	}
+	assert.equal(store.leaseCount(), 1, "lease is copied, never consumed");
+});
+
+test("push lease: every other push shape stays blocked while the lease is present", () => {
+	const repo = repoFixture();
+	const other = repoFixture();
+	const store = core.createGrantStore();
+	store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	const cases: Array<[string, string]> = [
+		["git push origin feat/y", repo], ["git push origin master", repo], ["git push origin main", repo], ["git push origin release/x", repo], ["git push origin trunk", repo],
+		["git push origin feat/x -f", repo], ["git push origin feat/x:master", repo], ["git push origin +feat/x", repo], ["git push origin :feat/x", repo],
+		["git push --tags origin feat/x", repo], ["git push --mirror origin", repo], ["git push --all origin", repo], ["git push --no-verify origin feat/x", repo],
+		["git push upstream feat/x", repo], ["git push https://example.test/owner/repo.git feat/x", repo], ["git -C . push origin feat/x", repo],
+		["env X=1 git push origin feat/x", repo], ["git push origin feat/x && git push origin master", repo], ["git push origin feat/x\n", repo],
+		["git push origin 'feat/x'", repo], ["git push origin feat/x; echo", repo], ["git push origin feat/x\u200b", repo],
+		["git push origin feat/x", other], ["gh pr create --head feat/x", repo], ["npm publish", repo],
+	];
+	for (const [command, dir] of cases) assert.ok(blocked(guardToolCall(childGuard(store), "bash", { command }, dir)), `${command} in ${dir}`);
+	assert.ok(blocked(guardToolCall(childGuard(store), "powershell", { command: "git push origin master" }, repo)), "powershell protected branch");
+	assert.ok(blocked(guardToolCall({ scope: "main", store, agentDir }, "bash", { command: "git push origin feat/x" }, repo)), "main scope never uses a lease");
+});
+
+test("push lease: stub URL drift, a throwing or undefined live read, and a missing lease all fail closed", () => {
+	const repo = repoFixture();
+	const store = core.createGrantStore();
+	store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	const push = { command: "git push origin feat/x" };
+	assert.equal(guardToolCall(childGuard(store), "bash", push, repo, () => PUSH_URL), undefined, "matching live URL is the control");
+	assert.ok(blocked(guardToolCall(childGuard(store), "bash", push, repo, () => "https://example.test/owner/other.git")), "URL drift");
+	assert.ok(blocked(guardToolCall(childGuard(store), "bash", push, repo, () => undefined)), "undefined live read");
+	assert.ok(blocked(guardToolCall(childGuard(store), "bash", push, repo, () => { throw new Error("timeout"); })), "throwing live read");
+	assert.ok(blocked(guardToolCall(childGuard(core.createGrantStore()), "bash", push, repo)), "no lease in this child");
+});
+
+test("live binding (real git): drift, extra push URL, mirror, followTags, receivepack, tag collision, subdirectory, missing branch or origin refuse; false settings stay allowed", () => {
+	const mutations: Array<[string, (repo: string) => string]> = [
+		["second push URL", (r) => { git(r, "config", "--add", "remote.origin.pushurl", "https://example.test/owner/second.git"); return r; }],
+		["mirror", (r) => { git(r, "config", "remote.origin.mirror", "true"); return r; }],
+		["push.followTags", (r) => { git(r, "config", "push.followTags", "true"); return r; }],
+		["custom receivepack", (r) => { git(r, "config", "remote.origin.receivepack", "git-receive-pack"); return r; }],
+		["tag named like the branch", (r) => { git(r, "tag", "feat/x"); return r; }],
+		["subdirectory cwd", (r) => { fs.mkdirSync(path.join(r, "sub")); return path.join(r, "sub"); }],
+		["branch missing locally", (r) => { git(r, "branch", "-D", "feat/x"); return r; }],
+		["origin missing", (r) => { git(r, "remote", "remove", "origin"); return r; }],
+	];
+	for (const [label, mutate] of mutations) {
+		const repo = repoFixture();
+		assert.equal(livePushUrl(mutate(repo), "feat/x"), undefined, label);
+	}
+	const drift = repoFixture();
+	git(drift, "remote", "set-url", "origin", "https://example.test/owner/other.git");
+	assert.equal(livePushUrl(drift, "feat/x"), "https://example.test/owner/other.git", "drift is reported live; the lease comparison refuses it");
+	const control = repoFixture();
+	git(control, "config", "push.followTags", "false");
+	git(control, "config", "remote.origin.mirror", "false");
+	assert.equal(livePushUrl(control, "feat/x"), PUSH_URL, "false settings and a matching branch stay allowed");
+});
+
+test("push target and lease mint: a verified repo yields one deduplicated binding; protected, credential-bearing, relative or non-repo targets refuse", () => {
+	const repo = repoFixture();
+	assert.deepEqual(pushBranchTarget(repo, "feat/x"), { candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	assert.throws(() => pushBranchTarget(repo, "master"), RangeError);
+	assert.throws(() => pushBranchTarget("relative/dir", "feat/x"), TypeError);
+	assert.equal(pushBranchTarget(fs.mkdtempSync(path.join(os.tmpdir(), "push-lease-plain-")), "feat/x"), undefined, "non-repo");
+	const creds = repoFixture();
+	git(creds, "remote", "set-url", "origin", "https://u:tok@example.test/owner/repo.git");
+	assert.throws(() => pushBranchTarget(creds, "feat/x"), RangeError, "embedded credentials");
+	const store = core.createGrantStore();
+	const first = store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	assert.deepEqual(store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" }), first);
+	assert.equal(store.leaseCount(), 1, "identical binding is deduplicated");
+	assert.throws(() => store.mintLease({ candidate: repo, pushUrl: "https://u:tok@example.test/owner/repo.git", branch: "feat/x" }), RangeError);
+	assert.throws(() => store.mintLease({ candidate: "relative", pushUrl: PUSH_URL, branch: "feat/x" }), TypeError);
+});
+
+test("lease transport: copies are non-consuming across first, fallback and later spawns; project-source and other roles receive none", () => {
+	const repo = repoFixture();
+	const main = core.createGrantStore();
+	main.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	const job = { open: true };
+	const first = claimChildGuard(main, LEASE_ROLE, repo, GUARD_FILE, job, true);
+	const fallback = claimChildGuard(main, LEASE_ROLE, repo, GUARD_FILE, job, true);
+	const later = claimChildGuard(main, LEASE_ROLE, repo, GUARD_FILE, { open: true }, true);
+	assert.deepEqual([first.leaseCount, fallback.leaseCount, later.leaseCount], [1, 1, 1]);
+	assert.equal(main.leaseCount(), 1, "main keeps its lease");
+	assert.equal(claimChildGuard(main, LEASE_ROLE, repo, GUARD_FILE, { open: true }, false).childEnv({})[core.CHILD_GRANT_ENV], undefined, "project-source agent gets no lease");
+	assert.equal(claimChildGuard(main, "general-worker", repo, GUARD_FILE, { open: true }, true).leaseCount, 0, "other role gets no lease");
+	assert.equal(claimChildGuard(main, LEASE_ROLE, repo, GUARD_FILE).leaseCount, 0, "omitted flag gets no lease");
+	const env = first.childEnv({ KEEP: "1" });
+	assert.equal(env.KEEP, "1");
+	const childStore = core.createGrantStore();
+	childStore.importLeases(loadChildLeases(env[core.CHILD_GRANT_ENV]));
+	assert.equal(guardToolCall(childGuard(childStore), "bash", { command: "git push origin feat/x" }, repo), undefined, "child allows the normal push");
+});
+
+test("revocation: abort (revokeAll) keeps approved leases; revokeAll(true) clears them and the same push blocks again", () => {
+	const repo = repoFixture();
+	const store = core.createGrantStore();
+	store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	const push = { command: "git push origin feat/x" };
+	store.revokeAll();
+	assert.equal(store.leaseCount(), 1, "abort clears grants only");
+	assert.equal(guardToolCall(childGuard(store), "bash", push, repo), undefined);
+	store.revokeAll(true);
+	assert.equal(store.leaseCount(), 0);
+	assert.ok(blocked(guardToolCall(childGuard(store), "bash", push, repo)));
+});
+
+// Review repair: effective submodule recursion and extra remote URLs are part of the live binding (fail closed; unknown bool values refuse).
+test("live binding (review): push.recurseSubmodules and submodule.recurse refuse unless unset or false; unknown values refuse", () => {
+	for (const [key, value] of [["push.recurseSubmodules", "true"], ["push.recurseSubmodules", "yes"], ["push.recurseSubmodules", "on-demand"], ["push.recurseSubmodules", "only"], ["push.recurseSubmodules", "check"], ["submodule.recurse", "true"], ["submodule.recurse", "on-demand"]]) {
+		const repo = repoFixture();
+		git(repo, "config", key, value);
+		assert.equal(livePushUrl(repo, "feat/x"), undefined, `${key}=${value}`);
+	}
+	for (const [key, value] of [["push.recurseSubmodules", "false"], ["push.recurseSubmodules", "no"], ["push.recurseSubmodules", "0"], ["submodule.recurse", "false"]]) {
+		const repo = repoFixture();
+		git(repo, "config", key, value);
+		assert.equal(livePushUrl(repo, "feat/x"), PUSH_URL, `${key}=${value} stays allowed`);
+	}
+});
+
+test("live binding (review): two remote.origin.url values refuse even when the first one matches", () => {
+	const repo = repoFixture();
+	git(repo, "config", "--add", "remote.origin.url", "https://example.test/owner/second.git");
+	assert.equal(livePushUrl(repo, "feat/x"), undefined);
+});
+
+// Heads+tags with one name is ambiguous (empty single-ref read); tag-only resolves outside refs/heads. Both must refuse.
+test("live binding (review): a tag named like the branch refuses with the branch present and when the branch is absent", () => {
+	const both = repoFixture();
+	git(both, "tag", "feat/x");
+	assert.equal(livePushUrl(both, "feat/x"), undefined, "heads+tags: ambiguous name");
+	const tagOnly = repoFixture();
+	git(tagOnly, "branch", "-D", "feat/x");
+	git(tagOnly, "tag", "feat/x");
+	assert.equal(livePushUrl(tagOnly, "feat/x"), undefined, "tag only: outside refs/heads");
+});
+
+test("push target (review): token-only and any other credential-bearing URL refuse with no secret in the error; public git@ ssh forms stay allowed", () => {
+	for (const url of ["https://TOKEN@example.test/owner/repo.git", "http://TOKEN@example.test/owner/repo.git", "https://git@example.test/owner/repo.git", "https://u:tok@example.test/owner/repo.git", "ssh://deploy:key@example.test/owner/repo.git", "TOKEN@example.test:owner/repo.git"]) {
+		const repo = repoFixture();
+		git(repo, "remote", "set-url", "origin", url);
+		assert.throws(() => pushBranchTarget(repo, "feat/x"), (error: unknown) => error instanceof RangeError && !String((error as Error).message).includes("TOKEN"), url);
+	}
+	for (const url of ["ssh://git@example.test/owner/repo.git", "git@example.test:owner/repo.git"]) {
+		const repo = repoFixture();
+		git(repo, "remote", "set-url", "origin", url);
+		assert.equal(pushBranchTarget(repo, "feat/x")?.pushUrl, url, url);
+	}
+});
+
+// The candidate path is shown to the operator before confirm, so it must be displayable exactly (bidi override in the folder name refuses).
+test("push target (review): a candidate path with a bidi override is refused before any confirm", () => {
+	const repo = repoFixture();
+	const bidi = path.join(path.dirname(repo), `x\u202Ey-${path.basename(repo)}`);
+	fs.renameSync(repo, bidi);
+	assert.throws(() => pushBranchTarget(bidi, "feat/x"), RangeError);
+});
+
+// Release family: releases/ is protected like release/; releasing and ordinary names stay allowed.
+test("push lease (review): the releases family is protected; releasing and ordinary names stay allowed", () => {
+	for (const name of ["releases", "releases/1.0", "releases/1.0.1", "feat/releases/x"]) assert.throws(() => validatePushBranch(name), RangeError, name);
+	for (const name of ["feat/releasing", "feat/x"]) assert.equal(validatePushBranch(name), name, name);
+});
+
+test("lease envelope: tampered role, branch, candidate or shape fails closed; old v1 envelopes load with no leases", () => {
+	const repo = repoFixture();
+	const store = core.createGrantStore();
+	const lease = store.mintLease({ candidate: repo, pushUrl: PUSH_URL, branch: "feat/x" });
+	const text = core.serializeGrants([], [lease]);
+	assert.deepEqual(loadChildLeases(text), [lease]);
+	const tamper = (edit: (l: Record<string, unknown>) => void) => {
+		const envelope = JSON.parse(text);
+		envelope.leases = envelope.leases.map((l: Record<string, unknown>) => { const c = { ...l }; edit(c); return c; });
+		return JSON.stringify(envelope);
+	};
+	assert.throws(() => loadChildLeases(tamper((l) => { l.role = "general-worker"; })), undefined, "role");
+	assert.throws(() => loadChildLeases(tamper((l) => { l.branch = "master"; })), undefined, "protected branch");
+	assert.throws(() => loadChildLeases(tamper((l) => { l.candidate = "relative"; })), undefined, "relative candidate");
+	assert.throws(() => loadChildLeases(tamper((l) => { l.pushUrl = "https://u:tok@example.test/owner/repo.git"; })), undefined, "embedded credentials");
+	assert.throws(() => loadChildLeases(JSON.stringify({ v: 1, grants: [], leases: {} })), undefined, "leases not an array");
+	assert.deepEqual(loadChildLeases('{"v":1,"grants":[]}'), [], "old envelope");
+});

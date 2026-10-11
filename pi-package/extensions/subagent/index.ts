@@ -40,7 +40,7 @@ import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagSta
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
-import { assertBatchDisplayable, authorizableOp, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, MAX_GRANT_OPS, type ClaimWindow, type GuardOp } from "./safety-core.ts";
+import { assertBatchDisplayable, authorizableOp, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_GRANT_OPS, pushBranchTarget, type ClaimWindow, type GuardOp } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -376,7 +376,7 @@ async function runAgentAttempt(
         }
 		if (signal?.aborted) throw new Error("Subagent was aborted"); // an abort during the prompt-file write spawns nothing
 		// Guard entry is always injected after pause-gate/relay; a missing guard file throws (fail closed). Grants are claimed only by the job's first actual spawn (grantWindow).
-		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow);
+		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package");
 		args.push("--extension", guard.entry);
 		let wasAborted = false;
 
@@ -645,11 +645,45 @@ function registerSkillAliases(pi: ExtensionAPI) {
 	});
 }
 
+// One TUI confirmation per new binding; a live binding already approved this session is reused without a dialog. Revalidates repo and URL before and after the dialog.
+async function authorizePushBranch(params: { role?: string; ttl_minutes?: number; push_branch: { branch: string; cwd?: string } }, ctx: { cwd: string; ui: { confirm(title: string, message: string, options?: { timeout?: number }): Promise<boolean> } }) {
+	const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
+	if (params.role !== undefined && params.role !== LEASE_ROLE) return fail(`push_branch is only for role ${LEASE_ROLE}; no lease minted.`);
+	if (params.ttl_minutes !== undefined) return fail("push_branch leases are session-only and take no ttl; no lease minted.");
+	let target: ReturnType<typeof pushBranchTarget>;
+	try {
+		target = pushBranchTarget(path.resolve(ctx.cwd, params.push_branch.cwd ?? "."), params.push_branch.branch);
+	} catch (error) {
+		return fail(`${(error as Error).message}; no lease minted.`);
+	}
+	if (!target) return fail("not a verified git repository with exactly one origin push URL; no lease minted.");
+	if (safetyGrants.hasLease(target.candidate, target.branch, target.pushUrl)) return { content: [{ type: "text" as const, text: `Already authorized this session: ${LEASE_ROLE} may push ${target.branch} to the approved origin of ${target.candidate}.` }], details: {} };
+	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nBranch: ${target.branch}\nPush URL: ${target.pushUrl}\nScope: this session only; normal push of this branch (no tags, force, delete, mirror or other refs). /revoke-authorization or session end withdraws it.`;
+	const approved = await ctx.ui.confirm("Authorize release-engineer branch pushes?", text, { timeout: 120_000 });
+	if (!approved) return fail("Not authorized by the operator; no lease minted.");
+	let again: ReturnType<typeof pushBranchTarget>;
+	try {
+		again = pushBranchTarget(target.candidate, target.branch);
+	} catch {
+		again = undefined;
+	}
+	if (!again || again.candidate !== target.candidate || again.pushUrl !== target.pushUrl) return fail("repository binding changed during approval; no lease minted.");
+	safetyGrants.mintLease(again);
+	return { content: [{ type: "text" as const, text: `Authorized ${LEASE_ROLE} to push ${target.branch} for this session.` }], details: {} };
+}
+
 export default function (pi: ExtensionAPI) {
 	registerProviderCooldown(pi);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	pi.on("agent_settled", (event) => { if (event.aborted) safetyGrants.revokeAll(); });
-	pi.on("session_shutdown", () => safetyGrants.revokeAll());
+	pi.on("session_shutdown", () => safetyGrants.revokeAll(true));
+	pi.registerCommand("revoke-authorization", {
+		description: "Withdraw session authorizations: single-use grants and release-engineer push leases (running children keep copies until they exit)",
+		handler: async (_args, ctx) => {
+			safetyGrants.revokeAll(true);
+			ctx.ui.notify("Authorizations revoked; the next risky push needs a new approval. Pause or cancel running workers separately.", "info");
+		},
+	});
 	registerSkillAliases(pi);
 	pi.registerCommand("provider-cooldown", {
 		description: "Show provider cooldown state, or refresh one provider's auth after re-authenticating",
@@ -926,7 +960,12 @@ export default function (pi: ExtensionAPI) {
 						},
 						makeDetails("parallel"),
 						t.readOnly ? "read" : "write",
-					);
+					).catch((error): SingleResult => {
+						// Per-task fail closed: a launch that throws (e.g. missing Claude subscription guard) is one failed task; siblings keep their evidence. Abort still rejects.
+						if (signal?.aborted) throw error;
+						const message = error instanceof Error ? error.message : String(error);
+						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: "error", errorMessage: message };
+					});
 					allResults[index] = result;
 					emitParallelUpdate();
 					return result;
@@ -1012,15 +1051,19 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(subagentTool);
     pi.registerTool({
         name: "request_authorization", label: "Request authorization",
-        description: "Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked. Refused outside the interactive TUI.",
+        description: "Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked, or exclusively via push_branch a session-only release-engineer push lease for one feature branch. Refused outside the interactive TUI.",
         parameters: Type.Object({
-            operations: Type.Array(Type.Object({ kind: StringEnum(["shell", "write"] as const), value: Type.String({ description: "Exact shell command or file path" }) }), { minItems: 1, maxItems: MAX_GRANT_OPS }),
+            operations: Type.Optional(Type.Array(Type.Object({ kind: StringEnum(["shell", "write"] as const), value: Type.String({ description: "Exact shell command or file path" }) }), { minItems: 1, maxItems: MAX_GRANT_OPS })),
+            push_branch: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch name; protected branches are refused" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })) }, { description: "Exclusive with operations: one session release-engineer PR-branch push lease" })),
             role: Type.Optional(Type.String({ description: "Child role the grant binds to; omit for main" })),
             ttl_minutes: Type.Optional(Type.Number({ minimum: 1, maximum: GRANT_TTL_MAX_MS / 60_000, description: "Default 30" })),
         }),
         async execute(_id, params, _signal, _onUpdate, ctx) {
             const denied = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
             if (ctx.mode !== "tui" || !ctx.hasUI) return denied("request_authorization requires the human TUI; no grant minted.");
+            if (params.push_branch !== undefined && params.operations !== undefined) return denied("push_branch is exclusive with operations; no grant minted.");
+            if (params.push_branch !== undefined) return authorizePushBranch(params, ctx);
+            if (!params.operations) return denied("operations or push_branch is required; no grant minted.");
             const role = params.role ?? null;
             if (role !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(role)) return denied("invalid role name; no grant minted.");
             const candidate = canonicalCwd(ctx.cwd);

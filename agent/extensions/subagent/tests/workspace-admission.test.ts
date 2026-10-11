@@ -26,10 +26,9 @@ async function withFixtures(run: (root: string, links: string[]) => Promise<void
   } finally {
     for (const link of links) {
       try {
-        fs.lstatSync(link);
-        fs.rmdirSync(link); // removes only the junction itself, never its target
-      } catch {
-        // already removed by the test
+        fs.unlinkSync(link); // removes only the junction/symlink itself, never its target
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; // already removed by the test
       }
     }
     fs.rmSync(root, { recursive: true, force: true });
@@ -75,7 +74,7 @@ test("junction alias and its subdirectories share the checkout key; unlinking th
   assert.equal(resolveCheckoutKey(alias), key);
   assert.equal(resolveCheckoutKey(path.join(alias, "src", "deep")), key);
   assert.equal(resolveCheckoutKey(path.join(repo, "src", "deep")), key);
-  fs.rmdirSync(alias);
+  fs.unlinkSync(alias); // rmdir fails with ENOTDIR on POSIX symlinks; unlink removes the link only
   links.length = 0;
   assert.ok(fs.statSync(path.join(repo, ".git")).isDirectory());
 }));

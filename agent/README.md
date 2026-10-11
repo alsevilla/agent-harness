@@ -1,6 +1,6 @@
 # Modular Pi agent profile
 
-This directory is a shareable snapshot of the current `~/.pi/agent` profile for Pi 1.0.4. It uses direct Claude subscription and ChatGPT/Codex sign-in. CLIProxyAPI is not required.
+This directory is a shareable snapshot of the current `~/.pi/agent` profile. Tested baseline: Pi 1.1.0 on Node 24.20.0 (Node 22 unverified); Pi 1.0.4 is historical. It uses direct Claude subscription and ChatGPT/Codex sign-in. CLIProxyAPI is not required.
 
 This repository starts from a fresh source snapshot. The retired root-level stack is not in its history; use the active agent/ profile.
 
@@ -31,7 +31,7 @@ Copy each extension's `config.example.json` to `config.json`. Set your own Git i
 
 Apply the optional connector correction as described in [patches/claude-subscription-connector](patches/claude-subscription-connector/README.md). Restart Pi, sign in with `/login anthropic` using the connector's offered OAuth flow and `/login openai-codex`. Model availability depends on your provider/catalog; inspect agent frontmatter and `roles.json` before using the profile. Configured availability fallbacks require a separate GitHub Copilot sign-in.
 
-Run Pi from your project. `/subagent` opens worker history/live activity; its command controls and the orchestrator's `subagent_control` tool support steering and pause/resume. See [subagent documentation](extensions/subagent/README.md) for details. The inspector's outside-click compatibility path depends on Pi 1.0.4 TUI internals and should be rechecked after a Pi upgrade.
+Run Pi from your project. `/subagent` opens worker history/live activity; its command controls and the orchestrator's `subagent_control` tool support steering and pause/resume. See [subagent documentation](extensions/subagent/README.md) for details. The inspector's outside-click compatibility path depends on Pi TUI internals and should be rechecked after a Pi upgrade.
 
 ## Privacy and verification
 
@@ -56,7 +56,7 @@ Workers report RED and GREEN commands/results for meaningful behavior, or an exp
 
 Six profile skills are discoverable: engineering-harness, frontend, backend, RFID attendance, browser and graphify. Frontend/backend modules remain references, with SolidJS guards around cross-framework examples. The inherited duplicate browser and graphify-pi package skill remain disabled; native extensions remain enabled. Human questions use the local native-dialog extension, with no external ask-user package or extra skill. Do not delete useful framework-independent design modules merely because some examples use another framework.
 
-Compatibility was checked against the installed Pi 1.0.4 resource loader, all 23 role definitions, registry/frontmatter agreement, referenced module paths and explicit worker integrations. Smaller instruction text does not prove a measured reduction in billed tokens.
+Compatibility was checked against the installed Pi 1.1.0 resource loader (1.0.4 historical), all 23 role definitions, registry/frontmatter agreement, referenced module paths and explicit worker integrations. Smaller instruction text does not prove a measured reduction in billed tokens.
 
 See [VALIDATION.md](VALIDATION.md) for the October 7, 2026 regression pass, including live Serena/QMD checks and the distinction between mock-worker verification and provider reliability.
 

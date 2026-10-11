@@ -4,13 +4,13 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { after } from "node:test";
 import { classifyObservation, guardStreamSimple, MAX_OBSERVED_BODY_BYTES, readBoundedJson } from "../provider-cooldown-guard.ts";
 import { type CooldownStore, createCooldownStore } from "../provider-cooldown.ts";
 
 // Test-only absolute path to the installed Pi 1.1.0 public pi-ai dist. Extension-loader resolution is NOT exercised here.
-const PI_AI_DIST = process.env.PI_AI_DIST ?? "C:/Users/MSI/.pi/agent/install/releases/1.1.0/node_modules/@earendil-works/pi-ai/dist";
+const PI_AI_DIST = process.env.PI_AI_DIST ?? fileURLToPath(new URL("../../../install/releases/1.1.0/node_modules/@earendil-works/pi-ai/dist", import.meta.url));
 const piAi = (rel: string) => import(pathToFileURL(path.join(PI_AI_DIST, rel)).href);
 const { createAssistantMessageEventStream } = await piAi("utils/event-stream.js");
 

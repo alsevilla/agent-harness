@@ -25,7 +25,7 @@ Historical snapshot of the lean-instructions migration, before the later worker 
 - Worker orchestration tests use mock model responses. This pass establishes runtime/control behavior, not how every model follows instructions. TDD order remains a prompt requirement rather than a runtime-enforced gate.
 - Browser verification checks the installed CLI and discovery, not live website interaction. Native TUI tests use a controlled terminal fixture; terminal-emulator-specific mouse behavior remains environment dependent.
 - No fresh subscription requests were made here, so current provider limits and billing are not established. A separate earlier small GPT-6.1 Codex request succeeded on this date.
-- Validation targets Pi 1.0.4 and the installed integration versions; rerun after upgrades. Smaller text is measured, but billed token savings are not.
+- Historical snapshot: validation targeted Pi 1.0.4 (current tested baseline is Pi 1.1.0, see agent/README.md) and the installed integration versions; rerun after upgrades. Smaller text is measured, but billed token savings are not.
 
 ## Manual refresh and Windows browser verification
 

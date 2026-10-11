@@ -38,7 +38,18 @@ test("values already in the environment win", () => {
   assert.deepEqual(cargoEnvDefaults(repo("app"), env), {});
 });
 
-test("checkout hash preserves case on case-sensitive platforms", { skip: process.platform === "win32" }, () => {
+// APFS (macOS default) and NTFS fold A/ and a/ into one directory, so the case-distinction assertion cannot hold there.
+function fsIsCaseInsensitive(): boolean {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "build-env-casefs-"));
+  try {
+    fs.mkdirSync(path.join(dir, "CaseProbe"));
+    return fs.existsSync(path.join(dir, "caseprobe"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("checkout hash preserves case on case-sensitive platforms", { skip: process.platform === "win32" || fsIsCaseInsensitive() }, () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "build-env-case-"));
   fixtures.push(base);
   const upper = path.join(base, "A", "repo"), lower = path.join(base, "a", "repo");

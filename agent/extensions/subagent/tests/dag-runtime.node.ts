@@ -40,7 +40,7 @@ export function spawn(_command, args, options) {
 const entryStubUrl = dataUrl("export default function providerCooldownEntry() {}\nexport function registerProviderCooldown() {}\nexport async function runProviderCooldownCommand() { return { message: '', type: 'info' }; }\nexport async function providerLaunchState() { return { state: 'launch' }; }\nexport async function guardRefusalReplayable() { return false; }");
 const indexDependencies = new Set(["@earendil-works/pi-ai", "./code-integrations.ts", "./build-env.ts"]);
 // Real installed SDK pieces for the tool-boundary check: index.ts builds its real TypeBox schema; validateToolArguments comes from the installed pi-ai.
-const INSTALL_MODULES = "C:/Users/MSI/.pi/agent/install/releases/1.1.0/node_modules";
+const INSTALL_MODULES = fileURLToPath(new URL("../../../install/releases/1.1.0/node_modules", import.meta.url));
 const typeboxUrl = pathToFileURL(`${INSTALL_MODULES}/typebox/build/index.mjs`).href;
 const piAiUrl = pathToFileURL(`${INSTALL_MODULES}/@earendil-works/pi-ai/dist/index.js`).href;
 
@@ -1077,4 +1077,45 @@ check("dag concurrency is the shared cap: five independent nodes run at most fou
 	await waitFor(() => children().length === 5, "fifth node starts when capacity frees");
 	for (const child of children().slice(1)) finish(child, "ok");
 	assert.notEqual((await launch).isError, true);
+});
+
+// Parallel launch failure: a throwing task (missing Claude subscription guard, fail closed) is one failed task beside its sibling, never a rejected call.
+const BOOM_AGENT = "---\nname: boom\ndescription: boom\nmodel: anthropic/x\n---\n";
+check("parallel: a throwing launch is one failed task; the sibling output is kept and the call resolves isError", async () => {
+	fs.writeFileSync(path.join(userDir, "agents", "boom.md"), BOOM_AGENT);
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const call = tool.execute("parallel-boom", { background: false, tasks: [{ agent: "reader", task: "good", cwd: makeRepo("parallel-boom-ok") }, { agent: "boom", task: "bad", cwd: makeRepo("parallel-boom-bad") }] }, undefined, undefined, dagCtx(makeRepo("parallel-boom")));
+	await waitFor(() => children().length === 1, "the sibling reader spawns");
+	finish(children()[0], "GOOD-RESULT");
+	const result = await call;
+	const text = result.content[0].text;
+	assert.equal(result.isError, true);
+	assert.match(text, /Parallel: 1\/2 succeeded/);
+	assert.match(text, /GOOD-RESULT/);
+	assert.match(text, /### \[boom\] failed/);
+	assert.match(text, /Claude subscription guard missing/);
+	assert.equal(children().length, 1, "the guard-missing task never spawns");
+});
+
+check("parallel background: a throwing launch ends the job failed and keeps the sibling output", async () => {
+	fs.writeFileSync(path.join(userDir, "agents", "boom.md"), BOOM_AGENT);
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const control = pi.tools.get("subagent_control")!;
+	const ctx = dagCtx(makeRepo("parallel-boom-bg"));
+	const started = await tool.execute("parallel-boom-bg", { background: true, tasks: [{ agent: "reader", task: "good", cwd: makeRepo("parallel-boom-bg-ok") }, { agent: "boom", task: "bad", cwd: makeRepo("parallel-boom-bg-bad") }] }, undefined, undefined, ctx);
+	await waitFor(() => children().length === 1, "the sibling reader spawns");
+	finish(children()[0], "GOOD-RESULT");
+	await waitFor(() => pi.sent.length === 1, "completion delivered");
+	await settle(450);
+	assert.equal(pi.sent.length, 1, "one completion for the failed job, with no late duplicate");
+	assert.equal(pi.sent[0].details.jobId, started.details.jobId, "the completion names this job");
+	assert.equal(pi.sent[0].details.state, "failed", pi.sent[0].content);
+	const recovered = await control.execute("recover", { action: "result", target: started.details.jobId }, undefined, undefined, ctx);
+	const text = recovered.content[0].text;
+	assert.match(text, /GOOD-RESULT/);
+	assert.match(text, /Claude subscription guard missing/);
 });

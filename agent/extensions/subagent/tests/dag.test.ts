@@ -233,6 +233,35 @@ test("abort signals started children, aborts pending nodes, and waits for the st
 	assert.deepEqual([rows.a.status, rows.c.status, rows.d.status], ["aborted", "aborted", "aborted"]);
 });
 
+test("parallel abort: a sibling that throws after abort settles aborted with its cause, the other started sibling sees the abort, and no pending node launches", async () => {
+	const controller = new AbortController();
+	const gateA = deferred<void>();
+	const gateB = deferred<void>();
+	let observedB = false;
+	const run = recorder(async (id, _parents, signal) => {
+		if (id === "a") {
+			await gateA.promise;
+			throw new Error("a boom after abort");
+		}
+		signal.addEventListener("abort", () => { observedB = true; }, { once: true });
+		await gateB.promise; // ignores abort until released, then reports a non-accepted result
+		return failed(id);
+	});
+	const done = runDag([spec("a"), spec("b"), spec("c", ["a"])], options(run.run, { concurrency: 2, signal: controller.signal }));
+	await flush();
+	assert.deepEqual(run.launches, ["a", "b"]);
+	controller.abort();
+	await flush();
+	assert.equal(observedB, true, "the started sibling receives the abort");
+	gateA.resolve();
+	await flush();
+	gateB.resolve();
+	const rows = byId(await done);
+	assert.deepEqual(run.launches, ["a", "b"], "no pending node launches after abort");
+	assert.deepEqual([rows.a.status, rows.b.status, rows.c.status], ["aborted", "aborted", "aborted"]);
+	assert.equal((rows.a.cause as Error).message, "a boom after abort");
+});
+
 test("an already-aborted signal launches nothing and marks every node aborted", async () => {
 	const controller = new AbortController();
 	controller.abort();

@@ -5,11 +5,12 @@ import * as fs from "node:fs";
 import { registerHooks } from "node:module";
 import * as path from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import * as os from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createCooldownStore, type CooldownStore } from "../provider-cooldown.ts";
 
-const PKG = "C:/Users/MSI/.pi/agent/install/releases/1.1.0/node_modules/@earendil-works";
-const SCRATCH = "C:/Users/MSI/worktrees/pi-agent-harness/_scratch/provider-cooldown-phase-b-repair";
+const PKG = fileURLToPath(new URL("../../../install/releases/1.1.0/node_modules/@earendil-works", import.meta.url));
+const SCRATCH = process.env.PROVIDER_COOLDOWN_SCRATCH ?? path.join(os.tmpdir(), "provider-cooldown-integration");
 const urls = {
 	"@earendil-works/pi-coding-agent": pathToFileURL(`${PKG}/pi-coding-agent/dist/index.js`).href,
 	"@earendil-works/pi-ai": pathToFileURL(`${PKG}/pi-ai/dist/index.js`).href,
