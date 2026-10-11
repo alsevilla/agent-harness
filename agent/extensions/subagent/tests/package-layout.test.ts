@@ -45,7 +45,7 @@ async function runNodeSuite(): Promise<void> {
 	test("manifest declares the explicit entry, skills, host peers and no dependencies", () => {
 		const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "package.json"), "utf8"));
 		assert.equal(manifest.name, "@alsevilla/pi-engineering-harness");
-		assert.equal(manifest.version, "1.2.0");
+		assert.equal(manifest.version, "1.3.0");
 		assert.equal(manifest.license, "MIT");
 		assert.deepEqual(manifest.pi.extensions, ["./extensions/subagent/index.ts", "./extensions/ask-user/index.ts", "./extensions/external-compaction/index.ts"]);
 		assert.deepEqual(manifest.pi.skills, ["./skills/engineering-harness", "./skills/agent-creation"]);

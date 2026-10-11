@@ -5,7 +5,7 @@
 An independent, unofficial harness profile for [Pi](https://github.com/earendil-works/pi), the minimal extensible coding agent by Mario Zechner. It is not an official Pi project and is not endorsed by its authors.
 
 - Tested baseline: Pi 1.1.0 on Windows with Node 24.20.0 (targeted checks; see [Status and limits](#status-and-limits)).
-- Source release: v1.2.0. This documentation update does not change the version or publish a release.
+- Source release: v1.3.0.
 - The npm package `@alsevilla/pi-engineering-harness` is **UNPUBLISHED** until explicit approval. Install the profile manually as described in [Quickstart](#quickstart) and [Install](#install).
 
 ## What it does
