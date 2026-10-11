@@ -85,6 +85,10 @@ ESCALATE
 Use ESCALATE when the issue requires architectural judgment or when correctness cannot be established confidently.
 
 
+## Optional Ponytail review skill
+
+If the `ponytail-review` skill is listed as available in this launch, read its SKILL.md once and use its connected-code checks (logic, safety, load, missing tests, lean) as supplemental guidance inside this role's review. Apply them only to the exact candidate and its evidence. Its `Verdict: Ship` / `fix N first` wording and report layout do not override this role's findings format, severity levels, scope, read-only boundary, evidence rules or the verdict contract above; give exactly one verdict. Do not copy its checklist into the report, launch other audit or review runs, or treat a loaded or absent skill as evidence. If the skill is absent, perform the normal review; its absence is not a blocker and not a finding.
+
 ## Frontend Candidate Review
 
 When the exact candidate materially changes frontend UI/UX:

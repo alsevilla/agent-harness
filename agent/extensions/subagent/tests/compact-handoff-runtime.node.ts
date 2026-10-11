@@ -448,3 +448,31 @@ test("background failed child: explicit result keeps errorMessage, distinct stde
 	assert.equal(recovered.isError, true);
 	assert.equal(recovered.content[0].text, "### rpc-fail \u2014 FAILED/STOPPED\nERROR: 503 unavailable\nSTDERR: stderr-detail-XYZ\npartial report FINAL-TEXT");
 });
+
+const MARKUP_HEAD = "INCOMPLETE/UNVERIFIED (tool-call markup as text)\nWARNING: This printed markup was not executed as tool calls; other recorded tool activity/partial writes may exist.\n\n";
+const printedInvoke = '<invoke name="Bash">\n<parameter name="command">cd X && find . -maxdepth 1 | head -40</parameter>\n</invoke>';
+
+test("foreground single: exit 0 stop with printed invoke markup is labelled INCOMPLETE/UNVERIFIED and keeps the full text", async () => {
+	const root = setupRoles({ "printer": "You are printer." });
+	spawnPlan = () => ({ events: [reply([printedInvoke, printedInvoke])], exitCode: 0 });
+	const result = await tool!.execute("call-printed", { agent: "printer", task: "report", background: false }, undefined, undefined, context(root));
+	assert.equal(result.isError, undefined);
+	assert.equal(result.content[0].text, MARKUP_HEAD + printedInvoke + "\n" + printedInvoke);
+});
+
+test("foreground single: a real tool call then printed invoke markup keeps the tool activity and is labelled", async () => {
+	const root = setupRoles({ "printer-tool": "You are printer-tool." });
+	const toolCall = { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } }], stopReason: "toolUse", usage } };
+	spawnPlan = () => ({ events: [toolCall, reply([printedInvoke])], exitCode: 0 });
+	const result = await tool!.execute("call-printed-tool", { agent: "printer-tool", task: "report", background: false }, undefined, undefined, context(root));
+	assert.equal(result.content[0].text, MARKUP_HEAD + printedInvoke);
+	assert.equal(result.details.results[0].messages.some((m: any) => m.role === "assistant" && m.content.some((p: any) => p.type === "toolCall")), true);
+});
+
+test("foreground single: a normal report that quotes invoke markup in a fence is not labelled", async () => {
+	const root = setupRoles({ "quoter": "You are quoter." });
+	const report = "STATUS: PASS\nSUMMARY: example below\n```xml\n" + printedInvoke + "\n```\nCHECKS: NOT RUN";
+	spawnPlan = () => ({ events: [reply([report])], exitCode: 0 });
+	const result = await tool!.execute("call-quoter", { agent: "quoter", task: "report", background: false }, undefined, undefined, context(root));
+	assert.equal(result.content[0].text, report);
+});

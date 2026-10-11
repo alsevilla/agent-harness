@@ -37,7 +37,7 @@ Read only when a complex multi-stage run needs a durable record. Optional: simpl
 1. Inspect the actual candidate: branch, HEAD and fingerprint against the manifest.
 2. Inspect the evidence files named in the stage rows.
 3. Inspect live process owners, if any. Do not assume a running job still exists.
-4. Preserve every hold (user stop, pause, queued item) unchanged. Do not clear holds to continue.
+4. Keep every ACTIVE hold (user stop, pause, queued item, pending decision) unchanged. Do not clear it to continue. A hold moves to satisfied only on a documented accepted disposition or authorized transition, recorded with its reference; a worker PASS is not acceptance, and a user pause, stop, security or no-publication restriction is never cleared automatically.
 5. Record what was verified and update the change log before the next action.
 
 ## Template

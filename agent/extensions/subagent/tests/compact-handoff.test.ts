@@ -7,6 +7,7 @@ import {
 	boundBackgroundCompletion,
 	expandRetainedResult,
 	extractFinalText,
+	retainedEntryBlock,
 	withTerminalDiagnostics,
 } from "../compact-handoff.ts";
 
@@ -285,4 +286,64 @@ test("F2 dedupes only an exact whole-field duplicate, never a substring of the o
 test("F2 fallback note keeps the primary failure chain in stderr next to the second errorMessage", () => {
 	const expanded = expandRetainedResult({ details: { results: [{ agent: "w", exitCode: 1, stopReason: "error", errorMessage: "second 503", stderr: "Model a failed; retried with b. first 429\n", messages: [] }] } });
 	assert.equal(expanded, "### w \u2014 FAILED/STOPPED\nERROR: second 503\nSTDERR: Model a failed; retried with b. first 429\n(no final assistant output)");
+});
+
+// Printed tool-call markup (detection only): raw invocation text as the final assistant text is INCOMPLETE/UNVERIFIED, never completed.
+const MARKUP_LABEL = "INCOMPLETE/UNVERIFIED (tool-call markup as text)";
+const MARKUP_WARNING = "WARNING: This printed markup was not executed as tool calls; other recorded tool activity/partial writes may exist.";
+const INVOKE = '<invoke name="Bash">\n<parameter name="command">cd X && find . -maxdepth 1 | head -40</parameter>\n<parameter name="timeout">60</parameter>\n</invoke>';
+const child = (messages: unknown[], extra: Record<string, unknown> = {}) => ({ agent: "frontend-worker", exitCode: 0, stopReason: "stop", messages, ...extra });
+const toolCallMessage = { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }], stopReason: "toolUse" };
+const toolResultMessage = { role: "toolResult", content: [text("a")] };
+
+test("repeated raw invoke markup as final text with stop is INCOMPLETE/UNVERIFIED, keeps the full text and warns it was not executed", () => {
+	const printed = Array(5).fill(INVOKE).join("\n");
+	const block = retainedEntryBlock(child([assistant(text(printed))]));
+	assert.equal(block.split("\n")[0], `### frontend-worker \u2014 ${MARKUP_LABEL}`);
+	assert.ok(block.includes(MARKUP_WARNING));
+	assert.ok(block.includes(printed));
+});
+
+test("truncated raw invoke markup (no closing tag) is still INCOMPLETE/UNVERIFIED", () => {
+	const block = retainedEntryBlock(child([assistant(text('<invoke name="Bash">\n<parameter name="command">cd X'))]));
+	assert.equal(block.split("\n")[0], `### frontend-worker \u2014 ${MARKUP_LABEL}`);
+	assert.ok(block.includes(MARKUP_WARNING));
+});
+
+test("a real tool call followed by printed markup as final text is labelled and keeps the earlier tool trace out of the text", () => {
+	const block = retainedEntryBlock(child([toolCallMessage, toolResultMessage, assistant(text(INVOKE))], { stopReason: "stop" }));
+	assert.equal(block.split("\n")[0], `### frontend-worker \u2014 ${MARKUP_LABEL}`);
+	assert.ok(block.includes(MARKUP_WARNING));
+	assert.ok(block.includes(INVOKE));
+});
+
+test("a native tool call with no printed markup is not labelled", () => {
+	const block = retainedEntryBlock(child([toolCallMessage, toolResultMessage, assistant(text("STATUS: PASS\nSUMMARY: done"))]));
+	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 completed");
+	assert.ok(!block.includes(MARKUP_WARNING));
+});
+
+test("a valid report that quotes invoke markup in a fenced block or in prose is not flagged", () => {
+	const report = "STATUS: PASS\nSUMMARY: the parser recognizes `<invoke name=\"Bash\">` tags.\nEvidence:\n```xml\n" + INVOKE + "\n```\nCHECKS: NOT RUN";
+	const block = retainedEntryBlock(child([assistant(text(report))]));
+	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 completed");
+	assert.ok(!block.includes(MARKUP_WARNING));
+	assert.ok(block.includes(report));
+});
+
+test("indented markup quoted as a code block is not flagged", () => {
+	const block = retainedEntryBlock(child([assistant(text("Example:\n    " + INVOKE.split("\n").join("\n    ")))]));
+	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 completed");
+});
+
+test("ordinary XML output with a parameter element but no invoke is not labelled", () => {
+	const xml = '<?xml version="1.0"?>\n<project>\n<parameter name="x">1</parameter>\n</project>';
+	const block = retainedEntryBlock(child([assistant(text(xml))]));
+	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 completed");
+	assert.ok(block.includes(xml));
+});
+
+test("a failed child with printed markup keeps its FAILED label", () => {
+	const block = retainedEntryBlock(child([assistant(text(INVOKE))], { exitCode: 1, stopReason: "error", errorMessage: "boom" }));
+	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 FAILED/STOPPED");
 });

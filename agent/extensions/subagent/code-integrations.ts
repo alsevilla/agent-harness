@@ -47,27 +47,29 @@ whole directories. Restart only with verified DB_PATH and runtime configuration;
 otherwise leave services stopped and return that scope to main.
 
 ## Code navigation integrations
-Ponytail's native extension is explicitly active in this code leaf and injects
-the configured default/session mode without an extra skill read. Apply its reuse
-and minimal-correct-change guidance within the assigned role. It cannot override
-user requirements, candidate boundaries, required checks or delegation policy.
+When Ponytail's native extension is loaded in this launch, it injects
+the configured default/session mode without an extra skill read, and its reuse
+and minimal-correct-change guidance applies within the assigned role. When it is not
+loaded (a reviewer launch may lack it), skip Ponytail guidance and perform normal review.
+Ponytail never overrides user requirements, candidate boundaries, required checks or delegation policy.
 Do not reload its base skill merely to activate it or launch extra audit/review
 work. Missing graphs never authorize a fresh graph build as a prerequisite.
-For prior decisions, specs, notes or plans relevant to this assignment, use a focused
+For prior decisions, specs, notes or plans relevant to this assignment, and only when qmd_search is in your tool list (otherwise skip this lookup), use a focused
 qmd_search with maxResults 3 (at most 5) and a useful collection scope. Search
 only when that context is needed; read only selected hits. Do not initialize/update
 indexes, request feedback writes, or treat retrieval as authoritative current code.
 When graphify-out artifacts exist, first use their wiki index/report to orient this
-assignment. Then prefer Serena symbol overview, symbol lookup and references for
-source navigation; use read/grep for docs/config or targeted source follow-up.
-The profile-adapted graphify skill is available on demand for graph queries and
+assignment. Then, when Serena tools are in your tool list, prefer Serena symbol overview,
+symbol lookup and references for source navigation; otherwise use read/grep. Use read/grep
+for docs/config or targeted source follow-up.
+The graphify skill, when loaded in this launch, is available on demand for graph queries and
 paths. Its standard-library read_graph.py helper is the read-only query path;
 native Graphify CLI queries can write stamps and are not permitted read-only
 retrieval. Do not load build procedures or scan the repository without a task
 reason. Report a missing interpreter/backend rather than inventing results.
 Read-only roles must not build/update graphs, onboard projects, or edit
-source; return stale-graph findings to the authorized worker. If Serena is unavailable,
-report the concrete failure and use only focused permitted fallback reads.
+source; return stale-graph findings to the authorized worker.
+Optional integrations (QMD, Serena, Graphify) may be absent from a launch. Then their tools and skills are not granted, and any launch note names the skipped ones. File presence does not prove the backend is healthy or configured. If an integration tool fails, report the concrete error once, do not retry it in a loop, continue with permitted read/grep/find source reads, and report reduced capability in the handoff. Do not install, reconfigure, rebuild or repair an integration or index during this assignment, and do not read auth files or secrets to diagnose one.
 These integrations do not authorize nested agents, broader writes, or new tasks.
 `;
 
@@ -109,7 +111,7 @@ export function globalGraphGuidance(roots: string[], directory: string): string 
 
 export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(os.homedir(), ".graphify")): string {
   const project = candidateProjectRoot(cwd);
-  const navigation = "\n## Candidate navigation and shared retrieval\nFor Serena calls pass project explicitly as " + project + ". Resolve relative_path from that root, even if the shell cwd is backend/frontend. Do not activate the primary checkout just because it contains the graph; symbol lookups and references must target the candidate. Do not automatically onboard or recreate Serena project configuration.\nQMD uses the profile's existing shared named index, not a worktree-local index. Scope queries to the relevant existing collection; retrieved document paths can belong to the primary checkout. Use indexed notes as prior evidence, then verify current files/requirements in the candidate. Do not create/update/clone indexes or rewrite QMD references under the worktree.\n";
+  const navigation = "\n## Candidate navigation and shared retrieval\nIf Serena tools are in your tool list, for Serena calls pass project explicitly as " + project + ". Resolve relative_path from that root, even if the shell cwd is backend/frontend. Do not activate the primary checkout just because it contains the graph; symbol lookups and references must target the candidate. Do not automatically onboard or recreate Serena project configuration.\nIf qmd_* tools are in your tool list, QMD uses the profile's existing shared named index, not a worktree-local index. Scope queries to the relevant existing collection; retrieved document paths can belong to the primary checkout. Use indexed notes as prior evidence, then verify current files/requirements in the candidate. Do not create/update/clone indexes or rewrite QMD references under the worktree.\n";
   try {
     const root = project;
     const roots = [root];
@@ -152,28 +154,65 @@ export function packageResourceGuidance(root: string | null): string {
 	return `\n\nPackage resources: ~/.pi/agent/skills/engineering-harness/ and ~/.pi/agent/skills/agent-creation/ resolve to ${skills}/engineering-harness/ and ${skills}/agent-creation/. Precedence: these bundled paths take effect over any profile path in the role text. Backend, frontend, graphify, browser and RFID skill catalogs are not bundled; any instruction to read them is unavailable, so use the project's own guidance or other available generic guidance instead. Roles not bundled in this package (hardware-integration, attendance-domain-specialist, event-reconciliation-specialist, messaging-specialist, privacy-compliance-specialist) are never dispatched.`;
 }
 
-export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = []): boolean {
-  const config = JSON.parse(fs.readFileSync(new URL("./integrations.json", import.meta.url), "utf8")) as IntegrationConfig;
+const QMD_EXTENSION = fileURLToPath(new URL("../qmd/index.ts", import.meta.url));
+type Integration = { label: string; flag: string; file: string; toolPrefix?: string };
+
+function readIntegrationConfig(): IntegrationConfig {
+  return JSON.parse(fs.readFileSync(new URL("./integrations.json", import.meta.url), "utf8")) as IntegrationConfig;
+}
+
+// Ponytail is required for every role except reviewer, where its extension and review skill are optional supplements.
+function ponytailIntegrations(): Integration[] {
+  const ponytail = path.join(getAgentDir(), "npm", "node_modules", "@dietrichgebert", "ponytail");
+  return [
+    { label: "Ponytail extension", flag: "--extension", file: path.join(ponytail, "pi-extension", "index.js") },
+    { label: "Ponytail review skill (ponytail-review)", flag: "--skill", file: path.join(ponytail, "skills", "ponytail-review", "SKILL.md") },
+  ];
+}
+
+// Optional for every configured role: a missing file skips that integration and its integration-only tools.
+function optionalIntegrations(qmdExtension: string): Integration[] {
+  const packages = path.join(getAgentDir(), "npm", "node_modules");
+  return [
+    { label: "QMD extension", flag: "--extension", file: qmdExtension, toolPrefix: "qmd_" },
+    { label: "Serena extension", flag: "--extension", file: path.join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts"), toolPrefix: "serena_" },
+    { label: "Graphify extension", flag: "--extension", file: path.join(packages, "graphify-pi", "extensions", "graphify.ts") },
+    { label: "Graphify skill", flag: "--skill", file: path.join(getAgentDir(), "skills", "graphify", "SKILL.md") },
+  ];
+}
+
+/** Launch note naming optional integrations this launch lacks; empty when all are present or the role has none configured. */
+export function unavailableIntegrationGuidance(agentName: string, qmdExtension = QMD_EXTENSION): string {
+  if (!readIntegrationConfig().roles.includes(agentName)) return "";
+  const items = [...(agentName === "reviewer" ? ponytailIntegrations() : []), ...optionalIntegrations(qmdExtension)];
+  const missing = items.filter(item => !fs.existsSync(item.file)).map(item => item.label);
+  if (!missing.length) return "";
+  return `\n## Integrations not loaded in this launch\nNot loaded: ${missing.join(", ")}. The launch continued without them; any tools they would provide are not granted. Use the permitted read, grep and find fallback for the affected navigation, do not call, install, reconfigure or rebuild them, and name the skipped integration in the handoff.\n`;
+}
+
+export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = [], qmdExtension = QMD_EXTENSION): boolean {
+  const config = readIntegrationConfig();
   if (!config.roles.includes(agent.name)) {
     // A role without an explicit allowlist means all default tools; a grant cannot be expressed there, so it is skipped.
     if (agent.tools?.length) args.push("--tools", [...agent.tools, ...extraTools].join(","));
     return false;
   }
-  const packages = path.join(getAgentDir(), "npm", "node_modules");
-  const resources = [
-    ["--extension", path.join(packages, "@dietrichgebert", "ponytail", "pi-extension", "index.js")],
-    ["--extension", fileURLToPath(new URL("../qmd/index.ts", import.meta.url))],
-    ["--extension", path.join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts")],
-    ["--extension", path.join(packages, "graphify-pi", "extensions", "graphify.ts")],
-    ["--skill", path.join(getAgentDir(), "skills", "graphify", "SKILL.md")],
-  ];
-  for (const [flag, file] of resources) {
-    if (!fs.existsSync(file)) throw new Error(`Code integration missing for ${agent.name}: ${file}. Install @dietrichgebert/ponytail, @bacnh85/pi-serena, graphify-pi through Pi; configure plain QMD in extensions/qmd/config.json.`);
-    args.push(flag, file);
+  // Reviewer only: Ponytail is optional (extension and review skill load when present); every other role fails closed without it.
+  const optionalPonytail = agent.name === "reviewer";
+  const [ponytailExtension, ponytailSkill] = ponytailIntegrations();
+  if (!optionalPonytail && !fs.existsSync(ponytailExtension.file)) throw new Error(`Code integration missing for ${agent.name}: ${ponytailExtension.file}. Install @dietrichgebert/ponytail through Pi.`);
+  if (!optionalPonytail) args.push(ponytailExtension.flag, ponytailExtension.file);
+  const optional = [...(optionalPonytail ? [ponytailExtension, ponytailSkill] : []), ...optionalIntegrations(qmdExtension)];
+  const omitted: string[] = [];
+  for (const item of optional) {
+    if (fs.existsSync(item.file)) args.push(item.flag, item.file);
+    else if (item.toolPrefix) omitted.push(item.toolPrefix);
   }
   // Exact names preserve role authority; never select all serena_* tools by wildcard.
   const tools = new Set([...(agent.tools ?? ["read", "grep", "find", "ls"]), ...config.readOnlyTools]);
   if (tools.has("edit") || tools.has("write")) for (const tool of config.workerTools) tools.add(tool);
+  // Omitted integrations drop matching tools even when the role's own allowlist names them.
+  for (const tool of tools) if (omitted.some(prefix => tool.startsWith(prefix))) tools.delete(tool);
   for (const tool of extraTools) tools.add(tool);
   args.push("--tools", [...tools].join(","));
   return true;

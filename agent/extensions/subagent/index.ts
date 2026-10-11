@@ -34,8 +34,8 @@ import {
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
 import { getFallbackSequence, nextFallbackModel } from "./model-routing.ts";
-import { configureCodeIntegrations, CODE_NAVIGATION_GUIDANCE, graphReferenceGuidance, packageResourceGuidance } from "./code-integrations.ts";
-import { COMPACT_HANDOFF_INSTRUCTIONS, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
+import { configureCodeIntegrations, CODE_NAVIGATION_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } from "./code-integrations.ts";
+import { COMPACT_HANDOFF_INSTRUCTIONS, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
@@ -94,11 +94,11 @@ function isFailedResult(result: SingleResult): boolean {
 
 function getResultOutput(result: SingleResult): string {
 	// INCOMPLETE keeps every text block of the final message plus its terminal diagnostics: the partial report is the evidence.
-	if (isIncompleteStop(result)) return withTerminalDiagnostics(extractFinalText(result.messages), result) || "(no output)";
+	if (isIncompleteStop(result)) return markupNotice(withTerminalDiagnostics(extractFinalText(result.messages), result), result) || "(no output)";
 	if (isFailedResult(result)) {
 		return [...failureDiagnostics(result).map((d, i) => (i === 0 ? d.value : `${d.label}: ${d.value}`)), getFinalOutput(result.messages)].filter(Boolean).join("\n\n") || "(no output)";
 	}
-	return getFinalOutput(result.messages) || "(no output)";
+	return markupNotice(getFinalOutput(result.messages), result) || "(no output)";
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(
@@ -319,6 +319,7 @@ async function runAgentAttempt(
 		args.push("--extension", guardPath);
 	}
 	args.push("--extension", path.join(extensionDir, "provider-cooldown-entry.ts")); // child guard, explicit despite --no-extensions
+	if (process.env.PI_EXTERNAL_COMPACTION === "1") args.push("--extension", path.join(extensionDir, "external-compaction-entry.ts")); // opt-in; same spawn path so every fallback gets it
 	if (agent.thinking) args.push("--thinking", agent.thinking);
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
@@ -361,7 +362,7 @@ async function runAgentAttempt(
 
 	try {
 		if (agent.systemPrompt.trim()) {
-			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt + (codeIntegrationsEnabled ? CODE_NAVIGATION_GUIDANCE + graphReferenceGuidance(cwd ?? defaultCwd) : "") + packageResourceGuidance(packageRoot()) + COMPACT_HANDOFF_INSTRUCTIONS);
+			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt + (codeIntegrationsEnabled ? CODE_NAVIGATION_GUIDANCE + graphReferenceGuidance(cwd ?? defaultCwd) + unavailableIntegrationGuidance(agent.name) : "") + packageResourceGuidance(packageRoot()) + COMPACT_HANDOFF_INSTRUCTIONS);
 			tmpPromptDir = tmp.dir;
 			tmpPromptPath = tmp.filePath;
 			args.push("--append-system-prompt", tmpPromptPath);
@@ -895,7 +896,7 @@ export default function (pi: ExtensionAPI) {
 					previousOutput = extractFinalText(result.messages);
 				}
 				return {
-					content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],
+					content: [{ type: "text", text: getResultOutput(results[results.length - 1]) }],
 					details: makeDetails("chain")(results),
 				};
 			}
@@ -974,7 +975,7 @@ export default function (pi: ExtensionAPI) {
 				const successCount = results.filter((r) => !isFailedResult(r)).length;
 				const summaries = results.map((r) => {
 					const output = getResultOutput(r);
-					const status = isIncompleteStop(r) ? incompleteLabel(r.stopReason) : isFailedResult(r)
+					const status = printedToolMarkup(r) ? PRINTED_MARKUP_LABEL : isIncompleteStop(r) ? incompleteLabel(r.stopReason) : isFailedResult(r)
 						? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
 						: "completed";
 					return `### [${r.agent}] ${status}\n\n${output}`;
@@ -1015,7 +1016,7 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 				return {
-					content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
+					content: [{ type: "text", text: getResultOutput(result) }],
 					details: makeDetails("single")([result]),
 				};
 			}

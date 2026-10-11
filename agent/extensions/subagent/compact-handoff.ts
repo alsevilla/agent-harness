@@ -126,19 +126,42 @@ export function incompleteLabel(stopReason?: string): string {
 	return `INCOMPLETE (${stopReason ?? "no terminal stopReason"})`;
 }
 
+export const PRINTED_MARKUP_LABEL = "INCOMPLETE/UNVERIFIED (tool-call markup as text)";
+export const PRINTED_MARKUP_WARNING = "WARNING: This printed markup was not executed as tool calls; other recorded tool activity/partial writes may exist.";
+const INVOKE_OPEN = /^<invoke\s+name="[^"\n]+"\s*>/m; // column 0 only: indented or fenced quotes are examples, not invocations
+const INVOKE_BODY = /^(?:<parameter\s+name="[^"\n]+"\s*>|<\/invoke>)/m;
+const FUNCTION_CALLS = /^<\/?(?:antml:)?function_calls\s*>/m;
+const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm;
+
+/** Raw tool-call markup as the final assistant text: the last assistant message has no toolCall block, exit 0, not error/aborted. Detection only: nothing is parsed, extracted or run. */
+export function printedToolMarkup(entry: any): boolean {
+	if (entry?.exitCode !== 0 || entry.stopReason === "error" || entry.stopReason === "aborted") return false;
+	const messages: any[] = Array.isArray(entry.messages) ? entry.messages : [];
+	const last = messages.filter((message) => message?.role === "assistant").at(-1);
+	if (!last || (Array.isArray(last.content) && last.content.some((part: any) => part?.type === "toolCall"))) return false;
+	const prose = extractFinalText(messages).replace(FENCED, "");
+	return FUNCTION_CALLS.test(prose) || (INVOKE_OPEN.test(prose) && INVOKE_BODY.test(prose));
+}
+
+/** Prefixes printed-markup output with the INCOMPLETE/UNVERIFIED label and warning; any other output is returned unchanged. */
+export function markupNotice(text: string, entry: any): string {
+	return printedToolMarkup(entry) ? `${PRINTED_MARKUP_LABEL}\n${PRINTED_MARKUP_WARNING}\n\n${text}` : text;
+}
+
 /** One retained child or DAG node as a headed block. DAG nodes are headed by node ID, so repeated agents stay distinct; a not-run node is labelled, not failed. */
 export function retainedEntryBlock(entry: any): string {
 	const failed = entry?.exitCode !== 0 || entry?.stopReason === "error" || entry?.stopReason === "aborted";
-	const incomplete = isIncompleteStop(entry);
+	const markup = printedToolMarkup(entry);
+	const incomplete = isIncompleteStop(entry) || markup;
 	const dag = entry?.dag;
 	const notRun = dag?.status === "blocked" || (dag?.status === "aborted" && dag?.started === false);
-	const label = dag?.status === "blocked" ? `BLOCKED by ${(dag.blockedBy ?? []).join(", ")}` : notRun ? "ABORTED before start" : failed ? "FAILED/STOPPED" : incomplete ? incompleteLabel(entry.stopReason) : "completed";
+	const label = dag?.status === "blocked" ? `BLOCKED by ${(dag.blockedBy ?? []).join(", ")}` : notRun ? "ABORTED before start" : failed ? "FAILED/STOPPED" : markup ? PRINTED_MARKUP_LABEL : incomplete ? incompleteLabel(entry.stopReason) : "completed";
 	const agent = String(entry?.agent ?? "unknown agent");
 	const name = entry?.nodeId !== undefined ? `node "${entry.nodeId}" (${agent})` : agent;
 	const text = extractFinalText(Array.isArray(entry?.messages) ? entry.messages : []);
 	const issue = failed ? failureDiagnostics(entry).map((d) => `${d.label}: ${d.value}`).join("\n") : "";
 	// Failed children lead with their error; INCOMPLETE children keep the partial text first, then every terminal diagnostic.
-	const detail = notRun ? "(not run)" : incomplete ? withTerminalDiagnostics(text, entry) || "(no final assistant output)" : [issue, text || "(no final assistant output)"].filter(Boolean).join("\n");
+	const detail = notRun ? "(not run)" : incomplete ? [withTerminalDiagnostics(text, entry) || "(no final assistant output)", markup ? PRINTED_MARKUP_WARNING : ""].filter(Boolean).join("\n\n") : [issue, text || "(no final assistant output)"].filter(Boolean).join("\n");
 	return `### ${name} \u2014 ${label}\n${detail}`;
 }
 

@@ -17,7 +17,7 @@
   },
   "files": ["extensions", "skills", "defaults", "README.md", "LICENSE", "PI-LICENSE", "THIRD_PARTY_NOTICES.md"],
   "pi": {
-    "extensions": ["./extensions/subagent/index.ts", "./extensions/ask-user/index.ts"],
+    "extensions": ["./extensions/subagent/index.ts", "./extensions/ask-user/index.ts", "./extensions/external-compaction/index.ts"],
     "skills": ["./skills/engineering-harness", "./skills/agent-creation"]
   },
   "peerDependencies": {

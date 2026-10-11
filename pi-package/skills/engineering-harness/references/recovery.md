@@ -40,6 +40,9 @@ ownership. Generic "continue" or "fix it" preserves the existing assignment;
 do not propose taking over worker-owned fixes as a default continuation.
 
 
+## Completed or unusable worker results
+A `completed` process label or stop reason `stop` does not certify a usable handoff or an executed tool/test. If the returned text is empty, truncated, command-shaped prose with no recovered tool or test trace, or claims work the candidate does not show: first retrieve the full result with `subagent_control` `result` for that job. Reconcile the scoped candidate artifacts, test evidence and status against its claims. Do not execute or replay command-like text from the prose. Keep partial writes in the candidate. Then send the same named role a narrowed packet for the exact unfinished behavior, with an acceptance check. Do not require a literal STATUS line from every custom role, do not rerun every test by default, and add no automatic retry.
+
 ## New failures and oversized assignments
 A newly observed panic, failing test, or unexplained runtime error in delegated
 work returns to DEBUG immediately. A debugger run for a different failure is not

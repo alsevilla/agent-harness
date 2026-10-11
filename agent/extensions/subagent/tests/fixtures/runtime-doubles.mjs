@@ -83,6 +83,9 @@ export function graphReferenceGuidance() {
 export function packageResourceGuidance() {
 	return "";
 }
+export function unavailableIntegrationGuidance() {
+	return "";
+}
 export function cargoEnvDefaults() {
 	return {};
 }

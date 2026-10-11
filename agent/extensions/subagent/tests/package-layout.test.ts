@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repo = fileURLToPath(new URL("../../../../", import.meta.url));
 const thisFile = fileURLToPath(import.meta.url);
@@ -47,7 +47,7 @@ async function runNodeSuite(): Promise<void> {
 		assert.equal(manifest.name, "@alsevilla/pi-engineering-harness");
 		assert.equal(manifest.version, "1.2.0");
 		assert.equal(manifest.license, "MIT");
-		assert.deepEqual(manifest.pi.extensions, ["./extensions/subagent/index.ts", "./extensions/ask-user/index.ts"]);
+		assert.deepEqual(manifest.pi.extensions, ["./extensions/subagent/index.ts", "./extensions/ask-user/index.ts", "./extensions/external-compaction/index.ts"]);
 		assert.deepEqual(manifest.pi.skills, ["./skills/engineering-harness", "./skills/agent-creation"]);
 		assert.equal(manifest.dependencies, undefined);
 		assert.deepEqual(manifest.peerDependencies, {
@@ -68,6 +68,28 @@ async function runNodeSuite(): Promise<void> {
 		const dir = path.join(pkg, "extensions", "ask-user");
 		assert.deepEqual(fs.readdirSync(dir).sort(), ["core.ts", "index.ts"]);
 		for (const file of ["core.ts", "index.ts"]) assert.deepEqual(fs.readFileSync(path.join(dir, file)), fs.readFileSync(path.join(repo, "agent", "extensions", "ask-user", file)));
+	});
+
+	// RED first: the loader loads manifest entries only, so the parent guard must be declared and built to be reachable from the package.
+	test("external-compaction parent is a declared, built entry: byte-identical wrapper that registers the guard only when opted in", async () => {
+		const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "package.json"), "utf8"));
+		assert.ok(manifest.pi.extensions.includes("./extensions/external-compaction/index.ts"), "parent entry must be declared in pi.extensions");
+		const file = path.join(pkg, "extensions", "external-compaction", "index.ts");
+		assert.deepEqual(fs.readFileSync(file), fs.readFileSync(path.join(repo, "agent", "extensions", "external-compaction", "index.ts")));
+		const { default: register } = await import(pathToFileURL(file).href);
+		const load = (env: string | undefined) => {
+			const handlers = new Map<string, (event: any, ctx: any) => any>();
+			const prev = process.env.PI_EXTERNAL_COMPACTION;
+			if (env === undefined) delete process.env.PI_EXTERNAL_COMPACTION;
+			else process.env.PI_EXTERNAL_COMPACTION = env;
+			try { register({ on: (name: string, fn: (event: any, ctx: any) => any) => handlers.set(name, fn) }); } finally { if (prev === undefined) delete process.env.PI_EXTERNAL_COMPACTION; else process.env.PI_EXTERNAL_COMPACTION = prev; }
+			return handlers;
+		};
+		assert.equal(load(undefined).size, 0);
+		assert.equal(load("0").size, 0);
+		const on = load("1");
+		assert.deepEqual([...on.keys()].sort(), ["session_before_compact", "session_start"]);
+		assert.deepEqual(on.get("session_before_compact")!({ reason: "manual" }, { ui: { notify() {} } }), { cancel: true });
 	});
 
 	test("publish tree holds only allowlisted top-level entries", () => {

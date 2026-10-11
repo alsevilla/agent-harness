@@ -7,7 +7,7 @@ description: Main engineering entrypoint. Select the next phase and actual named
 Main owns sequencing and launches. Apply the compact AGENTS policy; leaves perform only their assignment.
 Read this entry once per session and reuse it for subsequent tasks. When execution starts, load only missing relevant domain routers/module indexes and referenced sections. Reread changed guidance or content lost from context; a new task alone does not require another read. Each leaf loads its assignment in its own context.
 
-For "queue this", record the request and order, acknowledge briefly, and continue current work. Select modules/roles when that task is scheduled; do not launch or implement it early. Resolve loading directly without explaining internal deliberations.
+For "queue this", record the request and order, acknowledge briefly, and continue current work. When a durable PLAN or resume queue exists, read `plan/index.md` ("Durable plan state") before resuming or changing it. Select modules/roles when that task is scheduled; do not launch or implement it early. Resolve loading directly without explaining internal deliberations.
 
 | Need | Module / role |
 |---|---|

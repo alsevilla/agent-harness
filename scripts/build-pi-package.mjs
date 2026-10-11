@@ -98,6 +98,8 @@ const extSrc = path.join(repo, "agent", "extensions", "subagent");
 for (const file of fs.readdirSync(extSrc).filter((f) => f.endsWith(".ts") && !/\.(test|node)\.ts$/.test(f))) copy(path.join(extSrc, file), path.join(pkg, "extensions", "subagent", file));
 // ask_user: only the runtime pair (MIT, no deps); its tests and README stay in the profile.
 for (const file of ["index.ts", "core.ts"]) copy(path.join(repo, "agent", "extensions", "ask-user", file), path.join(pkg, "extensions", "ask-user", file));
+// Parent external-compaction guard (opt-in PI_EXTERNAL_COMPACTION=1): the profile wrapper copied byte-for-byte; it imports the copied subagent/external-compaction-entry.ts above.
+copy(path.join(repo, "agent", "extensions", "external-compaction", "index.ts"), path.join(pkg, "extensions", "external-compaction", "index.ts"));
 fs.writeFileSync(path.join(pkg, "extensions", "subagent", "integrations.json"), JSON.stringify({ roles: [], readOnlyTools: [], workerTools: [] }, null, 2) + "\n");
 
 // Skills: agent-creation CLI and harness modules (dev-only examples, scripts, tests and unaudited catalogs excluded).
@@ -123,6 +125,10 @@ copy(path.join(repo, "LICENSE"), path.join(pkg, "LICENSE"));
 copy(path.join(repo, "agent", "PI-LICENSE"), path.join(pkg, "PI-LICENSE"));
 // Package-only notices: generated for the shipped components; the repository's broader notices are not copied.
 fs.writeFileSync(path.join(pkg, "THIRD_PARTY_NOTICES.md"), PACKAGE_NOTICES);
+
+// The loader loads manifest entries only: every declared extension entry must be built, so a declared-but-missing entry fails the build.
+const unbuilt = JSON.parse(fs.readFileSync(path.join(pkg, "package.json"), "utf8")).pi.extensions.filter((rel) => !fs.existsSync(path.resolve(pkg, rel)));
+if (unbuilt.length) throw new Error(`declared extension entry not built: ${unbuilt.join(", ")}`);
 
 // Fail closed on private machine paths in anything shipped.
 const leaks = walk(pkg).filter((rel) => TEXT.test(rel) && /C:[\\/]Users[\\/]|\/Users\/MSI/.test(fs.readFileSync(path.join(pkg, ...rel.split("/")), "utf8")));

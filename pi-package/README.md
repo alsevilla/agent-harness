@@ -32,7 +32,7 @@ Tested on Pi 1.1.0 with Node 24.20.0 (targeted local checks only; Node 22 is unv
 
 Not included: backend, frontend, RFID, graphify and browser catalogs, the excluded domain roles, and any personal settings, credentials or sessions.
 
-Code navigation is optional. Serena (`npm:@bacnh85/pi-serena`), Graphify (`npm:graphify-pi`) and QMD are separate installs with their own configuration, and this package installs none of them. `extensions/subagent/integrations.json` lists no roles, so the packaged roles need none of these and nothing is launched through them. The live profile's 23 roles do list integrations; a launch with a missing integration fails closed, and no configuration overrides that. Setup steps are in the profile repository's README under "Code navigation setup (optional)".
+Code navigation is optional. Serena (`npm:@bacnh85/pi-serena`), Graphify (`npm:graphify-pi`) and QMD are separate installs with their own configuration, and this package installs none of them. `extensions/subagent/integrations.json` lists no roles, so the packaged roles need none of these and nothing is launched through them. The live profile's 23 roles do list integrations; a missing Ponytail extension fails a non-reviewer launch closed (the reviewer runs without it), while a missing QMD, Serena or Graphify is skipped with a launch note. Setup steps are in the profile repository's README under "Code navigation setup (optional)".
 
 ## Overrides
 

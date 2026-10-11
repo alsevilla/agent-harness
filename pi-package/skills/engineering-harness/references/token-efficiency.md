@@ -14,6 +14,9 @@ Read only when investigating token consumption, oversized results, repetitive ro
 - Do not repeat fixed policy already in the child prompt, and omit instructions meant for other roles.
 - Guidance only, not a runtime-enforced budget or token measurement. Never drop a critical risk, failed check or blocker to meet a length target.
 
+## Main-session compaction
+If a context-compaction call fails on a reference mismatch, first use host-provided reference or range discovery, then retry with those values. Do not guess references, reuse invalid ones, or repeat the unchanged failed call. If discovery is unavailable, pause compression and keep the current state (goal, holds, open objectives, candidate identity) in context. Reference management belongs to the host/provider layer; this repository implements none. This is a safer retry rule only; it does not establish or fix any external proxy or model-output cause.
+
 ## Child final report
 Child system prompts for roles with a prompt body get the final-handoff format from the packaged `extensions/subagent/compact-handoff.ts`. Normally 150-250 tokens (not a strict ceiling):
 
