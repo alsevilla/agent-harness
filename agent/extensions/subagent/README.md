@@ -76,7 +76,7 @@ Activation: saving these files does not change the running parent. The new tool 
 
 ## Explicit code-role integrations
 
-Automatic extension/MCP/skill/prompt discovery is disabled in children. `code-integrations.ts` explicitly loads these resources for the 18 roles in `integrations.json`; the `statusline-setup` role was removed and is not part of the registry or integration set:
+Automatic extension/MCP/skill/prompt discovery is disabled in children. `code-integrations.ts` explicitly loads these resources for the 19 roles in `integrations.json`; the `statusline-setup` role was removed and is not part of the registry or integration set:
 
 | Integration | Actual worker behavior |
 | --- | --- |

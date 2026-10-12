@@ -46,6 +46,7 @@ After choosing a phase, dispatch the dedicated role when that phase has one:
 - non-trivial backend implementation -> `backend-worker`;
 - non-trivial frontend implementation -> `frontend-worker`;
 - non-trivial general implementation -> `general-worker`;
+- non-trivial infrastructure, GitOps or GitHub Actions file implementation -> `platform-worker`;
 - independent verification -> `test-engineer`;
 - adversarial review -> `reviewer`;
 - unresolved specialist-domain decision -> the justified read-only specialist.

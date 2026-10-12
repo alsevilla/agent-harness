@@ -12,7 +12,7 @@ const [mode, arg1, arg2, arg3] = process.argv.slice(2);
 if (mode === "discover") {
 	const mod = await import(pathToFileURL(arg1).href);
 	const result = mod.discoverAgents(arg2, arg3);
-	console.log(JSON.stringify({ packageRoot: mod.packageRoot(), error: result.error ?? null, agents: result.agents.map((a) => ({ name: a.name, source: a.source, model: a.model ?? null, filePath: a.filePath, systemPrompt: a.systemPrompt })) }));
+	console.log(JSON.stringify({ packageRoot: mod.packageRoot(), error: result.error ?? null, agents: result.agents.map((a) => ({ name: a.name, source: a.source, model: a.model ?? null, thinking: a.thinking, fallbackModel: a.fallbackModel, tools: a.tools, filePath: a.filePath, systemPrompt: a.systemPrompt })) }));
 } else if (mode === "sdk") {
 	const pi = await import("@earendil-works/pi-coding-agent");
 	const settingsManager = pi.SettingsManager.inMemory({ packages: [arg1] });

@@ -60,6 +60,12 @@ Prefer explicit, stable contracts.
 Report ambiguities before implementation.
 
 
+**REST contract notes:**
+- Name resources as nouns, use HTTP methods for their meaning, and keep status codes consistent across endpoints.
+- Define pagination, filtering and the error shape (ProblemDetails or the project's existing format) before implementation starts.
+- Version breaking changes explicitly and record what each consumer must change.
+- Unsafe retries that change state need an idempotency key or a conditional request such as If-Match.
+
 ## Contract-First Boundary
 
 When frontend/backend or producer/consumer work can evolve independently,

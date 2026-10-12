@@ -323,6 +323,76 @@
         "skills_required": [],
         "skills_forbidden": []
       }
+    },
+    {
+      "id": "R24",
+      "kind": "positive",
+      "question": "Add the accepted retention_days variable to the Terraform module in this repository and pass it from its caller; the plan contract is already accepted.",
+      "context": "Local repository files only. Provider versions are pinned in the candidate. No plan, apply, state or backend access is needed.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["platform-worker"],
+        "roles_allowed": ["platform-worker"],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
+    },
+    {
+      "id": "R25",
+      "kind": "positive",
+      "question": "Set resource requests and the readiness probe for the accepted Kubernetes Deployment manifest and its Helm values file in this repository.",
+      "context": "Local manifests and values only; namespace and resource values are in the accepted contract. No kubeconfig context, cluster access or FluxCD reconciliation is involved.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["platform-worker"],
+        "roles_allowed": ["platform-worker"],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
+    },
+    {
+      "id": "R26",
+      "kind": "positive",
+      "question": "Pin the third-party actions in the accepted .github/workflows/ci.yml to full commit SHAs and set job permissions to read-only.",
+      "context": "Workflow file edit only. The change does not trigger a run, publish a package or deploy; those need separate authority.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["platform-worker"],
+        "roles_allowed": ["platform-worker"],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
+    },
+    {
+      "id": "R27",
+      "kind": "near_miss",
+      "question": "Is a second Kubernetes cluster worth it for staging? Recommend a topology before any manifest is written.",
+      "context": "Unresolved infrastructure topology decision. Read-only advice only; no file edit is accepted yet.",
+      "critical": false,
+      "expect": {
+        "routes": ["T3_SPECIALIST_FIRST"],
+        "roles_required": ["devops-specialist"],
+        "roles_allowed": ["devops-specialist"],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
+    },
+    {
+      "id": "R28",
+      "kind": "near_miss",
+      "question": "Roll the accepted Helm release out to production now that the user has authorized the deployment named in the ship packet.",
+      "context": "Exact release candidate, environment and operation authority are present, with fresh evidence attached. Editing platform files is not delivery.",
+      "critical": true,
+      "expect": {
+        "routes": ["SHIP_AUTHORIZED"],
+        "roles_required": ["release-engineer"],
+        "roles_allowed": ["release-engineer"],
+        "skills_required": ["engineering-harness/ship"],
+        "skills_forbidden": []
+      }
     }
   ]
 }

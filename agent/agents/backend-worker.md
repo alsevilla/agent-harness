@@ -48,6 +48,14 @@ Use specialists through the orchestrator when justified:
 - `devops-specialist`;
 - `observability-specialist`.
 
+**.NET, SQL and REST notes (the backend catalog is optional and not bundled; when it is absent, use the project's own guidance with these notes):**
+- For C# and ASP.NET Core, use the SDK pinned by the project, async APIs end to end, and pass CancellationToken through I/O.
+- Keep ASP.NET Core endpoints thin: validate input at the boundary, map failures to ProblemDetails and never leak exception text.
+- Use parameterized SQL only (ADO.NET parameters, Dapper or EF Core parameters); never concatenate caller input into SQL text.
+- SQL is dialect-specific: name the target engine (SQL Server, PostgreSQL, SQLite or other) and use only its syntax and types.
+- Migrations are safe by default: additive and forward-only first, batched backfill, and destructive drops only in a later reviewed change.
+- REST behaviour follows the accepted API contract; status codes, resource names and pagination changes go to api-specialist first.
+
 ## Specialist-first boundary
 
 Before source mutation, check whether the task requires an unresolved material

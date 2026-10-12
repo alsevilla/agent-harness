@@ -1,4 +1,4 @@
-// Role registry and lifecycle contracts (RED first): the packaged profile registers exactly the 18 generic roles, every definition agrees
+// Role registry and lifecycle contracts (RED first): the packaged profile registers exactly the 19 generic roles, every definition agrees
 // with the registry, and lifecycle ownership stays explicit. Project-local domain roles are not part of this generic profile.
 import { test } from "bun:test";
 import assert from "node:assert/strict";
@@ -11,7 +11,7 @@ const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.m
 const GENERIC_ROLES = [
   "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
   "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer",
-  "reviewer", "scout", "security-specialist", "sqlite-specialist", "test-engineer", "ui-ux-specialist",
+  "reviewer", "scout", "security-specialist", "sqlite-specialist", "test-engineer", "ui-ux-specialist", "platform-worker",
 ];
 
 function frontmatter(name: string) {
@@ -27,9 +27,9 @@ function parseDefinition(name: string, text: string) {
   return { text, name: field("name"), tools: field("tools") ?? "", model: field("model"), fallbackModel: field("fallbackModel"), thinking: field("thinking") };
 }
 
-test("registry registers exactly the 18 generic roles, unique, without statusline-setup", () => {
-  assert.equal(roles.length, 18);
-  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 18);
+test("registry registers exactly the 19 generic roles, unique, without statusline-setup", () => {
+  assert.equal(roles.length, 19);
+  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 19);
   assert.deepEqual(roles.map((r: { name: string }) => r.name).sort(), [...GENERIC_ROLES].sort());
   assert.ok(!roles.some((r: { name: string }) => r.name === "statusline-setup"));
   assert.ok(!fs.existsSync(new URL("../../../agents/statusline-setup.md", import.meta.url)), "statusline-setup definition removed");
@@ -37,7 +37,7 @@ test("registry registers exactly the 18 generic roles, unique, without statuslin
 });
 
 test("every generic role receives standard code navigation integrations", () => {
-  assert.equal(integrations.roles.length, 18);
+  assert.equal(integrations.roles.length, 19);
   assert.deepEqual([...integrations.roles].sort(), roles.map((r: { name: string }) => r.name).sort());
 });
 
@@ -67,7 +67,7 @@ test("release engineer has precise edit but not bulk write", () => {
 });
 
 test("registry mirrors precise edit restriction for implementation workers", () => {
-  for (const name of ["backend-worker", "frontend-worker", "general-worker"]) {
+  for (const name of ["backend-worker", "frontend-worker", "general-worker", "platform-worker"]) {
     const role = roles.find((r: { name: string }) => r.name === name);
     assert.ok(role, name);
     assert.match(role.tools, /(^|,\s*)edit(\s*,|$)/);
@@ -75,11 +75,11 @@ test("registry mirrors precise edit restriction for implementation workers", () 
   }
 });
 
-test("implementation workers are backend, frontend and general with the inherited rust defaults", () => {
+test("implementation workers are backend, frontend, general and platform with the inherited rust defaults", () => {
   assert.equal(roles.find((r: { name: string }) => r.name === "rust-worker"), undefined, "rust-worker retired from registry");
   assert.equal(fs.existsSync(new URL("../../../agents/rust-worker.md", import.meta.url)), false, "rust-worker definition retired");
   const defaults = { provider: "anthropic", model: "claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" };
-  for (const name of ["backend-worker", "frontend-worker", "general-worker"]) {
+  for (const name of ["backend-worker", "frontend-worker", "general-worker", "platform-worker"]) {
     const role = roles.find((r: { name: string }) => r.name === name);
     assert.ok(role, name);
     assert.deepEqual({ provider: role.provider, model: role.model, fallbackModel: role.fallbackModel, thinking: role.thinking, tools: role.tools }, defaults, name);
@@ -118,4 +118,19 @@ test("quoted empty fallbackModel decodes to the registry empty value; a non-empt
   // Discriminating control: a real fallback must not compare equal to the empty registry value.
   assert.notEqual(parseDefinition("probe", doc('fallbackModel: "github-copilot/gpt-6-luna"')).fallbackModel, "");
   assert.equal(parseDefinition("probe", doc('fallbackModel: "github-copilot/gpt-6-luna"')).fallbackModel, "github-copilot/gpt-6-luna");
+});
+
+// Platform implementation is a distinct writer: it applies accepted infrastructure contracts but never owns design, delivery or live mutation authority.
+test("platform-worker is a precise-edit writer distinct from read-only devops design and release delivery", () => {
+  const fm = frontmatter("platform-worker");
+  assert.match(fm.tools, /(^|,\s*)edit(\s*,|$)/);
+  assert.ok(!/(^|,\s*)write(\s*,|$)/.test(fm.tools));
+  const devops = frontmatter("devops-specialist");
+  assert.ok(!/(^|,\s*)edit(\s*,|$)/.test(devops.tools), "devops-specialist stays read-only");
+  assert.match(fm.text, /editing files is not authority/i);
+  assert.match(fm.text, /dry-run|plan validation/i);
+  assert.match(fm.text, /explicit target[^.\n]*(tenant|subscription|namespace)/i);
+  assert.match(fm.text, /never (print|expose|echo)[^.\n]*secret/i);
+  assert.match(fm.text, /devops-specialist/);
+  assert.match(fm.text, /release-engineer/);
 });

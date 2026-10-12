@@ -394,14 +394,6 @@ test("a failed child with printed markup keeps its FAILED label", () => {
 	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 FAILED/STOPPED");
 });
 
-// pi-package is user-deleted in this candidate: the mirror is checked only when present; exact equality is kept when it is.
-const PKG_COMPACT_HANDOFF = new URL("../../../../pi-package/extensions/subagent/compact-handoff.ts", import.meta.url);
-(fs.existsSync(PKG_COMPACT_HANDOFF) ? test : test.skip)("pi-package compact-handoff source mirrors the agent source byte for byte", () => {
-	const agent = fs.readFileSync(new URL("../compact-handoff.ts", import.meta.url));
-	const pkg = fs.readFileSync(PKG_COMPACT_HANDOFF);
-	assert.ok(agent.equals(pkg));
-});
-
 // Duplicated budget: a role body must not state its own return length; the appended handoff block is the single budget.
 test("each role states exactly one return-length budget, from the appended handoff block", () => {
 	const agents = new URL("../../../agents/", import.meta.url);

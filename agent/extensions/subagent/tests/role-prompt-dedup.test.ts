@@ -28,7 +28,7 @@ const { assembleChildSystemPrompt, graphReferenceGuidance } = await import("../c
 
 const repo = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\\/g, "/").replace(/\/$/, "");
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
-const normalize = (text: string) => text.replace(/\r\n/g, "\n").replace(/\\/g, "/").split(`${repo}/pi-package`).join("<PACKAGE>").split(repo).join("<CANDIDATE>");
+const normalize = (text: string) => text.replace(/\r\n/g, "\n").replace(/\\/g, "/").split(repo).join("<CANDIDATE>");
 const sentences = (text: string) => normalize(text).split(/\n+|(?<=\.) /).map((s) => s.trim()).filter((s) => s.length >= 20);
 const sentenceHashes = (text: string) => new Set(sentences(text).map((s) => sha(s).slice(0, 8)));
 const frontmatterSha = (text: string) => sha(/^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/\r\n/g, "\n"))?.[1] ?? "");
@@ -87,23 +87,75 @@ const DISPOSITIONS: Disposition[] = [
 ];
 // AFTER-only sentences that are not relocation targets: the core graph write-authority sentence (stated once) and the core heading.
 const NEW_AFTER = ["c708d8e8", "33322dbf"];
+// Reviewed F1 rewrite of frontend-worker (framework-aware role). The BEFORE fixture is unchanged; these are the reviewed post-change frontmatter sha and sentence hashes for that one role only.
+// REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
+const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5" };
+const REPAIR_REMOVED: Record<string, string[]> = { "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"] };
+const REPAIR_ADDED: Record<string, string[]> = { "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"] };
+// Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
+// Only lines of 20+ characters are hashed as sentences, matching sentences() above.
+const STACK_ADDED: Record<string, string[]> = {
+	"backend-worker": [
+		"**.NET, SQL and REST notes (the backend catalog is optional and not bundled; when it is absent, use the project's own guidance with these notes):**",
+		"- For C# and ASP.NET Core, use the SDK pinned by the project, async APIs end to end, and pass CancellationToken through I/O.",
+		"- Keep ASP.NET Core endpoints thin: validate input at the boundary, map failures to ProblemDetails and never leak exception text.",
+		"- Use parameterized SQL only (ADO.NET parameters, Dapper or EF Core parameters); never concatenate caller input into SQL text.",
+		"- SQL is dialect-specific: name the target engine (SQL Server, PostgreSQL, SQLite or other) and use only its syntax and types.",
+		"- Migrations are safe by default: additive and forward-only first, batched backfill, and destructive drops only in a later reviewed change.",
+		"- REST behaviour follows the accepted API contract; status codes, resource names and pagination changes go to api-specialist first.",
+	],
+	"frontend-worker": [
+		"**React and TypeScript notes (apply when the project uses React; the SolidJS rules below stay conditional on SolidJS):**",
+		"- Use function components and hooks; keep effects for synchronizing with external systems, not for derived state.",
+		"- Type props, events and API responses explicitly; avoid any and unchecked casts.",
+		"- Derive values during render and memoize only when a measured cost justifies it.",
+		"- Keep server data fetching behind the project's existing data or query layer, not ad hoc fetch calls in components.",
+		"- Test behaviour with the project's existing runner and React Testing Library queries, not implementation details.",
+	],
+	"observability-specialist": [
+		"**NRQL notes:**",
+		"- NRQL is New Relic's query language and is not SQL, so do not carry SQL idioms into it.",
+		"- Bound every query with SINCE and UNTIL and facet deliberately, because unbounded queries cost time and money.",
+		"- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write.",
+		"- Analysis queries stay read-only; NerdGraph or New Relic API writes are never implied by query design.",
+		"**Grafana and Kiali notes:**",
+		"- Grafana dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.",
+		"- Kiali: diagnose service-mesh traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.",
+		"- Alert thresholds and severities come from the team's approved policy; never invent them.",
+		"- Diagnosis stays read-only; no Grafana or Kiali write is implied by it.",
+	],
+	"api-specialist": [
+		"**REST contract notes:**",
+		"- Name resources as nouns, use HTTP methods for their meaning, and keep status codes consistent across endpoints.",
+		"- Define pagination, filtering and the error shape (ProblemDetails or the project's existing format) before implementation starts.",
+		"- Version breaking changes explicitly and record what each consumer must change.",
+		"- Unsafe retries that change state need an idempotency key or a conditional request such as If-Match.",
+	],
+	"general-worker": [
+		"**Jira JQL, Confluence CQL and gh or curl automation:**",
+		"- JQL is the Jira Query Language; Confluence search uses CQL, and the two are not interchangeable.",
+		"- Use bounded JQL and CQL queries with explicit project keys, space keys and date ranges; avoid unbounded scans.",
+		"- Automate gh and curl read-first: list and view before any create, edit, merge, comment or transition.",
+		"- Writes to Jira, Confluence or GitHub need explicit authority for the exact target; a missing or failed grant stops that step.",
+		"- Never place tokens on the command line or print them; read credentials from the environment without echoing them.",
+	],
+	"security-specialist": [
+		"**Scanner policy (Snyk, SonarQube, Prisma Cloud):** you own unresolved vulnerability, IAM and compliance policy questions these scanners raise. Advise on accepted risk, exceptions and policy; never suppress findings or set thresholds yourself. `platform-worker` wires the CI gates to the policy that main or the user approves.",
+	],
+	"devops-specialist": [
+		"**Platform handoff:** accepted infrastructure file changes (Terraform, Kubernetes, Helm, Azure CLI, FluxCD) go to `platform-worker` for editing; this role stays read-only and never applies them.",
+	],
+};
 
 const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/role-prompt-dedup.before.json", import.meta.url), "utf8")) as {
 	entries: Record<string, { chars: number; frontmatterSha: string; headings: string[]; sentenceHashes: string[] }>;
 };
-// pi-package is user-deleted in this candidate: its package-shape entries cannot be read, so they are omitted here and reported as a named skip below, never passed.
-const PACKAGE_PRESENT = fs.existsSync(path.join(repo, "pi-package", "defaults", "agents"));
-if (!PACKAGE_PRESENT) for (const key of Object.keys(fixture.entries)) if (key.startsWith("package/")) delete fixture.entries[key];
-
+// Only live (agent/) shapes remain: the retired pi-package defaults shape was removed with the pi-package layout.
 function assembled(shape: string, role: string): { text: string; sourceText: string } {
-	if (shape === "live") {
-		const sourceText = fs.readFileSync(new URL(`../../../agents/${role}.md`, import.meta.url), "utf8");
-		const agent = { name: role, systemPrompt: bodyOf(sourceText), source: "user", filePath: "", description: role, tools: [] };
-		return { text: assembleChildSystemPrompt(agent as never, { codeIntegrationsEnabled: true, cwd: repo, packageRoot: null, launchArgs: FULL_LAUNCH, qmdExtension: FILES.qmd, globalGraphDirectory: EMPTY_GLOBAL }), sourceText };
-	}
-	const sourceText = fs.readFileSync(path.join(repo, "pi-package", "defaults", "agents", `${role}.md`), "utf8");
+	assert.equal(shape, "live");
+	const sourceText = fs.readFileSync(new URL(`../../../agents/${role}.md`, import.meta.url), "utf8");
 	const agent = { name: role, systemPrompt: bodyOf(sourceText), source: "user", filePath: "", description: role, tools: [] };
-	return { text: assembleChildSystemPrompt(agent as never, { codeIntegrationsEnabled: false, cwd: repo, packageRoot: path.join(repo, "pi-package"), globalGraphDirectory: EMPTY_GLOBAL }), sourceText };
+	return { text: assembleChildSystemPrompt(agent as never, { codeIntegrationsEnabled: true, cwd: repo, packageRoot: null, launchArgs: FULL_LAUNCH, qmdExtension: FILES.qmd, globalGraphDirectory: EMPTY_GLOBAL }), sourceText };
 }
 
 // Closed world: every BEFORE hash that is missing AFTER, and every AFTER hash that is new, must be a reviewed disposition for that role. Nothing else may change.
@@ -112,9 +164,8 @@ const HEADINGS_NEW_HERE = ["## Integration and graph authority"];
 test("every role/profile keeps frontmatter; sentences and headings change only by the reviewed closed-world mapping", () => {
 	for (const [key, before] of Object.entries(fixture.entries)) {
 		const [shape, role] = key.split("/");
-		if (shape !== "live") continue; // package shape is NOT RUN (named skip below)
 		const { text, sourceText } = assembled(shape, role);
-		assert.equal(frontmatterSha(sourceText), before.frontmatterSha, `${key} frontmatter changed`);
+		assert.equal(frontmatterSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} frontmatter changed`);
 		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
 		for (const h of HEADINGS_ABSENT_HERE) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
 		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), HEADINGS_ABSENT_HERE.slice().sort(), `${key} headings lost`);
@@ -128,7 +179,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 		const redundantHere = [...REDUNDANT_HASHES].filter((h) => beforeSet.has(h));
 		assert.equal(redundantHere.length, 1, `${key}: exactly one redundant restatement expected before`);
 
-		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere].sort();
+		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere, ...(REPAIR_REMOVED[role] ?? [])].sort();
 		const actualMissing = before.sentenceHashes.filter((h) => !after.has(h)).sort();
 		assert.deepEqual(actualMissing, expectedMissing, `${key}: sentences lost outside the reviewed mapping`);
 
@@ -137,7 +188,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 			else assert.equal(after.has(d.before), false, `${key}: ${d.before} (${d.status}) should be absent in this world`);
 		}
 
-		const expectedAdded = [...DISPOSITIONS.flatMap((d) => (d.after ? [d.after] : [])), ...NEW_AFTER, ...privacy.map((p) => sha(p.to).slice(0, 8))].filter((h) => !beforeSet.has(h));
+		const expectedAdded = [...DISPOSITIONS.flatMap((d) => (d.after ? [d.after] : [])), ...NEW_AFTER, ...(REPAIR_ADDED[role] ?? []), ...privacy.map((p) => sha(p.to).slice(0, 8)), ...(STACK_ADDED[role] ?? []).flatMap((s) => sentences(s)).map((s) => sha(s).slice(0, 8))].filter((h) => !beforeSet.has(h));
 		const actualAdded = [...after].filter((h) => !beforeSet.has(h));
 		assert.deepEqual([...new Set(actualAdded)].sort(), [...new Set(expectedAdded)].sort(), `${key}: sentences added outside the reviewed mapping`);
 	}
@@ -206,12 +257,10 @@ test("variant requirements survive dedup: oracle subscription guard, release-eng
 	assert.match(assembled("live", "scout").text, /Pi thinking levels control GPT reasoning directly/);
 });
 
-test.skip("NOT RUN: package-shape dedup proof is not implemented in this file (pi-package defaults/agents bodies and baseline hashes are not evaluated); skipped, not passed", () => {});
-
-// Essential no-helper boundary for all 18 live roles (the fixture covers 18 generic roles): the leaf prohibition, the no-subagent-tool statement and the shell-launch prohibition remain, and the removed restatements stay absent.
+// Essential no-helper boundary for all 19 live roles (the fixture covers the 18 pre-platform generic roles): the leaf prohibition, the no-subagent-tool statement and the shell-launch prohibition remain, and the removed restatements stay absent.
 test("every live role keeps the no-helper boundary and no longer restates the removed phrases", () => {
 	const names = fs.readdirSync(new URL("../../../agents/", import.meta.url)).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)).sort();
-	assert.equal(names.length, 18, "live role count");
+	assert.equal(names.length, 19, "live role count");
 	const missing: string[] = [];
 	for (const role of names) {
 		const text = assembled("live", role).text;

@@ -1,5 +1,5 @@
-// Domain-neutral leak contract (RED first): candidate text (tracked or untracked) carries no absolute user-home path, and the generated package
-// (when present) carries none either. Private-domain terms are inventoried outside the harness; this file names none of them.
+// Domain-neutral leak contract (RED first): candidate text (tracked or untracked) carries no absolute user-home path. The retired pi-package tree
+// is no longer generated, so its separate scan was removed; the candidate scan covers any regenerated file. Private-domain terms are inventoried outside the harness; this file names none of them.
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -32,20 +32,8 @@ function scan(files: string[], root: string): string[] {
 	return hits;
 }
 
-function walk(dir: string): string[] {
-	return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.relative(repo, path.join(dir, e.name))]));
-}
-
 test("candidate source, tests and docs carry no absolute user-home path (tracked or untracked)", () => {
 	const files = candidateFiles();
 	assert.ok(files.length > 100, "candidate file list too small");
 	assert.deepEqual(scan(files, repo), []);
-});
-
-// The generated package is removed from this checkout by the user; this check runs only if it is rebuilt.
-const pkgDir = path.join(repo, "pi-package");
-(fs.existsSync(pkgDir) ? test : test.skip)("generated package text carries no absolute user-home path", () => {
-	const pkgFiles = walk(pkgDir);
-	assert.ok(pkgFiles.length > 20, "package tree missing");
-	assert.deepEqual(scan(pkgFiles, repo), []);
 });

@@ -125,6 +125,18 @@ Report:
 - operational failure indicators.
 
 
+**NRQL notes:**
+- NRQL is New Relic's query language and is not SQL, so do not carry SQL idioms into it.
+- Bound every query with SINCE and UNTIL and facet deliberately, because unbounded queries cost time and money.
+- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write.
+- Analysis queries stay read-only; NerdGraph or New Relic API writes are never implied by query design.
+
+**Grafana and Kiali notes:**
+- Grafana dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.
+- Kiali: diagnose service-mesh traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.
+- Alert thresholds and severities come from the team's approved policy; never invent them.
+- Diagnosis stays read-only; no Grafana or Kiali write is implied by it.
+
 ## Rust / SQLite Operational Signals
 
 For Axum/Tokio/SQLx/SQLite systems consider, when justified:
