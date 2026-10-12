@@ -14,23 +14,23 @@ Read only when investigating token consumption, oversized results, repetitive ro
 - Do not repeat fixed policy already in the child prompt, and omit instructions meant for other roles.
 - Guidance only, not a runtime-enforced budget or token measurement. Never drop a critical risk, failed check or blocker to meet a length target.
 
+## Bounded checklist and evidence reuse
+- Before dispatch and at completion, list each required check once: acceptance checks, RED/GREEN focus checks, and UI focus/browser only when UI is affected or assigned (not universal). Each item ends as a result (command, exit code, outcome), NOT RUN with its reason, or a justified not-applicable with its reason. No item is dropped silently.
+- Reuse a prior PASS or RED/GREEN result only for unchanged tested bytes (HEAD plus a scoped diff hash or changed-file content hashes), the same relevant environment (runtime, dependencies and configuration the check reads) and the same contract. Otherwise rerun the affected checks, not the whole suite.
+- Cite the canonical REPORT path for earlier results instead of copying them into new packets.
+
+## Compaction batching
+- Compact only ranges the reply or a finished step has consumed (tool output, resolved threads). Batch consumed ranges into one batched compaction call instead of folding after every reply.
+- Each summary keeps open goals, active holds (user pause, stop, no-publication restriction), live job IDs and candidate identity. Split an oversized range into several smaller summaries in the same call.
+- Do not fold a range that still holds an unresolved decision or an unconfirmed result.
+
 ## Main-session compaction
 If a context-compaction call fails on a reference mismatch, first use host-provided reference or range discovery, then retry with those values. Do not guess references, reuse invalid ones, or repeat the unchanged failed call. If discovery is unavailable, pause compression and keep the current state (goal, holds, open objectives, candidate identity) in context. Reference management belongs to the host/provider layer; this repository implements none. This is a safer retry rule only; it does not establish or fix any external proxy or model-output cause.
 
 ## Child final report
-Child system prompts for roles with a prompt body get the final-handoff format from the packaged `extensions/subagent/compact-handoff.ts`. Normally 150-250 tokens (not a strict ceiling):
+Child system prompts for roles with a prompt body get the final-handoff format from the packaged `extensions/subagent/compact-handoff.ts` (`COMPACT_HANDOFF_INSTRUCTIONS`). That constant is the only copy of the four-line format: normally `STATUS` (outcome; failed or required NOT RUN checks named here), `NEXT`, `RISKS` and `EVIDENCE` (one primary absolute REPORT path), not a strict ceiling.
 
-```text
-STATUS: PASS | FAIL | BLOCKED | ESCALATE
-SUMMARY: <what actually changed or was learned>
-FILES: <changed paths; none for read-only roles>
-CHECKS: <actual command and result; NOT RUN if applicable>
-RISKS: <remaining critical warnings or none>
-NEXT: <done / one justified next action>
-EVIDENCE: <existing exact output path(s) or none>
-```
-
-This is prompt guidance, not proof of obedience. Failed or NOT RUN checks, blockers, security/data risks and pending decisions stay in the report even when it exceeds the budget. PASS requires the assigned scope and its required checks to pass; exit code 0 alone is not PASS. Write long logs and diffs only to assigned evidence paths.
+This is prompt guidance, not proof of obedience. Failed or required NOT RUN checks, blockers, material security/data risks, material UNKNOWN and pending decisions stay in the reply even when it exceeds the budget; unassigned checks are listed only when material to interpreting the result. Changed files, commands, hashes and logs go to the REPORT.
 
 ## Runtime result handling (current implementation)
 - Foreground runs: not capped by this change. The visible text keeps the existing extraction (`getFinalOutput` in `index.ts` → `extractFinalText` in `compact-handoff.ts`: every text block of the latest text-bearing assistant message, joined by newlines).

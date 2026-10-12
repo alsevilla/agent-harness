@@ -20,13 +20,19 @@
    the exception and replacement evidence; small size alone is not an exception.
 5. Make the smallest correct change; run focused checks, then broader regression
    only when relevant. Do not weaken valid expectations to fit incorrect behavior.
-6. Return RED/GREEN commands and outcomes (or exception/replacement evidence),
+6. Record RED/GREEN commands and outcomes (or exception/replacement evidence) in the assigned REPORT file, not the reply:
    the exact candidate, changed files, checks/results, missing evidence and
    residual risk. The main session selects independent Verify/Review using global
    criteria; worker confidence is not independent verification. For a dirty candidate,
    cite HEAD plus a scoped diff hash or changed-file content hashes identifying the
    tested bytes (including relevant untracked source); a changed-path list alone is
-   not byte identity. Later relevant changes invalidate that evidence.
+   not byte identity. Later relevant changes invalidate that evidence. The reply follows the canonical four-line handoff (`references/token-efficiency.md`, "Child final report").
+
+## Dispatch and completion checklist
+- Use one implementation worker per candidate; it owns the writes. Add independent Verify/Review or a specialist only for a justified risk under `references/routing.md`, and name that risk in the packet.
+- Packet brief: task, absolute candidate, role scope, authority and mutation boundary, essential restrictions, required checks, scratch/evidence paths. Use canonical references (governing plan, contract, REPORT path) instead of copied history or policy.
+- Before dispatch and at completion, mark each required check as a result (command, exit code, outcome), NOT RUN with reason, or justified not-applicable with reason. UI focus/browser checks are not universal: require them only when UI is affected or assigned.
+- Reuse earlier evidence only for unchanged tested bytes, the same relevant environment and the same contract; otherwise rerun the affected checks. Details: `references/token-efficiency.md` ("Bounded checklist and evidence reuse", "Compaction batching").
 
 Do not automatically run Scout, specialists, tester, or reviewer. Read relevant
 sections of `references/extended.md` only for complex execution/isolation/recovery.

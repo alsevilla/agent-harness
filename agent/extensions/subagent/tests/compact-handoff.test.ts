@@ -1,6 +1,7 @@
 // Unit contract for compact-handoff.ts: guidance text, bounded background completion, lossless retained results.
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as fs from "node:fs";
 import {
 	BACKGROUND_COMPLETION_LIMIT,
 	COMPACT_HANDOFF_INSTRUCTIONS,
@@ -15,14 +16,33 @@ const text = (value: string) => ({ type: "text", text: value });
 const assistant = (...content: unknown[]) => ({ role: "assistant", content });
 const toolCallOnly = { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "read", arguments: {} }] };
 
-test("guidance names every handoff field, keeps verdict evidence and states exit 0 is not PASS", () => {
-	for (const label of ["STATUS", "SUMMARY", "FILES", "CHECKS", "RISKS", "NEXT", "EVIDENCE"]) {
+test("guidance is a four-line handoff (STATUS, NEXT, RISKS, EVIDENCE), keeps verdict evidence and states exit 0 is not PASS", () => {
+	for (const label of ["STATUS", "NEXT", "RISKS", "EVIDENCE"]) {
 		assert.match(COMPACT_HANDOFF_INSTRUCTIONS, new RegExp(`^${label}:`, "m"), label);
 	}
-	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /150-250 tokens/);
+	assert.doesNotMatch(COMPACT_HANDOFF_INSTRUCTIONS, /^(?:SUMMARY|FILES|CHECKS):/m);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /normally four lines/);
 	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /exit code of 0 alone is not PASS/);
 	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /Do not conceal failed checks/);
 	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /take precedence/);
+});
+
+test("guidance keeps INCONCLUSIVE in STATUS, routes unrun required checks there and never obliges unassigned checks into RISKS", () => {
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /^STATUS: PASS \| FAIL \| INCONCLUSIVE \| BLOCKED \| ESCALATE\b[^\n]*\nNEXT: [^\n]*\nRISKS: [^\n]*\nEVIDENCE: [^\n]*$/m);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /name each failed or required NOT RUN check in STATUS/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /required check not run is INCONCLUSIVE/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /NOT ASSESSED/);
+	assert.doesNotMatch(COMPACT_HANDOFF_INSTRUCTIONS, /once in RISKS/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /in RISKS only when material to interpreting the result/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /does not lower an automated-only PASS/);
+});
+
+test("guidance moves hashes, counts and logs to the assigned REPORT, keeps the reply brief and overrides longer role templates", () => {
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /not a strict cap/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /REPORT file, not the reply: hashes, counts, manifests and logs/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /EVIDENCE: one primary absolute path to your assigned REPORT/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /takes precedence over any longer "Return:" list or word limit in your role prompt/);
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /Material UNKNOWN, security and data risks stay explicit even when they exceed the size budget/);
 });
 
 test("background completion at or under the limit is delivered unchanged", () => {
@@ -346,4 +366,22 @@ test("ordinary XML output with a parameter element but no invoke is not labelled
 test("a failed child with printed markup keeps its FAILED label", () => {
 	const block = retainedEntryBlock(child([assistant(text(INVOKE))], { exitCode: 1, stopReason: "error", errorMessage: "boom" }));
 	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 FAILED/STOPPED");
+});
+
+test("pi-package compact-handoff source mirrors the agent source byte for byte", () => {
+	const agent = fs.readFileSync(new URL("../compact-handoff.ts", import.meta.url));
+	const pkg = fs.readFileSync(new URL("../../../../pi-package/extensions/subagent/compact-handoff.ts", import.meta.url));
+	assert.ok(agent.equals(pkg));
+});
+
+// Duplicated budget: a role body must not state its own return length; the appended handoff block is the single budget.
+test("each role states exactly one return-length budget, from the appended handoff block", () => {
+	const agents = new URL("../../../agents/", import.meta.url);
+	const offenders: string[] = [];
+	for (const file of fs.readdirSync(agents).filter((name) => name.endsWith(".md"))) {
+		const body = fs.readFileSync(new URL(file, agents), "utf8").replace(/^---\r?\n[\s\S]*?\r?\n---/, "");
+		const budgets = (body + COMPACT_HANDOFF_INSTRUCTIONS).match(/normally[^.\n]*(?:words|lines)/gi) ?? [];
+		if (budgets.length !== 1) offenders.push(`${file}: ${budgets.length}`);
+	}
+	assert.deepEqual(offenders, []);
 });

@@ -5,7 +5,7 @@
 An independent, unofficial harness profile for [Pi](https://github.com/earendil-works/pi), the minimal extensible coding agent by Mario Zechner. It is not an official Pi project and is not endorsed by its authors.
 
 - Tested baseline: Pi 1.1.0 on Windows with Node 24.20.0 (targeted checks; see [Status and limits](#status-and-limits)).
-- Source release: v1.3.0.
+- Source release: v1.4.0.
 - The npm package `@alsevilla/pi-engineering-harness` is **UNPUBLISHED** until explicit approval. Install the profile manually as described in [Quickstart](#quickstart) and [Install](#install).
 
 ## What it does
@@ -103,7 +103,7 @@ These load one skill module as guidance. They do not dispatch a worker or choose
 | `/refresh graph [absolute checkout]` | Updates the existing `graphify-out/graph.json` for the current Git checkout or an explicit one. It never initializes a graph. | [refresh README](agent/extensions/refresh/README.md) |
 | `/refresh qmd` | Updates every collection in the QMD extension's named index. No embeddings or hooks. | [refresh README](agent/extensions/refresh/README.md) |
 | `/refresh serena` | Asks the loaded Serena package's `/serena-restart` command (not registered by this profile) to restart the existing Serena worker; it errors if that command is not loaded. | [refresh README](agent/extensions/refresh/README.md) |
-| `/revoke-authorization` | Withdraws session authorizations (single-use grants and release-engineer push leases). Running children keep their copies until they exit. | [subagent README](agent/extensions/subagent/README.md) |
+| `/revoke-authorization` | Withdraws session authorizations (single-use grants, release-engineer push leases and release delivery). Running children keep their copies until they exit or expire; pause or cancel them separately. | [subagent README](agent/extensions/subagent/README.md) |
 | `/provider-cooldown` | Shows the provider cooldown state, or refreshes one provider's auth after you re-authenticate. | [subagent README](agent/extensions/subagent/README.md) |
 | `/engineering-harness`, `/agent-creation` | Bare aliases that queue the native `/skill:engineering-harness` or `/skill:agent-creation` command with your arguments. They create nothing. If another command owns the name, the alias is disabled and the `/skill:` form still works. | [subagent README](agent/extensions/subagent/README.md) |
 
@@ -182,7 +182,7 @@ Each row is marked as model-followed **policy** or **runtime** code. Limits are 
 | Long child reports flood the parent context | Automatic completion notices are capped at 4,000 characters. A longer one starts `INCOMPLETE HANDOFF` and must not be accepted from its excerpt; the full retained report comes from `subagent_control` `result`. | Runtime |
 | A job could report completion more than once | One completion per logical job, with regression tests for late per-node and per-child duplicates. No duplicate bug was confirmed or fixed. | Runtime regression guard |
 | Fan-out usage and cost were unclear | `/subagent usage` (command-only) counts settled agent tasks per Pi run (single runs, chain steps, parallel tasks, DAG nodes), counts each fallback attempt once, keeps partial failures and aborts, and resets on reload or session change. Costs are reported figures, not a bill. | Runtime; live-checked against two child results |
-| Workers could run risky shell operations or touch secret files | A `tool_call` guard on main and children blocks listed risky operations and fails closed if a child's guard is missing. TUI `request_authorization` mints exact, single-use, expiring grants, or one session-only release-engineer PR-branch push lease (`push_branch`). Bounded lexical matcher, not an OS sandbox; unsupported forms are listed. | Runtime with disclosed limits |
+| Workers could run risky shell operations or touch secret files | A `tool_call` guard on main and children blocks listed risky operations and fails closed if a child's guard is missing. TUI `request_authorization` mints exact, single-use, expiring grants, one session-only release-engineer PR-branch push lease (`push_branch`), or a session-scoped release-engineer delivery (`delivery`: push, PR create/edit/merge, release create; no time expiry; withdrawn by `/revoke-authorization` or session end; running children keep their copy until they exit). Bounded lexical matcher, not an OS sandbox; unsupported forms are listed. | Runtime with disclosed limits |
 
 Verified scope: the live check covered background batching and `/subagent usage` only. General live TTY, the `/subagent roles` wizard, platform parity and invoice reconciliation are not verified.
 

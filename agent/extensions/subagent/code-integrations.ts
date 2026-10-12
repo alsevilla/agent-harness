@@ -13,64 +13,20 @@ type IntegrationConfig = {
 
 export const CODE_NAVIGATION_GUIDANCE = `
 ## Shell syntax
-Match command syntax to the selected tool, not to the operating system. The bash
-tool runs Bash on Windows too: use export NAME='value', &&, and Bash conditionals.
-PowerShell syntax ($env:NAME, $LASTEXITCODE, -ne, and brace-form if statements)
-belongs in the powershell tool. Never submit it to bash. Set the assigned candidate
-working directory explicitly and preserve native command failures. A shell parse
-error means the checks did not run; correct the shell invocation before reporting
-test results or diagnosing application code. Do not rerun checks already completed
-successfully merely to repair a later invocation error.
+Match syntax to the selected tool, not the OS. The bash tool runs Bash on Windows too: use export NAME='value', &&, and Bash conditionals. PowerShell syntax ($env:NAME, $LASTEXITCODE, -ne, brace-form if) belongs in the powershell tool. Never submit it to bash. Set the assigned candidate working directory explicitly and preserve native command failures. A shell parse error means the checks did not run: correct the invocation before reporting results or diagnosing application code. Do not rerun checks that already succeeded merely to repair a later invocation error.
 
 ## Rust build output
-Workers inherit a per-checkout CARGO_TARGET_DIR (shared, outside the repo) and
-CARGO_INCREMENTAL=0. Use that directory for every cargo command; do not create or
-set another target directory, do not delete the shared one, and do not run servers
-from it (run a copy of the executable from the run folder instead: a running .exe
-locks its file and breaks later builds). If CARGO_TARGET_DIR is unset, or a task
-packet names a different one, follow the packet and say so in the handoff.
+Workers inherit a per-checkout CARGO_TARGET_DIR (shared, outside the repo) and CARGO_INCREMENTAL=0. Use it for every cargo command; do not create or set another target directory, do not delete the shared one, and never run a server from it. Run a copy of the executable from the run folder instead: a running .exe locks its file and breaks later builds. If CARGO_TARGET_DIR is unset, or a task packet names a different one, follow the packet and say so in the handoff.
 
 ## Artifact placement
-Main supplies absolute scratch/evidence paths in task packet when an assignment
-may produce files outside its candidate. Put separate QA fixtures, temporary
-copies, external build targets and logs in the assigned _scratch/<task> path;
-put captured backups and durable evidence in _evidence/<task>. These paths
-normally live under <primary-parent>/worktrees/<repo>, not beside the checkout.
-Do not create scratch directories beside the primary checkout.
-Return to main when required artifact paths are missing; do not guess a sibling
-folder. Report actual artifact paths at handoff. Source/test edits stay in the
-assigned candidate. Shell access is not a filesystem sandbox; verify targets
-before write-capable commands.
-Do not move live SQLite .db, -wal and -shm files or a running executable.
-Obtain authorized downtime and verify processes have stopped before relocating
-whole directories. Restart only with verified DB_PATH and runtime configuration;
-otherwise leave services stopped and return that scope to main.
+Main supplies absolute scratch/evidence paths in task packet when work may write outside the candidate. Put QA fixtures, temporary copies, external build targets and logs in the assigned _scratch/<task> path; captured backups and durable evidence go in _evidence/<task>. Both normally live under <primary-parent>/worktrees/<repo>. Do not create scratch directories beside the primary checkout. Return to main when a required artifact path is missing; do not guess a sibling folder. Report actual artifact paths at handoff. Source and test edits stay in the assigned candidate. Shell access is not a filesystem sandbox: verify targets before write-capable commands.
+Do not move live SQLite .db, -wal or -shm files or a running executable. Obtain authorized downtime and verify processes have stopped before relocating whole directories. Restart only with verified DB_PATH and runtime configuration; otherwise leave services stopped and return that scope to main.
 
 ## Code navigation integrations
-When Ponytail's native extension is loaded in this launch, it injects
-the configured default/session mode without an extra skill read, and its reuse
-and minimal-correct-change guidance applies within the assigned role. When it is not
-loaded (a reviewer launch may lack it), skip Ponytail guidance and perform normal review.
-Ponytail never overrides user requirements, candidate boundaries, required checks or delegation policy.
-Do not reload its base skill merely to activate it or launch extra audit/review
-work. Missing graphs never authorize a fresh graph build as a prerequisite.
-For prior decisions, specs, notes or plans relevant to this assignment, and only when qmd_search is in your tool list (otherwise skip this lookup), use a focused
-qmd_search with maxResults 3 (at most 5) and a useful collection scope. Search
-only when that context is needed; read only selected hits. Do not initialize/update
-indexes, request feedback writes, or treat retrieval as authoritative current code.
-When graphify-out artifacts exist, first use their wiki index/report to orient this
-assignment. Then, when Serena tools are in your tool list, prefer Serena symbol overview,
-symbol lookup and references for source navigation; otherwise use read/grep. Use read/grep
-for docs/config or targeted source follow-up.
-The graphify skill, when loaded in this launch, is available on demand for graph queries and
-paths. Its standard-library read_graph.py helper is the read-only query path;
-native Graphify CLI queries can write stamps and are not permitted read-only
-retrieval. Do not load build procedures or scan the repository without a task
-reason. Report a missing interpreter/backend rather than inventing results.
-Read-only roles must not build/update graphs, onboard projects, or edit
-source; return stale-graph findings to the authorized worker.
-Optional integrations (QMD, Serena, Graphify) may be absent from a launch. Then their tools and skills are not granted, and any launch note names the skipped ones. File presence does not prove the backend is healthy or configured. If an integration tool fails, report the concrete error once, do not retry it in a loop, continue with permitted read/grep/find source reads, and report reduced capability in the handoff. Do not install, reconfigure, rebuild or repair an integration or index during this assignment, and do not read auth files or secrets to diagnose one.
-These integrations do not authorize nested agents, broader writes, or new tasks.
+When Ponytail's native extension is loaded in this launch, it injects the configured default/session mode without an extra skill read; apply its reuse and minimal-correct-change guidance within the assigned role. When it is not loaded (a reviewer launch may lack it), skip Ponytail guidance and review normally. Ponytail never overrides user requirements, candidate boundaries, required checks or delegation policy. Do not reload its base skill merely to activate it or launch extra audit/review work. Missing graphs never authorize a fresh graph build as a prerequisite.
+For prior decisions, specs, notes or plans relevant to this assignment, and only when qmd_search is in your tool list (otherwise skip this lookup), run one focused qmd_search (maxResults 3, at most 5) in a useful collection scope, only when that context is needed; read only selected hits. Do not initialize/update indexes, request feedback writes, or treat retrieval as authoritative current code.
+When graphify-out artifacts exist, orient with their wiki index or report first. Then, when Serena tools are in your tool list, prefer Serena symbol overview, lookup and references; otherwise use read/grep. Use read/grep for docs, config or targeted source follow-up. The graphify skill, when loaded in this launch, is on demand for graph queries and paths: its standard-library read_graph.py helper is the read-only query path, because native Graphify CLI queries can write stamps. Do not load build procedures or scan the repository without a task reason. Report a missing interpreter or backend rather than inventing results. Read-only roles must not build/update graphs, onboard projects or edit source; return stale-graph findings to the authorized worker.
+Optional integrations (QMD, Serena, Graphify) may be absent from a launch; their tools and skills are then not granted and the launch note names them. File presence does not prove the backend is healthy or configured. If an integration tool fails, report the concrete error once, do not retry it in a loop, continue with permitted read/grep/find, and report reduced capability in the handoff. Do not install, reconfigure, rebuild or repair an integration or index, and do not read auth files or secrets to diagnose one. These integrations do not authorize nested agents, broader writes or new tasks.
 `;
 
 export function candidateProjectRoot(cwd: string): string {
@@ -111,7 +67,7 @@ export function globalGraphGuidance(roots: string[], directory: string): string 
 
 export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(os.homedir(), ".graphify")): string {
   const project = candidateProjectRoot(cwd);
-  const navigation = "\n## Candidate navigation and shared retrieval\nIf Serena tools are in your tool list, for Serena calls pass project explicitly as " + project + ". Resolve relative_path from that root, even if the shell cwd is backend/frontend. Do not activate the primary checkout just because it contains the graph; symbol lookups and references must target the candidate. Do not automatically onboard or recreate Serena project configuration.\nIf qmd_* tools are in your tool list, QMD uses the profile's existing shared named index, not a worktree-local index. Scope queries to the relevant existing collection; retrieved document paths can belong to the primary checkout. Use indexed notes as prior evidence, then verify current files/requirements in the candidate. Do not create/update/clone indexes or rewrite QMD references under the worktree.\n";
+  const navigation = "\n## Candidate navigation and shared retrieval\nFor Serena calls (when listed) pass project explicitly as " + project + "; resolve relative_path from that root, even from a backend/frontend shell cwd. Never activate the primary checkout just because it holds the graph; symbol lookups and references target the candidate. Do not automatically onboard or recreate Serena project configuration.\nQMD (when listed) uses the profile's shared named index, not a worktree-local one: scope queries to the relevant existing collection. Retrieved document paths can belong to the primary checkout. Treat retrieved notes as prior evidence; verify current files/requirements in the candidate. Do not create, update or clone indexes or rewrite QMD references under the worktree.\n";
   try {
     const root = project;
     const roots = [root];
@@ -136,11 +92,11 @@ export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(
       return navigation + globalGraphGuidance(roots, globalDirectory) + "\n## Graph reference location\nCandidate checkout: " + root + "\nGraph source checkout: " + source +
         "\nGraph directory (verified to exist): " + path.join(source, "graphify-out") +
         "\nExisting artifacts (absolute paths):\n" + artifacts.map(file => "- " + file).join("\n") +
-        "\nUse these absolute paths directly. This resolved location overrides relative graphify-out paths and existence-check examples in the Graphify skill. Do not ls/read the candidate's graphify-out to rediscover this reference when the graph source differs. For queries, pass --graph with the listed absolute graph.json path only if it is listed; absence of a wiki/report is not a reason to try its unlisted path. If this directory/artifact disappears, skip the graph rather than retrying a known missing path. Never change the candidate cwd/project to make a relative graph path work." +
-        (source !== root ? "\nThis graph belongs to another checkout of the same repository. Use it only for orientation; it may differ from the candidate branch or uncommitted edits. Do not rewrite its paths into the candidate worktree or build/copy/update the source checkout's graph as part of this assignment." : "\nGraph paths were checked at dispatch; if an artifact is removed, use focused permitted navigation instead of repeating the missing read.") +
-        "\nVerify symbols and changed behavior against the candidate checkout using Serena/read/grep. All source edits and tests stay in the assigned candidate; graph reference access does not widen write authority.\n";
+        "\nUse these absolute paths directly; they override relative graphify-out paths and existence-check examples in the Graphify skill. Do not ls/read the candidate's graphify-out to rediscover this reference when the graph source differs. Pass --graph only with a listed graph.json path; a missing wiki or report is no reason to try an unlisted one. If this directory or an artifact disappears, skip the graph rather than retrying the missing path. Never change the candidate cwd/project to make a relative graph path work." +
+        (source !== root ? "\nThis graph belongs to another checkout of the same repository: orientation only. It may differ from the candidate branch or uncommitted edits; do not rewrite its paths into the candidate worktree or build, copy or update that checkout's graph in this assignment." : "\nGraph paths were checked at dispatch; if an artifact is removed, use focused permitted navigation instead of repeating the missing read.") +
+        "\nVerify symbols and changed behavior against the candidate checkout with Serena/read/grep. Source edits and tests stay in the assigned candidate; graph reference access does not widen write authority.\n";
     }
-    return navigation + globalGraphGuidance(roots, globalDirectory) + "\nNo Graphify report/wiki/graph was found in the candidate or its primary checkout at dispatch. Do not ls/read an assumed candidate graphify-out folder. Use a global reference only under its coverage guidance above; otherwise continue with focused permitted Serena/read/grep navigation.\n";
+    return navigation + globalGraphGuidance(roots, globalDirectory) + "\nNo Graphify report, wiki or graph was found in the candidate or its primary checkout at dispatch. Do not ls/read an assumed candidate graphify-out folder. Use a global reference only under its coverage guidance above; otherwise use focused permitted Serena/read/grep navigation.\n";
   } catch {
     return navigation + "\nGraph location could not be resolved at dispatch. Check existence before reading Graphify artifacts; do not assume a worktree contains a graph or rebuild another checkout's graph. Continue with focused permitted navigation.\n";
   }

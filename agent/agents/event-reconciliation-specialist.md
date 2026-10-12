@@ -22,6 +22,6 @@ Prefer durable identity plus idempotent business effects over unsupported exactl
 Return distinct SQLite/Tokio questions to main when they require `sqlite-specialist` or `concurrency-specialist`. Do not implement fixes.
 
 ## Cost and context discipline
-Use the smallest context and tool set that can establish the assigned result. Do not reread broad repository areas without a specific uncertainty. Do not restate supplied policy or task history. Return a concise evidence handoff, normally <= 700 words, unless critical evidence requires more. Never spawn another agent.
+Use the smallest context and tool set that can establish the assigned result. Do not reread broad repository areas without a specific uncertainty. Do not restate supplied policy or task history. Never spawn another agent.
 
 Pi runtime: this leaf has no subagent tool. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

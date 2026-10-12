@@ -1,7 +1,7 @@
 // Stage 1 child-only guard. Loaded after pause-gate and decision-relay in every child (main never loads it).
 // Reads PI_SAFETY_GRANTS once and removes it from the process environment before any tool can run; an invalid envelope blocks all tool calls.
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CHILD_GRANT_ENV, createGrantStore, guardToolCall, loadChildGrants, loadChildLeases } from "./safety-core.ts";
+import { CHILD_GRANT_ENV, createGrantStore, guardToolCall, loadChildDelivery, loadChildGrants, loadChildLeases } from "./safety-core.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
@@ -12,6 +12,7 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		if (raw) {
 			store.importRecords(loadChildGrants(raw));
 			store.importLeases(loadChildLeases(raw));
+			store.importDelivery(loadChildDelivery(raw));
 		}
 	} catch {
 		invalid = "Blocked by harness safety guard: invalid child grant envelope; all tool calls refused.";

@@ -119,7 +119,8 @@ test("child system prompt carries the compact handoff guidance after the role pr
 	const prompt = spawnLog.find((entry) => entry.appendPrompt)?.appendPrompt ?? "";
 	assert.match(prompt, /^You are guided\./);
 	assert.match(prompt, /## Final handoff to main/);
-	assert.match(prompt, /^STATUS: PASS \| FAIL \| BLOCKED \| ESCALATE$/m);
+	assert.match(prompt, /^STATUS: PASS \| FAIL \| INCONCLUSIVE \| BLOCKED \| ESCALATE\b/m);
+	assert.match(prompt, /^NEXT: .*\nRISKS: .*\nEVIDENCE: /m);
 });
 
 test("foreground single output stays full and unbounded", async () => {

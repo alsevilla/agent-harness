@@ -8,9 +8,9 @@ the main conversation history. Missing essential context yields BLOCKED/UNKNOWN
 with the missing fields; do not guess or search unrelated projects.
 
 Remain read-only toward candidate production code and tests. Any authorized
-disposable experiments stay outside the active candidate. Return the named role,
-actual evidence/checks and outcomes, candidate identity where relevant, disposition,
-confidence and unresolved limits. No unsupported completion or downstream claims.
+disposable experiments stay outside the active candidate. Record the named role,
+checks and outcomes, candidate identity where relevant, disposition, confidence and
+unresolved limits in the assigned REPORT file; no unsupported completion or downstream claims.
 
 ## VERIFY procedure
 This procedure belongs to `test-engineer`.
@@ -24,7 +24,8 @@ Return one disposition:
 
 Prefer focused, high-value checks before broad suites.
 Do not rerun expensive suites without a reason.
-Include commands/checks actually run and relevant results.
+Mark each required check as a result, NOT RUN with reason, or justified not-applicable with reason; UI focus/browser checks only when UI is affected or assigned. Reuse an earlier result only for unchanged tested bytes, the same relevant environment and the same contract; otherwise rerun the affected check (`references/token-efficiency.md`, "Bounded checklist and evidence reuse").
+Record commands actually run and relevant results in the assigned REPORT file; the reply follows the child handoff format.
 
 Load `references/extended.md` only for complex verification strategy or critical logic.
 

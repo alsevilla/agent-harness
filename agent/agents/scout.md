@@ -42,7 +42,7 @@ Do not perform opportunistic refactors.
 ---
 
 ## Focused work and evidence
-Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Do not claim unrun checks or source mutation. Normally stay within 700 words. Never spawn helpers.
+Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Do not claim unrun checks or source mutation. Never spawn helpers.
 Map entry points, dependencies/callers, existing patterns/tests, missing coverage and affected files. Answer where/what, not an unexplained defect diagnosis. Recommend another role only for a concrete unresolved question.
 
 For deeper domain questions, search headings in `~/.pi/agent/skills/engineering-harness/references/roles/scout.md` and read only the matching section. Routine packets need no extra reference read.

@@ -494,6 +494,11 @@ export interface GrantStore {
 	copyLeases(candidate: string): PushLease[];
 	importLeases(incoming: PushLease[]): void;
 	leaseCount(): number;
+	addDeliveryGrant(binding: DeliveryBinding): DeliveryGrant;
+	findDelivery(binding: DeliveryBinding): DeliveryGrant | undefined;
+	copyDelivery(candidate: string): DeliveryGrant[];
+	importDelivery(incoming: DeliveryGrant[]): void;
+	deliveryCount(): number;
 }
 
 function validateRecord(value: unknown): GrantRecord {
@@ -506,6 +511,7 @@ function validateRecord(value: unknown): GrantRecord {
 export function createGrantStore(now: () => number = () => Date.now()): GrantStore {
 	let records: GrantRecord[] = [];
 	let leases: PushLease[] = [];
+	let delivery: DeliveryGrant[] = [];
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
@@ -541,7 +547,10 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		},
 		revokeAll(includeLeases = false) {
 			records = [];
-			if (includeLeases) leases = [];
+			if (includeLeases) {
+				leases = [];
+				delivery = [];
+			}
 		},
 		mintLease({ candidate, pushUrl, branch }) {
 			if (!path.isAbsolute(candidate)) throw new TypeError("candidate must be absolute");
@@ -563,6 +572,33 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		leaseCount() {
 			return leases.length;
 		},
+		addDeliveryGrant(binding) {
+			const t = live();
+			const next = normalizeBinding(binding);
+			const existing = delivery.find((d) => sameBinding(d, next));
+			if (existing) return { ...existing };
+			if (delivery.length >= MAX_DELIVERY_GRANTS) throw new RangeError(`at most ${MAX_DELIVERY_GRANTS} live delivery grants`);
+			const record = { ...next, issuedAt: t };
+			delivery.push(record);
+			return { ...record };
+		},
+		findDelivery(binding) {
+			live();
+			const next = normalizeBinding(binding);
+			const found = delivery.find((d) => sameBinding(d, next));
+			return found ? { ...found } : undefined;
+		},
+		copyDelivery(candidate) {
+			live();
+			return delivery.filter((d) => normPath(d.candidate) === normPath(candidate) && artifactStillLive(d)).map((d) => ({ ...d }));
+		},
+		importDelivery(incoming) {
+			delivery.push(...incoming.map(validateDelivery));
+		},
+		deliveryCount() {
+			live();
+			return delivery.length;
+		},
 		size() {
 			return records.length;
 		},
@@ -571,8 +607,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
-export function serializeGrants(records: GrantRecord[], leases: PushLease[] = []): string {
-	return JSON.stringify(leases.length ? { v: 1, grants: records, leases } : { v: 1, grants: records });
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = []): string {
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { delivery } : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -616,9 +652,11 @@ function assertPushUrl(url: string): void {
 }
 
 // Fixed argv, no shell. Unset config (exit 1) is an empty list; any other failure or timeout is undefined, which callers treat as refusal.
+// Neutral cwd plus explicit -C: a bare git/gh run with the candidate as cwd can resolve a same-named binary from the candidate on Windows. PATH and global config stay trusted (documented, not an OS sandbox).
+const NEUTRAL_EXEC_CWD = path.parse(os.homedir()).root;
 function gitRead(cwd: string, args: string[]): string[] | undefined {
 	try {
-		return childProcess.execFileSync("git", args, { cwd, encoding: "utf8", timeout: PUSH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/).filter(Boolean);
+		return childProcess.execFileSync("git", ["-C", cwd, ...args], { cwd: NEUTRAL_EXEC_CWD, encoding: "utf8", timeout: PUSH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/).filter(Boolean);
 	} catch (error) {
 		return args[0] === "config" && (error as { status?: number }).status === 1 ? [] : undefined;
 	}
@@ -674,10 +712,312 @@ export function loadChildLeases(text: string): PushLease[] {
 	return parsed.leases.map((l) => validateLease(l));
 }
 
+// Release delivery (human-approved, reusable for the current PI session, like a push lease: no time expiry). Bound to candidate, origin push URL, repo, branch and base; release-engineer children only; non-consuming. Cleared by explicit revoke or session shutdown; abort keeps it.
+export const MAX_DELIVERY_GRANTS = 4;
+const GH_TIMEOUT_MS = 15_000;
+const DELIVERY_FILE_MAX = 65_536;
+const PLACEMENT = /^(?:[A-Za-z]:)?\/(?:.+\/)?worktrees\/[^/]+\/_(?:scratch|evidence)\/[^/]+(?:\/.+)?$/;
+const PATH_ARG = /^(?:[A-Za-z]:)?\/[A-Za-z0-9 _.,+()#\/-]+$/;
+const TEXT_ARG = /^[A-Za-z0-9 .,_\/#()+-]+$/;
+const BARE_REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
+const BARE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/;
+const BARE_NUM = /^[1-9][0-9]{0,8}$/;
+const BARE_SHA = /^[0-9a-f]{40}$/;
+const BARE_VERSION = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+const TEXT_LIMIT = { title: 120, subject: 120, body: 500 } as const;
+
+export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; pr?: number; version?: string; latest?: boolean; artifactDir?: string }
+export interface DeliveryGrant extends DeliveryBinding { issuedAt: number }
+// Live readers, injectable for offline tests. Production uses the real git/gh calls below.
+export interface DeliveryLive { env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number }
+
+// A record whose artifact directory vanished stays stored but is not copied to a child (the envelope would otherwise fail closed as a whole).
+function artifactStillLive(d: DeliveryGrant): boolean {
+	if (d.artifactDir === undefined) return true;
+	try { validateArtifactDir(d.artifactDir, d.candidate); return true; } catch { return false; }
+}
+
+function normPath(p: string): string {
+	return foldPath(p.replace(/\\/g, "/"));
+}
+
+// github.com origin forms only (https, scp-style ssh, ssh://git@). Credentials, other hosts, extra segments and dot-names refuse.
+export function parseRepoFromPushUrl(url: unknown): string | undefined {
+	const m = typeof url === "string" ? /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([^/]+?)(?:\.git)?$/.exec(url) : null;
+	if (!m || !/^[A-Za-z0-9._-]{1,100}$/.test(m[2]) || m[2].startsWith(".") || m[2].endsWith(".")) return undefined;
+	return `${m[1]}/${m[2]}`;
+}
+
+function baseBranchOk(name: unknown): name is string {
+	return typeof name === "string" && BARE_BRANCH.test(name) && !/\.\.|\/\/|[./]$|\/\.|\.lock(\/|$)/.test(name);
+}
+
+// Segments after the drive: no empty, dot, dot-dot, or trailing dot/space segment.
+function badSegments(p: string): boolean {
+	return p.replace(/^[A-Za-z]:/, "").split("/").slice(1).some((seg) => seg === "" || seg === "." || seg === ".." || /[. ]$/.test(seg));
+}
+
+// Trusted artifact directory: ASCII absolute forward-slash placement under <worktrees>/<repo>/_scratch|_evidence/<task>, existing, canonical (no alias/link), and not overlapping the candidate.
+export function validateArtifactDir(input: string, candidate: string): string {
+	// shortcut: any ~<digit> segment refuses as a possible 8.3 alias (may over-block a literal ~1 name), upgrade to native alias resolution when realpath can settle it.
+	if (typeof input === "string" && input.split("/").some((seg) => /~\d/.test(seg))) throw new RangeError("artifact directory is an alias or link (8.3 short name)");
+	if (typeof input !== "string" || !/^[\x20-\x7e]+$/.test(input) || input.includes("\\") || !PLACEMENT.test(input) || badSegments(input)) throw new RangeError("artifact directory must be an ASCII absolute forward-slash path under worktrees/<repo>/_scratch or _evidence");
+	let stat: fs.Stats;
+	try { stat = fs.statSync(input); } catch { throw new RangeError("artifact directory does not exist"); }
+	if (!stat.isDirectory()) throw new RangeError("artifact directory is not a directory");
+	if (normPath(fs.realpathSync.native(input)) !== normPath(input)) throw new RangeError("artifact directory is an alias or link");
+	const cand = normPath(canonicalCwd(candidate));
+	const dir = normPath(input);
+	if (dir === cand || dir.startsWith(`${cand}/`) || cand.startsWith(`${dir}/`)) throw new RangeError("artifact directory overlaps the candidate");
+	return input;
+}
+
+// One file per use, read by gh from the approved directory. Returns the violated rule name only, or undefined when the file is allowed.
+export function checkArtifactFile(file: string, artifactDir: string): string | undefined {
+	if (typeof file !== "string" || !PATH_ARG.test(file) || badSegments(file)) return "path";
+	if (!normPath(file).startsWith(`${normPath(artifactDir)}/`)) return "outside the approved artifact directory";
+	if (!/\.(md|txt)$/i.test(file)) return "extension";
+	let stat: fs.Stats;
+	try { stat = fs.lstatSync(file); } catch { return "missing"; }
+	if (!stat.isFile()) return "not a regular file";
+	if (stat.nlink !== 1) return "hard link";
+	if (stat.size < 1 || stat.size > DELIVERY_FILE_MAX) return "size";
+	if (normPath(fs.realpathSync.native(file)) !== normPath(file)) return "alias or link escape";
+	const bytes = fs.readFileSync(file);
+	if (bytes.length < 1 || bytes.length > DELIVERY_FILE_MAX) return "size";
+	if (bytes.includes(0)) return "NUL byte";
+	if (CREDENTIAL_TEXT.test(bytes.toString("utf8"))) return "credential-like text";
+	return undefined;
+}
+
+function normalizeBinding(input: unknown): DeliveryBinding {
+	const b = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+	if (b.role !== LEASE_ROLE) throw new RangeError("delivery is for release-engineer children only");
+	if (typeof b.candidate !== "string" || !path.isAbsolute(b.candidate)) throw new TypeError("candidate must be absolute");
+	const candidate = canonicalCwd(b.candidate);
+	assertPushUrl(b.pushUrl as string);
+	const repo = parseRepoFromPushUrl(b.pushUrl);
+	if (repo === undefined || b.repo !== repo) throw new RangeError("repo must derive from the github.com origin push URL");
+	const branch = validatePushBranch(b.branch as string);
+	if (!baseBranchOk(b.base) || b.base === branch) throw new RangeError("base must be a branch name different from the feature branch");
+	const out: DeliveryBinding = { role: LEASE_ROLE, candidate, pushUrl: b.pushUrl as string, repo, branch, base: b.base };
+	if (b.pr !== undefined) {
+		if (!Number.isSafeInteger(b.pr) || (b.pr as number) < 1 || (b.pr as number) > 999999999) throw new RangeError("PR number is invalid");
+		out.pr = b.pr as number;
+	}
+	if (b.version !== undefined) {
+		if (typeof b.version !== "string" || !BARE_VERSION.test(b.version)) throw new RangeError("version must be a release tag such as v1.2.3");
+		out.version = b.version;
+	}
+	if (b.latest !== undefined && b.latest !== false) {
+		if (b.latest !== true || out.version === undefined) throw new RangeError("latest requires an approved version");
+		out.latest = true;
+	}
+	if (b.artifactDir !== undefined) out.artifactDir = validateArtifactDir(b.artifactDir as string, candidate);
+	return out;
+}
+
+// An old 30-minute record (expiresAt or TTL present) is refused, never reread as forever; the feature was not activated, so no such record exists in practice.
+function validateDelivery(value: unknown): DeliveryGrant {
+	const d = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+	if ("expiresAt" in d || "ttl" in d || "ttlMs" in d) throw new RangeError("delivery records are session-scoped; expiresAt or TTL is unsupported");
+	const binding = normalizeBinding(value);
+	if (typeof d.issuedAt !== "number" || !Number.isFinite(d.issuedAt)) throw new RangeError("delivery issuedAt must be a finite session time");
+	return { ...binding, issuedAt: d.issuedAt };
+}
+
+function sameBinding(a: DeliveryBinding, b: DeliveryBinding): boolean {
+	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.pr === b.pr && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
+}
+
+export function loadChildDelivery(text: string): DeliveryGrant[] {
+	const parsed = JSON.parse(text) as { v?: number; delivery?: unknown };
+	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
+	if (parsed.delivery === undefined) return [];
+	if (!Array.isArray(parsed.delivery)) throw new TypeError("invalid delivery list");
+	return parsed.delivery.map(validateDelivery);
+}
+
+interface Tok { text: string; quoted: string }
+
+// Single spaces between tokens, ASCII only; a token is double-quoted, single-quoted or bare (no spaces or quotes). Any other shape is not a delivery command.
+function tokenizeDelivery(command: string): Tok[] | undefined {
+	if (typeof command !== "string" || /[^\x20-\x7e]/.test(command)) return undefined;
+	const re = /"([^"]*)"|'([^']*)'|([^ "']+)/y;
+	const out: Tok[] = [];
+	let i = 0;
+	while (i < command.length) {
+		re.lastIndex = i;
+		const m = re.exec(command);
+		if (!m) return undefined;
+		out.push(m[1] !== undefined ? { text: m[1], quoted: '"' } : m[2] !== undefined ? { text: m[2], quoted: "'" } : { text: m[3], quoted: "" });
+		i = re.lastIndex;
+		if (i < command.length) {
+			if (command[i] !== " ") return undefined;
+			i++;
+			if (i >= command.length) return undefined;
+		}
+	}
+	return out;
+}
+
+type ArgKind = "none" | "repo" | "branch" | "sha" | "path" | "title" | "subject" | "body";
+
+function textValue(tok: Tok, max: number): string | undefined {
+	if (tok.quoted === "" || tok.text.length < 1 || tok.text.length > max || !TEXT_ARG.test(tok.text) || CREDENTIAL_TEXT.test(tok.text)) return undefined;
+	return tok.text;
+}
+
+function argValue(kind: Exclude<ArgKind, "none">, tok: Tok): string | undefined {
+	switch (kind) {
+		case "repo": return tok.quoted === "" && BARE_REPO.test(tok.text) ? tok.text : undefined;
+		case "branch": return tok.quoted === "" && baseBranchOk(tok.text) ? tok.text : undefined;
+		case "sha": return tok.quoted === "" && BARE_SHA.test(tok.text) ? tok.text : undefined;
+		case "path": return tok.quoted === '"' && tok.text.length <= 240 && PATH_ARG.test(tok.text) ? tok.text : undefined;
+		default: return textValue(tok, TEXT_LIMIT[kind]);
+	}
+}
+
+// Each flag at most once, only flags in spec, values typed by kind; order is free.
+function readOptions(tokens: Tok[], spec: Record<string, ArgKind>): Record<string, string | true> | undefined {
+	const out: Record<string, string | true> = {};
+	for (let i = 0; i < tokens.length; i++) {
+		const flag = tokens[i];
+		if (flag.quoted !== "" || !Object.hasOwn(spec, flag.text) || Object.hasOwn(out, flag.text)) return undefined;
+		const kind = spec[flag.text];
+		if (kind === "none") {
+			out[flag.text] = true;
+			continue;
+		}
+		const value = tokens[++i];
+		const parsed = value ? argValue(kind, value) : undefined;
+		if (parsed === undefined) return undefined;
+		out[flag.text] = parsed;
+	}
+	return out;
+}
+
+export type DeliveryCommand =
+	| { kind: "create"; repo: string; base: string; head: string; title: string; body?: string; bodyFile?: string }
+	| { kind: "edit"; pr: number; repo: string; title?: string; body?: string; bodyFile?: string }
+	| { kind: "merge"; pr: number; repo: string; sha: string; subject?: string; body?: string; bodyFile?: string }
+	| { kind: "release"; tag: string; repo: string; target: string; title: string; notes?: string; notesFile?: string; generate: boolean; latest: boolean };
+
+// Exactly the five approved gh forms (PR create/edit/merge, release create); anything else, including compounds, returns undefined.
+export function parseDeliveryCommand(command: string): DeliveryCommand | undefined {
+	const t = tokenizeDelivery(command);
+	if (!t) return undefined;
+	const w = (i: number) => (t[i] && t[i].quoted === "" ? t[i].text : undefined);
+	const s = (o: Record<string, string | true>, k: string) => (typeof o[k] === "string" ? (o[k] as string) : undefined);
+	if (w(0) !== "gh") return undefined;
+	if (w(1) === "pr" && w(2) === "create") {
+		const o = readOptions(t.slice(3), { "--repo": "repo", "--base": "branch", "--head": "branch", "--title": "title", "--body": "body", "--body-file": "path" });
+		if (!o) return undefined;
+		const repo = s(o, "--repo"), base = s(o, "--base"), head = s(o, "--head"), title = s(o, "--title"), body = s(o, "--body"), bodyFile = s(o, "--body-file");
+		if (!repo || !base || !head || !title || (body === undefined) === (bodyFile === undefined)) return undefined;
+		return { kind: "create", repo, base, head, title, body, bodyFile };
+	}
+	if (w(1) === "pr" && (w(2) === "edit" || w(2) === "merge")) {
+		const num = w(3);
+		if (!num || !BARE_NUM.test(num)) return undefined;
+		if (w(2) === "edit") {
+			const o = readOptions(t.slice(4), { "--repo": "repo", "--title": "title", "--body": "body", "--body-file": "path" });
+			if (!o) return undefined;
+			const repo = s(o, "--repo"), title = s(o, "--title"), body = s(o, "--body"), bodyFile = s(o, "--body-file");
+			if (!repo || (title === undefined && body === undefined && bodyFile === undefined) || (body !== undefined && bodyFile !== undefined)) return undefined;
+			return { kind: "edit", pr: Number(num), repo, title, body, bodyFile };
+		}
+		const o = readOptions(t.slice(4), { "--repo": "repo", "--squash": "none", "--match-head-commit": "sha", "--subject": "subject", "--body": "body", "--body-file": "path" });
+		if (!o) return undefined;
+		const repo = s(o, "--repo"), sha = s(o, "--match-head-commit"), subject = s(o, "--subject"), body = s(o, "--body"), bodyFile = s(o, "--body-file");
+		if (!repo || !sha || o["--squash"] !== true || (body !== undefined && bodyFile !== undefined)) return undefined;
+		return { kind: "merge", pr: Number(num), repo, sha, subject, body, bodyFile };
+	}
+	if (w(1) === "release" && w(2) === "create") {
+		const tag = w(3);
+		if (!tag || !BARE_VERSION.test(tag)) return undefined;
+		const o = readOptions(t.slice(4), { "--repo": "repo", "--target": "sha", "--title": "title", "--notes": "body", "--notes-file": "path", "--generate-notes": "none", "--latest": "none" });
+		if (!o) return undefined;
+		const repo = s(o, "--repo"), target = s(o, "--target"), title = s(o, "--title"), notes = s(o, "--notes"), notesFile = s(o, "--notes-file"), generate = o["--generate-notes"] === true;
+		if (!repo || !target || !title || [notes !== undefined, notesFile !== undefined, generate].filter(Boolean).length !== 1) return undefined;
+		return { kind: "release", tag, repo, target, title, notes, notesFile, generate, latest: o["--latest"] === true };
+	}
+	return undefined;
+}
+
+function prView(pr: number, g: DeliveryGrant, live: DeliveryLive): Record<string, unknown> | undefined {
+	const view = live.ghJson(["pr", "view", String(pr), "--repo", g.repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository"]);
+	return view && typeof view === "object" ? (view as Record<string, unknown>) : undefined;
+}
+
+function openOwned(view: Record<string, unknown> | undefined, g: DeliveryGrant): boolean {
+	return view !== undefined && view.state === "OPEN" && view.baseRefName === g.base && view.headRefName === g.branch && view.isCrossRepository === false;
+}
+
+// One grant against one command. Any mismatch or read problem is false; the caller treats false as refusal.
+function matchDelivery(g: DeliveryGrant, push: { branch: string } | undefined, c: DeliveryCommand | undefined, live: DeliveryLive): boolean {
+	if (live.pushUrl(g.candidate, g.branch) !== g.pushUrl) return false;
+	if (push) return push.branch === g.branch;
+	if (!c || c.repo !== g.repo) return false;
+	const fileOk = (file?: string) => file === undefined || (g.artifactDir !== undefined && checkArtifactFile(file, g.artifactDir) === undefined);
+	switch (c.kind) {
+		case "create":
+			return g.pr === undefined && c.base === g.base && c.head === g.branch && fileOk(c.bodyFile);
+		case "edit":
+			return (g.pr === undefined || c.pr === g.pr) && openOwned(prView(c.pr, g, live), g) && fileOk(c.bodyFile);
+		case "merge": {
+			const view = (g.pr === undefined || c.pr === g.pr) ? prView(c.pr, g, live) : undefined;
+			return openOwned(view, g) && view?.headRefOid === c.sha && fileOk(c.bodyFile);
+		}
+		case "release": {
+			if (g.version !== c.tag || (c.latest && g.latest !== true) || !fileOk(c.notesFile)) return false;
+			if (live.tagStatus(g.pushUrl, c.tag) !== 2) return false;
+			const merged = live.ghJson(["pr", "list", "--repo", g.repo, "--head", g.branch, "--base", g.base, "--state", "merged", "--json", "number,mergeCommit,mergedAt,isCrossRepository,headRefName,baseRefName", "--limit", "20"]);
+			if (!Array.isArray(merged) || merged.some((m) => !m || typeof m !== "object")) return false;
+			// Exactly one live merged PR that matches this approved target, head, base and non-fork; unrelated older entries do not count.
+			const matches = (merged as Record<string, any>[]).filter((pr) => pr.mergeCommit?.oid === c.target && pr.isCrossRepository === false && pr.headRefName === g.branch && pr.baseRefName === g.base);
+			if (matches.length !== 1) return false;
+			const pr = matches[0];
+			return g.pr !== undefined ? pr.number === g.pr : Date.parse(String(pr.mergedAt)) >= g.issuedAt;
+		}
+	}
+}
+
+function defaultDeliveryLive(liveUrl: (candidate: string, branch: string) => string | undefined): DeliveryLive {
+	return {
+		env: () => process.env,
+		pushUrl: liveUrl,
+		ghJson: (args) => JSON.parse(childProcess.execFileSync("gh", args, { cwd: NEUTRAL_EXEC_CWD, encoding: "utf8", timeout: GH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, GH_PROMPT_DISABLED: "1" } })),
+		tagStatus: (pushUrl, tag) => {
+			const run = childProcess.spawnSync("git", ["ls-remote", "--exit-code", "--tags", pushUrl, `refs/tags/${tag}`], { cwd: NEUTRAL_EXEC_CWD, encoding: "utf8", timeout: GH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+			return run.error || run.signal || run.status === null ? -1 : run.status;
+		},
+	};
+}
+
+// Child release-engineer delivery: exact push or gh form, only GIT_PUBLISH, no GH_HOST/GH_REPO. Non-consuming; each grant re-checked live.
+function deliveryAllows(store: GrantStore, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive): boolean {
+	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const push = parseNormalPush(decision.op.command);
+	const cmd = push ? undefined : parseDeliveryCommand(decision.op.command);
+	if (!push && !cmd) return false;
+	try {
+		const env = live.env();
+		if (env.GH_HOST !== undefined || env.GH_REPO !== undefined) return false;
+		for (const grant of store.copyDelivery(decision.op.cwd)) {
+			try { if (matchDelivery(grant, push, cmd, live)) return true; } catch { /* a read problem refuses this grant only */ }
+		}
+	} catch {
+		return false;
+	}
+	return false;
+}
+
 export interface ChildGuardLaunch {
 	entry: string;
 	grantCount: number;
 	leaseCount: number;
+	deliveryCount: number;
 	childEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 }
 
@@ -692,11 +1032,14 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
 	// Lease copies are non-consuming: every legitimate release-engineer spawn of this candidate gets them, including fallback and later spawns.
 	const leases = withLeases && role === LEASE_ROLE ? store.copyLeases(canonicalCwd(candidate)) : [];
-	const value = claimed.length || leases.length ? serializeGrants(claimed, leases) : undefined;
+	// Delivery copies follow the lease rule: non-consuming, release-engineer only, same absolute expiry for every spawn of this candidate.
+	const delivery = withLeases && role === LEASE_ROLE ? store.copyDelivery(canonicalCwd(candidate)) : [];
+	const value = claimed.length || leases.length || delivery.length ? serializeGrants(claimed, leases, delivery) : undefined;
 	return {
 		entry: guardFile,
 		grantCount: claimed.length,
 		leaseCount: leases.length,
+		deliveryCount: delivery.length,
 		childEnv(base) {
 			const env: NodeJS.ProcessEnv = { ...base };
 			delete env[CHILD_GRANT_ENV];
@@ -722,11 +1065,12 @@ function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "bl
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir);
 	if (decision.action === "allow") return undefined;
 	if (decision.grantable && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
 	if (guard.scope === "child" && leasedPush(guard.store, decision, liveUrl)) return undefined;
+	if (guard.scope === "child" && deliveryAllows(guard.store, decision, guard.live ?? defaultDeliveryLive(liveUrl))) return undefined;
 	const how = decision.grantable ? "needs exact operator authorization via request_authorization" : "not grantable to a model: use the operator out-of-band";
 	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}.` };
 }

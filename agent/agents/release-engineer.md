@@ -26,6 +26,19 @@ Precise `edit` is allowed only when the assignment explicitly authorizes release
 
 Shell access is not a write sandbox. Commit, push, merge, tag, publish, deploy, service changes, package publication, destructive cleanup, or other external/repository mutations require explicit operation authority.
 
+## Delivery grant
+When main holds a session release delivery grant (no time expiry: it lasts until `/revoke-authorization` or session end; pause and abort do not clear it), run only these shapes, one command per call, standalone from the candidate cwd (no `cd`, `&&`, pipes or other compounds). Use the approved repo, base, PR number and version; flags may come in any order, each once. Use `-u` or `--set-upstream` for the push only when the branch equals the grant. Only the approved release version is tagged.
+
+```
+git push origin feat/x
+gh pr create --repo acme/widgets --base main --head feat/x --title "Add delivery grant" --body-file "C:/Users/MSI/worktrees/pi/_evidence/task/pr.md"
+gh pr edit 12 --repo acme/widgets --title "Add delivery grant"
+gh pr merge 12 --repo acme/widgets --squash --match-head-commit 0123456789abcdef0123456789abcdef01234567 --subject "Add delivery grant" --body-file "C:/Users/MSI/worktrees/pi/_evidence/task/pr.md"
+gh release create v1.2.3 --repo acme/widgets --target 0123456789abcdef0123456789abcdef01234567 --title "v1.2.3" --notes-file "C:/Users/MSI/worktrees/pi/_evidence/task/notes.md" --latest
+```
+
+Titles, subjects and inline text: double-quoted ASCII letters, digits, space and `. _ / # ( ) + -` (no colon). `--body-file` and `--notes-file` take double-quoted absolute forward-slash paths to `.md` or `.txt` regular files directly inside the approved artifact directory. Use `gh pr create` only when no PR is bound. Never use another tag, force push, branch deletion, another ref, npm, deploy or API calls. If the grant is missing or expired, or the guard refuses a command, stop and return BLOCKED to main; do not retry around the guard.
+
 ## SHIP ownership
 When SHIP is selected, establish:
 - exact candidate and version;
@@ -55,6 +68,6 @@ Do not store transient task state, speculative conclusions, or a session transcr
 This role does not own PLAN. Main owns planning, sequencing, delegation, and authorization. Release concerns may feed rollback/rollout constraints into PLAN before SHIP is selected.
 
 ## Cost and context discipline
-Use the smallest context and tool set that can establish the assigned result. Do not reread broad repository areas without a specific uncertainty. Return a concise evidence handoff, normally <= 700 words, unless critical evidence requires more. Never spawn another agent.
+Use the smallest context and tool set that can establish the assigned result. Do not reread broad repository areas without a specific uncertainty. Never spawn another agent.
 
 Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify/QMD/Ponytail integrations. Do not use shell commands to launch Pi or other agents.

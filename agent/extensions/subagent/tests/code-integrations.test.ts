@@ -9,7 +9,7 @@ let agentDir = fileURLToPath(new URL("../../../", import.meta.url));
 mock.module("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => agentDir,
 }));
-const { configureCodeIntegrations, CODE_NAVIGATION_GUIDANCE, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
+const { configureCodeIntegrations, CODE_NAVIGATION_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
 const config = JSON.parse(fs.readFileSync(new URL("../integrations.json", import.meta.url), "utf8"));
 const unsafeMutations = [
   "serena_replace_symbol_body", "serena_insert_before_symbol", "serena_insert_after_symbol",
@@ -268,4 +268,66 @@ test("non-configured role keeps its explicit allowlist and grants unfiltered", (
   const args: string[] = [];
   assert.equal(configureCodeIntegrations(args, { ...role("general-worker"), name: "not-configured", tools: ["read", "serena_find_symbol"] }, ["request_decision"]), false);
   assert.deepEqual(args, ["--tools", "read,serena_find_symbol,request_decision"]);
+});
+
+// Characterization (GREEN before and after): critical rules stay unconditional for every role, whatever the role text.
+test("shared guidance keeps shell, Rust build and artifact rules unconditional for every role", () => {
+  assert.match(CODE_NAVIGATION_GUIDANCE, /export NAME='value'/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /\$env:NAME, \$LASTEXITCODE/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /Never submit it to bash/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /CARGO_TARGET_DIR/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /CARGO_INCREMENTAL=0/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /do not delete the shared one/i);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /locks its file and breaks later builds/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /If CARGO_TARGET_DIR is unset/);
+});
+test("shared code-leaf guidance keeps Ponytail, QMD and missing-graph authority limits", () => {
+  assert.match(CODE_NAVIGATION_GUIDANCE, /never overrides user requirements, candidate boundaries, required checks or delegation policy/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /Do not reload its base skill/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /Missing graphs never authorize a fresh graph build/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /only when qmd_search is in your tool list/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /Do not initialize\/update/);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /read-only roles must not build\/update graphs/i);
+  assert.match(CODE_NAVIGATION_GUIDANCE, /do not authorize nested agents/);
+});
+test("graph reference keeps candidate scope, no automatic fallback and read-only limits in both launch shapes", () => {
+  const root = fs.mkdtempSync(join(tmpdir(), "graph-guidance-"));
+  try {
+    const candidate = join(root, "candidate");
+    const globalDir = join(root, "global");
+    fs.mkdirSync(join(candidate, ".git"), { recursive: true });
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(join(globalDir, "global-graph.json"), "{}");
+    const none = graphReferenceGuidance(candidate, globalDir);
+    assert.ok(none.includes(candidate), "candidate root must be named for Serena calls");
+    assert.match(none, /activate the primary checkout/);
+    assert.match(none, /No Graphify report/);
+    assert.match(none, /Do not ls\/read an assumed candidate graphify-out folder/);
+    assert.match(none, /coverage is not established/);
+    assert.match(none, /automatic fallback/);
+    assert.match(none, /candidate source evidence/);
+    assert.match(none, /Do not load the (entire|whole) global JSON/);
+    assert.match(none, /rebuild\/merge\/update it to repair a missing candidate folder/);
+    fs.mkdirSync(join(candidate, "graphify-out"), { recursive: true });
+    fs.writeFileSync(join(candidate, "graphify-out", "graph.json"), "{}");
+    const graph = graphReferenceGuidance(candidate, globalDir);
+    assert.ok(graph.includes(join(candidate, "graphify-out", "graph.json")), "listed artifact must be its absolute path");
+    assert.match(graph, /Use these absolute paths directly/);
+    assert.match(graph, /Never change the candidate cwd\/project/);
+    assert.match(graph, /Verify symbols and changed behavior against the candidate checkout/);
+    assert.match(graph, /graph reference access does not widen write authority/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("graph reference pins the QMD prior-evidence verification contract", () => {
+  const root = fs.mkdtempSync(join(tmpdir(), "qmd-contract-"));
+  try {
+    const candidate = join(root, "candidate");
+    fs.mkdirSync(join(candidate, ".git"), { recursive: true });
+    assert.match(graphReferenceGuidance(candidate, join(root, "global")), /Treat retrieved notes as prior evidence; verify current files\/requirements in the candidate\./);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

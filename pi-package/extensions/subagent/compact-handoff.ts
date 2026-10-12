@@ -5,17 +5,16 @@
  */
 export const COMPACT_HANDOFF_INSTRUCTIONS = `
 ## Final handoff to main
-Return a compact evidence-based report, normally 150-250 tokens, using:
-STATUS: PASS | FAIL | BLOCKED | ESCALATE
-SUMMARY: concrete outcome (1-2 sentences)
-FILES: paths changed, or none
-CHECKS: commands and actual results; say NOT RUN if applicable
-RISKS: remaining risks/warnings, or none
+Return a compact evidence-based final reply: normally four lines (not a strict cap), one line per field:
+STATUS: PASS | FAIL | INCONCLUSIVE | BLOCKED | ESCALATE, then one sentence of outcome; name each failed or required NOT RUN check in STATUS
 NEXT: done, or one justified next action
-EVIDENCE: existing exact path(s), or none
+RISKS: material blockers, limits and unknowns for the assigned contract, or none
+EVIDENCE: one primary absolute path to your assigned REPORT when it exists, otherwise existing exact path(s), or none
+Full detail goes to the assigned REPORT file, not the reply: hashes, counts, manifests and logs, changed files, commands with exit codes, candidate identity, complete warnings. Name the file; do not paste its contents, whole logs, stack traces or diffs unless they are the evidence itself.
+Verdicts: a required check not run is INCONCLUSIVE; an actual failure is FAIL. A check outside your assignment (for example browser or live behavior not assigned) is NOT ASSESSED: name it in RISKS only when material to interpreting the result. It does not lower an automated-only PASS and creates no approval gate.
+This format takes precedence over any longer "Return:" list or word limit in your role prompt; that list belongs in the REPORT file.
 This is guidance only: full details requested by the user or needed for correctness take precedence.
-Do not paste whole logs, stack traces, or diffs unless they are the evidence itself.
-Do not conceal failed checks, security/data risks, blockers, or unresolved questions.
+Do not conceal failed checks, security/data risks, blockers, or unresolved questions. Material UNKNOWN, security and data risks stay explicit even when they exceed the size budget.
 Only claim PASS when the assigned scope and its required checks passed; an exit code of 0 alone is not PASS.
 The main orchestrator owns delegations, approvals, and phase routing.
 `;
