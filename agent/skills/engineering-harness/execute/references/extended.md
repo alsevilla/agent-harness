@@ -41,6 +41,7 @@ Once READY FOR EXECUTION is established:
 - backend source mutation routes to `backend-worker`;
 - frontend source mutation routes to `frontend-worker`;
 - general (tooling, CLI, extension, script, docs, config) mutation routes to `general-worker`;
+- infrastructure and GitHub Actions workflow file mutation (Terraform, Kubernetes, Helm, Azure CLI, FluxCD, `.github/workflows`) routes to `platform-worker` (editing only; no run, deploy or publish);
 - cross-stack work uses explicit non-overlapping ownership;
 - specialist analysis runs first when a material unresolved domain decision
   requires it.

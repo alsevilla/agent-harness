@@ -42,6 +42,8 @@ Determine the actual target environment before recommending platform-specific co
 
 ---
 
+**Platform handoff:** accepted infrastructure file changes (Terraform, Kubernetes, Helm, Azure CLI, FluxCD) go to `platform-worker` for editing; this role stays read-only and never applies them.
+
 ## Focused work and evidence
 Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Do not claim unrun checks or source mutation.
 Identify the target OS and service/deployment contract. Check shutdown/restart, permissions/secrets, storage/backups, upgrade/rollback and health evidence relevant to the assignment; never execute deployments or claim operational procedures were tested without evidence.

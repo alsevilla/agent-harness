@@ -5,15 +5,15 @@
 An independent, unofficial harness profile for [Pi](https://github.com/earendil-works/pi), the minimal extensible coding agent by Mario Zechner. It is not an official Pi project and is not endorsed by its authors.
 
 - Tested baseline: Pi 1.1.0 on Windows with Node 24.20.0 (targeted checks; see [Status and limits](#status-and-limits)).
-- Source release: v1.5.0.
+- Source release: v1.5.1.
 - The native Pi package `@alsevilla/pi-engineering-harness` (root `package.json`) is not published to npm. Install it with `pi install git:github.com/alsevilla/pi-agent-harness` as described in [Quickstart](#quickstart) and [Install](#install); a local checkout is an optional development alternative. The retired pi-package build and manual profile copies are no longer the install path.
 
 ## What it does
 
 The profile provides:
 
-- 18 named agent roles with explicit models, thinking levels and delegation boundaries (`agent/agents/`, `agent/roles.json`), including a scoped release engineer. Domain-specific roles belong to each project, not this generic profile. The native package exposes these 18 generic roles.
-- Engineering, frontend and backend skills, loaded selectively (`agent/skills/`).
+- 19 named agent roles with explicit models, thinking levels and delegation boundaries (`agent/agents/`, `agent/roles.json`), including a scoped release engineer and a platform-worker for accepted Terraform, Kubernetes, Helm, Azure CLI, FluxCD and GitHub Actions workflow file changes (editing only; it never triggers runs, publishes or deploys). It also wires CI gates for Snyk, SonarQube and Prisma Cloud (Prisma Cloud, not Prisma ORM) and implements approved Grafana or Kiali provisioning; policy and gate thresholds come from the repository or user, and `security-specialist` advises on vulnerability, IAM and compliance policy. Domain-specific roles belong to each project, not this generic profile. The native package exposes these 19 generic roles.
+- Two native skills (`engineering-harness`, `agent-creation`). The backend, frontend, browser and graphify catalogs under `agent/skills/` are optional: Pi discovers them when `agent/` is your agent directory, and otherwise you load one by path ([optional skill catalogs](#optional-skill-catalogs)).
 - A subagent extension ([details](agent/extensions/subagent/README.md)): DAG launches of up to 8 nodes (at most 4 running at once); a process-local workspace admission queue; background jobs with steering, pause, resume and cancel, plus a live inspector; compact handoff reports (background completion notices are capped at 4,000 characters; `subagent_control` `result` returns the full retained report while the job is among the last 64 finished); completed workers stay inspectable in history; and a provider cooldown shared across the whole Pi host session (not only subagent children) for Anthropic and OpenAI Codex HTTP calls.
 - `/subagent roles`, which edits one role's primary model, fallbacks and thinking level through native dialogs.
 - Optional read-only Serena, Graphify and QMD integrations for code workers ([setup](#code-navigation-setup-optional)). Core orchestration works without them. Code roles listed in `agent/extensions/subagent/integrations.json` use integrations: Ponytail is required for every listed role except `reviewer` (optional there), and QMD, Serena and Graphify are optional, so a missing one is skipped with a launch note instead of blocking the launch.
@@ -109,7 +109,7 @@ The `/refresh` rows apply only when the optional `agent/extensions/refresh` comp
 | `/provider-cooldown` | Shows the provider cooldown state, or refreshes one provider's auth after you re-authenticate. | [subagent README](agent/extensions/subagent/README.md) |
 | `/engineering-harness`, `/agent-creation` | Bare aliases that queue the native `/skill:engineering-harness` or `/skill:agent-creation` command with your arguments. They create nothing. If another command owns the name, the alias is disabled and the `/skill:` form still works. | [subagent README](agent/extensions/subagent/README.md) |
 
-Other native features: `ask_user` is a tool for asking you a question with Pi's native dialogs (see [Interactive user questions](#interactive-user-questions-ask_user)). Browser and Graphify guidance are skills (see [Canonical browser and graph skills](#canonical-browser-and-graph-skills)).
+Other native features: `ask_user` is a tool for asking you a question with Pi's native dialogs (see [Interactive user questions](#interactive-user-questions-ask_user)). Browser and Graphify guidance are optional skill catalogs (see [Optional skill catalogs](#optional-skill-catalogs)).
 
 ## Documentation
 
@@ -131,7 +131,7 @@ Human-facing guides, grouped by purpose:
 - [Commands](#commands) (this README).
 - [Subagent README](agent/extensions/subagent/README.md): limits, controls, history and safety guard.
 - [Validation record](agent/VALIDATION.md): historical October 7, 2026 regression pass.
-- Skills: [engineering-harness](agent/skills/engineering-harness/SKILL.md), plus the frontend, backend, [browser](agent/skills/browser/SKILL.md) and [graphify](agent/skills/graphify/SKILL.md) catalogs under `agent/skills/` (repository files; the native package exports only the two skills listed in [Install](#install)).
+- Skills: [engineering-harness](agent/skills/engineering-harness/SKILL.md) and [agent-creation](agent/skills/agent-creation/SKILL.md) are native exports. The backend, frontend, [browser](agent/skills/browser/SKILL.md) and [graphify](agent/skills/graphify/SKILL.md) catalogs under `agent/skills/` are optional ([setup](#optional-skill-catalogs)); they are not exported by the native package.
 - [docs/knowledge](docs/knowledge/README.md): Pi-specific decision and knowledge records.
 
 **Explanation**
@@ -216,7 +216,7 @@ Pi treats a `git:` source as a Git package: it clones the repository and reconci
 pi install C:/path/to/pi-agent-harness
 ```
 
-Use an absolute path for a local checkout. The install, remove and update commands in this section are standard Pi commands from Pi's package documentation (`docs/packages.md`, `docs/cli.md`); they were not executed in this verification. The package declares three extensions (`agent/extensions/subagent`, `agent/extensions/ask-user`, `agent/extensions/external-compaction`) and two skills (`agent/skills/engineering-harness`, `agent/skills/agent-creation`). The 18 generic roles are read from `agent/roles.json` and `agent/agents/`. `engineering-environment`, `qmd` and `refresh` are not in the default exports: they stay in the repository, and the sections below that describe them apply only if you load them separately.
+Use an absolute path for a local checkout. The install, remove and update commands in this section are standard Pi commands from Pi's package documentation (`docs/packages.md`, `docs/cli.md`); they were not executed in this verification. The package declares three extensions (`agent/extensions/subagent`, `agent/extensions/ask-user`, `agent/extensions/external-compaction`) and two skills (`agent/skills/engineering-harness`, `agent/skills/agent-creation`). The 19 generic roles are read from `agent/roles.json` and `agent/agents/`. `engineering-environment`, `qmd` and `refresh` are not in the default exports: they stay in the repository, and the sections below that describe them apply only if you load them separately.
 
 Host Pi packages (`@earendil-works/*`, `typebox`) are `peerDependencies` supplied by Pi, not bundled. Restart Pi after installing. `/subagent roles` should then list the bundled roles; this live check is not part of the repository tests.
 
@@ -262,11 +262,68 @@ Main loads the harness once per session, reuses available guidance across tasks 
 
 Implementation workers use precise `edit` with read-only Serena navigation; bulk `write` and Serena mutation tools are excluded. Workers report RED and GREEN commands and results for meaningful behavior, or an explained exception with replacement evidence. These are prompt requirements; the runtime does not enforce test-first order. Review checks that evidence without duplicating worker implementation. Scout, DevOps and UI/UX retain short role contracts with optional topic references. Applying a harness upgrade follows the [upgrade checklist](agent/skills/engineering-harness/references/upgrade-checklist.md).
 
-## Canonical browser and graph skills
+## Optional skill catalogs
 
-The native package exports exactly two skills: `engineering-harness` and `agent-creation`. The frontend, backend, browser and graphify catalogs under `agent/skills/` are repository files that the harness references; the native package does not export them as skills. Frontend and backend modules remain references, with SolidJS guards around cross-framework examples; do not delete useful framework-independent design modules merely because some examples use another framework.
+The native package exports exactly two skills, `engineering-harness` and `agent-creation`, and three extensions (`subagent`, `ask-user`, `external-compaction`). The backend, frontend, browser and graphify catalogs under `agent/skills/` are plain files: Pi discovers them when `agent/` is your agent directory, and otherwise you load one by path. Loading a catalog adds guidance only: it installs no CLI, MCP server, Python package or other tool.
 
-The browser guide is at [agent/skills/browser/SKILL.md](agent/skills/browser/SKILL.md), not a native export. The example settings' skills filter excludes the duplicate inherited `~/.agents` browser guide from a Pi profile without changing that shared file. The optional `graphify-pi` package (`pi install npm:graphify-pi`, not part of the native package) has its package skill disabled in the example settings; the graph guide is at [agent/skills/graphify/SKILL.md](agent/skills/graphify/SKILL.md). Ordinary graph queries use the bounded, standard-library `read_graph.py` helper and write no query stamps, vocabulary sidecars or feedback records. Build and update procedures require an actual authorized artifact-write assignment. Unused upstream Graphify pipeline references and their obsolete version marker were removed; read-only query and explicit build procedures remain.
+| Catalog | Entry in this repository | Needs outside Pi (you install) |
+| --- | --- | --- |
+| backend | `agent/skills/backend/SKILL.md` | Rust toolchain, for Rust checks only |
+| frontend | `agent/skills/frontend/SKILL.md` | Your project's test and runtime stack; Python 3.x for ui-ux-pro-max `search.py` |
+| browser | `agent/skills/browser/SKILL.md` | `betterwright` CLI on `PATH` |
+| graphify | `agent/skills/graphify/SKILL.md` | Python `graphify` CLI (package `graphifyy`), only for builds; queries use `scripts/read_graph.py` |
+
+Other tools named in guidance (k6, oha, Vitest with `@solidjs/testing-library`, cargo) are optional and yours to install.
+
+### Load a catalog by path
+
+Your agent directory already discovers every catalog when the checkout's `agent/` folder is `<agent-dir>` (as in this profile, `~/.pi/agent`): each `SKILL.md` under `<agent-dir>/skills/` loads with no settings entry, and a path entry for it would be a second copy. Add a path entry only for a catalog outside your agent directory. Keep a local checkout and add the entry to the `skills` array of your existing `settings.json`, keeping the entries you already have:
+
+```json
+{
+  "skills": [
+    "!**/.agents/skills/browser/SKILL.md",
+    "C:/path/to/pi-agent-harness/agent/skills/backend/SKILL.md"
+  ]
+}
+```
+
+- `skills` takes files or directories; absolute and `~` paths are accepted. Pi reads a local path in place, so pull the checkout to update it.
+- Run `/reload` after editing settings, and only after active workers finish ([Status and limits](#status-and-limits)).
+- Do not add the whole checkout as a package to get one catalog: that also loads its three extensions and both native skills.
+
+### Duplicates and exclusions
+
+- Pi discovers `<agent-dir>/skills/` recursively (`~/.pi/agent/skills/` by default). A second copy of a catalog is a skill with the same name: Pi keeps the first one found and warns about the other, so load each catalog from one path only.
+- To stop a copy without deleting it, exclude it in the same `skills` array: `"!skills/backend"`. Pi's docs do not state the base for `!` patterns. `dist/core/package-manager.js` matches a user-settings pattern against the path relative to the agent directory, and for a `SKILL.md` also against its folder (`matchesAnyPattern`); auto-discovered `<agent-dir>/skills` entries are filtered by the same array (`addAutoDiscoveredResources`). This was read from the code and not verified by running Pi.
+- Use the `skills/<catalog>` form. A bare `!backend` can also match unrelated folders with that name.
+
+### Parent sessions and subagents
+
+- Skills and `--skill` apply to the parent Pi session. Subagent children start with `--no-skills` (`agent/extensions/subagent/index.ts`), so they do not receive catalogs from your settings.
+- For a worker to use a module, the task packet must give its absolute path, for example `C:/path/to/pi-agent-harness/agent/skills/backend/rust-axum-engineering/index.md`, and say to read it.
+- Role files and prompts refer to `~/.pi/agent/skills/...` literally (for example `agent/agents/frontend-worker.md`). Skill settings do not repoint those paths: keep the catalogs there or edit the references.
+- The Graphify code integration passes `--skill <agent-dir>/skills/graphify/SKILL.md` when enabled ([code navigation setup](#code-navigation-setup-optional)).
+
+### Graphify and browser
+
+- **Graphify.** `graphify-pi` (npm) ships an extension and a skill both named `graphify`, which collides with the catalog. Keep one package entry with its skill disabled:
+
+```json
+{ "source": "npm:graphify-pi", "extensions": ["extensions/graphify.ts"], "skills": [] }
+```
+
+  The package provides `/graphify` and its hooks, with no LLM tools. The catalog answers questions about existing graphs through `scripts/read_graph.py`; builds and updates run only when explicitly assigned.
+- **Browser.** The guide assumes `betterwright` is on `PATH`. If it is not, the guide says to use its verified launcher and not to reinstall or edit `PATH`. Install betterwright from its own project; this repository does not install it.
+
+### Skills and tools
+
+Skills add guidance only. Commands and tools come from extensions: the native extensions register their own (see [Install](#install)), and `graphify-pi` adds `/graphify`. Loading a catalog changes none of them.
+
+### Limits
+
+- This section documents the setup; it was not run against a live Pi profile. Run `/reload` and check the loaded skill list yourself.
+- Catalog names are not separately published npm packages. Do not look for `npm:` entries for them.
 
 ## Manual data refresh
 

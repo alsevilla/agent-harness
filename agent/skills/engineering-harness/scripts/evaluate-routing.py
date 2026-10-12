@@ -23,7 +23,7 @@ ROUTES = frozenset({
 ROLES = frozenset({
     "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist",
     "debugger", "devops-specialist", "frontend-worker", "general-worker",
-    "observability-specialist", "oracle", "performance-specialist", "release-engineer",
+    "observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
     "reviewer", "scout", "security-specialist", "sqlite-specialist",
     "test-engineer", "ui-ux-specialist",
 })

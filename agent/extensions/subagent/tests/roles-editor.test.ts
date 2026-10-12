@@ -355,6 +355,7 @@ async function runNodeSuite(): Promise<void> {
 			["malformed roles.json", () => newFixture({ registryText: "[{" }), /roles\.json/],
 			["registry not an array", () => newFixture({ registryText: "{}\n" }), /array/],
 			["duplicate registry role", () => newFixture({ roles: [DEFAULT_ROLES[0], DEFAULT_ROLES[0]] }), /duplicate/],
+			["registry entry with an unknown key (typo)", () => newFixture({ roles: DEFAULT_ROLES.map((r, i) => (i === 0 ? { ...r, modle: "typo" } : r)) }), /entry 0 has unknown key modle/],
 			["non-canonical registry formatting", () => newFixture({ registryText: JSON.stringify(DEFAULT_ROLES) + "\n" }), /canonical|formatting/],
 			["missing definition file", () => { const fx = newFixture(); fs.rmSync(fx.agentPath("alpha")); }, /definition file/],
 			["ambiguous definition file", () => { const fx = newFixture(); fs.writeFileSync(path.join(fx.dir, "agents", "copy.md"), fs.readFileSync(fx.agentPath("alpha"))); }, /ambiguous/],

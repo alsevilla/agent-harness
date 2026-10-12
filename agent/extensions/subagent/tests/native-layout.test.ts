@@ -2,7 +2,7 @@
 // Discovery runs in Node probes against isolated profiles (PI_CODING_AGENT_DIR, HOME/USERPROFILE set to temp dirs); nothing is installed or written outside temp dirs.
 // Probes resolve host packages from the supported install tree (agent/install/releases/1.1.0/node_modules, passed as NATIVE_PROBE_HOST_MODULES), not a checkout node_modules; a checkout without that install tree fails these probes.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,7 +63,7 @@ function runProbe(args: string[], profile: string): string {
 	return run.stdout.trim().split("\n").pop() ?? "";
 }
 
-type Discovery = { packageRoot: string | null; error: string | null; agents: { name: string; source: string; filePath: string; systemPrompt: string }[] };
+type Discovery = { packageRoot: string | null; error: string | null; agents: { name: string; source: string; model?: string | null; thinking?: string; fallbackModel?: string[]; tools?: string[]; filePath: string; systemPrompt: string }[] };
 function discover(agentsTs: string, profile: string, cwd: string, scope = "both"): Discovery {
 	return JSON.parse(runProbe(["discover", agentsTs, cwd, scope], profile)) as Discovery;
 }
@@ -83,6 +83,8 @@ test("root manifest declares the native resources directly and the host packages
 	for (const rel of [...NATIVE_EXTENSIONS, ...NATIVE_SKILLS]) assert.ok(fs.existsSync(path.join(REPO, rel)), rel);
 	assert.deepEqual(manifest.peerDependencies, Object.fromEntries(HOST_PACKAGES.map((name) => [name, "*"])));
 	assert.deepEqual(Object.keys(manifest.dependencies ?? {}).filter((name) => HOST_PACKAGES.includes(name) || name.startsWith("@earendil-works/")), []);
+	assert.equal(manifest.license, "MIT");
+	assert.deepEqual(manifest.engines, { node: ">=22.19.0" });
 	assert.doesNotMatch(JSON.stringify(manifest), /pi-package|defaults/);
 });
 
@@ -105,13 +107,13 @@ test("the trust-boundary scan checks single-quoted and double-quoted imports ali
 	assert.deepEqual(undeclaredImports(`import { z } from '@earendil-works/unlisted-host';`), ["@earendil-works/unlisted-host"]);
 });
 
-probeTest("a fresh isolated profile resolves the 18 bundled roles from the native package and writes nothing", () => {
+probeTest("a fresh isolated profile resolves the 19 bundled roles from the native package and writes nothing", () => {
 	const profile = tmp("native-profile-");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"));
 	assert.equal(found.error, null);
 	assert.equal(found.packageRoot, path.join(REPO, "agent"));
 	const roles = JSON.parse(fs.readFileSync(path.join(REPO, "agent", "roles.json"), "utf8")) as { name: string }[];
-	assert.equal(roles.length, 18);
+	assert.equal(roles.length, 19);
 	assert.deepEqual(found.agents.map((agent) => agent.name).sort(), roles.map((role) => role.name).sort());
 	for (const agent of found.agents) {
 		assert.equal(agent.source, "package", agent.name);
@@ -130,7 +132,7 @@ probeTest("a project-local role overrides the bundled role and private project r
 	assert.equal(found.error, null);
 	assert.equal(found.agents.find((agent) => agent.name === "reviewer")?.source, "project");
 	assert.equal(found.agents.find((agent) => agent.name === "private-domain-role")?.source, "project");
-	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 17);
+	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 18);
 });
 
 probeTest("a renamed root manifest is inert: no package mode and no bundled roles", () => {
@@ -188,6 +190,82 @@ probeTest("the public SDK loader lists exactly the native extensions and skills 
 	const skills = out.skills.filter((skill) => skill.filePath.startsWith(agentRoot)).map((skill) => skill.name).sort();
 	assert.deepEqual(skills, ["agent-creation", "engineering-harness"]);
 	assert.deepEqual(listFiles(profile), [], "SDK loading writes nothing into the profile");
+});
+
+probeTest("a project scope lists no bundled roles", () => {
+	const found = discover(AGENTS_TS, tmp("native-profile-"), tmp("native-cwd-"), "project");
+	assert.equal(found.error, null);
+	assert.deepEqual(found.agents, []);
+});
+
+probeTest("a user agent file with a bundled role's name wins over the bundled definition", () => {
+	const profile = tmp("native-profile-");
+	fs.mkdirSync(path.join(profile, "agents"), { recursive: true });
+	fs.writeFileSync(path.join(profile, "agents", "general-worker.md"), "---\nname: general-worker\ndescription: user override\ntools: read\n---\nUser override body.\n");
+	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user");
+	assert.equal(found.error, null);
+	assert.equal(found.agents.length, 19);
+	const general = found.agents.find((agent) => agent.name === "general-worker");
+	assert.equal(general?.source, "user");
+	assert.deepEqual(general?.tools, ["read"]);
+	assert.match(general?.systemPrompt ?? "", /User override body\./);
+});
+
+probeTest("a user roles.json overlays a bundled default field-wise and keeps the unset defaults", () => {
+	const profile = tmp("native-profile-");
+	fs.writeFileSync(path.join(profile, "roles.json"), JSON.stringify([{ name: "scout", provider: "openai-codex", model: "gpt-6-luna", thinking: "high" }]));
+	const scout = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user").agents.find((agent) => agent.name === "scout");
+	assert.equal(scout?.model, "openai-codex/gpt-6-luna");
+	assert.equal(scout?.thinking, "high");
+	assert.deepEqual(scout?.fallbackModel, ["openai-codex/gpt-6-luna", "github-copilot/gpt-6-luna"]);
+});
+
+// Malformed user registry in the native layout (the bundled roles.json is the baseline): an error result, never a silent fallback.
+const MALFORMED_USER_ROLES: [string, string, RegExp][] = [
+	["unparseable JSON", '[{"name":"oracle"', /user roles\.json/],
+	["not a JSON list", '{"name":"scout"}', /must be a JSON list/],
+	["capitalised Name key", '[{"Name":"debugger","provider":"openai-codex","model":"gpt-6-luna"}]', /user roles\.json/],
+	["unknown key modle", '[{"name":"scout","modle":"gpt-6-luna"}]', /user roles\.json/],
+	["non-string tools", '[{"name":"scout","tools":5}]', /user roles\.json/],
+	["empty name", '[{"name":"","model":"x"}]', /user roles\.json/],
+	["duplicate names", '[{"name":"scout","thinking":"low"},{"name":"scout","thinking":"high"}]', /user roles\.json/],
+];
+for (const [label, text, expected] of MALFORMED_USER_ROLES) {
+	probeTest(`a malformed user roles.json fails closed in the native layout (${label})`, () => {
+		const profile = tmp("native-profile-");
+		fs.writeFileSync(path.join(profile, "roles.json"), text);
+		const found = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user");
+		assert.match(found.error ?? "", expected);
+		assert.deepEqual(found.agents, []);
+	});
+}
+
+test("the third-party notices point at the shipped Pi license copy", () => {
+	const notices = fs.readFileSync(path.join(REPO, "THIRD_PARTY_NOTICES.md"), "utf8");
+	assert.match(notices, /agent\/PI-LICENSE/);
+	assert.ok(fs.existsSync(path.join(REPO, "agent", "PI-LICENSE")), "agent/PI-LICENSE");
+});
+
+test("every skill reference in the native skill entry files resolves inside its own skill directory", () => {
+	let checked = 0;
+	const missing: string[] = [];
+	for (const skill of ["engineering-harness", "agent-creation"]) {
+		const dir = path.join(REPO, "agent", "skills", skill);
+		for (const m of fs.readFileSync(path.join(dir, "SKILL.md"), "utf8").matchAll(/`((?:references|scripts|examples)\/[A-Za-z0-9_./-]+\.(?:md|py|json))`/g)) {
+			checked++;
+			if (!fs.existsSync(path.join(dir, m[1]))) missing.push(`${skill}: ${m[1]}`);
+		}
+	}
+	assert.ok(checked >= 6, `expected skill references, found ${checked}`);
+	assert.deepEqual(missing, []);
+});
+
+// The git-source install ships the tracked tree: ignored personal, auth, runtime and local-state files must never be tracked or unignored.
+test("no personal, auth, runtime or local-state file is tracked or unignored in the candidate", () => {
+	const files = execFileSync("git", ["ls-files", "-z", "-co", "--exclude-standard"], { cwd: REPO, maxBuffer: 64 * 1024 * 1024 }).toString("utf8").split("\0").filter(Boolean);
+	assert.ok(files.length > 100, "candidate file list too small");
+	const forbidden = /(^|\/)(auth\.json|settings\.json|models(-store)?\.json|mcp-onboarding\.json)$|(^|\/)(sessions|node_modules|install|npm|run-state|_scratch|_evidence)\//;
+	assert.deepEqual(files.filter((file) => forbidden.test(file)), []);
 });
 
 test("the retired pi-package generator refuses and no pi-package tree exists", () => {

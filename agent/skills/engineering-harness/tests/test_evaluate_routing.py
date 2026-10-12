@@ -63,11 +63,11 @@ def run_cli(*args):
 
 
 class FixtureSpecimenTests(unittest.TestCase):
-    def test_twenty_three_unique_cases_with_positive_and_near_miss(self):
+    def test_twenty_eight_unique_cases_with_positive_and_near_miss(self):
         fx = load_fixture()
         ids = [c["id"] for c in fx["cases"]]
-        self.assertEqual(len(ids), 23)
-        self.assertEqual(len(set(ids)), 23)
+        self.assertEqual(len(ids), 28)
+        self.assertEqual(len(set(ids)), 28)
         kinds = [c["kind"] for c in fx["cases"]]
         self.assertGreaterEqual(kinds.count("near_miss"), 3)
         self.assertGreaterEqual(kinds.count("positive"), 3)
@@ -115,6 +115,21 @@ class FixtureSpecimenTests(unittest.TestCase):
         # frontend keyword in a backend-only task must not select frontend guidance
         self.assertIn("frontend", c["R19"]["expect"]["skills_forbidden"])
 
+    def test_platform_routing_examples_separate_platform_devops_and_release(self):
+        c = by_id(load_fixture())
+        for cid in ("R24", "R25", "R26", "R27", "R28"):
+            self.assertIn(cid, c, f"missing platform routing example {cid}")
+        # accepted Terraform, Kubernetes and GitHub Actions file edits -> platform-worker (editing only)
+        for cid in ("R24", "R25", "R26"):
+            self.assertEqual(c[cid]["expect"]["roles_required"], ["platform-worker"], cid)
+            self.assertEqual(c[cid]["expect"]["roles_allowed"], ["platform-worker"], cid)
+        # read-only devops advice on an unresolved topology decision is not a platform edit
+        self.assertEqual(c["R27"]["expect"]["roles_required"], ["devops-specialist"])
+        self.assertNotIn("platform-worker", c["R27"]["expect"]["roles_allowed"])
+        # authorized release delivery stays with release-engineer, never platform-worker
+        self.assertEqual(c["R28"]["expect"]["roles_required"], ["release-engineer"])
+        self.assertNotIn("platform-worker", c["R28"]["expect"]["roles_allowed"])
+
     def test_roles_match_current_agent_directory(self):
         self.assertTrue(AGENTS_DIR.is_dir(), f"role registry missing: {AGENTS_DIR}")
         stems = {p.stem for p in AGENTS_DIR.glob("*.md")}
@@ -135,7 +150,7 @@ class EvaluatorTests(unittest.TestCase):
     def test_perfect_predictions_pass(self):
         rep = evaluate_rows(perfect_predictions(load_fixture()))
         self.assertTrue(rep["ok"])
-        self.assertEqual(rep["matched"], 23)
+        self.assertEqual(rep["matched"], 28)
         self.assertEqual(rep["accuracy"], 1.0)
         self.assertEqual(rep["critical_failures"], 0)
 
@@ -169,7 +184,7 @@ class EvaluatorTests(unittest.TestCase):
         fx = load_fixture()
         rows = set_row(perfect_predictions(fx), "R05", route="T1_WORKER", roles=["backend-worker"])
         rep = evaluate_rows(rows, fx)
-        self.assertEqual(rep["matched"], 22)
+        self.assertEqual(rep["matched"], 27)
         self.assertGreater(rep["accuracy"], 0.95)
         self.assertEqual(rep["critical_failures"], 1)
         self.assertFalse(rep["ok"])
@@ -253,7 +268,7 @@ class InputValidationTests(unittest.TestCase):
             ev.parse_predictions(text, self.ids)
 
     def test_good_text_parses(self):
-        self.assertEqual(len(ev.parse_predictions(self.good, self.ids)), 23)
+        self.assertEqual(len(ev.parse_predictions(self.good, self.ids)), 28)
 
     def test_malformed_json_line(self):
         self.assertInvalid(self.good[:-2] + "\n")  # truncated final object
@@ -396,7 +411,7 @@ class CliTests(unittest.TestCase):
         p = self.write("pred.jsonl", to_jsonl(perfect_predictions(self.fx)))
         r = run_cli("--cases", str(CASES), "--predictions", p)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("matched: 23/23", r.stdout)
+        self.assertIn("matched: 28/28", r.stdout)
         self.assertIn("RESULT: PASS", r.stdout)
         self.assertIn("does NOT prove runtime skill activation", r.stdout)
 
@@ -449,7 +464,7 @@ class CliTests(unittest.TestCase):
         r = run_cli("--cases", str(CASES), "--predictions", str(p))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("sha256=" + hashlib.sha256(raw).hexdigest(), r.stdout)
-        self.assertIn("matched: 23/23", r.stdout)
+        self.assertIn("matched: 28/28", r.stdout)
 
     def test_utf8_bom_and_invalid_utf8_predictions_exit_two(self):
         body = to_jsonl(perfect_predictions(self.fx)).encode("utf-8")

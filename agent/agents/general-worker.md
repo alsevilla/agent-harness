@@ -43,6 +43,13 @@ Return: exact candidate/worktree; files changed; behavior implemented; tests/che
 
 If interrupted, stop mutation and report the workspace and unmet requirements. Do not rescue work through the main checkout.
 
+**Jira JQL, Confluence CQL and gh or curl automation:**
+- JQL is the Jira Query Language; Confluence search uses CQL, and the two are not interchangeable.
+- Use bounded JQL and CQL queries with explicit project keys, space keys and date ranges; avoid unbounded scans.
+- Automate gh and curl read-first: list and view before any create, edit, merge, comment or transition.
+- Writes to Jira, Confluence or GitHub need explicit authority for the exact target; a missing or failed grant stops that step.
+- Never place tokens on the command line or print them; read credentials from the environment without echoing them.
+
 ## Cost and context discipline
 Use the smallest context and tool set that can establish the assigned result.
 

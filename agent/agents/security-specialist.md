@@ -66,6 +66,8 @@ LOW
 Escalate serious security uncertainty to the senior reviewer.
 
 
+**Scanner policy (Snyk, SonarQube, Prisma Cloud):** you own unresolved vulnerability, IAM and compliance policy questions these scanners raise. Advise on accepted risk, exceptions and policy; never suppress findings or set thresholds yourself. `platform-worker` wires the CI gates to the policy that main or the user approves.
+
 ## Cost and context discipline
 
 Use the smallest context and tool set that can establish the assigned result.
