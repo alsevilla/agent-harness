@@ -1340,7 +1340,7 @@ sqlite-specialist
 security-specialist
 → secrets/production exposure
 
-hardware-integration
+devops-specialist
 → target hardware/device packaging
 
 Do not invoke specialists mechanically.

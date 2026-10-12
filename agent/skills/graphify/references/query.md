@@ -3,9 +3,9 @@
 Read a supplied report/wiki section first when sufficient. To inspect graph relationships without cache writes, run the adjacent standard-library helper using an available Python interpreter and absolute paths:
 
 ```text
-python <absolute-skill-dir>/scripts/read_graph.py query --graph <absolute-existing-graph.json> --query "attendance" --limit 12
-python <absolute-skill-dir>/scripts/read_graph.py explain --graph <absolute-existing-graph.json> --query "AttendanceService"
-python <absolute-skill-dir>/scripts/read_graph.py path --graph <absolute-existing-graph.json> --from "Reader" --to "AttendanceService"
+python <absolute-skill-dir>/scripts/read_graph.py query --graph <absolute-existing-graph.json> --query "event" --limit 12
+python <absolute-skill-dir>/scripts/read_graph.py explain --graph <absolute-existing-graph.json> --query "EventService"
+python <absolute-skill-dir>/scripts/read_graph.py path --graph <absolute-existing-graph.json> --from "Reader" --to "EventService"
 ```
 
 Resolve Python from an existing installation, or read a supplied graph's existing `.graphify_python` marker if present. Do not create that marker or install Python/packages for retrieval. Match shell syntax to the selected tool; quote paths and arguments. If the interpreter is unavailable, use the report/wiki or focused permitted source reads.

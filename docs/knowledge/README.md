@@ -7,7 +7,7 @@ Curated, git-versioned notes for the Pi profile. Indexed scopes (QMD BM25 collec
 | general | `general/` | Verified cross-project engineering knowledge |
 | harness | `harness/` | Pi-specific decisions and procedures |
 
-Not stored here: project facts (kept in each project's `docs/knowledge/`, e.g. `C:/Users/MSI/RFID/RFIDAttendance-Rust/docs/knowledge/curated/`, QMD collection `knowledge-rfid`), session logs, temporary task state, unconfirmed lessons and secrets.
+Not stored here: project facts (kept in each project's `docs/knowledge/`, e.g. `<project>/docs/knowledge/curated/`, QMD collection `<project-collection>`), session logs, temporary task state, unconfirmed lessons and secrets.
 
 `private/` and `local/` hold unindexed notes and are git-ignored. Ignoring is not secrecy and QMD does not honor gitignore, so keep them outside every indexed path.
 

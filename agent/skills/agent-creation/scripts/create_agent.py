@@ -416,13 +416,11 @@ PACKAGE_NAME = "@alsevilla/pi-engineering-harness"
 
 
 def package_root(script_file=__file__):
-    # Bundled as <package>/skills/agent-creation/scripts/create_agent.py; a live profile has no such package.json.
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(script_file)))))
-    manifest = os.path.join(root, "package.json")
+    # Native layout: <package>/agent/skills/agent-creation/scripts/create_agent.py. Resources are <package>/agent; the named manifest is <package>/package.json.
+    resources = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(script_file)))))
+    manifest = os.path.join(os.path.dirname(resources), "package.json")
     if not os.path.lexists(manifest):
-        # Packaged defaults without their manifest is a damaged package, not the live profile.
-        if os.path.lexists(os.path.join(root, "defaults")):
-            raise Refusal("package manifest is missing beside package defaults, collision check cannot be established")
+        # No root manifest is the legacy/live layout; bundled roles are not discovered there either.
         return None
     try:
         with open(manifest, "rb") as fh:
@@ -431,51 +429,50 @@ def package_root(script_file=__file__):
         raise Refusal(f"package manifest unreadable, collision check cannot be established: {manifest}") from None
     if not isinstance(data, dict):
         raise Refusal(f"package manifest must be an object, collision check cannot be established: {manifest}")
-    return root if data.get("name") == PACKAGE_NAME else None
+    return resources if data.get("name") == PACKAGE_NAME else None
 
 
-def package_role_names(defaults):
+def package_role_names(resources):
     # Names contract only (not a full role parser): a non-empty list of objects with unique non-empty string names.
-    path = os.path.join(defaults, "roles.json")
+    path = os.path.join(resources, "roles.json")
     try:
         data = strict_json(_read_bytes(path).decode("utf-8"))
     except UnicodeDecodeError:
-        raise Refusal("package defaults roles.json must list named roles, collision check cannot be established") from None
+        raise Refusal("package roles.json must list named roles, collision check cannot be established") from None
     names = [entry.get("name") if isinstance(entry, dict) else None for entry in data] if isinstance(data, list) else []
     if not names or any(not isinstance(n, str) or not n.strip() for n in names) or len(set(names)) != len(names):
-        raise Refusal("package defaults roles.json must list named roles without duplicates, collision check cannot be established")
+        raise Refusal("package roles.json must list named roles without duplicates, collision check cannot be established")
     return names
 
 
-def scan_package_defaults(root, table):
+def scan_package_roles(resources, table):
     # Bundled role names are reserved as a static label; paths stay out of the refusal text.
-    defaults = os.path.join(root, "defaults")
-    agents = os.path.join(defaults, "agents")
+    agents = os.path.join(resources, "agents")
     # Package mode fails closed: a partial bundle would let a colliding name through the collision check.
-    if not os.path.isfile(os.path.join(defaults, "roles.json")) or not os.path.isdir(agents):
-        raise Refusal("package defaults missing, collision check cannot be established")
-    declared = package_role_names(defaults)
+    if not os.path.isfile(os.path.join(resources, "roles.json")) or not os.path.isdir(agents):
+        raise Refusal("package roles missing, collision check cannot be established")
+    declared = package_role_names(resources)
     for name in declared:
-        _add(table, name, "package default roles.json")
+        _add(table, name, "package roles.json")
     try:
         entries = sorted(os.listdir(agents))
     except OSError as exc:
-        raise Refusal(f"cannot scan package defaults: {exc.strerror}") from None
+        raise Refusal(f"cannot scan package agents: {exc.strerror}") from None
     defined = []
     for entry in entries:
         path = os.path.join(agents, entry)
         if not entry.endswith(".md") or not os.path.isfile(path):
             continue
         fm = _frontmatter(_read_bytes(path), path)
-        _add(table, entry[:-3], "package default agent file")
+        _add(table, entry[:-3], "package agent file")
         name = fm.get("name") if fm else None
         if not isinstance(name, str) or not name.strip():
-            raise Refusal("package defaults roles.json and agents disagree on role names, collision check cannot be established")
+            raise Refusal("package roles.json and agents disagree on role names, collision check cannot be established")
         defined.append(name)
-        _add(table, name, "package default agent frontmatter name")
+        _add(table, name, "package agent frontmatter name")
     # Exact set equality: each declared role has one parsed definition and no definition is undeclared.
     if sorted(declared) != sorted(defined):
-        raise Refusal("package defaults roles.json and agents disagree on role names, collision check cannot be established")
+        raise Refusal("package roles.json and agents disagree on role names, collision check cannot be established")
 
 
 def agent_registry(agent_dir, root, own, warnings, pkg=None):
@@ -483,7 +480,7 @@ def agent_registry(agent_dir, root, own, warnings, pkg=None):
     for name in load_roles(agent_dir):
         _add(table, name, "global roles.json")
     if pkg:
-        scan_package_defaults(pkg, table)
+        scan_package_roles(pkg, table)
     scan_agent_dir(os.path.join(agent_dir, "agents"), "global agents", own, table)
     target = os.path.join(root, ".pi", "agents")
     if _kind(target) == "dir":

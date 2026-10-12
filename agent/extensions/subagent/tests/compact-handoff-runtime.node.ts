@@ -267,6 +267,55 @@ test("chain: an exit 0 length step stops the chain before step 2 is launched", a
 	assert.equal(spawnLog.length, 1);
 });
 
+test("chain: printed invoke markup on a non-final step stops the chain before step 2 is launched", async () => {
+	const root = setupRoles({ "step-one": "You are step-one.", "step-two": "You are step-two." });
+	spawnPlan = () => ({ events: [reply([printedInvoke])], exitCode: 0 });
+	const result = await tool!.execute("call-chain-markup", { chain: [{ agent: "step-one", task: "produce" }, { agent: "step-two", task: "use: {previous}" }], background: false }, undefined, undefined, context(root));
+	assert.equal(result.isError, true);
+	assert.equal(result.content[0].text, "Chain stopped at step 1 (step-one): " + MARKUP_HEAD + printedInvoke);
+	assert.equal(spawnLog.length, 1);
+});
+
+test("chain: printed invoke markup on the final step keeps the labelled non-error presentation", async () => {
+	const root = setupRoles({ "step-one": "You are step-one.", "step-two": "You are step-two." });
+	spawnPlan = (task) => (task.includes("use:") ? { events: [reply([printedInvoke])], exitCode: 0 } : { events: [reply(["ready"])], exitCode: 0 });
+	const result = await tool!.execute("call-chain-final-markup", { chain: [{ agent: "step-one", task: "produce" }, { agent: "step-two", task: "use: {previous}" }], background: false }, undefined, undefined, context(root));
+	assert.equal(result.isError, undefined);
+	assert.equal(result.content[0].text, MARKUP_HEAD + printedInvoke);
+	assert.equal(spawnLog.length, 2);
+});
+
+test("chain: two-space indented printed invoke markup on a non-final step stops the chain before step 2 is launched", async () => {
+	const root = setupRoles({ "step-one": "You are step-one.", "step-two": "You are step-two." });
+	const indented = printedInvoke.split("\n").map((line) => "  " + line).join("\n");
+	spawnPlan = () => ({ events: [reply([indented])], exitCode: 0 });
+	const result = await tool!.execute("call-chain-indented-markup", { chain: [{ agent: "step-one", task: "produce" }, { agent: "step-two", task: "use: {previous}" }], background: false }, undefined, undefined, context(root));
+	assert.equal(result.isError, true);
+	assert.equal(result.content[0].text, "Chain stopped at step 1 (step-one): " + MARKUP_HEAD + indented);
+	assert.equal(spawnLog.length, 1);
+});
+
+test("chain: a four-space indented invoke markup quote on a non-final step is a code block, not a stop", async () => {
+	const root = setupRoles({ "step-one": "You are step-one.", "step-two": "You are step-two." });
+	const quoted = printedInvoke.split("\n").map((line) => "    " + line).join("\n");
+	spawnPlan = (task) => (task.includes("use:") ? { events: [reply(["step two done"])], exitCode: 0 } : { events: [reply(["STATUS: PASS\n" + quoted])], exitCode: 0 });
+	const result = await tool!.execute("call-chain-code-block", { chain: [{ agent: "step-one", task: "produce" }, { agent: "step-two", task: "use: {previous}" }], background: false }, undefined, undefined, context(root));
+	assert.equal(result.isError, undefined);
+	assert.equal(result.content[0].text, "step two done");
+	assert.equal(spawnLog.length, 2);
+});
+
+test("chain: a fenced invoke markup quote on a non-final step is not a stop and the next step receives it", async () => {
+	const root = setupRoles({ "step-one": "You are step-one.", "step-two": "You are step-two." });
+	const quoted = "STATUS: PASS\n```xml\n" + printedInvoke + "\n```\nCHECKS: NOT RUN";
+	spawnPlan = (task) => (task.includes("use:") ? { events: [reply(["step two done"])], exitCode: 0 } : { events: [reply([quoted])], exitCode: 0 });
+	const result = await tool!.execute("call-chain-fenced", { chain: [{ agent: "step-one", task: "produce" }, { agent: "step-two", task: "use: {previous}" }], background: false }, undefined, undefined, context(root));
+	assert.equal(result.isError, undefined);
+	assert.equal(result.content[0].text, "step two done");
+	assert.equal(spawnLog.length, 2);
+	assert.ok(spawnLog[1].task.includes(quoted), "step two receives the fenced report literally");
+});
+
 // Real background.ts (bounded automatic completion; explicit lossless result).
 function fakePi() {
 	const sent: { content: string }[] = [];

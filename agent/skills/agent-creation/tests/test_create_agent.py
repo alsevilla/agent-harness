@@ -830,18 +830,18 @@ class NativeLinkAndNameFallbacks(Case):
 
 
 class PackageDefaults(Case):
-    """Package mode: the bundled CLI at <package>/skills/agent-creation/scripts also reserves the packaged default role names."""
+    """Native package mode: the bundled CLI at <package>/agent/skills/agent-creation/scripts reserves the bundled role names from <package>/agent, gated by the root package.json."""
 
     def setUp(self):
         super().setUp()
         self.pkg = self.dir / "pkg"
-        (self.pkg / "skills" / "agent-creation" / "scripts").mkdir(parents=True)
-        (self.pkg / "defaults" / "agents").mkdir(parents=True)
-        shutil.copyfile(SCRIPT, self.pkg / "skills" / "agent-creation" / "scripts" / "create_agent.py")
-        self.pkg_script = self.pkg / "skills" / "agent-creation" / "scripts" / "create_agent.py"
+        (self.pkg / "agent" / "skills" / "agent-creation" / "scripts").mkdir(parents=True)
+        (self.pkg / "agent" / "agents").mkdir(parents=True)
+        shutil.copyfile(SCRIPT, self.pkg / "agent" / "skills" / "agent-creation" / "scripts" / "create_agent.py")
+        self.pkg_script = self.pkg / "agent" / "skills" / "agent-creation" / "scripts" / "create_agent.py"
         (self.pkg / "package.json").write_text(json.dumps({"name": "@alsevilla/pi-engineering-harness", "version": "0.1.0"}), encoding="utf-8")
-        (self.pkg / "defaults" / "agents" / "reviewer.md").write_text("---\nname: reviewer\ndescription: r\ntools: read\n---\nbody\n", encoding="utf-8")
-        (self.pkg / "defaults" / "agents" / "scout.md").write_text("---\nname: scout\ndescription: s\ntools: read\n---\nbody\n", encoding="utf-8")
+        (self.pkg / "agent" / "agents" / "reviewer.md").write_text("---\nname: reviewer\ndescription: r\ntools: read\n---\nbody\n", encoding="utf-8")
+        (self.pkg / "agent" / "agents" / "scout.md").write_text("---\nname: scout\ndescription: s\ntools: read\n---\nbody\n", encoding="utf-8")
         self._roles(PACKAGED_ROLES)
         (self.agent / "roles.json").unlink()  # fresh profile: no user registry at all
 
@@ -854,7 +854,7 @@ class PackageDefaults(Case):
     def test_packaged_agent_file_name_refused_on_fresh_profile_with_no_output(self):
         r = self.pkg_cli(self.spec(name="reviewer"), "--apply")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("package default", r.stderr)
+        self.assertIn("package roles", r.stderr)
         self.assertNotIn(str(self.pkg), r.stderr)
         self.assertFalse((self.project / ".pi").exists())
 
@@ -868,38 +868,42 @@ class PackageDefaults(Case):
         self.assertTrue(self.agent_file().exists())
 
     def test_live_layout_without_package_root_keeps_preview_behaviour(self):
-        self.assertEqual(self.cli(self.spec(name="reviewer")).returncode, 0)
+        # A copy outside the native checkout has no root manifest above it: live layout, bundled names are not reserved.
+        live = self.dir / "live" / "skills" / "agent-creation" / "scripts"
+        live.mkdir(parents=True)
+        shutil.copyfile(SCRIPT, live / "create_agent.py")
+        self.assertEqual(self.pkg_cli(self.spec(name="reviewer"), script=live / "create_agent.py").returncode, 0)
 
     def test_package_name_mismatch_is_not_treated_as_the_package(self):
         (self.pkg / "package.json").write_text(json.dumps({"name": "other-package"}), encoding="utf-8")
         self.assertEqual(self.pkg_cli(self.spec(name="reviewer")).returncode, 0)
 
-    def test_unreadable_package_manifest_refuses_instead_of_skipping_defaults(self):
+    def test_unreadable_package_manifest_refuses_instead_of_skipping_roles(self):
         (self.pkg / "package.json").write_text("{not json", encoding="utf-8")
         r = self.pkg_cli(self.spec(name="reviewer"))
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("package manifest", r.stderr)
 
     def test_missing_packaged_roles_json_refuses_with_no_output(self):
-        (self.pkg / "defaults" / "roles.json").unlink()
+        (self.pkg / "agent" / "roles.json").unlink()
         r = self.pkg_cli(self.spec(), "--apply")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("package defaults missing", r.stderr)
+        self.assertIn("package roles missing", r.stderr)
         self.assertNotIn(str(self.pkg), r.stderr)
         self.assertFalse(self.agent_file().exists())
         self.assertFalse((self.project / ".pi").exists())
 
     def test_missing_packaged_agents_dir_refuses_with_no_output(self):
-        shutil.rmtree(self.pkg / "defaults" / "agents")
+        shutil.rmtree(self.pkg / "agent" / "agents")
         r = self.pkg_cli(self.spec(), "--apply")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("package defaults missing", r.stderr)
+        self.assertIn("package roles missing", r.stderr)
         self.assertFalse(self.agent_file().exists())
         self.assertFalse((self.project / ".pi").exists())
 
 
     def _roles(self, data):
-        (self.pkg / "defaults" / "roles.json").write_text(json.dumps(data), encoding="utf-8")
+        (self.pkg / "agent" / "roles.json").write_text(json.dumps(data), encoding="utf-8")
 
     def assert_refused_no_output(self, r, text):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
@@ -908,48 +912,42 @@ class PackageDefaults(Case):
         self.assertFalse(self.agent_file().exists())
         self.assertFalse((self.project / ".pi").exists())
 
-    def test_missing_manifest_beside_packaged_defaults_refuses_with_no_output(self):
+    def test_missing_root_manifest_is_the_legacy_live_layout_and_stays_silent(self):
         (self.pkg / "package.json").unlink()
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package manifest")
+        self.assertEqual(self.pkg_cli(self.spec(name="reviewer"), "--apply").returncode, 0)
 
-    def test_missing_manifest_without_packaged_defaults_is_live_layout(self):
-        live = self.dir / "live" / "skills" / "agent-creation" / "scripts"
-        live.mkdir(parents=True)
-        shutil.copyfile(SCRIPT, live / "create_agent.py")
-        self.assertEqual(self.pkg_cli(self.spec(name="reviewer"), script=live / "create_agent.py").returncode, 0)
-
-    def test_renamed_bundle_with_defaults_stays_inert_and_creates(self):
+    def test_renamed_root_manifest_stays_inert_and_creates(self):
         (self.pkg / "package.json").write_text(json.dumps({"name": "x-renamed-harness"}), encoding="utf-8")
         self.assertEqual(self.pkg_cli(self.spec(name="reviewer")).returncode, 0)
 
     def test_packaged_role_without_definition_refuses_with_no_output(self):
         self._roles(PACKAGED_ROLES + [{"name": "ghost", "provider": "anthropic", "model": "claude-haiku-5-5", "fallbackModel": "", "thinking": "low", "tools": "read"}])
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json and agents disagree")
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json and agents disagree")
 
     def test_packaged_definition_without_role_refuses_with_no_output(self):
-        (self.pkg / "defaults" / "agents" / "scout.md").unlink()
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json and agents disagree")
+        (self.pkg / "agent" / "agents" / "scout.md").unlink()
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json and agents disagree")
 
     def test_garbled_packaged_definition_refuses_with_no_output(self):
-        (self.pkg / "defaults" / "agents" / "scout.md").write_text("no frontmatter here\n", encoding="utf-8")
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json and agents disagree")
+        (self.pkg / "agent" / "agents" / "scout.md").write_text("no frontmatter here\n", encoding="utf-8")
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json and agents disagree")
 
     def test_emptied_packaged_agents_refuse_with_no_output(self):
-        for f in (self.pkg / "defaults" / "agents").glob("*.md"):
+        for f in (self.pkg / "agent" / "agents").glob("*.md"):
             f.unlink()
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json and agents disagree")
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json and agents disagree")
 
     def test_empty_packaged_roles_list_refuses_with_no_output(self):
         self._roles([])
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json must list")
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json must list")
 
     def test_garbled_packaged_role_entry_refuses_with_no_output(self):
         self._roles([{"Name": "scout"}, PACKAGED_ROLES[0]])
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json must list")
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json must list")
 
     def test_duplicate_packaged_role_name_refuses_with_no_output(self):
         self._roles(PACKAGED_ROLES + [PACKAGED_ROLES[0]])
-        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package defaults roles.json must list")
+        self.assert_refused_no_output(self.pkg_cli(self.spec(), "--apply"), "package roles.json must list")
 
 
 if __name__ == "__main__":

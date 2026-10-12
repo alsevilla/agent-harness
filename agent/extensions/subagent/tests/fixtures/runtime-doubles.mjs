@@ -1,3 +1,4 @@
+import { COMPACT_HANDOFF_INSTRUCTIONS } from "../../compact-handoff.ts";
 // Test doubles for the pi runtime surface touched by subagent/index.ts and agents.ts.
 // Loaded only through the resolve hook in tests/fallback-runtime.node.ts; never shipped at runtime.
 import { EventEmitter } from "node:events";
@@ -79,6 +80,10 @@ export function configureCodeIntegrations() {
 export const CODE_NAVIGATION_GUIDANCE = "";
 export function graphReferenceGuidance() {
 	return "";
+}
+// Integrations are disabled in this double; the compact handoff is still appended as in the production assembler.
+export function assembleChildSystemPrompt(agent) {
+	return agent.systemPrompt + COMPACT_HANDOFF_INSTRUCTIONS;
 }
 export function packageResourceGuidance() {
 	return "";

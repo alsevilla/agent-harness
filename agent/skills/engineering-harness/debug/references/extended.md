@@ -497,7 +497,7 @@ Do not replace the original failure with a different easier failure and pretend 
 For example:
 
 original:
-real scan reopens finalized attendance
+real event reopens finalized records
 
 reduced:
 pure engine function returns OPEN
@@ -834,7 +834,7 @@ dashboard wrong
 may originate from:
 
 event classification
-→ attendance calculation
+→ domain calculation
 → persistence
 → API mapping
 → frontend display.
@@ -1024,7 +1024,7 @@ Find the first failing layer.
 
 Do not blame hardware because the final application state is wrong.
 
-Use `hardware-integration` when necessary.
+Use `concurrency-specialist` when device lifecycle or reconnect races are necessary.
 
 ---
 
@@ -1187,9 +1187,6 @@ security-specialist
 performance-specialist
 → throughput/latency/resource bottlenecks
 
-hardware-integration
-→ USB/device/OS integration
-
 api-specialist
 → protocol/contract behavior
 
@@ -1267,7 +1264,7 @@ is not root cause.
 
 Better:
 
-> Two scan handlers read the OPEN daily row before either transaction persists dismissal; both then calculate from stale state, and the second write overwrites the first because the update has no state/version guard.
+> Two event handlers read the OPEN period row before either transaction persists closure; both then calculate from stale state, and the second write overwrites the first because the update has no state/version guard.
 
 That is falsifiable and actionable.
 
@@ -1421,7 +1418,7 @@ Use when correction requires unresolved decisions about:
 - compatibility;
 - audit behavior;
 - legacy side effects;
-- SMS/notification behavior;
+- notification behavior;
 - retry behavior;
 - replay/idempotency behavior;
 - migration/backfill behavior;
@@ -1847,7 +1844,7 @@ What was reported or observed.
 
 **Classification:**
 
-REPRODUCIBLE DEFECT / INTERMITTENT / REGRESSION / ENVIRONMENTAL / PERFORMANCE / CONCURRENCY / HARDWARE-INTEGRATION / UNKNOWN
+REPRODUCIBLE DEFECT / INTERMITTENT / REGRESSION / ENVIRONMENTAL / PERFORMANCE / CONCURRENCY / DEVICE-LIFECYCLE / UNKNOWN
 
 **Source of expectation:**
 

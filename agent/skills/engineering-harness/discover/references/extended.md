@@ -393,7 +393,7 @@ Typical routing:
 - security boundary → `security-specialist`
 - API contract → `api-specialist`
 - substantial UI workflow → `ui-ux-specialist`
-- USB/RFID/device lifecycle → `hardware-integration`
+- USB/field-reader/device lifecycle → `concurrency-specialist`
 - deployment/platform behavior → `devops-specialist`
 - hot path/throughput → `performance-specialist`
 - cross-system structure → `architecture-specialist`
@@ -415,11 +415,11 @@ Acceptance criteria describe observable outcomes rather than vague implementatio
 
 Bad:
 
-"Improve RFID handling."
+"Improve device-reader handling."
 
 Better:
 
-"If an RFID reader disconnects and reconnects, the service resumes accepting reads without requiring an application restart."
+"If a device reader disconnects and reconnects, the service resumes accepting reads without requiring an application restart."
 
 Acceptance criteria should include relevant:
 

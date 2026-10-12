@@ -240,7 +240,7 @@ Do not invoke it for ordinary TypeScript just because TypeScript is present.
 
 | Task | Recommended capabilities |
 |---|---|
-| RFID admin dashboard redesign | `design-dashboards` + `accessible-ui-patterns`; optionally one visual-direction skill |
+| Device admin dashboard redesign | `design-dashboards` + `accessible-ui-patterns`; optionally one visual-direction skill |
 | New branded landing/admin surface | `frontend-design` + `accessible-ui-patterns` |
 | General design-system exploration | `ui-ux-pro-max` + `accessible-ui-patterns` where needed |
 | New onboarding/setup/admin flow | `ux-flow-wireframer` first; then the narrow visual/accessibility capability actually needed |

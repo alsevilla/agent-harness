@@ -225,10 +225,10 @@ recommend the relevant specialist before the implementation worker. If the
 domain contract is already settled, recommend the worker directly.
 
 
-Recommend `hardware-integration` for:
+Recommend `concurrency-specialist` for:
 
 - USB;
-- RFID;
+- field-device readers;
 - serial/HID;
 - device lifecycle.
 

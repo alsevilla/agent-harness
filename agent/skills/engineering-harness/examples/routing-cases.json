@@ -19,7 +19,7 @@
     {
       "id": "R02",
       "kind": "positive",
-      "question": "Change the uniqueness key of attendance event rows; it is undecided whether duplicates are per device+card or per device+card+day, and the migration rewrites existing rows.",
+      "question": "Change the uniqueness key of event rows; it is undecided whether duplicates are per source+key or per source+key+day, and the migration rewrites existing rows.",
       "context": "Schema, migration and data-integrity semantics. The owner has not confirmed the key.",
       "critical": true,
       "expect": {
@@ -33,7 +33,7 @@
     {
       "id": "R03",
       "kind": "positive",
-      "question": "Apply the approved spacing and column order from the accepted dashboard design to the attendance summary table.",
+      "question": "Apply the approved spacing and column order from the accepted dashboard design to the summary table.",
       "context": "Design already approved in the record. No open design, flow or accessibility judgment; localized SolidJS presentation fix.",
       "critical": false,
       "expect": {
@@ -47,7 +47,7 @@
     {
       "id": "R04",
       "kind": "positive",
-      "question": "Design the empty and error states of the new parent notification history screen; the flow and wording are not decided.",
+      "question": "Design the empty and error states of the new recipient notification history screen; the flow and wording are not decided.",
       "context": "Material unresolved UX judgment. No frontend implementation has been accepted yet.",
       "critical": true,
       "expect": {
@@ -61,7 +61,7 @@
     {
       "id": "R05",
       "kind": "positive",
-      "question": "The attendance sync endpoint intermittently returns HTTP 500 after the nightly job; the log has a stack trace but the cause is not established.",
+      "question": "The sync endpoint intermittently returns HTTP 500 after the nightly job; the log has a stack trace but the cause is not established.",
       "context": "Unknown-cause defect. No evidence yet identifies the failing code path. A speculative patch is not allowed before debugging.",
       "critical": true,
       "expect": {
@@ -117,7 +117,7 @@
     {
       "id": "R09",
       "kind": "positive",
-      "question": "The backend worker finished the attendance finalization state-machine change across three modules; independent verification is requested before merge.",
+      "question": "The backend worker finished the finalization state-machine change across three modules; independent verification is requested before merge.",
       "context": "Business-critical state machine and multi-module change. The rules are already confirmed. Worker evidence exists but is not independent.",
       "critical": true,
       "expect": {
@@ -173,7 +173,7 @@
     {
       "id": "R13",
       "kind": "positive",
-      "question": "Which of the three services owns the SMS retry queue? The repository has no notes and the owner is unknown.",
+      "question": "Which of the three services owns the notification retry queue? The repository has no notes and the owner is unknown.",
       "context": "Location and dependency surface unknown. Scout answers where, not why.",
       "critical": false,
       "expect": {
@@ -202,7 +202,7 @@
       "id": "R15",
       "kind": "near_miss",
       "question": "The accepted contract sets the late threshold to 08:15; update the existing constant and its test.",
-      "context": "School policy is confirmed in the accepted contract with no open state-machine question. The word attendance alone does not make a domain specialist necessary.",
+      "context": "Contract policy is confirmed in the accepted contract with no open state-machine question. The word domain alone does not make a specialist necessary.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
@@ -215,49 +215,49 @@
     {
       "id": "R16",
       "kind": "positive",
-      "question": "For optional lunch absences on a half-day schedule, it is not decided whether the student is recorded as half-day or absent.",
-      "context": "Attendance business rule unresolved and not confirmed by the school. Main must not invent the policy; no writes until a decision exists.",
+      "question": "For optional sub-period absences on a partial-day schedule, it is not decided whether the account is recorded as partial-day or absent.",
+      "context": "Domain business rule unresolved and not confirmed by the owner. Main must not invent the policy; no writes until a decision exists.",
       "critical": true,
       "expect": {
         "routes": ["T3_SPECIALIST_FIRST"],
-        "roles_required": ["attendance-domain-specialist"],
-        "roles_allowed": ["attendance-domain-specialist"],
-        "skills_required": ["rfid-attendance"],
+        "roles_required": ["architecture-specialist"],
+        "roles_allowed": ["architecture-specialist"],
+        "skills_required": [],
         "skills_forbidden": []
       }
     },
     {
       "id": "R17",
       "kind": "positive",
-      "question": "Provider callbacks can arrive after an SMS retry; it is not decided whether a duplicate SMS to a parent must be suppressed within 24 hours.",
+      "question": "Provider callbacks can arrive after a notification retry; it is not decided whether a duplicate notification to a recipient must be suppressed within 24 hours.",
       "context": "Messaging delivery and retry semantics are unresolved.",
       "critical": true,
       "expect": {
         "routes": ["T3_SPECIALIST_FIRST"],
-        "roles_required": ["messaging-specialist"],
-        "roles_allowed": ["messaging-specialist"],
-        "skills_required": ["rfid-attendance"],
+        "roles_required": ["concurrency-specialist"],
+        "roles_allowed": ["concurrency-specialist"],
+        "skills_required": [],
         "skills_forbidden": []
       }
     },
     {
       "id": "R18",
       "kind": "positive",
-      "question": "Add a CSV export of student and parent contact numbers for the office; retention and minimization for the export are not decided.",
-      "context": "Student and parent personal data export with an unresolved privacy and retention policy.",
+      "question": "Add a CSV export of account holder and contact numbers for the operations team; retention and minimization for the export are not decided.",
+      "context": "Account holder personal data export with an unresolved privacy and retention policy.",
       "critical": true,
       "expect": {
         "routes": ["T3_SPECIALIST_FIRST"],
-        "roles_required": ["privacy-compliance-specialist"],
-        "roles_allowed": ["privacy-compliance-specialist"],
-        "skills_required": ["rfid-attendance"],
+        "roles_required": ["security-specialist"],
+        "roles_allowed": ["security-specialist"],
+        "skills_required": [],
         "skills_forbidden": []
       }
     },
     {
       "id": "R19",
       "kind": "near_miss",
-      "question": "The frontend team asked for a grade_level field in the backend attendance API response; the field is in the accepted contract.",
+      "question": "The frontend team asked for a level field in the backend API response; the field is in the accepted contract.",
       "context": "Backend-only API implementation against an accepted contract. The word frontend names the consumer, not the work, so no frontend guidance is needed.",
       "critical": true,
       "expect": {
@@ -299,7 +299,7 @@
     {
       "id": "R22",
       "kind": "positive",
-      "question": "The user says stop while a background backend worker is running on the attendance fix.",
+      "question": "The user says stop while a background backend worker is running on the sync fix.",
       "context": "A user stop is authoritative. Main launches nothing new; pause or cancel only through explicit worker controls.",
       "critical": true,
       "expect": {

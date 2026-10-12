@@ -8,7 +8,7 @@ Known backend contract (Rust/Axum or another stack) -> backend-worker. Unknown-c
 Touching a domain alone does not require a specialist. For material unresolved decisions:
 SQLite -> sqlite-specialist; concurrency -> concurrency-specialist; security -> security-specialist;
 API -> api-specialist; subsystem boundaries -> architecture-specialist; measured capacity
--> performance-specialist; device I/O -> hardware-integration; deployment -> devops-specialist;
+-> performance-specialist; device I/O -> concurrency-specialist; deployment -> devops-specialist;
 runtime signals -> observability-specialist. Prefer one relevant specialist and one writer.
 
 ## Read only the relevant module index

@@ -738,12 +738,12 @@ Do not invoke for routine implementation.
 
 ------------------------------------------------------------------------
 
-## hardware-integration
+## device-lifecycle
 
-Use `hardware-integration` for:
+Use `concurrency-specialist` for device lifecycle work:
 
 -   USB devices;
--   RFID readers;
+-   field-device readers;
 -   serial devices;
 -   HID;
 -   device discovery;
@@ -1081,7 +1081,7 @@ SQLite + concurrent writes:
 
 USB reader processing:
 
-`hardware-integration` + `concurrency-specialist`
+`concurrency-specialist` + `backend-worker`
 
 Production SQLite backup:
 
@@ -1089,11 +1089,11 @@ Production SQLite backup:
 
 Reader health monitoring:
 
-`hardware-integration` + `observability-specialist`
+`concurrency-specialist` + `observability-specialist`
 
 Windows NUC USB service deployment:
 
-`hardware-integration` + `devops-specialist`
+`devops-specialist` + `concurrency-specialist`
 
 Dashboard redesign:
 
@@ -1784,7 +1784,7 @@ Risk is not proportional to diff size.
 
 Treat changes involving these areas as potentially high consequence:
 
--   attendance and other business-critical rules;
+-   domain and other business-critical rules;
 -   persisted data;
 -   state machines;
 -   authentication or authorization;
@@ -2102,7 +2102,7 @@ Examples:
 
 -   "Discovery found one product decision that blocks planning."
 -   "Implementation is complete; independent verification is starting."
--   "Verify passed, but this is high-risk attendance logic, so Review is
+-   "Verify passed, but this is high-risk domain logic, so Review is
     required."
 -   "Review found a material contract conflict, so shipping is blocked."
 

@@ -148,11 +148,11 @@ but "does the exact candidate remain correct and bounded under pressure or
 failure?"
 
 Typical triggers:
-- RFID/attendance burst windows;
+- reader/event burst windows;
 - queue saturation;
 - overload/rejection behavior;
 - SQLite contention;
-- external SMS failure;
+- external notification failure;
 - graceful shutdown while work is in flight;
 - restart/recovery;
 - capacity claims.
@@ -221,7 +221,7 @@ read-only specialist:
 - API contract -> `api-specialist`
 - security boundary -> `security-specialist`
 - architecture -> `architecture-specialist`
-- device integration -> `hardware-integration`
+- device integration -> `concurrency-specialist`
 - deployment/operations -> `devops-specialist`
 - observability contract -> `observability-specialist`
 - evidence-driven performance strategy -> `performance-specialist`

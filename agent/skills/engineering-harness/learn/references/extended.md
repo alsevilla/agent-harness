@@ -201,7 +201,7 @@ accidentally assume away.
 Example:
 
 > Finalized-scan correction semantics are intentionally unresolved. Do
-> not implement reject, audit-only, SMS, replay, or legacy-write
+> not implement reject, audit-only, notification, replay, or legacy-write
 > behavior until an approved Plan resolves those semantics.
 
 This is useful because future engineering must avoid inventing policy.
@@ -275,7 +275,7 @@ That is a decision for Plan.
 
 Learn may preserve the narrower durable constraint:
 
-> Remote replay semantics for finalized attendance remain intentionally
+> Remote replay semantics for finalized records remain intentionally
 > unresolved and must not be assumed by implementation work.
 
 But only when future work materially needs that warning.
@@ -645,8 +645,8 @@ preserve unless explicitly reconsidered.
 
 Examples:
 
--   lunch tracking is optional per school;
--   first accepted event of each attendance type wins.
+-   optional sub-period tracking is per account;
+-   first accepted event of each event type wins.
 
 ## INVARIANT
 
@@ -683,7 +683,7 @@ A durable fact about build/runtime/deployment environment.
 Examples:
 
 -   production uses Raspberry Pi/Linux and Windows NUC targets;
--   RFID readers are local USB devices rather than network readers.
+-   Field devices are local USB devices rather than network devices.
 
 ## PROCESS
 
@@ -817,17 +817,17 @@ record only the conflict boundary, not either disputed rule as truth.
 Good:
 
 > The meaning of `LATE_ENTRY` is currently subject to an unresolved
-> authority conflict between the attendance specification and a later
+> authority conflict between the domain specification and a later
 > implementation decision. Future work must resolve the conflict through
 > Plan before treating either interpretation as canonical.
 
 Bad:
 
-> `LATE_ENTRY` means only the first half-day minute.
+> `LATE_ENTRY` means only the first minute of the period.
 
 Bad:
 
-> `LATE_ENTRY` means every entry after the half-day cutoff.
+> `LATE_ENTRY` means every entry after the period cutoff.
 
 ------------------------------------------------------------------------
 
@@ -862,9 +862,9 @@ materially prevents future accidental assumptions.
 
 Example:
 
-> UNRESOLVED: Whether accepted scans against FINALIZED attendance should
+> UNRESOLVED: Whether accepted events against FINALIZED records should
 > be rejected or retained only as audit events. Do not implement until
-> Plan resolves event/audit/SMS/replay semantics.
+> Plan resolves event/audit/notification/replay semantics.
 
 Use sparingly.
 
@@ -882,7 +882,7 @@ Specific to the current repository/system.
 
 Example:
 
-> RFID readers are local USB devices attached directly to the host.
+> Field devices are local USB devices attached directly to the host.
 
 ## GLOBAL PROCESS
 
@@ -909,7 +909,7 @@ Default to PROJECT unless clearly broader.
 
 Store knowledge at the narrowest correct scope.
 
-Do not put RFID attendance rules into global engineering memory.
+Do not put domain business rules into global engineering memory.
 
 Do not bury global workflow invariants inside one project.
 
@@ -934,7 +934,7 @@ documentation for that domain.
 
 Examples:
 
--   attendance engine business rules;
+-   domain engine business rules;
 -   supported deployment topology;
 -   schema meaning;
 -   API contract;
@@ -1030,7 +1030,7 @@ duplicating the truth itself.
 
 Examples:
 
--   which spec governs attendance-engine rules;
+-   which spec governs domain-engine rules;
 -   which document governs API behavior;
 -   where schema truth is maintained;
 -   which docs are historical only.
@@ -1182,7 +1182,7 @@ Example:
 
 Good:
 
-> FINALIZED attendance records must not automatically recalculate.
+> FINALIZED records must not automatically recalculate.
 > Handling of post-finalization scans requires an accepted policy before
 > implementation may add new behavior.
 
@@ -1631,11 +1631,11 @@ represent an architectural boundary.
 
 Weak memory:
 
-> `attendance.rs` has a function called `do_scan`.
+> `ledger.rs` has a function called `record_event`.
 
 Better architectural memory:
 
-> Local reader scans enter attendance through the shared scan
+> Local device events enter the ledger through the shared event
 > transaction path; lifecycle enforcement must therefore occur at or
 > below that persistence boundary.
 
@@ -1696,7 +1696,7 @@ Avoid unnecessary storage of:
 -   personal data;
 -   production credentials;
 -   private customer data;
--   raw student information;
+-   raw personal information;
 -   private endpoints.
 
 Record the engineering constraint, not sensitive contents.
@@ -1859,8 +1859,8 @@ If authoritative specifications already live under `docs/`:
 
 memory may record:
 
-> Attendance business rules are authoritative in `<spec path>`. Planning
-> and Review for attendance-rule changes must consult the affected
+> Domain business rules are authoritative in `<spec path>`. Planning
+> and Review for domain-rule changes must consult the affected
 > sections rather than infer vocabulary solely from code.
 
 This is a navigation/process lesson.
@@ -2011,8 +2011,8 @@ Observation:
 
 Valid lesson:
 
-> Planning for attendance-rule semantics should consult the relevant
-> authoritative attendance specification before declaring vocabulary
+> Planning for domain-rule semantics should consult the relevant
+> authoritative domain specification before declaring vocabulary
 > undefined.
 
 Invalid automatic policy:
@@ -2500,7 +2500,7 @@ task tracker.
 
 Example:
 
-> Existing unresolved attendance work still belongs to PLAN. Learn does
+> Existing unresolved domain work still belongs to PLAN. Learn does
 > not change that routing.
 
 Learn does not automatically restart engineering work.

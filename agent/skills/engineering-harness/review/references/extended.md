@@ -495,7 +495,7 @@ A small change inside a critical domain remains critical-domain work.
 
 Examples:
 
-- attendance;
+- domain records;
 - financial state;
 - authentication;
 - authorization;
@@ -725,7 +725,7 @@ changing `primary_reason` may affect:
 - reports;
 - filters;
 - exports;
-- SMS;
+- notifications;
 - API consumers;
 - historical analytics.
 
@@ -1387,7 +1387,7 @@ Examples:
 - `performance-specialist`;
 - `api-specialist`;
 - `architecture-specialist`;
-- `hardware-integration`;
+- `concurrency-specialist`;
 - `ui-ux-specialist`;
 - `observability-specialist`.
 

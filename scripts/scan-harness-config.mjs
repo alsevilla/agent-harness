@@ -142,7 +142,17 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 		}
 	}
 
-	readJson("pi-package/package.json");
+	// Absent pi-package/ is the intentional source-only checkout (INFO). Any present entry is validated strictly: a missing or invalid manifest is an ERROR.
+	const profilePackagePresent = (() => {
+		try {
+			fsImpl.lstatSync(path.join(root, "pi-package"));
+			return true;
+		} catch (error) {
+			return error?.code !== "ENOENT";
+		}
+	})();
+	if (profilePackagePresent) readJson("pi-package/package.json");
+	else add("INFO", "PACKAGE_ABSENT", "pi-package", "not present: intentional source-only checkout; package checks not applicable");
 
 	const subagentDir = path.join(agentDir, "extensions", "subagent");
 	const indexSource = readText(path.join(subagentDir, "index.ts"));
@@ -150,7 +160,7 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 	if (!exists(path.join(subagentDir, "safety-guard-entry.ts"))) add("ERROR", "GUARD_MISSING", "agent/extensions/subagent/safety-guard-entry.ts", "guard entry module is missing");
 
 	if (packageRoot === undefined) {
-		if (!exists(path.join(root, "pi-package", "extensions", "subagent", "safety-guard-entry.ts"))) add("INFO", "PACKAGE_LEGACY_NO_GUARD", "pi-package", "frozen package predates the safety guard; not claimed to contain it; no activation implied");
+		if (profilePackagePresent && !exists(path.join(root, "pi-package", "extensions", "subagent", "safety-guard-entry.ts"))) add("INFO", "PACKAGE_LEGACY_NO_GUARD", "pi-package", "frozen package predates the safety guard; not claimed to contain it; no activation implied");
 	} else {
 		const pkgDir = path.resolve(root, packageRoot);
 		const pkgFile = path.relative(root, pkgDir) || ".";

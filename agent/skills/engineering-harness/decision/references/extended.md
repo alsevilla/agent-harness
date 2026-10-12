@@ -426,7 +426,7 @@ Example:
 
 does not automatically mean:
 
-`WIREFRAMES governs attendance calculation.`
+`WIREFRAMES governs the domain calculation.`
 
 Likewise:
 
@@ -435,7 +435,7 @@ Likewise:
 does not automatically decide:
 
 - whether an audit event is stored;
-- whether SMS is emitted;
+- whether a notification is emitted;
 - how remote replay behaves;
 - whether administrators can override;
 - whether legacy writes occur.
@@ -485,13 +485,13 @@ Example:
 
 and:
 
-`D2 — Should that scan trigger SMS?`
+`D2 — Should that event trigger a notification?`
 
 may require separate decisions.
 
 Do not compress multiple independent product semantics into one broad option such as:
 
-`A — handle finalized scans correctly.`
+`A — handle finalized events correctly.`
 
 The decision must be specific enough for Plan to inherit without guessing.
 
@@ -961,7 +961,7 @@ Example:
 
 ```text id="rc51bu"
 D1:
-Reject finalized scan
+Reject finalized event
 or
 record audit-only?
 
@@ -970,7 +970,7 @@ record audit-only?
 If audit-only:
 
 D2:
-Should audit-only scan trigger SMS?
+Should audit-only event trigger a notification?
 ```
 
 Do not ask users to decide irrelevant branches.
@@ -1480,11 +1480,11 @@ Multiple decisions may be presented together only when they are sufficiently ind
 Example:
 
 ```text id="zuw8xb"
-D1 — Late finalized scan:
+D1 — Late finalized event:
 A — Reject
 B — Audit-only
 
-D2 — SMS:
+D2 — Notification:
 A — Suppress
 B — Send
 

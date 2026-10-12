@@ -190,7 +190,7 @@ Examples:
 
 "Use option A for Decision 1."
 
-"Keep physical noon taps as LUNCH_OUT."
+"Keep physical secondary taps as SECONDARY_OUT."
 
 "Go with the recommendations for Decisions 1 through 3."
 

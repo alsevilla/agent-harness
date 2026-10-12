@@ -49,6 +49,7 @@ async function runNodeSuite(): Promise<void> {
 		},
 	} as never);
 	const mod: any = await import(new URL("../agent-create.ts", import.meta.url).href);
+	const agents: any = await import(new URL("../agents.ts", import.meta.url).href);
 	const editor: any = await import(new URL("../roles-editor.ts", import.meta.url).href);
 	const monitorMod: any = await import(new URL("../monitor.ts", import.meta.url).href);
 	const piTui: any = await import(installedUrl("pi-tui/dist/index.js"));
@@ -197,7 +198,8 @@ async function runNodeSuite(): Promise<void> {
 		const [call] = fake.calls;
 		const frozen = frozenOf(call.args);
 		assert.equal(call.cmd, "PYEXE");
-		assert.deepEqual(call.args.slice(0, 4), ["-I", "-X", "utf8", path.join(w.agentDir, "skills", "agent-creation", "scripts", "create_agent.py")]);
+		// The bundled CLI wins in a native checkout (root package.json); a live profile without a manifest falls back to agentDir.
+		assert.deepEqual(call.args.slice(0, 4), ["-I", "-X", "utf8", path.join(agents.packageRoot() ?? w.agentDir, "skills", "agent-creation", "scripts", "create_agent.py")]);
 		assert.deepEqual(call.args.slice(4), ["--spec", frozen, "--project-root", w.root, "--agent-dir", w.agentDir]);
 		assert.equal(call.timeoutMs, 30_000);
 		assert.equal(call.cwd, path.dirname(frozen));

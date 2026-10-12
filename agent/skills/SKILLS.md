@@ -1,6 +1,6 @@
 # Modular skill map
 
-The registered engineering/domain skills are engineering-harness, frontend, backend and rfid-attendance.
+The registered engineering skills are engineering-harness, frontend and backend.
 Each owns its module folders; no child directory contains a registered SKILL.md.
 Read one module index for the task, then only relevant guide/reference sections.
 The main orchestrator owns actual named-agent launches; leaf agents never delegate.
@@ -35,17 +35,6 @@ Default role links include:
 - sqlite-specialist -> sqlite-sqlx-engineering
 
 `load-resilience-testing` remains conditional for performance, concurrency, SQLite, reviewer, and verification work when burst/overload/resilience evidence is actually material. Do not preload it for ordinary hot-path profiling or localized performance questions.
-
-## RFID attendance domain modules
-attendance-domain, event-reconciliation, messaging-reliability and privacy-compliance live under `rfid-attendance/<name>/index.md`.
-
-Default role links:
-- attendance-domain-specialist -> attendance-domain
-- event-reconciliation-specialist -> event-reconciliation
-- messaging-specialist -> messaging-reliability
-- privacy-compliance-specialist -> privacy-compliance
-
-These are domain-analysis modules. They do not grant source mutation authority.
 
 ## Compatibility
 Pi's manual shortcuts live under ~/.pi/agent/prompts/. They expand instructions;

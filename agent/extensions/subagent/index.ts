@@ -34,8 +34,8 @@ import {
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
 import { getFallbackSequence, nextFallbackModel } from "./model-routing.ts";
-import { configureCodeIntegrations, CODE_NAVIGATION_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } from "./code-integrations.ts";
-import { COMPACT_HANDOFF_INSTRUCTIONS, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
+import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
+import { PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
@@ -362,7 +362,7 @@ async function runAgentAttempt(
 
 	try {
 		if (agent.systemPrompt.trim()) {
-			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt + (codeIntegrationsEnabled ? CODE_NAVIGATION_GUIDANCE + graphReferenceGuidance(cwd ?? defaultCwd) + unavailableIntegrationGuidance(agent.name) : "") + packageResourceGuidance(packageRoot()) + COMPACT_HANDOFF_INSTRUCTIONS);
+			const tmp = await writePromptToTempFile(agent.name, assembleChildSystemPrompt(agent, { codeIntegrationsEnabled, cwd: cwd ?? defaultCwd, packageRoot: packageRoot(), launchArgs: args }));
 			tmpPromptDir = tmp.dir;
 			tmpPromptPath = tmp.filePath;
 			args.push("--append-system-prompt", tmpPromptPath);
@@ -870,7 +870,7 @@ export default function (pi: ExtensionAPI) {
 					agents: { has: (name) => agents.some((a) => a.name === name) },
 					concurrency: MAX_CONCURRENCY,
 					signal,
-					accept: (result: SingleResult) => !isFailedResult(result),
+					accept: (result: SingleResult) => !isFailedResult(result) && !printedToolMarkup(result),
 					report: (result: SingleResult) => withTerminalDiagnostics(extractFinalText(result.messages), result),
 					run: (node, parents, nodeSignal) => {
 						return runSingleAgent(ctx.cwd, { ...dispatchDefaults, waitKey: node.id, onSpawn: () => launched.add(node.id) }, agents, node.agent, appendParentReports(node.task, parents), node.cwd, undefined, nodeSignal, undefined, makeDetails("dag"), node.readOnly ? "read" : "write");
@@ -929,7 +929,8 @@ export default function (pi: ExtensionAPI) {
 					);
 					results.push(result);
 
-					const isError = isFailedResult(result);
+					// Printed markup is not executed, so a successor must not run on it; a final step keeps its labelled presentation.
+					const isError = isFailedResult(result) || (i < params.chain.length - 1 && printedToolMarkup(result));
 					if (isError) {
 						const errorMsg = getResultOutput(result);
 						return {

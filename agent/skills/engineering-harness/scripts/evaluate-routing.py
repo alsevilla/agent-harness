@@ -21,11 +21,10 @@ ROUTES = frozenset({
 })
 # Mirrors agent/agents/*.md; tests/test_evaluate_routing.py checks the drift.
 ROLES = frozenset({
-    "api-specialist", "architecture-specialist", "attendance-domain-specialist", "backend-worker",
-    "concurrency-specialist", "debugger", "devops-specialist", "event-reconciliation-specialist",
-    "frontend-worker", "general-worker", "hardware-integration", "messaging-specialist",
-    "observability-specialist", "oracle", "performance-specialist", "privacy-compliance-specialist",
-    "release-engineer", "reviewer", "scout", "security-specialist", "sqlite-specialist",
+    "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist",
+    "debugger", "devops-specialist", "frontend-worker", "general-worker",
+    "observability-specialist", "oracle", "performance-specialist", "release-engineer",
+    "reviewer", "scout", "security-specialist", "sqlite-specialist",
     "test-engineer", "ui-ux-specialist",
 })
 KINDS = frozenset({"positive", "near_miss"})

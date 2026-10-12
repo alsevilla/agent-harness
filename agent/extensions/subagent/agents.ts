@@ -216,24 +216,24 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 const PACKAGE_NAME = "@alsevilla/pi-engineering-harness";
 
 /**
- * Package mode is decided by the manifest name. A renamed bundle is inert (null): only the exact package is protected.
- * A missing manifest beside a defaults/ tree, or an unreadable manifest, is a damaged package and fails closed.
- * A missing manifest with no defaults is the live profile and stays silent.
+ * Native package mode is decided by the root package.json beside agent/ (this file's resource root). Only the exact package name is protected:
+ * a renamed manifest is inert (null). No manifest is the live profile (agent/ with no package above it) and stays silent.
+ * An unreadable manifest fails closed.
  */
 function packageLayout(): { root: string | null; error?: string } {
 	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const manifest = path.join(root, "..", "package.json");
 	let parsed: { name?: unknown } | null;
 	try {
-		parsed = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
+		parsed = JSON.parse(fs.readFileSync(manifest, "utf-8"));
 	} catch (error) {
-		const missing = (error as { code?: unknown }).code === "ENOENT";
-		if (missing && !isDirectory(path.join(root, "defaults"))) return { root: null };
-		return { root: null, error: `package manifest ${missing ? "is missing beside package defaults" : "is unreadable or not valid JSON"}: ${root}` };
+		if ((error as { code?: unknown }).code === "ENOENT") return { root: null };
+		return { root: null, error: `package manifest is unreadable or not valid JSON: ${manifest}` };
 	}
 	return { root: parsed?.name === PACKAGE_NAME ? root : null };
 }
 
-/** Installed package root, verified by name; null in the live profile (no package.json there), so live discovery is unchanged. */
+/** Native package resource root (agent/), verified by the root manifest name; null in the live profile, so live discovery is unchanged. */
 export function packageRoot(): string | null {
 	return packageLayout().root;
 }
@@ -246,13 +246,13 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const userRegistry = loadRoleRegistry(path.join(getAgentDir(), "roles.json"), pkgRoot || layout.error ? "user roles.json" : undefined, true);
 	const roles = userRegistry.roles;
 	let error = layout.error ?? userRegistry.error;
-	// Package tier: the pinned defaults/roles.json is the base; user roles.json fields override it field-wise.
+	// Package tier: the bundled roles.json is the base; user roles.json fields override it field-wise.
 	const packageRoles = new Map<string, RoleOverride>();
 	let shipped: AgentConfig[] = [];
 	if (pkgRoot) {
-		const base = loadRoleRegistry(path.join(pkgRoot, "defaults", "roles.json"), "package defaults roles.json");
+		const base = loadRoleRegistry(path.join(pkgRoot, "roles.json"), "package roles.json");
 		error = error ?? base.error;
-		if (!isDirectory(path.join(pkgRoot, "defaults", "agents"))) error = error ?? `package defaults agents directory is missing: ${pkgRoot}`;
+		if (!isDirectory(path.join(pkgRoot, "agents"))) error = error ?? `package agents directory is missing: ${pkgRoot}`;
 		for (const [name, baseRole] of base.roles) {
 			const user = roles.get(name);
 			packageRoles.set(name, {
@@ -262,11 +262,11 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 				tools: user?.tools ?? baseRole.tools,
 			});
 		}
-		shipped = loadAgentsFromDir(path.join(pkgRoot, "defaults", "agents"), "package", packageRoles);
+		shipped = loadAgentsFromDir(path.join(pkgRoot, "agents"), "package", packageRoles);
 		// Every declared role needs exactly one parsed definition, and no parsed definition may be undeclared (an empty set is never valid).
 		const declared = [...base.roles.keys()].sort();
 		const defined = shipped.map((a) => a.name).sort();
-		if (!error && (declared.length === 0 || JSON.stringify(declared) !== JSON.stringify(defined))) error = `package defaults roles.json and agents disagree on role names: ${pkgRoot}`;
+		if (!error && (declared.length === 0 || JSON.stringify(declared) !== JSON.stringify(defined))) error = `package roles.json and agents disagree on role names: ${pkgRoot}`;
 	}
 
 	const packageAgents = scope === "project" ? [] : shipped;

@@ -456,7 +456,7 @@ assessment.
 Examples:
 
 - backend fix + unrelated documentation change may be LOW;
-- attendance state-machine fix + attendance persistence change may be
+- domain state-machine fix + domain persistence change may be
   CRITICAL.
 
 Verification depth follows actual interaction risk.

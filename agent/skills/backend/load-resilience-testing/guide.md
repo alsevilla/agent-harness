@@ -17,7 +17,7 @@ explicit runtime/external-effect authority.
 Prefer:
 - disposable/local environments;
 - isolated test databases;
-- fake/local SMS gateways;
+- fake/local notification gateways;
 - bounded scenarios;
 - explicit cleanup.
 
@@ -69,13 +69,13 @@ Track relevant correctness signals such as:
 - restart recovery;
 - external side-effect behavior.
 
-For attendance/event systems, accepted work must not silently disappear.
+For event systems, accepted work must not silently disappear.
 
 ## Workload Model
 
 Choose a model that matches the real producer.
 
-For RFID/card-reader bursts, an **open arrival-rate model** is usually the more
+For device-reader bursts, an **open arrival-rate model** is usually the more
 useful system-capacity test because taps continue arriving even when the server
 slows.
 
@@ -154,7 +154,7 @@ Observe:
 
 ### 7. Dependency failure
 
-For network dependencies such as an SMS gateway, inject controlled:
+For network dependencies such as a notification gateway, inject controlled:
 - latency;
 - timeout;
 - disconnect;

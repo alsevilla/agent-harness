@@ -5,21 +5,21 @@
 An independent, unofficial harness profile for [Pi](https://github.com/earendil-works/pi), the minimal extensible coding agent by Mario Zechner. It is not an official Pi project and is not endorsed by its authors.
 
 - Tested baseline: Pi 1.1.0 on Windows with Node 24.20.0 (targeted checks; see [Status and limits](#status-and-limits)).
-- Source release: v1.4.0.
-- The npm package `@alsevilla/pi-engineering-harness` is **UNPUBLISHED** until explicit approval. Install the profile manually as described in [Quickstart](#quickstart) and [Install](#install).
+- Source release: v1.5.0.
+- The native Pi package `@alsevilla/pi-engineering-harness` (root `package.json`) is not published to npm. Install it with `pi install git:github.com/alsevilla/pi-agent-harness` as described in [Quickstart](#quickstart) and [Install](#install); a local checkout is an optional development alternative. The retired pi-package build and manual profile copies are no longer the install path.
 
 ## What it does
 
 The profile provides:
 
-- 23 named agent roles with explicit models, thinking levels and delegation boundaries (`agent/agents/`, `agent/roles.json`), including four read-only RFID attendance-domain specialists and a scoped release engineer. The npm package ships 18 generic defaults.
-- Engineering, frontend, backend and RFID attendance skills, loaded selectively (`agent/skills/`).
+- 18 named agent roles with explicit models, thinking levels and delegation boundaries (`agent/agents/`, `agent/roles.json`), including a scoped release engineer. Domain-specific roles belong to each project, not this generic profile. The native package exposes these 18 generic roles.
+- Engineering, frontend and backend skills, loaded selectively (`agent/skills/`).
 - A subagent extension ([details](agent/extensions/subagent/README.md)): DAG launches of up to 8 nodes (at most 4 running at once); a process-local workspace admission queue; background jobs with steering, pause, resume and cancel, plus a live inspector; compact handoff reports (background completion notices are capped at 4,000 characters; `subagent_control` `result` returns the full retained report while the job is among the last 64 finished); completed workers stay inspectable in history; and a provider cooldown shared across the whole Pi host session (not only subagent children) for Anthropic and OpenAI Codex HTTP calls.
 - `/subagent roles`, which edits one role's primary model, fallbacks and thinking level through native dialogs.
-- Optional read-only Serena, Graphify and QMD integrations for code workers ([setup](#code-navigation-setup-optional)). Core orchestration works without them only in the installed npm package. In the live profile, the 23 configured roles list integrations: Ponytail is required for every role except `reviewer` (optional there), and QMD, Serena and Graphify are optional, so a missing one is skipped with a launch note instead of blocking the launch.
+- Optional read-only Serena, Graphify and QMD integrations for code workers ([setup](#code-navigation-setup-optional)). Core orchestration works without them. Code roles listed in `agent/extensions/subagent/integrations.json` use integrations: Ponytail is required for every listed role except `reviewer` (optional there), and QMD, Serena and Graphify are optional, so a missing one is skipped with a launch note instead of blocking the launch.
 
-- Prompt shortcuts and native commands, listed in [Commands](#commands).
-- A Git identity environment extension, and the Claude subscription guard correction for obsolete inline tool references.
+- Manual, optional prompt shortcuts (not exported by the native package) and native commands, listed in [Commands](#commands).
+- Optional components that the native manifest does not export; load them separately: a Git identity environment extension (`engineering-environment`) and the Claude subscription guard correction for obsolete inline tool references.
 
 ## How it works
 
@@ -37,24 +37,24 @@ The full policy is [agent/AGENTS.md](agent/AGENTS.md). Routing criteria and proc
 
 Prerequisites: Pi 1.1.0, Node 24.20.0 (the tested Windows baseline), and your own Claude subscription or ChatGPT/Codex sign-in. No credentials are included.
 
-1. Back up your current `~/.pi/agent`.
-2. Copy `agent/AGENTS.md`, `agent/roles.json`, `agent/agents/`, `agent/extensions/`, `agent/prompts/` and `agent/skills/` into that profile, keeping your existing authentication and local configuration. Details: [Install](#install).
-3. Install the listed npm packages through Pi and create local configuration from the examples.
+1. Check out this repository at a path you control, for example `C:/path/to/pi-agent-harness`.
+2. Install it as a native package with `pi install git:github.com/alsevilla/pi-agent-harness`. Details, including the default-branch note and the optional local checkout: [Install](#install).
+3. Optionally install the third-party integrations and create local configuration from the examples (`engineering-environment`, `qmd` and `refresh` only if you load them separately). Core orchestration does not need them.
 4. Restart Pi and sign in with `/login anthropic` and `/login openai-codex`.
 5. Run Pi from your project and open the worker inspector with `/subagent`.
 
-Example, described and not executed here: type `/debug the save button ignores a second click`. The `/debug` prompt asks main to dispatch the `debugger` role with your request as its assignment packet; main does not diagnose the problem itself. After a fix, `/verify <what to check>` asks the `test-engineer` role for an independent check.
+Example, described and not executed here (it needs the manual `/debug` and `/verify` prompt files, which the native package does not export): type `/debug the save button ignores a second click`. The `/debug` prompt asks main to dispatch the `debugger` role with your request as its assignment packet; main does not diagnose the problem itself. After a fix, `/verify <what to check>` asks the `test-engineer` role for an independent check.
 
 ## Commands
 
 Two kinds of command exist:
 
-- **Prompt shortcuts** are Markdown files in `agent/prompts/`. The filename becomes the `/` command. Pi expands the template text and sends it to the model; a template is not executable behavior. Edit a template and run `/reload` in an active session at a safe point, after active workers finish (user guidance; the profile adds no automatic reload wait). An extension command with the same name is handled by the extension first.
-- **Native commands** are handled by an extension or by Pi. They run without a model dispatch unless the row says otherwise.
+- **Prompt shortcuts** are Markdown files in `agent/prompts/`. The filename becomes the `/` command. The native package exports no prompt templates (the public SDK loader reports none), so installing it adds none of the workflow or domain commands below. They are manual, optional files: they appear only if you load `agent/prompts/` yourself. Pi expands the template text and sends it to the model; a template is not executable behavior. Edit a template and run `/reload` in an active session at a safe point, after active workers finish (user guidance; the profile adds no automatic reload wait). An extension command with the same name is handled by the extension first.
+- **Native commands** are handled by a native extension (for example `subagent`) or by Pi. They run without a model dispatch unless the row says otherwise.
 
 ### Workflow prompts (AI workflow)
 
-These send a packet to the model. The workflow commands load a procedure; only `/debug`, `/verify` and `/review` dispatch a named subagent. Provider or model availability failures retry once with the agent's configured GitHub Copilot fallback, only before any tool call.
+Manual, optional prompt templates (not exported by the native package): they send a packet to the model when loaded. The workflow commands load a procedure; only `/debug`, `/verify` and `/review` dispatch a named subagent. Provider or model availability failures retry once with the agent's configured GitHub Copilot fallback, only before any tool call.
 
 | Command | What it does | Source |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ These send a packet to the model. The workflow commands load a procedure; only `
 
 ### Domain capability prompts (guidance only)
 
-These load one skill module as guidance. They do not dispatch a worker or choose a design. Unresolved, material frontend design or UX choices go to `ui-ux-specialist` before `frontend-worker`; accepted designs need no extra UX phase. `/rust-axum-engineering` applies only when the stack matches.
+Manual, optional prompt templates (not exported by the native package): each loads one skill module as guidance. They do not dispatch a worker or choose a design. Unresolved, material frontend design or UX choices go to `ui-ux-specialist` before `frontend-worker`; accepted designs need no extra UX phase. `/rust-axum-engineering` applies only when the stack matches.
 
 | Command | Loads | Source |
 | --- | --- | --- |
@@ -91,6 +91,8 @@ These load one skill module as guidance. They do not dispatch a worker or choose
 | `/sqlite-sqlx-engineering` | SQLite and SQLx backend guidance (`agent/skills/backend/sqlite-sqlx-engineering/index.md`) | [prompt](agent/prompts/sqlite-sqlx-engineering.md) |
 
 ### Native and subagent commands (no model dispatch)
+
+The `/refresh` rows apply only when the optional `agent/extensions/refresh` component is loaded separately; the native package does not register them.
 
 | Command | What it does | Source |
 | --- | --- | --- |
@@ -114,10 +116,10 @@ Other native features: `ask_user` is a tool for asking you a question with Pi's 
 Human-facing guides, grouped by purpose:
 
 **Tutorials**
-- [Quickstart](#quickstart): first manual install and first commands.
+- [Quickstart](#quickstart): first native install and first commands.
 
 **How-to**
-- [Install](#install): manual profile installation, packages, configuration and login.
+- [Install](#install): native package installation, optional packages, configuration and login.
 - [Code navigation setup (optional)](#code-navigation-setup-optional): Serena, Graphify and QMD.
 - [Manual data refresh](#manual-data-refresh) and the [refresh guide](agent/extensions/refresh/README.md).
 - [Worktree placement and disposition](#worktree-placement-and-disposition).
@@ -129,8 +131,7 @@ Human-facing guides, grouped by purpose:
 - [Commands](#commands) (this README).
 - [Subagent README](agent/extensions/subagent/README.md): limits, controls, history and safety guard.
 - [Validation record](agent/VALIDATION.md): historical October 7, 2026 regression pass.
-- Skills: [engineering-harness](agent/skills/engineering-harness/SKILL.md), plus the frontend, backend, RFID attendance, [browser](agent/skills/browser/SKILL.md) and [graphify](agent/skills/graphify/SKILL.md) catalogs under `agent/skills/`.
-- [pi-package/README.md](pi-package/README.md): readme for the separately built npm package. It is a distinct component document, not a second entrypoint.
+- Skills: [engineering-harness](agent/skills/engineering-harness/SKILL.md), plus the frontend, backend, [browser](agent/skills/browser/SKILL.md) and [graphify](agent/skills/graphify/SKILL.md) catalogs under `agent/skills/` (repository files; the native package exports only the two skills listed in [Install](#install)).
 - [docs/knowledge](docs/knowledge/README.md): Pi-specific decision and knowledge records.
 
 **Explanation**
@@ -190,7 +191,7 @@ Verified scope: the live check covered background batching and `/subagent usage`
 
 - Install steps below name Pi 1.1.0 as the tested baseline; Pi 1.0.4 is historical. Targeted local checks ran on Windows with Node 24.20.0 and Pi 1.1.0 (subagent package defaults, roles editor and agent-creation collision guard). Public `pi-ai/compat` imports were verified on Pi 1.1.0 only; no minimum historical Pi version is claimed. Historical targeted Node 22.19 and Node 24.20 Windows checks for the subagent push-authorization fix (guard, unit and runtime suites; see [safety-core tests](agent/extensions/subagent/tests/safety-core.test.ts) and [guard runtime tests](agent/extensions/subagent/tests/safety-guard-runtime.node.ts)) are not full-stack Node 22 compatibility. Native macOS and Linux runs, live TTY behaviour, a clean host and interactive TTY behaviour are also unverified. These are not a blanket compatibility claim.
 - Roles use Anthropic (Claude) and OpenAI Codex (GPT) models. The profile uses direct Claude subscription and ChatGPT/Codex sign-in; CLIProxyAPI is not required. You need your own sign-in or API key; no credentials are included.
-- Role discovery covers the profile's user roles in `agent/agents/`. Project roles in `.pi/agents/` use their own frontmatter.
+- Role discovery covers the bundled generic roles (`agent/roles.json` and `agent/agents/*.md` in the native package), your user roles in the Pi agent directory's `agents/` folder (`~/.pi/agent/agents/` by default; user `roles.json` fields override a bundled role's fields), and project roles in `.pi/agents/`, which use their own frontmatter. Precedence: package < user < project.
 - Changes to subagent extension files take effect only after a Pi reload or restart at a safe point, once active workers finish.
 - `/subagent create` is an operator-only native command in interactive sessions. It previews the files and writes a project-local agent only after you choose CREATE. A created agent is not active until used with `agentScope` `project` or `both`; creation is not trust, reload or launch.
 - Admission, DAG state and background capacity are per Pi process. They do not coordinate separate processes or machines. The cooldown does not cover Codex WebSocket transport.
@@ -201,11 +202,27 @@ Verified scope: the live check covered background batching and `/subagent usage`
 
 ## Install
 
-Manual installation. There is no automatic installer or launcher, and the npm package is not published.
+Native installation from the Git source. There is no automatic installer, and the package is not published to npm. Installing adds one package entry to `~/.pi/agent/settings.json`; `--local` or `-l` writes it to `.pi/settings.json` instead, which Pi reads only after project trust.
 
-Back up your current `~/.pi/agent` first. Copy `agent/AGENTS.md`, `agent/roles.json`, `agent/agents/`, `agent/extensions/`, `agent/prompts/` and `agent/skills/` into that profile. Preserve existing authentication and unrelated local configuration. Remove conflicting old skill or extension copies deliberately rather than merging two stacks blindly.
+```text
+pi install git:github.com/alsevilla/pi-agent-harness
+```
 
-For a fresh profile, copy `agent/settings.example.json` to `settings.json`. For an existing profile, merge the example's package and extension settings into your current settings. Install the listed packages through Pi. The code workers expect these packages under `~/.pi/agent/npm/node_modules`:
+Pi treats a `git:` source as a Git package: it clones the repository and reconciles the checkout to the selected ref (`docs/packages.md`). Only a tag or commit ref is pinned, for example `git:github.com/alsevilla/pi-agent-harness@<tag-or-commit>`. The unqualified source and a branch ref such as `@fix/worker-prompts-and-domain-separation` are not pinned, so `pi update` can move them to newer commits. The unqualified source requires this change on the repository's default branch; until it is merged there, PR testing can use `pi install git:github.com/alsevilla/pi-agent-harness@fix/worker-prompts-and-domain-separation` if necessary.
+
+**Optional development alternative: local checkout.** To run a working copy, install its absolute path. Pi loads the root `package.json` in place: the checkout is not copied into `~/.pi/agent`, and you update that checkout yourself.
+
+```text
+pi install C:/path/to/pi-agent-harness
+```
+
+Use an absolute path for a local checkout. The install, remove and update commands in this section are standard Pi commands from Pi's package documentation (`docs/packages.md`, `docs/cli.md`); they were not executed in this verification. The package declares three extensions (`agent/extensions/subagent`, `agent/extensions/ask-user`, `agent/extensions/external-compaction`) and two skills (`agent/skills/engineering-harness`, `agent/skills/agent-creation`). The 18 generic roles are read from `agent/roles.json` and `agent/agents/`. `engineering-environment`, `qmd` and `refresh` are not in the default exports: they stay in the repository, and the sections below that describe them apply only if you load them separately.
+
+Host Pi packages (`@earendil-works/*`, `typebox`) are `peerDependencies` supplied by Pi, not bundled. Restart Pi after installing. `/subagent roles` should then list the bundled roles; this live check is not part of the repository tests.
+
+Settings: `agent/settings.example.json` is a broad example of a profile settings file, not a package-only list. It sets model defaults (`defaultProvider`, `defaultModel`, `defaultThinkingLevel`), `defaultTools`, `cacheWarming`, `quietStartup`, `lastChangelogVersion`, `extensions` and `skills` filters, and the optional third-party `packages`. Do not overwrite your live `~/.pi/agent/settings.json` with it. Copy only the entries you want into your existing settings, keeping existing authentication and unrelated local configuration, and check the model and tool defaults against your own setup. The native install itself adds only its package entry (see above).
+
+Optional third-party integrations (not part of this package) are installed through Pi. The code workers expect these packages under `~/.pi/agent/npm/node_modules`:
 
 ```text
 pi install npm:pi-claude-subscription-connector
@@ -215,17 +232,21 @@ pi install npm:graphify-pi
 pi install npm:@dietrichgebert/ponytail
 ```
 
-Copy each extension's `config.example.json` to `config.json`. Set your own Git identity in engineering-environment. In qmd, set the absolute Node executable and installed QMD CLI paths for your machine, plus the existing shared index name (default `index`). The example Windows paths must be changed on other machines. Install QMD separately and configure collections before using its retrieval tools; this profile does not ship a search database or rebuild indexes during retrieval.
+For each optional extension you load separately (`engineering-environment`, `qmd`, `refresh`), copy its `config.example.json` to `config.json`. In engineering-environment, set your own Git identity. In qmd, set the absolute Node executable and installed QMD CLI paths for your machine, plus the existing shared index name (default `index`). The example Windows paths must be changed on other machines. Install QMD separately and configure collections before using its retrieval tools; this profile does not ship a search database or rebuild indexes during retrieval.
 
 Apply the optional connector correction as described in [patches/claude-subscription-connector](agent/patches/claude-subscription-connector/README.md). Restart Pi (after updating, cancel and relaunch any old workers), then sign in with `/login anthropic` using the connector's offered OAuth flow and `/login openai-codex`. Model availability depends on your provider and catalog; inspect agent frontmatter and `agent/roles.json` before using the profile. Configured availability fallbacks require a separate GitHub Copilot sign-in.
 
 Run Pi from your project. `/subagent` opens worker history and live activity; its command controls and the orchestrator's `subagent_control` tool support steering and pause/resume. See the [subagent documentation](agent/extensions/subagent/README.md). The inspector's outside-click compatibility path depends on Pi TUI internals and should be rechecked after a Pi upgrade. Changes to subagent extension files take effect only after a Pi reload or restart at a safe point, once active workers finish.
 
-To update a clean local checkout (fast-forward only, on `master`):
+**Update.** `pi update git:github.com/alsevilla/pi-agent-harness` reconciles this package (`pi update --extensions` reconciles all installed packages; `pi update` alone updates Pi itself). Then restart Pi, or reload at a safe point after active workers finish. A local checkout is updated by you, not by Pi. The update command was not run in this verification, and this repository does not test the update flow.
 
-```bash
-git -C ~/.pi pull --ff-only
-```
+**Remove.** `pi remove git:github.com/alsevilla/pi-agent-harness` removes the package and its settings entry (`pi uninstall` is an alias), then restart Pi. Pi identifies git packages by repository URL without the ref. For a local checkout, use `pi remove C:/path/to/pi-agent-harness`. The removal command was not run in this verification.
+
+**Old manual copies (double-load).** Earlier installs copied `agent/` files into `~/.pi/agent`. Those copies and the native package can both load the same extensions and skills. Migrating them is a separate, coordinated step: this change does not remove, edit or reload any live copy. Back up `~/.pi/agent` before removing old copies, and remove them deliberately.
+
+**Skill name collisions.** Pi discovers skills from several locations. When two skills share a name, Pi keeps the first one discovered and warns; the other is ignored. This package sets no priority between its skills and your user or project skills, so rename or remove a duplicate to get a predictable result.
+
+**Local overrides.** Project-local roles under `.pi/agents/` stay project-scoped. A project role with the same name as a bundled role overrides it only in that project (covered by the isolated-profile tests).
 
 ## Interactive user questions (ask_user)
 
@@ -243,13 +264,13 @@ Implementation workers use precise `edit` with read-only Serena navigation; bulk
 
 ## Canonical browser and graph skills
 
-Six profile skills are discoverable: engineering-harness, frontend, backend, RFID attendance, browser and graphify. Frontend and backend modules remain references, with SolidJS guards around cross-framework examples; do not delete useful framework-independent design modules merely because some examples use another framework.
+The native package exports exactly two skills: `engineering-harness` and `agent-creation`. The frontend, backend, browser and graphify catalogs under `agent/skills/` are repository files that the harness references; the native package does not export them as skills. Frontend and backend modules remain references, with SolidJS guards around cross-framework examples; do not delete useful framework-independent design modules merely because some examples use another framework.
 
-The profile registers one browser skill at [agent/skills/browser/SKILL.md](agent/skills/browser/SKILL.md). The skills filter excludes the duplicate inherited `~/.agents` browser guide from this Pi profile without changing that shared file. graphify-pi remains an always-loaded native extension, with its package skill disabled; both main and code workers load [agent/skills/graphify/SKILL.md](agent/skills/graphify/SKILL.md). Ordinary graph queries use the bounded, standard-library `read_graph.py` helper and write no query stamps, vocabulary sidecars or feedback records. Build and update procedures require an actual authorized artifact-write assignment. Unused upstream Graphify pipeline references and their obsolete version marker were removed; read-only query and explicit build procedures remain.
+The browser guide is at [agent/skills/browser/SKILL.md](agent/skills/browser/SKILL.md), not a native export. The example settings' skills filter excludes the duplicate inherited `~/.agents` browser guide from a Pi profile without changing that shared file. The optional `graphify-pi` package (`pi install npm:graphify-pi`, not part of the native package) has its package skill disabled in the example settings; the graph guide is at [agent/skills/graphify/SKILL.md](agent/skills/graphify/SKILL.md). Ordinary graph queries use the bounded, standard-library `read_graph.py` helper and write no query stamps, vocabulary sidecars or feedback records. Build and update procedures require an actual authorized artifact-write assignment. Unused upstream Graphify pipeline references and their obsolete version marker were removed; read-only query and explicit build procedures remain.
 
 ## Manual data refresh
 
-Main provides `/refresh graph`, `/refresh qmd` and `/refresh serena` as direct extension commands. They run maintenance without an orchestrator model request and do not add another skill or agent. See the [refresh documentation](agent/extensions/refresh/README.md) for targets, configuration and verification.
+Not loaded by the native package (`refresh` is outside its default exports). When you load the optional component in `agent/extensions/refresh/` separately, it provides `/refresh graph`, `/refresh qmd` and `/refresh serena` as direct extension commands. They run maintenance without an orchestrator model request and do not add another skill or agent. See the [refresh documentation](agent/extensions/refresh/README.md) for targets, configuration and verification.
 
 - Graph: updates existing code artifacts for the current repository or an explicit absolute target. A primary or global graph is never chosen automatically as a write destination.
 - QMD: refreshes existing collections in the configured shared index without embeddings, git pulls or configured update hooks.
@@ -271,11 +292,11 @@ The local Windows launcher correction hides background daemon and worker console
 
 ## Verification record
 
-Before publication, the profile's dispatch, worker controls and inspector were checked with local mock and native-TUI tests; QMD retrieval and Serena candidate navigation were checked against local backends. Those checks do not establish subscription billing, token savings, live model reliability or compatibility with later Pi versions. Compatibility was checked against the installed Pi 1.1.0 resource loader (1.0.4 historical), all 23 role definitions, registry/frontmatter agreement, referenced module paths and explicit worker integrations. Smaller instruction text does not prove a measured reduction in billed tokens. The [validation record](agent/VALIDATION.md) lists the October 7, 2026 regression pass, including live Serena and QMD checks and the difference between mock-worker verification and provider reliability.
+Before publication, the profile's dispatch, worker controls and inspector were checked with local mock and native-TUI tests; QMD retrieval and Serena candidate navigation were checked against local backends. Those checks do not establish subscription billing, token savings, live model reliability or compatibility with later Pi versions. Compatibility was checked against the installed Pi 1.1.0 resource loader (1.0.4 historical), all 18 role definitions, registry/frontmatter agreement, referenced module paths and explicit worker integrations. Smaller instruction text does not prove a measured reduction in billed tokens. The [validation record](agent/VALIDATION.md) lists the October 7, 2026 regression pass, including live Serena and QMD checks and the difference between mock-worker verification and provider reliability.
 
 ## Code navigation setup (optional)
 
-In the installed npm package, core orchestration works without any of the three integrations below: routing, named roles, DAG and background subagents, handoffs, `/subagent roles`, `ask_user` and agent creation. In the live profile, the 23 configured roles list these integrations as required, and a missing listed integration blocks that role's launch (see Current behavior below).
+Core orchestration works without any of the three integrations below: routing, named roles, DAG and background subagents, handoffs, `/subagent roles`, `ask_user` and agent creation. Code roles listed in `agent/extensions/subagent/integrations.json` use these integrations (see Current behavior below).
 
 The full code-navigation experience needs three separately installed components. Each needs its own CLI, extension or index, and configuration. This package and profile bundle or auto-install none of them.
 
@@ -285,7 +306,7 @@ The full code-navigation experience needs three separately installed components.
 
 The code workers also load Ponytail (`npm:@dietrichgebert/ponytail`). Setup steps are in the [install section](#install), with details in the [refresh](agent/extensions/refresh/README.md), [QMD](agent/extensions/qmd/README.md) and [engineering environment](agent/extensions/engineering-environment/README.md) READMEs.
 
-Current behavior: code roles are listed in `agent/extensions/subagent/integrations.json`. Ponytail is required for every listed role except `reviewer`; a missing Ponytail extension fails that launch with a `Code integration missing` error that names the package to install, and no configuration overrides that. QMD, Serena and Graphify are optional: a missing one is skipped, its integration-only tools are not granted, and the launch note names it so the worker uses permitted read/grep/find navigation. Launch checks detect missing files only; a present but unhealthy backend is not detected, and a failing tool is reported rather than retried. Packaged installs list no code roles and need none of these components.
+Current behavior: code roles are listed in `agent/extensions/subagent/integrations.json`. Ponytail is required for every listed role except `reviewer`; a missing Ponytail extension fails that launch with a `Code integration missing` error that names the package to install, and no configuration overrides that. QMD, Serena and Graphify are optional: a missing one is skipped, its integration-only tools are not granted, and the launch note names it so the worker uses permitted read/grep/find navigation. Launch checks detect missing files only; a present but unhealthy backend is not detected, and a failing tool is reported rather than retried. The native package lists code roles only through `integrations.json`; those roles still need Ponytail as described above.
 
 ## Privacy and local files
 

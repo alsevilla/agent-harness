@@ -127,9 +127,10 @@ export function incompleteLabel(stopReason?: string): string {
 
 export const PRINTED_MARKUP_LABEL = "INCOMPLETE/UNVERIFIED (tool-call markup as text)";
 export const PRINTED_MARKUP_WARNING = "WARNING: This printed markup was not executed as tool calls; other recorded tool activity/partial writes may exist.";
-const INVOKE_OPEN = /^<invoke\s+name="[^"\n]+"\s*>/m; // column 0 only: indented or fenced quotes are examples, not invocations
-const INVOKE_BODY = /^(?:<parameter\s+name="[^"\n]+"\s*>|<\/invoke>)/m;
-const FUNCTION_CALLS = /^<\/?(?:antml:)?function_calls\s*>/m;
+// 0-3 space indent matches the fence rule; 4+ spaces are a Markdown code block, and fenced or inline quotes are examples, not invocations.
+const INVOKE_OPEN = /^ {0,3}<invoke\s+name="[^"\n]+"\s*>/m;
+const INVOKE_BODY = /^ {0,3}(?:<parameter\s+name="[^"\n]+"\s*>|<\/invoke>)/m;
+const FUNCTION_CALLS = /^ {0,3}<\/?(?:antml:)?function_calls\s*>/m;
 const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm;
 
 /** Raw tool-call markup as the final assistant text: the last assistant message has no toolCall block, exit 0, not error/aborted. Detection only: nothing is parsed, extracted or run. */

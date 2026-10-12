@@ -110,7 +110,7 @@ Do not use `IMMEDIATE` everywhere by habit.
 
 Keep write transactions as short as correctness allows.
 
-Never hold a database transaction open across slow external network/SMS/device
+Never hold a database transaction open across slow external network/notification/device
 operations unless the design explicitly requires it.
 
 ## Data integrity
@@ -177,13 +177,13 @@ Indexes accelerate some reads but increase storage and write cost.
 
 ## Burst-write design
 
-For bursty RFID/event ingestion:
+For bursty device/event ingestion:
 - bound application concurrency;
 - avoid spawning one unbounded write task per tap;
 - keep accepted-work semantics explicit;
 - use idempotency/uniqueness for duplicate protection;
 - batch writes only when transactional semantics permit it;
-- separate external SMS work from critical DB transaction duration;
+- separate external notification work from critical DB transaction duration;
 - measure queue age, DB busy frequency, transaction latency, and pool acquire
   latency.
 

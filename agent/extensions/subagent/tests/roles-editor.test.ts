@@ -1698,9 +1698,9 @@ async function runNodeSuite(): Promise<void> {
 	function packageFixture(): string {
 		const pkg = fs.mkdtempSync(path.join(os.tmpdir(), "roles-editor-pkg-"));
 		dirs.push(pkg);
-		fs.mkdirSync(path.join(pkg, "defaults", "agents"), { recursive: true });
-		fs.writeFileSync(path.join(pkg, "defaults", "roles.json"), formatJson(PKG_ROLES, "\n"));
-		for (const role of PKG_ROLES) fs.writeFileSync(path.join(pkg, "defaults", "agents", `${role.name}.md`), roleMd(role, "\n"));
+		fs.mkdirSync(path.join(pkg, "agents"), { recursive: true });
+		fs.writeFileSync(path.join(pkg, "roles.json"), formatJson(PKG_ROLES, "\n"));
+		for (const role of PKG_ROLES) fs.writeFileSync(path.join(pkg, "agents", `${role.name}.md`), roleMd(role, "\n"));
 		return pkg;
 	}
 	function freshProfile(): string {

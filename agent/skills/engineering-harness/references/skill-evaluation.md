@@ -3,7 +3,7 @@
 Read only when measuring or changing routing/skill-selection guidance. This is an optional offline check: it is not a gate, not a runtime hook and not a model caller.
 
 ## Components
-- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 23 synthetic cases, 18 positive and 5 near-miss. Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend, backend and rfid-attendance routers when relevant.
+- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 23 synthetic cases, 18 positive and 5 near-miss. Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
 - Evaluator: `scripts/evaluate-routing.py` (Python stdlib only; no network, no model calls).
 - Tests: `tests/test_evaluate_routing.py` (deterministic unit checks).
 
@@ -26,7 +26,7 @@ One object per fixture case, exactly these four fields:
 
 Every case id appears exactly once. Blank lines, unknown fields, unknown ids or roles, duplicate JSON keys and `NaN`/`Infinity` are rejected. Ids and skill names are matched in full: a trailing newline, carriage return, leading space or uppercase letter is malformed (exit 2), never stripped. Syntax-valid skill names outside the installed set are accepted as generic vocabulary. The file is never rewritten.
 
-## Commands (run from the candidate root `C:/Users/MSI/.pi`)
+## Commands (run from the candidate root `~/.pi`)
 - Fixture consistency: `python agent/skills/engineering-harness/scripts/evaluate-routing.py --cases agent/skills/engineering-harness/examples/routing-cases.json --self-check`
 - Recorded predictions: `python agent/skills/engineering-harness/scripts/evaluate-routing.py --cases agent/skills/engineering-harness/examples/routing-cases.json --predictions <absolute path to .jsonl>`
 - Unit checks: `python -m unittest discover -s agent/skills/engineering-harness/tests -p "test_*.py" -v`

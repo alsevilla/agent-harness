@@ -45,7 +45,6 @@ Use specialists through the orchestrator when justified:
 - `security-specialist`;
 - `performance-specialist`;
 - `architecture-specialist`;
-- `hardware-integration`;
 - `devops-specialist`;
 - `observability-specialist`.
 
@@ -167,7 +166,6 @@ criterion as regression evidence where practical.
 Use the smallest context and tool set that can establish the assigned result.
 Do not reread broad repository areas without a specific uncertainty.
 Do not restate supplied policy or task history.
-Never spawn another agent.
 
 
 Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify extensions. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

@@ -7,7 +7,7 @@ and active workers. Preserve user work and reuse a suitable existing checkout.
 ### Placement
 Resolve the primary checkout from Git's common directory. Unless the user/project
 explicitly selects another location, use `<primary-parent>/worktrees/<repo>/<task>`.
-For RFID this is `C:/Users/MSI/RFID/worktrees/RFIDAttendance-Rust/<task>`.
+Example: `D:/src/worktrees/example-repo/<task>`.
 Keep temporary copies, QA fixtures and logs in `_scratch/<task>` beneath that same
 repo worktree folder; captured evidence/backups belong in `_evidence/<task>`.
 Do not scatter new checkouts, copies or build targets beside the primary checkout.

@@ -11,7 +11,7 @@ Current global policy and project requirements govern authority and selected gat
 | Public API compatibility, shape, errors | api-specialist |
 | Major subsystem boundary | architecture-specialist |
 | Measured load/capacity/performance | performance-specialist |
-| RFID/device I/O | hardware-integration |
+| device I/O | concurrency-specialist |
 | Deployment/service/backups | devops-specialist |
 | Logs/metrics/health/audit | observability-specialist |
 

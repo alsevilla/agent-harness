@@ -6,7 +6,7 @@ Read only when a complex multi-stage run needs a durable record. Optional: simpl
 - Main owns and writes the manifest. Leaves never write it.
 - Location: `_evidence/<task>/MANIFEST.md` in the assigned evidence root (absolute path from the task packet). Do not place it in the candidate source tree unless explicitly authorized.
 - It is a durable record, not a running-job archive, scheduler, database, lock or Git permission. Writing it grants no commit, push, merge, publish or deploy authority.
-- Exclude secrets, credentials, tokens, personal data (student or parent data), raw provider payloads and full logs. Reference evidence paths instead.
+- Exclude secrets, credentials, tokens, personal data (end-user or account data), raw provider payloads and full logs. Reference evidence paths instead.
 
 ## Required content
 1. Goal: the user's acceptance criteria in one or two sentences.

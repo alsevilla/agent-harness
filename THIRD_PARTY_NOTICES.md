@@ -77,7 +77,7 @@ SOFTWARE.
 
 ## Other skills (origin not audited)
 
-A bounded keyword search found no license or origin notice in the other profile skills (`agent/skills/`, including `graphify`, `browser`, `rfid-attendance`, `backend`, `engineering-harness`, `frontend`, `solidjs-engineering`, `typescript-advanced-types`, `web-design-guidelines`, `ux-flow-wireframer`, `accessible-ui-patterns`, `design-motion-principles` and `agent-creation`). Their origins were not audited.
+A bounded keyword search found no license or origin notice in the other profile skills (`agent/skills/`, including `graphify`, `browser`, `backend`, `engineering-harness`, `frontend`, `solidjs-engineering`, `typescript-advanced-types`, `web-design-guidelines`, `ux-flow-wireframer`, `accessible-ui-patterns`, `design-motion-principles` and `agent-creation`). Their origins were not audited.
 
 ## Runtime dependencies (not bundled)
 

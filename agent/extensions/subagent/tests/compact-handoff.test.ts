@@ -356,6 +356,32 @@ test("indented markup quoted as a code block is not flagged", () => {
 	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 completed");
 });
 
+// Indented (0-3 spaces, unfenced) markup is still an invocation: the anchors allow the same 0-3 space indent as the fence rule.
+test("unfenced invoke markup indented 0-3 spaces is INCOMPLETE/UNVERIFIED, like column-0 markup", () => {
+	for (const indent of ["", " ", "  ", "   "]) {
+		const markup = INVOKE.split("\n").map((line) => indent + line).join("\n");
+		const block = retainedEntryBlock(child([assistant(text(markup))]));
+		assert.equal(block.split("\n")[0], `### frontend-worker \u2014 ${MARKUP_LABEL}`, `indent ${indent.length}`);
+		assert.ok(block.includes(MARKUP_WARNING), `indent ${indent.length}`);
+	}
+});
+
+test("an unfenced function_calls wrapper indented two spaces is INCOMPLETE/UNVERIFIED", () => {
+	const block = retainedEntryBlock(child([assistant(text("  <function_calls>"))]));
+	assert.equal(block.split("\n")[0], `### frontend-worker \u2014 ${MARKUP_LABEL}`);
+});
+
+// Valid quotation controls stay completed: a two-space fenced quote and an indented line that only mentions the tag inline.
+test("two-space indented fenced markup quote and indented inline backtick mention are not flagged", () => {
+	const fenced = "STATUS: PASS\n  ```xml\n" + INVOKE.split("\n").map((line) => "  " + line).join("\n") + "\n  ```\nCHECKS: NOT RUN";
+	const inline = "STATUS: PASS\n  `<invoke name=\"Bash\">` is the tag shape\nCHECKS: NOT RUN";
+	for (const report of [fenced, inline]) {
+		const block = retainedEntryBlock(child([assistant(text(report))]));
+		assert.equal(block.split("\n")[0], "### frontend-worker \u2014 completed");
+		assert.ok(!block.includes(MARKUP_WARNING));
+	}
+});
+
 test("ordinary XML output with a parameter element but no invoke is not labelled", () => {
 	const xml = '<?xml version="1.0"?>\n<project>\n<parameter name="x">1</parameter>\n</project>';
 	const block = retainedEntryBlock(child([assistant(text(xml))]));
@@ -368,9 +394,11 @@ test("a failed child with printed markup keeps its FAILED label", () => {
 	assert.equal(block.split("\n")[0], "### frontend-worker \u2014 FAILED/STOPPED");
 });
 
-test("pi-package compact-handoff source mirrors the agent source byte for byte", () => {
+// pi-package is user-deleted in this candidate: the mirror is checked only when present; exact equality is kept when it is.
+const PKG_COMPACT_HANDOFF = new URL("../../../../pi-package/extensions/subagent/compact-handoff.ts", import.meta.url);
+(fs.existsSync(PKG_COMPACT_HANDOFF) ? test : test.skip)("pi-package compact-handoff source mirrors the agent source byte for byte", () => {
 	const agent = fs.readFileSync(new URL("../compact-handoff.ts", import.meta.url));
-	const pkg = fs.readFileSync(new URL("../../../../pi-package/extensions/subagent/compact-handoff.ts", import.meta.url));
+	const pkg = fs.readFileSync(PKG_COMPACT_HANDOFF);
 	assert.ok(agent.equals(pkg));
 });
 

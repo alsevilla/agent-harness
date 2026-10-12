@@ -25,20 +25,16 @@ Typical ownership:
 - public/typed API contract -> `api-specialist`
 - subsystem boundaries/major tradeoffs -> `architecture-specialist`
 - measured performance/overload -> `performance-specialist`
-- RFID/device I/O -> `hardware-integration`
-- attendance state machine/schedules/late/half-day/absent/finalization -> `attendance-domain-specialist`
-- offline event replay/idempotency/order/clock/acknowledgement -> `event-reconciliation-specialist`
-- SMS/provider/retry/delivery semantics -> `messaging-specialist`
-- student/parent data minimization/retention/export/privacy -> `privacy-compliance-specialist`
+- device protocol/physical I/O, domain state machines, event ordering, provider delivery semantics or personal-data policy -> a project-local domain specialist when the project defines one (not part of this generic profile); otherwise return the decision to main
 - deployment/service/backups -> `devops-specialist`
 - logs/metrics/health/audit -> `observability-specialist`
 - UX/design judgment -> `ui-ux-specialist`
 
 One specialist is preferred. Multiple specialists require distinct unresolved questions.
 
-Select an RFID domain specialist only when a material business/event/provider/privacy decision is unresolved; skip them when the task is implementation against a confirmed contract or the uncertainty belongs to another discipline. Specialists are read-only advisors, not an automatic phase or implementation gate. Their self-contained packet should name the exact unresolved question, candidate/evidence paths, known constraints, relevant scope, forbidden assumptions and requested decision/evidence. The handoff should separate confirmed facts, options/tradeoffs, boundary examples, acceptance evidence and explicit open questions; return unresolved school, privacy, consent, recipient, provider or retention policy to main rather than inventing it.
+Use project-local domain specialists, when the project defines them, only when a material business/event/provider/privacy decision is unresolved; skip them when the task is implementation against a confirmed contract or the uncertainty belongs to another discipline. Specialists are read-only advisors, not an automatic phase or implementation gate. Their self-contained packet should name the exact unresolved question, candidate/evidence paths, known constraints, relevant scope, forbidden assumptions and requested decision/evidence. The handoff should separate confirmed facts, options/tradeoffs, boundary examples, acceptance evidence and explicit open questions; return unresolved business, legal, privacy, consent, provider or retention policy to main rather than inventing it.
 
-Keep adjacent ownership distinct: RFID/device protocol and physical reader I/O -> `hardware-integration`; SQLite/SQLx schema, transactions and migrations -> `sqlite-specialist`; Tokio task/queue/race/shutdown behavior -> `concurrency-specialist`; auth, secrets and access control -> `security-specialist`; API/provider contract -> `api-specialist`; deployment, service and backup operations -> `devops-specialist`. A domain specialist may describe implications but does not decide those implementation/operational contracts.
+Keep adjacent ownership distinct: device protocol and physical I/O -> the project's device owner, when defined; SQLite/SQLx schema, transactions and migrations -> `sqlite-specialist`; Tokio task/queue/race/shutdown behavior -> `concurrency-specialist`; auth, secrets and access control -> `security-specialist`; API/provider contract -> `api-specialist`; deployment, service and backup operations -> `devops-specialist`. A domain specialist may describe implications but does not decide those implementation/operational contracts.
 
 ## Frontend
 If the task requires a real design/UX decision, use `ui-ux-specialist` before `frontend-worker`.

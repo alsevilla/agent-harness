@@ -6,7 +6,7 @@ This is a small, volunteer-maintained harness profile. Everyone who uses, report
 
 - Be respectful and constructive in issues, pull requests, reviews and discussions.
 - Do not harass, threaten, discriminate against or personally attack anyone.
-- Respect privacy. Do not publish others' personal data, including student, parent, staff or RFID-related records, private messages or session content, without clear permission and a legitimate need.
+- Respect privacy. Do not publish others' personal data, including end-user, account, staff or device-related records, private messages or session content, without clear permission and a legitimate need.
 - Never post secrets, tokens, passwords, credentials or private machine-specific paths. If one is exposed, report it and rotate it.
 
 ## Scope

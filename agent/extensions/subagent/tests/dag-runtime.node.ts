@@ -604,6 +604,86 @@ check("dag acceptance: exit 0 with stopReason length is not accepted and blocks 
 	assert.equal(children().length, 1, "dependent never launches from an INCOMPLETE parent");
 });
 
+const PRINTED_MARKUP = '<invoke name="bash">\n<parameter name="command">echo hi</parameter>\n</invoke>';
+check("dag acceptance: printed invoke markup (exit 0, stop) is not accepted and blocks its dependents", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const launch = tool.execute("dag-markup", { background: false, dag: [node("a", "writer", "a"), node("b", "writer", "b", { dependsOn: ["a"] })] }, undefined, undefined, dagCtx(makeRepo("dag-markup")));
+	await waitFor(() => children().length === 1, "root spawns");
+	finish(children()[0], PRINTED_MARKUP, "stop", 0);
+	await settle(300);
+	assert.equal(children().length, 1, "dependent never launches from printed markup");
+	const result = await launch;
+	assert.equal(result.isError, true);
+	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["failed", "blocked"]);
+	assert.deepEqual(result.details.results[1].dag.blockedBy, ["a"]);
+	assert.match(result.content[0].text, /### node "a" \(writer\) \u2014 INCOMPLETE\/UNVERIFIED \(tool-call markup as text\)/);
+});
+
+check("dag acceptance: two-space indented invoke markup (exit 0, stop) is not accepted and blocks its dependents", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const indented = PRINTED_MARKUP.split("\n").map((line) => "  " + line).join("\n");
+	const launch = tool.execute("dag-markup-indented", { background: false, dag: [node("a", "writer", "a"), node("b", "writer", "b", { dependsOn: ["a"] })] }, undefined, undefined, dagCtx(makeRepo("dag-markup-indented")));
+	await waitFor(() => children().length === 1, "root spawns");
+	finish(children()[0], indented, "stop", 0);
+	await settle(300);
+	assert.equal(children().length, 1, "dependent never launches from two-space indented printed markup");
+	const result = await launch;
+	assert.equal(result.isError, true);
+	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["failed", "blocked"]);
+	assert.deepEqual(result.details.results[1].dag.blockedBy, ["a"]);
+});
+
+check("dag acceptance: four-space indented invoke markup is a code block, so the parent is accepted and its dependent launches", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const quoted = PRINTED_MARKUP.split("\n").map((line) => "    " + line).join("\n");
+	const launch = tool.execute("dag-markup-code-block", { background: false, dag: [node("a", "writer", "a"), node("b", "writer", "b", { dependsOn: ["a"] })] }, undefined, undefined, dagCtx(makeRepo("dag-markup-code-block")));
+	await waitFor(() => children().length === 1, "root spawns");
+	finish(children()[0], "STATUS: PASS\n" + quoted + "\nCHECKS: NOT RUN");
+	await waitFor(() => children().length === 2, "dependent spawns");
+	finish(children()[1], "done");
+	const result = await launch;
+	assert.notEqual(result.isError, true);
+	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["accepted", "accepted"]);
+});
+
+check("dag acceptance: a real tool call followed by a final printed markup reply is not accepted", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const launch = tool.execute("dag-markup-tool", { background: false, dag: [node("a", "writer", "a"), node("b", "writer", "b", { dependsOn: ["a"] })] }, undefined, undefined, dagCtx(makeRepo("dag-markup-tool")));
+	await waitFor(() => children().length === 1, "root spawns");
+	children()[0].emitLine({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } }], stopReason: "toolUse", usage } });
+	finish(children()[0], PRINTED_MARKUP, "stop", 0);
+	await settle(300);
+	assert.equal(children().length, 1, "dependent never launches from printed markup after a real tool call");
+	const result = await launch;
+	assert.equal(result.isError, true);
+	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["failed", "blocked"]);
+});
+
+check("dag acceptance: a parent report that quotes invoke markup in a fence is accepted and its dependent launches", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const launch = tool.execute("dag-markup-fenced", { background: false, dag: [node("a", "writer", "a"), node("b", "writer", "b", { dependsOn: ["a"] })] }, undefined, undefined, dagCtx(makeRepo("dag-markup-fenced")));
+	await waitFor(() => children().length === 1, "root spawns");
+	const report = "STATUS: PASS\n```xml\n" + PRINTED_MARKUP + "\n```\nCHECKS: NOT RUN";
+	finish(children()[0], report);
+	await waitFor(() => children().length === 2, "dependent spawns");
+	await waitFor(() => promptOf(children()[1]) !== "", "dependent prompt arrives");
+	assert.ok(taskOf(children()[1], "b").includes(report), "dependent receives the fenced report literally");
+	finish(children()[1], "done");
+	const result = await launch;
+	assert.notEqual(result.isError, true);
+	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["accepted", "accepted"]);
+});
+
 check("dag parent reports reach the child literally: dollar and brace patterns, a 50KB report and stderr keep every byte", async () => {
 	const pi = fakePi();
 	subagentExtension(pi);

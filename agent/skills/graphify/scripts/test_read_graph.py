@@ -17,7 +17,7 @@ class GraphAccessTests(unittest.TestCase):
         self.graph = self.root / "graph.json"
         self.graph.write_text(json.dumps({"directed": True, "nodes": [
             {"id": "a", "label": "Reader", "repo": "rust"},
-            {"id": "b", "label": "AttendanceService", "repo": "rust"},
+            {"id": "b", "label": "EventService", "repo": "rust"},
             {"id": "c", "label": "Database", "repo": "rust"},
             {"id": "d", "label": "Reader", "repo": "go"}],
             "links": [{"source": "a", "target": "b", "relation": "calls"},

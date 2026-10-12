@@ -32,6 +32,9 @@ Child system prompts for roles with a prompt body get the final-handoff format f
 
 This is prompt guidance, not proof of obedience. Failed or required NOT RUN checks, blockers, material security/data risks, material UNKNOWN and pending decisions stay in the reply even when it exceeds the budget; unassigned checks are listed only when material to interpreting the result. Changed files, commands, hashes and logs go to the REPORT.
 
+## Role prompt restatement dedup
+Live role bodies (`agent/agents/*.md`) do not repeat "Never spawn another agent." or "Never spawn helpers.": the Leaf boundary already forbids launching helpers. Packaged defaults drop the same two phrases at build time (`ROLE_BODY_DEDUP` in `scripts/build-pi-package.mjs`) from the pinned baseline bodies; `agents_sha256` in `defaults/baseline.json` hashes those packaged bytes. Graph guidance states the write-authority limit without repeating the artifact-placement candidate rule. Role-specific rules, frontmatter and headings are unchanged.
+
 ## Runtime result handling (current implementation)
 - Foreground runs: not capped by this change. The visible text keeps the existing extraction (`getFinalOutput` in `index.ts` → `extractFinalText` in `compact-handoff.ts`: every text block of the latest text-bearing assistant message, joined by newlines).
 - Background automatic completion: the follow-up message is at most 4,000 characters. Longer output begins with `INCOMPLETE HANDOFF: job <id> output exceeds 4000 chars ...` and the exact recovery call `subagent_control action "result" target "<id>"`, then up to 8 priority lines (STATUS, RISKS, WARNINGS, BLOCKERS, ERROR(S), CHECKS, NEXT, and failure keywords), an excerpt, and `[TRUNCATED: do not infer PASS from this excerpt.]`. Never infer PASS from the excerpt.
@@ -42,3 +45,13 @@ This is prompt guidance, not proof of obedience. Failed or required NOT RUN chec
 
 ## Measurement
 Measure orchestrator input/output tokens separately from child tokens and provider cached tokens. Compare equal-complexity tasks and review quality, not only request counts. Reduced orchestrator input can increase total cost when unnecessary agents are spawned. No measured token or cost saving is established by this change; use actual observations.
+
+### Static prompt size (characters, not tokens)
+`node --experimental-strip-types scripts/measure-child-prompt.mjs --label <name> --out <absolute dir outside the repository> [--agent-dir <empty absolute dir outside the repository>]` writes `measure-<name>.json` and each assembled prompt for five roles, in live and package shapes, against a Cargo and a non-Cargo candidate. `--agent-dir` measures the missing-integration profile; a non-reviewer launch is refused when Ponytail is absent, as in `index.ts`. The script reports characters and hashes only; it does not count tokens.
+
+### Benchmark procedure (only when authorized; paid runs are not part of this repository)
+1. Fix constraints for both arms: model and fallback per role, thinking level, task packet, acceptance checks, cwd fixture, integration availability and cache state (cold or warm).
+2. Record the static measurement for each arm and compare characters and prompt hashes.
+3. If a tokenizer is authorized, count the assembled system prompt and tool schemas with it; keep those counts separate from characters.
+4. Per task and arm, repeat N runs and record main and child input (cached and uncached), output tokens, cost, wall time and acceptance-check results, with the Pi usage ledger path.
+5. Report medians with N, the constraint table, failures and retries. Differences within run-to-run variance are not savings.

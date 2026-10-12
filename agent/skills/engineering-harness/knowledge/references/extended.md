@@ -93,7 +93,7 @@ Use repository declarations that explicitly establish which sources govern a dom
 
 Examples:
 
-- a knowledge index declaring the attendance specification authoritative;
+- a knowledge index declaring the domain specification authoritative;
 - a project policy declaring one document supersedes another;
 - an accepted decision record establishing a new rule;
 - an explicit specification-precedence section;
@@ -113,7 +113,7 @@ Specifications explicitly established as governing the relevant domain.
 
 Examples may include:
 
-- attendance rules;
+- domain business rules;
 - dashboard behavior;
 - API contracts;
 - hardware contracts;
@@ -126,7 +126,7 @@ Authority is domain-specific.
 
 A UI specification does not automatically govern persistence semantics.
 
-A deployment document does not automatically govern attendance policy.
+A deployment document does not automatically govern domain policy.
 
 An API specification does not automatically override a business-rule specification outside its contract scope.
 
@@ -293,7 +293,7 @@ Example:
 
 `CLAIM: VERIFIED / HIGH`
 
-`ATTENDANCE LOGIC FINAL explicitly states that finalized records do not automatically recalculate.`
+`DOMAIN LOGIC FINAL explicitly states that finalized records do not automatically recalculate.`
 
 does not necessarily imply:
 
@@ -569,7 +569,7 @@ Directly supported by current inspected evidence.
 
 Example:
 
-`VERIFIED — ATTENDANCE LOGIC FINAL §8 states finalized records do not automatically recalculate.`
+`VERIFIED — DOMAIN LOGIC FINAL §8 states finalized records do not automatically recalculate.`
 
 VERIFIED describes evidence for the claim.
 
@@ -583,7 +583,7 @@ Strongly suggested by evidence but not explicitly established.
 
 Example:
 
-`INFERRED — this document appears intended to govern attendance behavior, but no explicit project-wide precedence declaration was found.`
+`INFERRED — this document appears intended to govern domain behavior, but no explicit project-wide precedence declaration was found.`
 
 Do not present inference as fact.
 

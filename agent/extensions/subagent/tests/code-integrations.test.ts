@@ -1,4 +1,4 @@
-import { mock, test } from "bun:test";
+import { afterAll, mock, test } from "bun:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +9,21 @@ let agentDir = fileURLToPath(new URL("../../../", import.meta.url));
 mock.module("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => agentDir,
 }));
-const { configureCodeIntegrations, CODE_NAVIGATION_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
+const { assembleChildSystemPrompt, candidateNavigationGuidance, configureCodeIntegrations, CORE_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
+// Controlled fixtures: a nonexistent global graph directory (no host ~/.graphify read), and git checkouts under a temp root removed at the end.
+const EMPTY_GLOBAL = join(tmpdir(), "code-integrations-no-global-graph");
+const fixtureRoot = fs.mkdtempSync(join(tmpdir(), "code-integrations-cwd-"));
+afterAll(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+function repoAt(name: string): string {
+  const dir = join(fixtureRoot, name);
+  fs.mkdirSync(join(dir, ".git"), { recursive: true });
+  return dir;
+}
+// Every optional integration launched: Ponytail extension, Serena and QMD tools, Graphify skill (as configureCodeIntegrations emits them).
+const FULL_LAUNCH = ["--extension", "/fx/npm/node_modules/@dietrichgebert/ponytail/pi-extension/index.js", "--extension", "/fx/npm/node_modules/@bacnh85/pi-serena/extensions/index.ts", "--extension", "/fx/qmd/index.ts", "--skill", "/fx/skills/graphify/SKILL.md", "--tools", "read,grep,find,ls,serena_find_symbol,qmd_search"];
+function assembled(cwd: string, options: { launchArgs?: string[]; packageRoot?: string | null; enabled?: boolean; name?: string } = {}): string {
+  return assembleChildSystemPrompt({ name: options.name ?? "general-worker", systemPrompt: "ROLE BODY" }, { codeIntegrationsEnabled: options.enabled ?? true, cwd, packageRoot: options.packageRoot ?? null, launchArgs: options.launchArgs ?? [], globalGraphDirectory: EMPTY_GLOBAL });
+}
 const config = JSON.parse(fs.readFileSync(new URL("../integrations.json", import.meta.url), "utf8"));
 const unsafeMutations = [
   "serena_replace_symbol_body", "serena_insert_before_symbol", "serena_insert_after_symbol",
@@ -45,19 +59,20 @@ for (const name of ["backend-worker", "frontend-worker", "general-worker"]) {
     for (const tool of config.readOnlyTools) assert.ok(tools.includes(tool), `read-only integration lost: ${tool}`);
   });
 }
+// Core guidance is unconditional for every integrations-enabled and package-shape child, so these rules are asserted on CORE_GUIDANCE.
 test("shared code-leaf guidance specifies artifact placement and missing-path handoff", () => {
-  assert.match(CODE_NAVIGATION_GUIDANCE, /_scratch\/<task>/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /_evidence\/<task>/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /absolute.*paths.*task packet/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /do not create.*beside the primary checkout/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /return.*main.*missing/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /report.*artifact paths.*handoff/i);
+  assert.match(CORE_GUIDANCE, /_scratch\/<task>/);
+  assert.match(CORE_GUIDANCE, /_evidence\/<task>/);
+  assert.match(CORE_GUIDANCE, /absolute.*paths.*task packet/i);
+  assert.match(CORE_GUIDANCE, /do not create.*beside the primary checkout/i);
+  assert.match(CORE_GUIDANCE, /return.*main.*missing/i);
+  assert.match(CORE_GUIDANCE, /report.*artifact paths.*handoff/i);
 });
 test("shared guidance treats live SQLite and running executables as relocation blockers", () => {
-  assert.match(CODE_NAVIGATION_GUIDANCE, /SQLite.*-wal.*-shm/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /running executable/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /verify processes have stopped before relocating/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /Restart only with verified DB_PATH[\s\S]*otherwise leave services stopped/i);
+  assert.match(CORE_GUIDANCE, /SQLite.*-wal.*-shm/i);
+  assert.match(CORE_GUIDANCE, /running executable/i);
+  assert.match(CORE_GUIDANCE, /verify processes have stopped before relocating/i);
+  assert.match(CORE_GUIDANCE, /Restart only with verified DB_PATH[\s\S]*otherwise leave services stopped/i);
 });
 test("worktree policy permits safe relocation without a known restart configuration", () => {
   const paths = ["../../../AGENTS.md", "../../../../README.md", "../README.md", "../../../skills/engineering-harness/worktree/index.md", "../../../skills/engineering-harness/worktree/guide.md"];
@@ -70,9 +85,8 @@ test("package resource guidance states precedence and empty outside the package"
   assert.equal(packageResourceGuidance(null), "");
   const note = packageResourceGuidance("C:\\pkg");
   assert.match(note, /Precedence: these bundled paths take effect over any profile path/);
-  assert.match(note, /Backend, frontend, graphify, browser and RFID skill catalogs are not bundled/);
-  for (const role of ["hardware-integration", "attendance-domain-specialist", "event-reconciliation-specialist", "messaging-specialist", "privacy-compliance-specialist"]) assert.match(note, new RegExp(role));
-  assert.match(note, /never dispatched/);
+  assert.match(note, /Backend, frontend, graphify and browser skill catalogs are not bundled/);
+  assert.match(note, /Roles not bundled in this package are unavailable and are never dispatched\./);
 });
 test("actual read-only scout grants remain unchanged", () => {
   const agent = role("scout");
@@ -153,8 +167,12 @@ test("reviewer keeps read-only tools and excludes edit, write and Serena mutatio
   });
 });
 test("code-leaf guidance makes Ponytail conditional on the loaded extension", () => {
-  assert.doesNotMatch(CODE_NAVIGATION_GUIDANCE, /Ponytail's native extension is present in this launch/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /When Ponytail's native extension is loaded in this launch/);
+  const loadedText = assembled(repoAt("ponytail-loaded"), { launchArgs: FULL_LAUNCH });
+  assert.doesNotMatch(loadedText, /Ponytail's native extension is present in this launch/);
+  assert.equal(loadedText.split("When Ponytail's native extension is loaded in this launch").length - 1, 1);
+  // Without the Ponytail extension in the launch argv, the Ponytail paragraph is absent.
+  const unloaded = assembled(repoAt("ponytail-absent"), { launchArgs: FULL_LAUNCH.filter(arg => !arg.includes("ponytail")) });
+  assert.equal(unloaded.includes("When Ponytail's native extension is loaded"), false);
 });
 test("reviewer keeps its verdict contract; Ponytail review skill is optional supplemental guidance", () => {
   const content = fs.readFileSync(new URL("../../../agents/reviewer.md", import.meta.url), "utf8");
@@ -232,16 +250,19 @@ test("unavailable integrations are named with fallback guidance; present ones ar
     assert.match(note, /Graphify skill/);
     assert.doesNotMatch(note, /QMD/);
     assert.match(note, /read, grep and find/);
-    assert.match(note, /do not call, install, reconfigure or rebuild/i);
+    assert.match(note, /do not call them/);
+    // Shared code-leaf guidance already requires naming reduced capability in the handoff; the note must not repeat it.
+    assert.doesNotMatch(note, /name the skipped integration/);
   });
   withAgentDir({ qmd: false }, (_dir, qmdExtension) => assert.match(unavailableIntegrationGuidance("general-worker", qmdExtension), /QMD/));
   withAgentDir({ ponytailExtension: false, ponytailSkill: false }, () => assert.match(unavailableIntegrationGuidance("reviewer"), /Ponytail.*ponytail-review/s));
   withAgentDir({ ponytailExtension: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true }, () => assert.equal(unavailableIntegrationGuidance("general-worker"), ""));
 });
 test("shared guidance: a failing integration is reported once, not retried, and presence is not health", () => {
-  assert.match(CODE_NAVIGATION_GUIDANCE, /do not retry it in a loop/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /reduced capability/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /does not prove the backend is healthy/i);
+  const text = assembled(repoAt("failure-once"), { launchArgs: FULL_LAUNCH });
+  assert.equal(text.split("do not retry it in a loop").length - 1, 1);
+  assert.match(text, /reduced capability/i);
+  assert.match(text, /does not prove the backend is healthy/i);
 });
 // Explicit role allowlists may name integration tools; an omitted integration drops them, while ordinary tools and per-launch grants stay.
 test("explicit integration tool names are omitted with their integration; ordinary tools and grants stay", () => {
@@ -270,25 +291,73 @@ test("non-configured role keeps its explicit allowlist and grants unfiltered", (
   assert.deepEqual(args, ["--tools", "read,serena_find_symbol,request_decision"]);
 });
 
-// Characterization (GREEN before and after): critical rules stay unconditional for every role, whatever the role text.
-test("shared guidance keeps shell, Rust build and artifact rules unconditional for every role", () => {
-  assert.match(CODE_NAVIGATION_GUIDANCE, /export NAME='value'/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /\$env:NAME, \$LASTEXITCODE/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /Never submit it to bash/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /CARGO_TARGET_DIR/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /CARGO_INCREMENTAL=0/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /do not delete the shared one/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /locks its file and breaks later builds/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /If CARGO_TARGET_DIR is unset/);
+// Characterization (GREEN before and after): shell and artifact rules stay unconditional for every role.
+test("shared guidance keeps shell and artifact rules unconditional for every role", () => {
+  assert.match(CORE_GUIDANCE, /export NAME='value'/);
+  assert.match(CORE_GUIDANCE, /\$env:NAME, \$LASTEXITCODE/);
+  assert.match(CORE_GUIDANCE, /Never submit it to bash/);
+  assert.match(CORE_GUIDANCE, /_scratch\/<task>/);
+});
+// The runtime injects CARGO_TARGET_DIR into every child in a git checkout (build-env.ts), so the no-delete and no-server protection stays unconditional in the shared guidance.
+test("shared build folder protection is unconditional for integrations-enabled children, not gated on Cargo", () => {
+  assert.match(CORE_GUIDANCE, /When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it\./);
+});
+// Detailed Rust rules are applicable only with a Cargo manifest at the working directory or an ancestor up to the candidate root.
+// Below-cwd manifests are not scanned (documented limit). The shared build-folder rule stays in core for every shape.
+test("Rust build output rules apply only with a Cargo manifest at the working directory or an ancestor; the build-folder rule is always present", () => {
+  const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
+  const plain = repoAt("rust-plain");
+  const deep = repoAt("rust-deep");
+  fs.mkdirSync(join(deep, "a", "b", "c", "d"), { recursive: true });
+  fs.writeFileSync(join(deep, "a", "b", "c", "d", "Cargo.toml"), "[package]\n");
+  const manifestAtCwd = join(deep, "a", "b", "c", "d");
+  for (const cwd of [plain, deep, join(deep, "a")]) {
+    const text = assembled(cwd);
+    assert.equal(text.includes("## Rust build output"), false, `no manifest at or above ${cwd}`);
+    assert.equal(text.split(rule).length - 1, 1, cwd);
+  }
+  const text = assembled(manifestAtCwd);
+  assert.equal(text.split("## Rust build output").length - 1, 1, manifestAtCwd);
+  for (const rust of [/CARGO_TARGET_DIR/, /CARGO_INCREMENTAL=0/, /Use it for every cargo command; do not create or set another target directory/, /locks its file and breaks later builds/, /If CARGO_TARGET_DIR is unset/]) assert.match(text, rust, manifestAtCwd);
+});
+test("assembled child prompt: core headings once in every shape; navigation and retrieval only with their launch evidence", () => {
+  const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
+  const plain = repoAt("assembled-plain");
+  const live = assembled(plain, { launchArgs: FULL_LAUNCH });
+  assert.ok(live.startsWith("ROLE BODY"));
+  for (const heading of ["## Shell syntax", "## Artifact placement", "## Integration and graph authority", "## Code navigation integrations", "## Candidate navigation and shared retrieval", "## Final handoff to main"]) assert.equal(live.split(heading).length - 1, 1, heading);
+  assert.equal(live.split(rule).length - 1, 1);
+  assert.equal(live.includes("## Rust build output"), false, "no Cargo manifest, so no Rust detail");
+  const bare = assembled(plain);
+  assert.equal(bare.includes("## Code navigation integrations"), false, "no integration in the launch, so no navigation section");
+  assert.equal(bare.includes("## Candidate navigation and shared retrieval"), false);
+  assert.equal(bare.split("## Final handoff to main").length - 1, 1);
+  const pkg = assembled(plain, { enabled: false, packageRoot: "C:\\pkg" });
+  assert.equal(pkg.split("## Shell syntax").length - 1, 1, "core is unconditional, so the package shape carries it too");
+  assert.equal(pkg.split(rule).length - 1, 1);
+  assert.doesNotMatch(pkg, /## Rust build output/);
+  assert.match(pkg, /Package resources:/);
+  assert.ok(pkg.includes("## Final handoff to main"));
+});
+// F2: package-shape children get no code guidance, so the build-folder rule is appended exactly once; integrations-enabled prompts keep it once too.
+test("package-shape children carry the shared build-folder rule exactly once, and so does an integrations-enabled prompt", () => {
+  const agent = { name: "general-worker", systemPrompt: "ROLE BODY" };
+  const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
+  const pkg = assembleChildSystemPrompt(agent, { codeIntegrationsEnabled: false, cwd: tmpdir(), packageRoot: "C:\\pkg", globalGraphDirectory: EMPTY_GLOBAL });
+  assert.equal(pkg.split(rule).length - 1, 1);
+  const live = assembleChildSystemPrompt(agent, { codeIntegrationsEnabled: true, cwd: tmpdir(), packageRoot: null, globalGraphDirectory: EMPTY_GLOBAL });
+  assert.equal(live.split(rule).length - 1, 1);
 });
 test("shared code-leaf guidance keeps Ponytail, QMD and missing-graph authority limits", () => {
-  assert.match(CODE_NAVIGATION_GUIDANCE, /never overrides user requirements, candidate boundaries, required checks or delegation policy/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /Do not reload its base skill/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /Missing graphs never authorize a fresh graph build/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /only when qmd_search is in your tool list/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /Do not initialize\/update/);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /read-only roles must not build\/update graphs/i);
-  assert.match(CODE_NAVIGATION_GUIDANCE, /do not authorize nested agents/);
+  const text = assembled(repoAt("authority-limits"), { launchArgs: FULL_LAUNCH });
+  assert.match(text, /never overrides user requirements, candidate boundaries, required checks or delegation policy/);
+  assert.match(text, /Do not reload its base skill/);
+  assert.equal(text.split("Missing graphs never authorize a fresh graph build").length - 1, 1);
+  assert.match(text, /run one focused qmd_search \(maxResults 3, at most 5\)[\s\S]*only when that context is needed/);
+  assert.match(text, /Do not initialize\/update/);
+  assert.match(text, /read-only roles must not build\/update graphs/i);
+  assert.match(text, /Integrations never authorize nested agents, broader writes or new tasks/);
+  assert.match(text, /Graph references never widen write authority\./);
 });
 test("graph reference keeps candidate scope, no automatic fallback and read-only limits in both launch shapes", () => {
   const root = fs.mkdtempSync(join(tmpdir(), "graph-guidance-"));
@@ -298,16 +367,25 @@ test("graph reference keeps candidate scope, no automatic fallback and read-only
     fs.mkdirSync(join(candidate, ".git"), { recursive: true });
     fs.mkdirSync(globalDir, { recursive: true });
     fs.writeFileSync(join(globalDir, "global-graph.json"), "{}");
+    // Candidate scope (Serena project path) is candidate navigation, emitted only when Serena or QMD is launched.
+    const scope = candidateNavigationGuidance(candidate, true, false);
+    assert.ok(scope.includes("pass project explicitly as " + candidate), "candidate root must be named for Serena calls");
+    assert.match(scope, /Never activate the primary checkout just because it holds the graph/);
+    // Unmatched global corpus (no manifest source_path for this candidate) is not injected at all.
     const none = graphReferenceGuidance(candidate, globalDir);
-    assert.ok(none.includes(candidate), "candidate root must be named for Serena calls");
-    assert.match(none, /activate the primary checkout/);
-    assert.match(none, /No Graphify report/);
-    assert.match(none, /Do not ls\/read an assumed candidate graphify-out folder/);
-    assert.match(none, /coverage is not established/);
-    assert.match(none, /automatic fallback/);
-    assert.match(none, /candidate source evidence/);
-    assert.match(none, /Do not load the (entire|whole) global JSON/);
-    assert.match(none, /rebuild\/merge\/update it to repair a missing candidate folder/);
+    assert.equal(none, "", "unmatched global corpus must not be injected");
+    // Manifest coverage: exact source_path match to the candidate graph.json; no project artifacts yet, so the global block carries the no-assumed-folder, read-only and fallback limits.
+    fs.writeFileSync(join(globalDir, "global-manifest.json"), JSON.stringify({ repos: { candidateRepo: { source_path: join(candidate, "graphify-out", "graph.json") }, unrelatedRepo: { source_path: join(root, "elsewhere", "graphify-out", "graph.json") } } }));
+    const matched = graphReferenceGuidance(candidate, globalDir);
+    assert.match(matched, /No project Graphify artifacts were found at dispatch; do not ls\/read an assumed candidate graphify-out folder/);
+    assert.match(matched, /Candidate\/primary checkout manifest matches: candidateRepo\n/);
+    assert.equal(matched.includes("unrelatedRepo"), false, "unrelated manifest repositories are not listed");
+    assert.match(matched, /read-only orientation/);
+    assert.match(matched, /automatic fallback/);
+    assert.match(matched, /never treat their nodes as candidate source evidence/);
+    assert.match(matched, /Do not load the (entire|whole) global JSON/);
+    assert.match(matched, /rebuild\/merge\/update it to repair a missing candidate folder/);
+    assert.equal(matched.includes("## Graph reference location"), false);
     fs.mkdirSync(join(candidate, "graphify-out"), { recursive: true });
     fs.writeFileSync(join(candidate, "graphify-out", "graph.json"), "{}");
     const graph = graphReferenceGuidance(candidate, globalDir);
@@ -315,19 +393,16 @@ test("graph reference keeps candidate scope, no automatic fallback and read-only
     assert.match(graph, /Use these absolute paths directly/);
     assert.match(graph, /Never change the candidate cwd\/project/);
     assert.match(graph, /Verify symbols and changed behavior against the candidate checkout/);
-    assert.match(graph, /graph reference access does not widen write authority/);
+    assert.equal(graph.includes("graph reference access does not widen write authority"), false, "authority is stated once, in core");
+    assert.match(assembled(candidate, { launchArgs: [] }), /Graph references never widen write authority\./);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("graph reference pins the QMD prior-evidence verification contract", () => {
-  const root = fs.mkdtempSync(join(tmpdir(), "qmd-contract-"));
-  try {
-    const candidate = join(root, "candidate");
-    fs.mkdirSync(join(candidate, ".git"), { recursive: true });
-    assert.match(graphReferenceGuidance(candidate, join(root, "global")), /Treat retrieved notes as prior evidence; verify current files\/requirements in the candidate\./);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+test("candidate retrieval pins the QMD prior-evidence verification contract, emitted only when QMD tools are launched", () => {
+  const candidate = repoAt("qmd-contract");
+  assert.match(candidateNavigationGuidance(candidate, false, true), /Treat retrieved notes as prior evidence; verify current files\/requirements in the candidate\./);
+  assert.equal(candidateNavigationGuidance(candidate, false, false), "");
+  assert.equal(graphReferenceGuidance(candidate, join(fixtureRoot, "no-global")), "");
 });

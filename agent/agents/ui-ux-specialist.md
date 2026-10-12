@@ -78,7 +78,7 @@ Typical routing:
 Capabilities are procedures, not workflow owners.
 
 ## Focused work and evidence
-Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Do not claim unrun checks or source mutation. Never spawn helpers.
+Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Do not claim unrun checks or source mutation.
 Deliver accepted flow, hierarchy/layout, states/copy, responsive/accessibility/motion expectations, evidence vs assumptions and testable acceptance criteria. Preserve research provenance and existing design authority; do not invent user research or claim implementation/verification.
 
 For deeper domain questions, search headings in `~/.pi/agent/skills/engineering-harness/references/roles/ui-ux-specialist.md` and read only the matching section. Routine packets need no extra reference read.

@@ -87,12 +87,39 @@ test("auth and settings are lstat-only; scanner never reads contents or writes",
 	} finally { f.cleanup(); }
 });
 
+// pi-package/ is intentionally absent from a source-only checkout; when present it is validated strictly (see the absence test below).
+const PKG_PRESENT = fs.existsSync(path.join(repo, "pi-package"));
 test("candidate profile scans clean (current Oracle configuration preserved and valid)", () => {
 	const report = scanHarnessConfig({ root: repo });
 	assert.equal(report.errors, 0, JSON.stringify(report.findings));
-	// Regenerated pi-package ships the guard: both guard files must be present and no legacy INFO may be reported for the candidate.
-	for (const req of ["safety-core.ts", "safety-guard-entry.ts"]) assert.ok(fs.existsSync(path.join(repo, "pi-package", "extensions", "subagent", req)), `${req} present in pi-package`);
-	assert.ok(!report.findings.some((x: any) => x.rule === "PACKAGE_LEGACY_NO_GUARD"), JSON.stringify(report.findings));
+	if (PKG_PRESENT) {
+		// Regenerated pi-package ships the guard: both guard files must be present and no legacy INFO may be reported for the candidate.
+		for (const req of ["safety-core.ts", "safety-guard-entry.ts"]) assert.ok(fs.existsSync(path.join(repo, "pi-package", "extensions", "subagent", req)), `${req} present in pi-package`);
+		assert.ok(!report.findings.some((x: any) => x.rule === "PACKAGE_LEGACY_NO_GUARD"), JSON.stringify(report.findings));
+	} else {
+		// Source-only checkout: the absent package is an INFO state; no guard file or legacy finding is claimed.
+		assert.ok(report.findings.some((x: any) => x.rule === "PACKAGE_ABSENT" && x.level === "INFO"), JSON.stringify(report.findings));
+		assert.ok(!report.findings.some((x: any) => x.rule === "PACKAGE_LEGACY_NO_GUARD"), JSON.stringify(report.findings));
+	}
+});
+
+// Absent pi-package/ is INFO only; a present pi-package/ stays strict (missing or malformed manifest is an ERROR, never skipped).
+test("pi-package absence is INFO; a present pi-package directory still validates its manifest strictly", () => {
+	const f = fixture();
+	const pkgDir = path.join(f.root, "pi-package");
+	try {
+		fs.rmSync(pkgDir, { recursive: true, force: true });
+		const absent = scanHarnessConfig({ root: f.root });
+		assert.equal(absent.errors, 0, JSON.stringify(absent.findings));
+		assert.ok(absent.findings.some((x: any) => x.rule === "PACKAGE_ABSENT" && x.level === "INFO"), JSON.stringify(absent.findings));
+		assert.ok(!absent.findings.some((x: any) => x.rule === "PACKAGE_LEGACY_NO_GUARD"), JSON.stringify(absent.findings));
+		fs.mkdirSync(pkgDir);
+		const missing = scanHarnessConfig({ root: f.root });
+		assert.ok(missing.findings.some((x: any) => x.rule === "FILE_MISSING" && x.level === "ERROR"), JSON.stringify(missing.findings));
+		fs.writeFileSync(path.join(pkgDir, "package.json"), "{ not json");
+		const malformed = scanHarnessConfig({ root: f.root });
+		assert.ok(malformed.findings.some((x: any) => x.rule === "JSON_INVALID" && x.level === "ERROR"), JSON.stringify(malformed.findings));
+	} finally { f.cleanup(); }
 });
 
 // Review repair RED (M3): guard injection, package reachability and frontmatter parity.

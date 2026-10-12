@@ -14,16 +14,15 @@ const out = process.env.PI_PACKAGE_OUT;
 // Exact boundary: ".." or ".."+sep leads out; "..evil" is a child name, and an absolute relative path is another volume.
 const escapes = (rel) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
 if (out !== undefined && (!path.isAbsolute(out) || !escapes(path.relative(repo, out)) || !escapes(path.relative(out, repo)))) throw new Error(`PI_PACKAGE_OUT must be an absolute path outside the repository and not containing it: ${out}`);
+// Retired: pi-package/ was intentionally removed from this candidate and its migration is not implemented. Refuse before any baseline read or write, so no package tree or pinned role text is generated or retrieved.
+throw new Error("pi-package generation is retired: the obsolete pi-package/ tree was intentionally removed and no migration is implemented; nothing was generated.");
 const pkg = out === undefined ? authored : path.resolve(out);
 const BASELINE = "861c095cae2d2cd8313706c4af54d8d832865571";
 const GENERIC = ["api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist", "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer", "reviewer", "scout", "security-specialist", "sqlite-specialist", "test-engineer", "ui-ux-specialist"];
-const EXCLUDED = ["attendance-domain-specialist", "event-reconciliation-specialist", "hardware-integration", "messaging-specialist", "privacy-compliance-specialist"];
 // Exact literal transforms, applied only to package copies. Counts are enforced so a drifted source fails the build.
 const TRANSFORMS = [
 	// Skill-relative: pi resolves skill references against the skill directory, so the profile prefix is dropped.
 	{ from: "~/.pi/agent/skills/engineering-harness/", to: "" },
-	// Private checkout path in worktree guidance; the generic `<primary-parent>/worktrees/<repo>/<task>` form remains.
-	{ from: "For RFID this is `C:/Users/MSI/RFID/worktrees/RFIDAttendance-Rust/<task>`.\r\n", to: "", expected: 2 },
 	// Optional run-manifest and skill-evaluation features are not bundled: their references are removed from the package copy only.
 	{ from: "; `references/run-manifest.md` for the optional main-owned manifest of complex multi-stage runs; `references/skill-evaluation.md` for the offline routing-fixture evaluator.", to: ".", expected: 1 },
 	// Profile routing index is not bundled: point to the packaged routing reference instead.
@@ -32,13 +31,11 @@ const TRANSFORMS = [
 	{ from: "If `~/.pi/agent/skills/SKILLS.md` or the required registered procedure is missing", to: "If the required registered procedure is missing", expected: 1 },
 	// Unbundled frontend catalog: named as not bundled so the guide is not treated as available.
 	{ from: "`~/.pi/agent/skills/frontend/ux-flow-wireframer/index.md`", to: "`frontend/ux-flow-wireframer/index.md` (not bundled in this package; use project UX guidance)", expected: 1 },
-	// Excluded roles stay optional: never an automatic dispatch target in the package.
-	{ from: "One specialist is preferred. Multiple specialists require distinct unresolved questions.", to: "One specialist is preferred. Multiple specialists require distinct unresolved questions. In this package, hardware-integration, attendance-domain-specialist, event-reconciliation-specialist, messaging-specialist and privacy-compliance-specialist are optional and not bundled: never dispatch them automatically; return their questions to main.", expected: 1 },
 	// Repository path in a shipped reference: the packaged module is the same file at package-relative path.
 	{ from: "from `agent/extensions/subagent/compact-handoff.ts`", to: "from the packaged `extensions/subagent/compact-handoff.ts`", expected: 1 },
-	// Private repository collection name in shared runtime guidance: generic wording keeps the rule.
-	{ from: "For this RFID repository, the existing rfid-rust collection contains primary-checkout docs;", to: "The existing project collection may contain primary-checkout docs;", expected: 1 },
 ];
+// Packaged role bodies only (pinned bytes are never edited): these restatements duplicate the Leaf boundary, which already forbids launching helpers. Counts are enforced like TRANSFORMS.
+const ROLE_BODY_DEDUP = [{ from: " Never spawn another agent.", expected: 15 }, { from: " Never spawn helpers.", expected: 3 }];
 const SKILL_FILES = { "agent-creation": ["SKILL.md", "scripts/create_agent.py", "examples/dotnet-worker.json"] };
 const HARNESS_EXCLUDED = [/^examples\//, /^scripts\//, /^tests\//, /^references\/legacy-catalog\.md$/, /^references\/skill-evaluation\.md$/, /^references\/run-manifest\.md$/];
 const TEXT = /\.(md|ts|json|py)$/;
@@ -69,11 +66,12 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const walk = (dir, base = dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(dir, e.name), base) : [path.relative(base, path.join(dir, e.name)).split(path.sep).join("/")]);
 const copy = (from, to) => { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(from, to); };
 
-// Baseline gate: the committed roles registry must be exactly the generic set plus the excluded set.
+// Baseline gate: the committed roles registry must contain every generic default role; other pinned entries are not packaged.
 execFileSync("git", ["cat-file", "-e", `${BASELINE}^{commit}`], { cwd: repo });
 const headRoles = JSON.parse(headBytes("agent/roles.json").toString("utf8"));
-const headNames = headRoles.map((r) => r.name).sort().join(",");
-if (headNames !== [...GENERIC, ...EXCLUDED].sort().join(",")) throw new Error(`unexpected baseline role set at ${BASELINE}: ${headNames}`);
+const headNames = new Set(headRoles.map((r) => r.name));
+const missing = GENERIC.filter((n) => !headNames.has(n));
+if (missing.length) throw new Error(`baseline registry lacks generic roles at ${BASELINE}: ${missing.join(", ")}`);
 const defaultRoles = headRoles.filter((r) => GENERIC.includes(r.name));
 
 // Isolated output starts from the authored hand-written files, so generation sees the same inputs as the default build.
@@ -81,17 +79,21 @@ if (out !== undefined && pkg !== authored) for (const rel of ["package.json", "R
 // Regenerate only generated paths; hand-authored policy template and manifest stay in place.
 for (const rel of ["extensions", "skills", "defaults/agents", "defaults/roles.json", "defaults/baseline.json", "LICENSE", "PI-LICENSE", "THIRD_PARTY_NOTICES.md"]) fs.rmSync(path.join(pkg, rel), { recursive: true, force: true });
 
-// Defaults: byte-identical HEAD bodies plus the HEAD registry entries for the generic set.
+// Defaults: pinned HEAD bodies with the ROLE_BODY_DEDUP restatements removed (hashes cover the packaged bytes), plus the HEAD registry entries for the generic set.
 const agentHashes = {};
+const roleBodyHits = ROLE_BODY_DEDUP.map(() => 0);
 for (const name of GENERIC) {
-	const bytes = headBytes(`agent/agents/${name}.md`);
+	let text = headBytes(`agent/agents/${name}.md`).toString("utf8");
+	ROLE_BODY_DEDUP.forEach((t, i) => { roleBodyHits[i] += text.split(t.from).length - 1; text = text.split(t.from).join(""); });
+	const bytes = Buffer.from(text, "utf8");
 	fs.mkdirSync(path.join(pkg, "defaults", "agents"), { recursive: true });
 	fs.writeFileSync(path.join(pkg, "defaults", "agents", `${name}.md`), bytes);
 	agentHashes[name] = sha(bytes);
 }
+ROLE_BODY_DEDUP.forEach((t, i) => { if (roleBodyHits[i] !== t.expected) throw new Error(`role body dedup drift: expected ${t.expected}, found ${roleBodyHits[i]} for ${JSON.stringify(t.from)}`); });
 const rolesBytes = Buffer.from(JSON.stringify(defaultRoles, null, 2) + "\n");
 fs.writeFileSync(path.join(pkg, "defaults", "roles.json"), rolesBytes);
-fs.writeFileSync(path.join(pkg, "defaults", "baseline.json"), JSON.stringify({ commit: BASELINE, roles_path: "agent/roles.json", roles_sha256: sha(headBytes("agent/roles.json")), generic: GENERIC, excluded: EXCLUDED, agents_sha256: agentHashes }, null, 2) + "\n");
+fs.writeFileSync(path.join(pkg, "defaults", "baseline.json"), JSON.stringify({ commit: BASELINE, roles_path: "agent/roles.json", roles_sha256: sha(headBytes("agent/roles.json")), generic: GENERIC, agents_sha256: agentHashes }, null, 2) + "\n");
 
 // Runtime extension: every top-level TypeScript source (no tests). Integrations are explicitly disabled in the package.
 const extSrc = path.join(repo, "agent", "extensions", "subagent");

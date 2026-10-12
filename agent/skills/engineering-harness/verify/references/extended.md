@@ -878,7 +878,7 @@ Diff size does not.
 
 For:
 
-- attendance;
+- domain records;
 - finance;
 - authentication;
 - authorization;

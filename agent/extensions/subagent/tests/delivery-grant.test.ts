@@ -133,7 +133,7 @@ test("delivery constants: no TTL constant (session-scoped) and the approved acce
 		`gh pr create --repo acme/widgets --base main --head feat/x --title Unquoted --body "x"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title 'Colon: title' --body "x"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "Caf\u00e9" --body "x"`,
-		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file "C:\\Users\\MSI\\x.md"`,
+		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file "D:\\work\\x.md"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file -`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file "$HOME/x.md"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file 'C:/x.md'`,

@@ -314,14 +314,13 @@ function findDefinition(dir: string, name: string, packaged: boolean): { path: s
 	return { path: file, bytes, text };
 }
 
-/** Packaged defaults registry (defaults/roles.json, the pinned baseline); empty when no package root is given. */
+/** Bundled registry (roles.json plus agents/ under the native package root); empty when no package root is given. */
 export function readPackageEntries(pkgRoot: string | null): RegistryEntry[] {
 	if (!pkgRoot) return [];
-	const defaults = path.join(pkgRoot, "defaults");
-	// A partial package must not be edited from a fallback: both halves of the pinned baseline are required.
-	if (!existsNoFollow(path.join(defaults, "roles.json"))) throw new RoleEditError("package defaults roles.json is missing; the package baseline cannot be read, nothing was changed");
-	if (!fs.existsSync(path.join(defaults, "agents")) || !fs.statSync(path.join(defaults, "agents")).isDirectory()) throw new RoleEditError("package defaults agents directory is missing; the package baseline cannot be read, nothing was changed");
-	return readRegistry(defaults).entries;
+	// A partial package must not be edited from a fallback: both halves of the bundled baseline are required.
+	if (!existsNoFollow(path.join(pkgRoot, "roles.json"))) throw new RoleEditError("package roles.json is missing; the package baseline cannot be read, nothing was changed");
+	if (!fs.existsSync(path.join(pkgRoot, "agents")) || !fs.statSync(path.join(pkgRoot, "agents")).isDirectory()) throw new RoleEditError("package agents directory is missing; the package baseline cannot be read, nothing was changed");
+	return readRegistry(pkgRoot).entries;
 }
 
 /** Reads the user roles.json (absent = fresh profile) and the packaged default for the name; a user entry wins as the base. */

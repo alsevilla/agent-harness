@@ -174,9 +174,9 @@ Do not rely exclusively on graceful shutdown for correctness.
 
 ---
 
-# USB / RFID Devices
+# USB Field Devices
 
-The application may depend on locally connected USB RFID readers.
+The application may depend on locally connected USB reader devices.
 
 Consider platform differences in:
 
@@ -202,7 +202,7 @@ Windows may require:
 - device interface discovery;
 - service-account access to hardware.
 
-Coordinate hardware behavior with `hardware-integration`.
+Coordinate hardware behavior with `concurrency-specialist`.
 
 Do not embed fragile platform-specific device paths directly into domain logic.
 
@@ -455,9 +455,9 @@ Consider health signals for:
 
 - application process;
 - database;
-- USB/RFID readers;
+- USB reader devices;
 - background workers;
-- SMS processing;
+- notification processing;
 - storage capacity;
 - backups;
 - external dependencies.
@@ -496,7 +496,7 @@ For operational changes ask:
 4. What happens if storage fills?
 5. What happens if configuration is invalid?
 6. What happens if the database cannot open?
-7. What happens if an RFID reader disconnects?
+7. What happens if a device reader disconnects?
 8. What happens if networking disappears?
 9. What happens if an external service is unavailable?
 10. How does the operator know something failed?
@@ -512,8 +512,8 @@ Coordinate with:
 `sqlite-specialist`
 for SQLite, WAL, backups, locking, and database operational safety.
 
-`hardware-integration`
-for USB/RFID lifecycle, drivers, discovery, and reconnect behavior.
+`concurrency-specialist`
+for USB device lifecycle, drivers, discovery, and reconnect behavior.
 
 `concurrency-specialist`
 for shutdown, worker lifecycle, channels, async behavior, and background processing.

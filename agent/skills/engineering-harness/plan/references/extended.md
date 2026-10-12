@@ -364,7 +364,7 @@ Use HIGH when failure could materially violate important system behavior or inva
 Strong HIGH-risk triggers include:
 
 - business-critical rules;
-- attendance rules;
+- domain business rules;
 - financial calculations;
 - authorization;
 - persistent state semantics;
@@ -408,7 +408,7 @@ Some domains require stronger treatment because incorrect behavior has dispropor
 
 Examples include:
 
-- attendance status and attendance finalization;
+- record status and record finalization;
 - financial calculations;
 - authorization and permissions;
 - identity;
@@ -498,7 +498,7 @@ Route first to:
 - `security-specialist` for trust/auth/secrets/security-sensitive behavior;
 - `api-specialist` for public contract changes;
 - `architecture-specialist` for material structural decisions;
-- `hardware-integration` for device lifecycle/protocol/recovery decisions;
+- `concurrency-specialist` for device lifecycle/recovery race decisions;
 - `devops-specialist` for deployment/operations policy;
 - `observability-specialist` for telemetry/audit/health requirements;
 - `performance-specialist` for evidence-driven performance strategy.
@@ -538,10 +538,10 @@ Use `architecture-specialist` for:
 
 ### Hardware
 
-Use `hardware-integration` for:
+Use `concurrency-specialist` for device lifecycle and reader work:
 
 - USB;
-- RFID;
+- field-device readers;
 - serial/HID;
 - device lifecycle;
 - disconnect/reconnect;
@@ -603,9 +603,9 @@ Give each specialist a specific technical question.
 
 Examples:
 
-"Determine the safest SQLite transaction and uniqueness strategy that guarantees one promotion batch per source/target school year across process restarts."
+"Determine the safest SQLite transaction and uniqueness strategy that guarantees one promotion batch per source/target period across process restarts."
 
-"Determine whether the proposed RFID reconnect loop can race with shutdown or create duplicate reader tasks."
+"Determine whether the proposed device reconnect loop can race with shutdown or create duplicate reader tasks."
 
 "Determine whether this endpoint preserves the existing authorization boundary."
 
@@ -673,7 +673,7 @@ Use for behavioral code changes where a meaningful automated failing test can re
 This is strongly expected for:
 
 - business rules;
-- attendance logic;
+- domain logic;
 - state machines;
 - persistence rules;
 - API behavior;
@@ -1148,7 +1148,7 @@ It is not automatically sufficient independent verification.
 Use `test-engineer` when appropriate, especially for:
 
 - business rules;
-- attendance logic;
+- domain logic;
 - state machines;
 - persistence;
 - concurrency;
@@ -1225,7 +1225,7 @@ Reviewer is normally REQUIRED for:
 
 - HIGH or CRITICAL risk behavioral changes;
 - critical business rules;
-- attendance rule changes;
+- domain rule changes;
 - database semantics;
 - migrations;
 - concurrency;

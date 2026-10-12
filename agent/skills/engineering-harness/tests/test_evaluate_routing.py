@@ -98,11 +98,11 @@ class FixtureSpecimenTests(unittest.TestCase):
         self.assertEqual(c["R20"]["expect"]["routes"], ["BLOCKED_NO_AUTHORITY"])
         self.assertEqual(c["R20"]["expect"]["roles_allowed"], [])
         self.assertEqual(c["R21"]["expect"]["roles_required"], ["release-engineer"])
-        # unresolved narrow domain roles; confirmed attendance rule excludes the specialist
-        self.assertEqual(c["R16"]["expect"]["roles_required"], ["attendance-domain-specialist"])
-        self.assertEqual(c["R17"]["expect"]["roles_required"], ["messaging-specialist"])
-        self.assertEqual(c["R18"]["expect"]["roles_required"], ["privacy-compliance-specialist"])
-        self.assertNotIn("attendance-domain-specialist", c["R15"]["expect"]["roles_allowed"])
+        # unresolved narrow domain roles; confirmed contract policy excludes the specialist
+        self.assertEqual(c["R16"]["expect"]["roles_required"], ["architecture-specialist"])
+        self.assertEqual(c["R17"]["expect"]["roles_required"], ["concurrency-specialist"])
+        self.assertEqual(c["R18"]["expect"]["roles_required"], ["security-specialist"])
+        self.assertNotIn("architecture-specialist", c["R15"]["expect"]["roles_allowed"])
         # scout only for unknown location; no scout when location is supplied
         self.assertEqual(c["R13"]["expect"]["roles_required"], ["scout"])
         self.assertNotIn("scout", c["R14"]["expect"]["roles_allowed"])
