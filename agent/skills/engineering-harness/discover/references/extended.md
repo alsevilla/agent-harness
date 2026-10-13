@@ -388,7 +388,7 @@ Recommend only expertise justified by discovered evidence.
 
 Typical routing:
 
-- SQLite/data persistence → `sqlite-specialist`
+- database implementation → `database-worker`; unresolved material database semantics → `database-specialist`
 - async/shared-state behavior → `concurrency-specialist`
 - security boundary → `security-specialist`
 - API contract → `api-specialist`

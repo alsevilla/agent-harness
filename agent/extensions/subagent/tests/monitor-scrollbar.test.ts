@@ -3,10 +3,13 @@
 // Only the host TUI handle (terminal rows and a render counter) is stubbed; every painted cell is real.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import * as pathModule from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostModules as resolveHostModules } from "./host-modules.ts";
 
 const thisFile = fileURLToPath(import.meta.url);
 const isBun = typeof (process.versions as Record<string, string>).bun === "string";
+const hostModules = resolveHostModules(["@earendil-works/pi-tui", "@earendil-works/pi-coding-agent"]);
 
 if (isBun) {
 	const { test } = await import("bun:test");
@@ -22,7 +25,7 @@ async function runNodeSuite() {
 	const { test, mock } = await import("node:test");
 	const { registerHooks } = await import("node:module");
 	// The tests directory sits under agent/, so the profile install is three levels up.
-	const pkg = (path: string) => new URL(`../../../install/releases/1.1.0/node_modules/@earendil-works/${path}`, import.meta.url).href;
+	const pkg = (path: string) => pathToFileURL(pathModule.join(hostModules, "@earendil-works", path)).href;
 	registerHooks({
 		resolve(specifier: string, context: object, nextResolve: (s: string, c: object) => { url: string }) {
 			if (specifier === "@earendil-works/pi-tui") return { url: pkg("pi-tui/dist/index.js"), shortCircuit: true };

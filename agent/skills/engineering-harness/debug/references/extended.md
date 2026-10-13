@@ -797,7 +797,7 @@ When SQLite is involved, consider:
 - uniqueness;
 - concurrent writers.
 
-Use `sqlite-specialist` when the issue requires deeper SQLite reasoning.
+Use `database-specialist` only for materially unresolved SQLite semantics (when SQLite is the actual engine); route database implementation to `database-worker`.
 
 ---
 
@@ -1175,8 +1175,8 @@ Use specialists when evidence points into their domain.
 
 Examples:
 
-sqlite-specialist
-→ locking, transactions, WAL, constraints
+database-specialist
+→ materially unresolved database semantics; database-worker owns implementation
 
 concurrency-specialist
 → races, ordering, cancellation
@@ -1206,7 +1206,7 @@ Correction must atomically preserve FINALIZED against concurrent scans.
 
 That may justify:
 
-sqlite-specialist
+database-specialist
 + concurrency-specialist
 
 during Plan.

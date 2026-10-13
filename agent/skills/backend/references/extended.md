@@ -42,7 +42,7 @@ In the main conversation, this router selects backend capabilities and agents;
 it does not authorize the orchestrator to perform specialist analysis or
 non-trivial backend implementation itself.
 
-- unresolved SQLite/SQLx semantics -> dispatch `sqlite-specialist`;
+- all database implementation -> `database-worker`; unresolved material database semantics -> `database-specialist`;
 - unresolved concurrency semantics -> dispatch `concurrency-specialist`;
 - unresolved API/security/architecture/ops/observability/performance policy ->
   dispatch the justified specialist;
@@ -68,11 +68,11 @@ Verify, Review, Integrate, Ship, and Learn.
 
 ## Role Routing
 
-The main implementation writer for backend source (any language) is `backend-worker`.
+The main implementation writer for backend service/API source (any language) is `backend-worker`; `database-worker` owns all database implementation, including ORM mappings, repositories, migrations and data access.
 
 Read-only/domain specialists may participate when justified:
 
-- `sqlite-specialist` — SQLite/SQLx persistence, migrations, constraints,
+- `database-specialist` — read-only analysis of material unresolved database semantics (including SQLite/SQLx when applicable); `database-worker` owns all DB implementation including migrations, constraints,
   locking, WAL, indexes, query plans;
 - `concurrency-specialist` — Tokio tasks, channels, locks, cancellation,
   backpressure, shutdown;
@@ -89,7 +89,7 @@ Do not create a second writer merely because several concerns are present.
 | Skill | Primary use | Primary owner | Use when | Location |
 |---|---|---|---|---|
 | `rust-axum-engineering` | Rust + Axum + Tokio + Tower implementation | `backend-worker` | Handlers, services, errors, typed state/extractors, middleware, async tasks, cancellation, shutdown, bounded concurrency, backend tests | `~/.pi/agent/skills/backend/rust-axum-engineering/index.md` |
-| `sqlite-sqlx-engineering` | SQLite + SQLx persistence engineering | `sqlite-specialist` for analysis, `backend-worker` for authorized implementation | Schema, migrations, SQLx pool/options, transactions, WAL, busy handling, constraints, indexes, query plans, idempotency, burst writes | `~/.pi/agent/skills/backend/sqlite-sqlx-engineering/index.md` |
+| `sqlite-sqlx-engineering` | SQLite + SQLx persistence engineering, only for that actual stack | `database-specialist` for material unresolved semantics, `database-worker` for authorized implementation | Schema, migrations, SQLx pool/options, transactions, WAL, busy handling, constraints, indexes, query plans, idempotency, burst writes | `~/.pi/agent/skills/backend/sqlite-sqlx-engineering/index.md` |
 | `load-resilience-testing` | Burst/load/resilience evidence | `test-engineer` / `performance-specialist` with domain specialists as needed | Arrival-rate workloads, overload/backpressure, DB contention, dependency failure, shutdown-under-load, restart/recovery, soak when justified | `~/.pi/agent/skills/backend/load-resilience-testing/index.md` |
 
 ## Routing Priority
@@ -111,8 +111,7 @@ Use:
 
 `sqlite-sqlx-engineering`
 
-`sqlite-specialist` owns analysis and invariants. `backend-worker` remains the
-normal source-code writer.
+`database-specialist` owns read-only analysis of material unresolved invariants. `database-worker` owns all database source implementation; `backend-worker` owns non-database backend services and API/business logic.
 
 ### API contract changes
 
@@ -193,7 +192,7 @@ behavior.
 3. Select the narrowest relevant registered backend capability.
 4. Invoke it with `Skill(<capability>)`, unless the assigned leaf agent already receives it through `skills:` preload.
 5. Route a read-only specialist first only when unresolved material domain policy or correctness risk justifies it.
-6. Keep `backend-worker` as the normal backend source writer.
+6. Keep `database-worker` as the database source writer and `backend-worker` as the non-database backend source writer.
 7. Use additional backend capabilities only for genuinely distinct concerns.
 8. Return control to the governing engineering lifecycle for independent Verify/Review and later phases.
 
@@ -216,7 +215,7 @@ authority to invent unresolved domain policy.
 
 Before backend mutation, route unresolved material decisions to the matching
 read-only specialist:
-- SQLite/SQLx semantics -> `sqlite-specialist`
+- all database implementation -> `database-worker`; material unresolved database semantics -> `database-specialist`
 - Tokio concurrency/backpressure/shutdown -> `concurrency-specialist`
 - API contract -> `api-specialist`
 - security boundary -> `security-specialist`

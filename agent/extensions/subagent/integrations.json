@@ -3,6 +3,7 @@
     "api-specialist",
     "architecture-specialist",
     "backend-worker",
+    "database-worker",
     "concurrency-specialist",
     "debugger",
     "devops-specialist",
@@ -16,7 +17,7 @@
     "reviewer",
     "scout",
     "security-specialist",
-    "sqlite-specialist",
+    "database-specialist",
     "test-engineer",
     "ui-ux-specialist"
   ],

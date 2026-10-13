@@ -9,8 +9,7 @@
 	"pi": {
 		"extensions": [
 			"./agent/extensions/subagent/index.ts",
-			"./agent/extensions/ask-user/index.ts",
-			"./agent/extensions/external-compaction/index.ts"
+			"./agent/extensions/ask-user/index.ts"
 		],
 		"skills": [
 			"./agent/skills/engineering-harness",

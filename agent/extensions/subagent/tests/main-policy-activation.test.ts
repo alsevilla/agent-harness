@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostModules } from "./host-modules.ts";
 
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = path.resolve(TESTS_DIR, "..", "..", "..");
@@ -16,8 +17,8 @@ const SKILLS_DIR = path.join(AGENT_DIR, "skills");
 const POLICY = fs.readFileSync(path.join(AGENT_DIR, "AGENTS.md"), "utf8").trim();
 const SKILL_POSIX = path.join(SKILLS_DIR, "engineering-harness", "SKILL.md").replace(/\\/g, "/");
 const AGENT_POSIX = AGENT_DIR.replace(/\\/g, "/");
-const RELEASES = ["1.1.0", "1.2.0"];
-const INSTALL_RELEASES = path.join(AGENT_DIR, "install", "releases");
+const HOST_MODULES = hostModules();
+const HOST_VERSION = JSON.parse(fs.readFileSync(path.join(HOST_MODULES, "@earendil-works", "pi-coding-agent", "package.json"), "utf8")).version;
 const CAPTURE = "main-policy-activation-capture";
 const MODEL = {
 	id: "capture-model",
@@ -125,11 +126,11 @@ async function turn(session: any, requests: string[], text: string) {
 	await until(() => !session.isStreaming, "agent idle");
 }
 
-for (const release of RELEASES) {
-	const piRoot = path.join(INSTALL_RELEASES, release, "node_modules", "@earendil-works");
+{
+	const piRoot = path.join(HOST_MODULES, "@earendil-works");
 	const pi: any = await import(pathToFileURL(path.join(piRoot, "pi-coding-agent", "dist", "index.js")).href);
 	const ai: any = await import(pathToFileURL(path.join(piRoot, "pi-ai", "dist", "index.js")).href);
-	const t = (name: string, body: () => Promise<void>) => test(`[${release}] ${name}`, body, 60_000);
+	const t = (name: string, body: () => Promise<void>) => test(`[${HOST_VERSION}] ${name}`, body, 60_000);
 
 	t("a native install gives the first request the installed policy once, with the absolute SKILL.md path", async () => {
 		const requests: string[] = [];

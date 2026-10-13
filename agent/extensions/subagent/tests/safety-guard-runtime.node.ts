@@ -10,6 +10,7 @@ import * as path from "node:path";
 import readline from "node:readline";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostModules } from "./host-modules.ts";
 import { authorizableOp, canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, pushBranchTarget } from "../safety-core.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,15 +18,12 @@ const profileRoot = path.resolve(here, "../../../..");
 const extensionDir = path.resolve(here, "..");
 const guardFile = path.join(extensionDir, "safety-guard-entry.ts");
 
-// Installed package lookup mirrors scripts/scan-harness-config.mjs (latest release first); no hardcoded machine paths.
-function installed(rel: string): string {
-	const releases = path.join(profileRoot, "agent", "install", "releases");
-	for (const version of fs.readdirSync(releases).sort().reverse()) {
-		const file = path.join(releases, version, "node_modules", "@earendil-works", rel);
-		if (fs.existsSync(file)) return file;
-	}
-	throw new Error(`installed ${rel} not found`);
-}
+const host = hostModules([
+	"@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+	"@earendil-works/pi-coding-agent/dist/index.js",
+	"@earendil-works/pi-ai/dist/index.js",
+]);
+const installed = (rel: string) => path.join(host, "@earendil-works", ...rel.split("/"));
 const piCli = installed("pi-coding-agent/dist/bundle/cli.js");
 const piAi = pathToFileURL(installed("pi-ai/dist/index.js")).href;
 
@@ -557,7 +555,7 @@ test("main V (simulated TUI): commit-only request shapes that are invalid never 
 		["artifact_dir without commits", { push_branch: { branch: "feat/x", artifact_dir: art } }],
 		["commits not boolean", { push_branch: { branch: "feat/x", commits: "yes" } }],
 		["relative artifact_dir", { push_branch: { branch: "feat/x", commits: true, artifact_dir: "relative/dir" } }],
-		["artifact_dir outside placement", { push_branch: { branch: "feat/x", commits: true, artifact_dir: fs.realpathSync.native(os.tmpdir()).replace(/\\/g, "/") } }],
+		["artifact_dir outside placement", { push_branch: { branch: "feat/x", commits: true, artifact_dir: fs.realpathSync.native(extensionDir).replace(/\\/g, "/") } }],
 	];
 	for (const [label, args] of bad) {
 		const s = await openMain([{ tool: "request_authorization", args, id: "v0" }, { text: "done" }], { ui: approve, repo: true });
@@ -583,14 +581,15 @@ test("main W (simulated TUI): a commit lease binds its artifact directory; the s
 	} finally { s.cleanup(); }
 });
 
-test("child commit gate: a trusted release-engineer child refuses a normal commit without a commit lease, allows it with one, and only the trusted role is gated", { timeout: 240_000 }, async () => {
+test("child commit: a trusted release-engineer child admits a normal commit without grants; other roles remain policy-only", { timeout: 240_000 }, async () => {
 	const work = fs.mkdtempSync(path.join(scratchBase, "gate-"));
 	const repo = makeRepo(path.join(work, "repo"));
 	assert.equal(spawnSync("git", ["checkout", "-q", "feat/x"], { cwd: repo, windowsHide: true }).status, 0);
 	const commit = [{ tool: "bash", args: { command: `git commit -m "${COMMIT_TEXT}"` }, id: "g1" }, { text: "done" }];
 	const noLease = await runChild(commit, undefined, undefined, "release-engineer", { dir: repo, withLeases: true });
 	assert.equal(noLease.ends.length, 1, noLease.stderr);
-	assert.match(noLease.ends[0].text, /Blocked by harness safety guard \[GIT_COMMIT\]/);
+	assert.doesNotMatch(noLease.ends[0].text, /Blocked by harness safety guard/);
+	assert.match(noLease.ends[0].text, /nothing to commit|working tree clean/);
 	const withLease = await runChild(commit, undefined, (store) => store.mintLease({ ...pushBranchTarget(repo, "feat/x")!, commits: true }), "release-engineer", { dir: repo, withLeases: true });
 	assert.equal(withLease.ends.length, 1, withLease.stderr);
 	assert.doesNotMatch(withLease.ends[0].text, /Blocked by harness safety guard/);

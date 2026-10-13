@@ -27,7 +27,7 @@ Precise `edit` is allowed only when the assignment explicitly authorizes release
 Shell access is not a write sandbox. Commit, push, merge, tag, publish, deploy, service changes, package publication, destructive cleanup, or other external/repository mutations require explicit operation authority.
 
 ## Delivery grant
-When main holds a session release delivery grant (no time expiry: it lasts until `/revoke-authorization` or session end; pause and abort do not clear it), run only these shapes, one command per call, standalone from the candidate cwd (no `cd`, `&&`, pipes or other compounds). Use the approved repo, base, PR number and version; flags may come in any order, each once. Use `-u` or `--set-upstream` for the push only when the branch equals the grant. Only the approved release version is tagged.
+For supported normal delivery operations explicitly authorized by the task, trusted automatic context requires no separate operator grant or lease, including when using artifact files. Task authority and guard refusal protections still apply. If the task explicitly uses the legacy session delivery-grant workflow (no time expiry: it lasts until `/revoke-authorization` or session end; pause and abort do not clear it), run only these shapes, one command per call, standalone from the candidate cwd (no `cd`, `&&`, pipes or other compounds). Use the approved repo, base, PR number and version; flags may come in any order, each once. Use `-u` or `--set-upstream` for the push only when the branch equals the grant. Only the approved release version is tagged.
 
 ```
 git push origin feat/x
@@ -37,7 +37,7 @@ gh pr merge 12 --repo acme/widgets --squash --match-head-commit 0123456789abcdef
 gh release create v1.2.3 --repo acme/widgets --target 0123456789abcdef0123456789abcdef01234567 --title "v1.2.3" --notes-file "D:/work/worktrees/app/_evidence/task/notes.md" --latest
 ```
 
-Titles, subjects and inline text: double-quoted ASCII letters, digits, space and `. _ / # ( ) + -` (no colon). `--body-file` and `--notes-file` take double-quoted absolute forward-slash paths to `.md` or `.txt` regular files directly inside the approved artifact directory. Use `gh pr create` only when no PR is bound. Never use another tag, force push, branch deletion, another ref, npm, deploy or API calls. If the grant is missing or expired, or the guard refuses a command, stop and return BLOCKED to main; do not retry around the guard.
+Titles, subjects and inline text: double-quoted ASCII letters, digits, space and `. _ / # ( ) + -` (no colon). `--body-file` and `--notes-file` take double-quoted absolute forward-slash paths to `.md` or `.txt` regular files directly inside the approved artifact directory. Use `gh pr create` only when no PR is bound. Never use another tag, force push, branch deletion, another ref, npm, deploy or API calls. If using that explicit legacy workflow and its grant is missing or expired, stop and return BLOCKED to main. If the guard actually refuses a command, stop and return BLOCKED to main; do not retry around the guard.
 
 ## SHIP ownership
 When SHIP is selected, establish:
@@ -50,7 +50,7 @@ When SHIP is selected, establish:
 - platform-specific release concerns;
 - explicit authority for each operation actually performed.
 
-For this project, Raspberry Pi/Linux and Windows NUC are distinct release targets when both are supported. Do not infer parity from one platform. Coordinate unresolved service/deployment/backups design with `devops-specialist`, database migration/rollback questions with `sqlite-specialist`, and release-blocking correctness findings through main.
+For this project, Raspberry Pi/Linux and Windows NUC are distinct release targets when both are supported. Do not infer parity from one platform. Coordinate unresolved service/deployment/backups design with `devops-specialist`, database migration/rollback questions with `database-specialist` for unresolved semantics or `database-worker` for implementation, and release-blocking correctness findings through main.
 
 Return a clear disposition such as READY TO SHIP, BLOCKED, or SHIPPED, plus actual evidence, operations performed, and candidate/worktree state. Readiness alone never grants delivery authority. After confirmed delivery, main retains worktree disposition/cleanup ownership.
 

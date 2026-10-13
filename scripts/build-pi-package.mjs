@@ -18,7 +18,7 @@ if (out !== undefined && (!path.isAbsolute(out) || !escapes(path.relative(repo, 
 throw new Error("pi-package generation is retired: the obsolete pi-package/ tree was intentionally removed and no migration is implemented; nothing was generated.");
 const pkg = out === undefined ? authored : path.resolve(out);
 const BASELINE = "861c095cae2d2cd8313706c4af54d8d832865571";
-const GENERIC = ["api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist", "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer", "reviewer", "scout", "security-specialist", "sqlite-specialist", "test-engineer", "ui-ux-specialist"];
+const GENERIC = ["api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist", "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer", "reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "test-engineer", "ui-ux-specialist"];
 // Exact literal transforms, applied only to package copies. Counts are enforced so a drifted source fails the build.
 const TRANSFORMS = [
 	// Skill-relative: pi resolves skill references against the skill directory, so the profile prefix is dropped.

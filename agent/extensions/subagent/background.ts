@@ -98,7 +98,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function costText(s: UsageSlice): string {
   if (s.turns === 0) return "n/a (no finalized turns)";
   if (s.unpricedTurns === s.turns) return "not reported (no turn priced)";
-  let text = `$${s.cost.toFixed(4)} reported`;
+  let text = `$${s.cost.toFixed(4)} SDK-estimated`;
   if (s.unpricedTurns) text += `; ${plural(s.unpricedTurns, "turn")} not priced, excluded`;
   if (s.zeroCostTurns) text += `; ${plural(s.zeroCostTurns, "zero-cost turn")} with tokens, may be unpriced`;
   return text;
@@ -109,14 +109,14 @@ function sliceLines(name: string, s: UsageSlice): string[] {
   const tokens = `input ${s.input.toLocaleString("en-US")} | output ${s.output.toLocaleString("en-US")} | cacheRead ${s.cacheRead.toLocaleString("en-US")} | cacheWrite ${s.cacheWrite.toLocaleString("en-US")}`;
   return [
     `${name}: ${plural(jobs, "settled agent task")} (${s.completed} completed, ${s.failed} failed, ${s.aborted} aborted); ${plural(s.attempts, "attempt")}; ${plural(s.turns, "turn")}`,
-    `  ${tokens}`,
+    `  ${tokens} tokens`,
     `  cost: ${costText(s)}`,
   ];
 }
 // Plain text for /subagent usage: fixed labels, numeric aggregates only.
 export function formatUsageSummary(scope: UsageScope): string {
   const settled = scope.foreground.completed + scope.foreground.failed + scope.foreground.aborted + scope.background.completed + scope.background.failed + scope.background.aborted;
-  const lines = ["Subagent usage: this Pi run only (in memory; resets on reload or session change).", "Reported by provider or catalog; not a bill. Settled agent tasks only."];
+  const lines = ["Subagent usage: this Pi run only (in memory; resets on reload or session change).", "SDK-observed cost may be catalog-estimated, not provider-reported billing. Settled agent tasks only."];
   if (settled === 0 && scope.running === 0) return [...lines, "No delegated agent tasks yet this run."].join("\n");
   lines.push(...sliceLines("Foreground", scope.foreground), ...sliceLines("Background", scope.background));
   if (scope.running > 0) lines.push(`Pending: ${plural(scope.running, "agent task")} incl. queued, excluded until settled`);

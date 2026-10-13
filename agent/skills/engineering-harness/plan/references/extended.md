@@ -436,19 +436,9 @@ Consult specialists only when their expertise materially affects the plan.
 
 Typical routing:
 
-### SQLite / Persistence
+### Database
 
-Use `sqlite-specialist` for:
-
-- schema semantics;
-- migrations;
-- transaction boundaries;
-- WAL/locking;
-- uniqueness;
-- constraints;
-- persistent idempotency;
-- backup/recovery implications;
-- query/index behavior.
+Use `database-worker` for implementation across database engines. Use the read-only `database-specialist` only for material unresolved invariants or semantics; SQLite/SQLx rules apply only when that is the actual stack.
 
 ### Concurrency
 
@@ -493,7 +483,7 @@ Before assigning a worker, identify whether implementation would require the
 worker to invent an unresolved material domain policy.
 
 Route first to:
-- `sqlite-specialist` for persistence semantics;
+- `database-worker` for database implementation and `database-specialist` only for material unresolved semantics;
 - `concurrency-specialist` for concurrency/backpressure/shutdown semantics;
 - `security-specialist` for trust/auth/secrets/security-sensitive behavior;
 - `api-specialist` for public contract changes;
@@ -619,7 +609,7 @@ Independent specialists may analyze in parallel when their concerns genuinely di
 
 Example:
 
-sqlite-specialist
+database-specialist
 +
 concurrency-specialist
 

@@ -174,7 +174,7 @@ Recommend the appropriate specialist when deeper analysis is justified.
 
 # Specialist Routing Recommendations
 
-Recommend `sqlite-specialist` when reconnaissance reveals:
+Recommend `database-specialist` only for material unresolved database semantics; route implementation to `database-worker` when reconnaissance reveals:
 
 - schema changes;
 - transaction changes;
@@ -461,7 +461,7 @@ Look for:
 If backend server implementation is material, recommend `backend-worker`;
 add `rust-axum-engineering` only for a Rust/Axum stack.
 
-If SQLite/SQLx semantics are material, recommend `sqlite-specialist` +
+If SQLite/SQLx-specific semantics are materially unresolved, recommend `database-specialist` +
 `sqlite-sqlx-engineering`.
 
 Inventory before invention.

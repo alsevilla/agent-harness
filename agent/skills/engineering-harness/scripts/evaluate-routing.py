@@ -24,7 +24,7 @@ ROLES = frozenset({
     "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist",
     "debugger", "devops-specialist", "frontend-worker", "general-worker",
     "observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
-    "reviewer", "scout", "security-specialist", "sqlite-specialist",
+    "reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
     "test-engineer", "ui-ux-specialist",
 })
 KINDS = frozenset({"positive", "near_miss"})

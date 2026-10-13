@@ -189,6 +189,69 @@ test("delivery positives: five stages in bash and powershell with real forms; th
 	assert.equal(store.copyDelivery(CAND).length, 1, "delivery is non-consuming");
 });
 
+test("trusted normal PR merge requires exact grammar and a matching live same-repo open PR", () => {
+    resetState();
+    const repo = makeRepo("trusted-merge");
+    git(repo, "checkout", "-q", "feat/x");
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "feature");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    assert.match(head, /^[0-9a-f]{40}$/);
+    state.views = { 12: { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: head, isCrossRepository: false } };
+    const command = `gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${head}`;
+    assert.equal(C.parseDeliveryCommand(command)?.kind, "merge", "test command must parse before behavior assertion");
+    const target = { candidate: repo, pushUrl: GH_URL, branch: "feat/x" };
+    const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: target, gateCommits: true, live: liveReaders() };
+    const runTrusted = (cmd = command) => C.guardToolCall(trusted, "bash", { command: cmd }, repo);
+    assert.equal(runTrusted(), undefined, "matching live PR is allowed without grants");
+    for (const [name, view, cmd] of [
+        ["stale SHA", { ...state.views[12], headRefOid: HEAD }, command],
+        ["wrong repo", state.views[12], command.replace("acme/widgets", "other/repo")],
+        ["closed PR", { ...state.views[12], state: "CLOSED" }, command],
+        ["fork PR", { ...state.views[12], isCrossRepository: true }, command],
+        ["wrong head", { ...state.views[12], headRefName: "feat/other" }, command],
+        ["equal base", { ...state.views[12], baseRefName: "feat/x" }, command],
+    ] as Array<[string, any, string]>) {
+        state.views = { 12: view };
+        assert.ok(runTrusted(cmd), name);
+    }
+    state.views = {};
+    assert.ok(runTrusted(), "missing live PR read blocks");
+});
+
+test("trusted normal PR merge admits an approved-group body file", () => {
+    resetState();
+    const repo = makeRepo("feat");
+    git(repo, "checkout", "-q", "feat/x");
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "feature");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    state.views = { 12: { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: head, isCrossRepository: false } };
+    const group = path.join(path.dirname(repo), "worktrees", path.basename(repo));
+    const scratch = path.join(group, "_scratch", "pr-create-friction");
+    fs.mkdirSync(scratch, { recursive: true });
+    const bodyFile = path.join(scratch, "approved-body.md");
+    fs.writeFileSync(bodyFile, "A safe merge note.\\n");
+    const command = `gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${head} --body-file "${slash(bodyFile)}"`;
+    assert.equal(C.parseDeliveryCommand(command)?.kind, "merge", "test command must parse before behavior assertion");
+    const target = { candidate: repo, pushUrl: GH_URL, branch: "feat/x" };
+    const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: target, gateCommits: true, live: liveReaders() };
+    assert.equal(C.guardToolCall(trusted, "bash", { command }, repo), undefined, "approved-group merge body file is allowed without grants");
+});
+
+test("trusted normal PR merge refuses an outside-group credential body file", () => {
+    resetState();
+    const repo = makeRepo("trusted-merge-body-file");
+    git(repo, "checkout", "-q", "feat/x");
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "feature");
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    state.views = { 12: { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: head, isCrossRepository: false } };
+    const outside = path.join(root, "outside.json");
+    fs.writeFileSync(outside, "token=synthetic-credential\\n");
+    const command = `gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${head} --body-file "${slash(outside)}"`;
+    const target = { candidate: repo, pushUrl: GH_URL, branch: "feat/x" };
+    const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: target, gateCommits: true, live: liveReaders() };
+    assert.ok(blocked(C.guardToolCall(trusted, "bash", { command }, repo)), "outside-group credential file must be refused");
+});
+
 test("delivery live gates: wrong repo, base, head, branch, PR, cwd, closed or cross PR, stale head, tag and merged SHA drift all block", () => {
 	resetState();
 	const store = storeWith({ version: "v1.2.3", artifactDir: A });

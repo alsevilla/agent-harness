@@ -8,9 +8,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { after } from "node:test";
 import { classifyObservation, guardStreamSimple, MAX_OBSERVED_BODY_BYTES, readBoundedJson } from "../provider-cooldown-guard.ts";
 import { type CooldownStore, createCooldownStore } from "../provider-cooldown.ts";
+import { hostModules } from "./host-modules.ts";
 
-// Test-only absolute path to the installed Pi 1.1.0 public pi-ai dist. Extension-loader resolution is NOT exercised here.
-const PI_AI_DIST = process.env.PI_AI_DIST ?? fileURLToPath(new URL("../../../install/releases/1.1.0/node_modules/@earendil-works/pi-ai/dist", import.meta.url));
+// Extension-loader resolution is NOT exercised here.
+const PI_AI_DIST = process.env.PI_AI_DIST ?? path.join(hostModules(["@earendil-works/pi-ai"]), "@earendil-works", "pi-ai", "dist");
 const piAi = (rel: string) => import(pathToFileURL(path.join(PI_AI_DIST, rel)).href);
 const { createAssistantMessageEventStream } = await piAi("utils/event-stream.js");
 
@@ -392,7 +393,7 @@ test("two stores on one directory after expiry: exactly one probe reaches the de
 	assert.equal(winnerEvents[0].type, "done");
 });
 
-// ---- 5. Real public API delegates (installed pi-ai 1.1.0 dist, mock fetch, no network) ----------------------------
+// ---- 5. Real public API delegates (installed pi-ai dist, mock fetch, no network) ---------------------------------
 
 test("real anthropic-messages streamSimple: one physical request, trusted rate cooldown from retry-after-ms", async () => {
 	const { streamSimple } = await piAi("api/anthropic-messages.js");

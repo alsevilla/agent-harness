@@ -326,7 +326,7 @@ This skill may be used by:
 - `test-engineer` — independent scenario execution/verdict;
 - `performance-specialist` — workload modeling and bottleneck measurement;
 - `concurrency-specialist` — backpressure/task/channel/cancellation analysis;
-- `sqlite-specialist` — contention/WAL/pool/transaction analysis;
+- `database-specialist` — material unresolved SQLite contention/WAL/pool/transaction semantics (SQLite/SQLx only); `database-worker` — authorized database implementation;
 - `observability-specialist` — required runtime signals;
 - `reviewer` — challenge unsupported capacity/resilience claims.
 

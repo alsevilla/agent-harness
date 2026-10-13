@@ -1,6 +1,7 @@
 // Stage 1 RED: manual read-only scanner (scripts/scan-harness-config.mjs). Fixtures live in a temp dir created here; spy fs proves no writes and no auth/settings reads.
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
@@ -41,6 +42,16 @@ function spyFs() {
 	}
 	return { fs: wrapped as typeof fs, calls };
 }
+
+test("invalid explicit host modules fails instead of falling back to installed SDK", () => {
+	const invalidModules = path.join(os.tmpdir(), `missing-host-modules-${Date.now()}`);
+	const result = spawnSync(process.execPath, ["--input-type=module", "-e", `import(${JSON.stringify(new URL("../../../../scripts/scan-harness-config.mjs", import.meta.url).href)})`], { cwd: repo, env: { ...process.env, NATIVE_PROBE_HOST_MODULES: invalidModules } });
+	assert.equal(result.error, undefined, result.error?.message);
+	assert.equal(result.signal, null);
+	assert.equal(typeof result.status, "number");
+	assert.notEqual(result.status, 0);
+	assert.match(String(result.stderr), /NATIVE_PROBE_HOST_MODULES selected/);
+});
 
 test("clean fixture passes with no ERROR findings", () => {
 	const f = fixture();

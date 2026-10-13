@@ -82,9 +82,9 @@ class FixtureSpecimenTests(unittest.TestCase):
         # unresolved UX -> ui-ux-specialist required; frontend-worker only allowed after the decision
         self.assertEqual(c["R04"]["expect"]["roles_required"], ["ui-ux-specialist"])
         self.assertEqual(c["R04"]["expect"]["roles_allowed"], ["ui-ux-specialist", "frontend-worker"])
-        # unresolved owner key -> sqlite-specialist required; backend-worker only allowed after the decision
-        self.assertEqual(c["R02"]["expect"]["roles_required"], ["sqlite-specialist"])
-        self.assertEqual(c["R02"]["expect"]["roles_allowed"], ["sqlite-specialist", "backend-worker"])
+        # unresolved owner key -> database-specialist required; database-worker only allowed after the decision
+        self.assertEqual(c["R02"]["expect"]["roles_required"], ["database-specialist"])
+        self.assertEqual(c["R02"]["expect"]["roles_allowed"], ["database-specialist", "database-worker"])
         # unknown cause -> debugger before backend-worker
         self.assertEqual(c["R05"]["expect"]["roles_required"], ["debugger", "backend-worker"])
         # standalone mechanical edit: main allowed, worker also valid
@@ -224,7 +224,7 @@ class EvaluatorTests(unittest.TestCase):
 
     def test_specialist_only_hold_passes_unresolved_cases(self):
         fx = load_fixture()
-        rows = set_row(perfect_predictions(fx), "R02", roles=["sqlite-specialist"])
+        rows = set_row(perfect_predictions(fx), "R02", roles=["database-specialist"])
         rows = set_row(rows, "R04", roles=["ui-ux-specialist"])
         rep = evaluate_rows(rows, fx)
         self.assertTrue(rep["ok"], rep["mismatches"])

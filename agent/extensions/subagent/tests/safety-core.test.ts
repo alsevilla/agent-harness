@@ -459,7 +459,7 @@ const EMPTY_GITCONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "push-le
 fs.writeFileSync(EMPTY_GITCONFIG, "");
 process.env.GIT_CONFIG_GLOBAL = EMPTY_GITCONFIG;
 process.env.GIT_CONFIG_NOSYSTEM = "1";
-const PUSH_URL = "https://example.test/owner/repo.git";
+const PUSH_URL = "https://github.com/example/repo.git";
 const git = (dir: string, ...args: string[]) => {
 	const run = spawnSync("git", args, { cwd: dir, encoding: "utf8", windowsHide: true });
 	assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stderr}`);
@@ -575,6 +575,123 @@ test("push target and lease mint: a verified repo yields one deduplicated bindin
 	assert.equal(store.leaseCount(), 1, "identical binding is deduplicated");
 	assert.throws(() => store.mintLease({ candidate: repo, pushUrl: "https://u:tok@example.test/owner/repo.git", branch: "feat/x" }), RangeError);
 	assert.throws(() => store.mintLease({ candidate: "relative", pushUrl: PUSH_URL, branch: "feat/x" }), TypeError);
+});
+
+test("trusted release-engineer launch admits feature commit without grant or lease", () => {
+	const repo = repoFixture();
+	git(repo, "checkout", "-q", "feat/x");
+	const store = core.createGrantStore();
+	const launch = claimChildGuard(store, LEASE_ROLE, repo, GUARD_FILE, { open: true }, true);
+	const env = launch.childEnv({});
+	const envelope = env[core.CHILD_GRANT_ENV];
+	assert.ok(envelope);
+	const gateCommits = core.loadChildGate(envelope);
+	assert.equal(gateCommits, true);
+	const childStore = core.createGrantStore();
+	childStore.importRecords(loadChildGrants(envelope));
+	assert.equal(childStore.size(), 0);
+	assert.equal(childStore.leaseCount(), 0);
+	const pushTarget = core.loadChildPushTarget(envelope);
+	assert.ok(pushTarget);
+	const trusted = { ...childGuard(childStore), gateCommits, pushTarget };
+	assert.equal(guardToolCall(trusted, "bash", { command: 'git commit -m "Regression"' }, repo), undefined);
+	assert.ok(guardToolCall(trusted, "bash", { command: 'git commit --amend -m "Regression"' }, repo), "amend remains blocked");
+	assert.ok(guardToolCall(trusted, "bash", { command: 'git commit -m "Regression"' }, path.join(repo, "subdir")), "cwd drift blocks");
+	fs.writeFileSync(path.join(repo, ".git", "MERGE_HEAD"), "0".repeat(40));
+	assert.ok(guardToolCall(trusted, "bash", { command: 'git commit -m "Regression"' }, repo), "merge state blocks");
+});
+
+test("trusted release-engineer launch admits feature push without grant, lease or approval", () => {
+	const repo = repoFixture();
+	git(repo, "checkout", "-q", "feat/x");
+	assert.equal(git(repo, "symbolic-ref", "--short", "HEAD").trim(), "feat/x");
+	const store = core.createGrantStore();
+	const launch = claimChildGuard(store, LEASE_ROLE, repo, GUARD_FILE, { open: true }, true);
+	assert.equal(store.size(), 0, "no exact grants");
+	assert.equal(store.leaseCount(), 0, "no delivery leases");
+	const childStore = core.createGrantStore();
+	childStore.importRecords(loadChildGrants(launch.childEnv({})[core.CHILD_GRANT_ENV]));
+	childStore.importLeases(loadChildLeases(launch.childEnv({})[core.CHILD_GRANT_ENV]));
+	const pushTarget = core.loadChildPushTarget(launch.childEnv({})[core.CHILD_GRANT_ENV]);
+	assert.ok(pushTarget);
+	assert.equal(pushTarget.branch, "feat/x");
+	assert.equal(guardToolCall({ ...childGuard(childStore), pushTarget }, "bash", { command: "git push origin feat/x" }, repo), undefined);
+});
+
+test("trusted release-engineer launch admits inline-notes release for its uniquely merged target without approval", () => {
+	const repo = repoFixture();
+	git(repo, "remote", "set-url", "origin", "https://github.com/example/repo.git");
+	git(repo, "checkout", "-q", "feat/x");
+	const store = core.createGrantStore();
+	const launch = claimChildGuard(store, LEASE_ROLE, repo, GUARD_FILE, { open: true }, true);
+	const envelope = launch.childEnv({})[core.CHILD_GRANT_ENV];
+	assert.ok(envelope);
+	const childStore = core.createGrantStore();
+	childStore.importRecords(loadChildGrants(envelope));
+	childStore.importLeases(loadChildLeases(envelope));
+	const pushTarget = core.loadChildPushTarget(envelope);
+	assert.ok(pushTarget);
+	const live = { env: () => ({}), pushUrl: () => PUSH_URL, tagStatus: () => 2, ghJson: () => [{ number: 7, state: "MERGED", isCrossRepository: false, headRefName: "feat/x", headRefOid: "1".repeat(40), baseRefName: "main", mergeCommit: { oid: "2".repeat(40) } }] };
+	const trusted = { ...childGuard(childStore), gateCommits: true, pushTarget, live };
+	const command = 'gh release create v1.2.3 --repo example/repo --target ' + "2".repeat(40) + ' --title "v1.2.3" --notes "Inline notes"';
+	assert.equal(store.size(), 0);
+	assert.equal(store.leaseCount(), 0);
+	assert.equal(guardToolCall(trusted, "bash", { command }, repo, () => PUSH_URL), undefined);
+});
+
+test("trusted release-engineer launch admits anchored file-based normal delivery without grants", () => {
+	const repo = repoFixture();
+	git(repo, "remote", "set-url", "origin", "https://github.com/example/repo.git");
+	git(repo, "checkout", "-q", "feat/x");
+	const taskDir = path.join(path.dirname(repo), "worktrees", path.basename(repo), "_scratch", "file-delivery");
+	fs.mkdirSync(taskDir, { recursive: true });
+	const file = path.join(taskDir, "delivery.md").replace(/\\/g, "/");
+	fs.writeFileSync(file, "Safe delivery text\n");
+	const target = core.pushBranchTarget(repo, "feat/x");
+	assert.ok(target);
+	const trusted = { ...childGuard(core.createGrantStore()), gateCommits: true, pushTarget: target, live: { env: () => ({}), tagStatus: () => 2, ghJson: () => [{ number: 7, mergeCommit: { oid: "2".repeat(40) }, isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }] } };
+	const textFile = path.join(taskDir, "delivery.txt").replace(/\\/g, "/");
+	fs.writeFileSync(textFile, "Safe text delivery\n");
+	const commit = `git commit -F "${file}"`;
+	const pr = `gh pr create --repo example/repo --base main --head feat/x --title "Regression" --body-file "${file}"`;
+	const release = `gh release create v1.2.3 --repo example/repo --target ${"2".repeat(40)} --title "v1.2.3" --notes-file "${file}"`;
+	assert.deepEqual(core.parseNormalCommit(commit), { file });
+	assert.equal(core.parseDeliveryCommand(pr)?.kind, "create");
+	assert.equal(core.parseDeliveryCommand(release)?.kind, "release");
+	for (const command of [commit, pr, release, `git commit -F "${textFile}"`]) assert.equal(guardToolCall(trusted, "bash", { command }, repo, () => PUSH_URL), undefined, command);
+	const otherGroup = path.join(path.dirname(repo), "worktrees", "other", "_scratch", "file-delivery");
+	fs.mkdirSync(otherGroup, { recursive: true });
+	const outside = path.join(otherGroup, "outside.txt").replace(/\\/g, "/");
+	fs.writeFileSync(outside, "Safe text\n");
+	assert.ok(guardToolCall(trusted, "bash", { command: `git commit -F "${outside}"` }, repo, () => PUSH_URL), "wrong checkout group blocks");
+	assert.ok(guardToolCall(trusted, "bash", { command: `git commit -F "${file.replace("delivery.md", "../delivery.md")}"` }, repo, () => PUSH_URL), "traversal blocks");
+	const credential = path.join(taskDir, "credential.txt").replace(/\\/g, "/");
+	fs.writeFileSync(credential, "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n");
+	assert.ok(guardToolCall(trusted, "bash", { command: `git commit -F "${credential}"` }, repo, () => PUSH_URL), "credential-like contents block");
+	assert.ok(guardToolCall(trusted, "bash", { command: pr.replace(file, credential) }, repo, () => PUSH_URL), "PR credential-like contents block");
+	assert.ok(guardToolCall(trusted, "bash", { command: release.replace(file, credential) }, repo, () => PUSH_URL), "release credential-like contents block");
+	const oversized = path.join(taskDir, "large.txt").replace(/\\/g, "/");
+	fs.writeFileSync(oversized, "x".repeat(65_537));
+	assert.ok(guardToolCall(trusted, "bash", { command: `git commit -F "${oversized}"` }, repo, () => PUSH_URL), "oversized files block");
+	fs.rmSync(taskDir, { recursive: true, force: true });
+});
+
+test("trusted release-engineer launch admits PR creation without operator authorization", () => {
+	const repo = repoFixture();
+	git(repo, "remote", "set-url", "origin", "https://github.com/example/repo.git");
+	git(repo, "checkout", "-q", "feat/x");
+	assert.equal(git(repo, "symbolic-ref", "--short", "HEAD").trim(), "feat/x");
+	const store = core.createGrantStore();
+	const launch = claimChildGuard(store, LEASE_ROLE, repo, GUARD_FILE, { open: true }, true);
+	assert.equal(store.size(), 0, "no exact grants");
+	assert.equal(store.leaseCount(), 0, "no delivery leases");
+	const childStore = core.createGrantStore();
+	childStore.importRecords(loadChildGrants(launch.childEnv({})[core.CHILD_GRANT_ENV]));
+	childStore.importLeases(loadChildLeases(launch.childEnv({})[core.CHILD_GRANT_ENV]));
+	const pushTarget = core.loadChildPushTarget(launch.childEnv({})[core.CHILD_GRANT_ENV]);
+	assert.ok(pushTarget);
+	assert.equal(pushTarget.branch, "feat/x");
+	assert.equal(guardToolCall({ ...childGuard(childStore), pushTarget }, "bash", { command: 'gh pr create --repo example/repo --base master --head feat/x --title "Regression" --body "Regression"' }, repo), undefined);
 });
 
 test("lease transport: copies are non-consuming across first, fallback and later spawns; project-source and other roles receive none", () => {

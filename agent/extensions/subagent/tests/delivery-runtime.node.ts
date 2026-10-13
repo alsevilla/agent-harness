@@ -9,23 +9,22 @@ import * as path from "node:path";
 import readline from "node:readline";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostModules } from "./host-modules.ts";
 import { canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, serializeGrants } from "../safety-core.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const profileRoot = path.resolve(here, "../../../..");
 const extensionDir = path.resolve(here, "..");
 const guardFile = path.join(extensionDir, "safety-guard-entry.ts");
-
-function installed(rel: string): string {
-	const releases = path.join(profileRoot, "agent", "install", "releases");
-	for (const version of fs.readdirSync(releases).sort().reverse()) {
-		const file = path.join(releases, version, "node_modules", "@earendil-works", rel);
-		if (fs.existsSync(file)) return file;
-	}
-	throw new Error(`installed ${rel} not found`);
-}
+const host = hostModules([
+	"@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+	"@earendil-works/pi-coding-agent/dist/index.js",
+	"@earendil-works/pi-ai/dist/index.js",
+]);
+const installed = (rel: string) => path.join(host, "@earendil-works", ...rel.split("/"));
 const piCli = installed("pi-coding-agent/dist/bundle/cli.js");
 const piAi = pathToFileURL(installed("pi-ai/dist/index.js")).href;
+const installedProfileRoot = path.resolve(host, "../../../../..");
 
 const scratchBase = process.env.DELIVERY_TEST_SCRATCH ?? os.tmpdir();
 const root = fs.mkdtempSync(path.join(scratchBase, "delivery-runtime-"));
@@ -63,7 +62,7 @@ function installTripwire(): void {
 	fs.writeFileSync(TRIPWIRE_SH, `${shimFn("git")}\n${shimFn("gh")}\n`);
 	// Pi resolves its code integration under HOME; copy the installed package into the isolated home (scratch only).
 	const ponytail = path.join("agent", "npm", "node_modules", "@dietrichgebert", "ponytail");
-	fs.cpSync(path.join(profileRoot, ponytail), path.join(HOME_DIR, ".pi", ponytail), { recursive: true });
+	fs.cpSync(path.join(installedProfileRoot, ponytail), path.join(HOME_DIR, ".pi", ponytail), { recursive: true });
 }
 const tripwireLog = () => (fs.existsSync(TRIPWIRE_LOG) ? fs.readFileSync(TRIPWIRE_LOG, "utf8") : "");
 function assertNoTripwire(where: string): void { assert.equal(tripwireLog(), "", `${where}: git/gh argv reached the bash tripwire`); }

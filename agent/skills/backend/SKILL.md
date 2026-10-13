@@ -4,9 +4,9 @@ description: Select task-relevant Rust/Axum, SQLite/SQLx or load/resilience modu
 ---
 
 # Backend
-Known backend contract (Rust/Axum or another stack) -> backend-worker. Unknown-cause defects follow harness DEBUG.
+Known backend service/API contract (Rust/Axum or another stack) -> backend-worker; database implementation -> database-worker. Unknown-cause defects follow harness DEBUG.
 Touching a domain alone does not require a specialist. For material unresolved decisions:
-SQLite -> sqlite-specialist; concurrency -> concurrency-specialist; security -> security-specialist;
+Database implementation -> database-worker; unresolved material database semantics -> database-specialist; concurrency -> concurrency-specialist; security -> security-specialist;
 API -> api-specialist; subsystem boundaries -> architecture-specialist; measured capacity
 -> performance-specialist; device I/O -> concurrency-specialist; deployment -> devops-specialist;
 runtime signals -> observability-specialist. Prefer one relevant specialist and one writer.

@@ -644,9 +644,9 @@ test("usage: the summary is plain, deterministic and separates settled, running 
 	assert.equal(bg.formatUsageSummary(scope), text);
 	assert.match(text, /Foreground: 1 settled agent task \(1 completed, 0 failed, 0 aborted\); 1 attempt; 1 turn/);
 	assert.match(text, /input 2 \| output 3 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$0\.2500 reported/);
+	assert.match(text, /cost: \$0\.2500 SDK-estimated/);
 	assert.match(text, /Background: none settled/);
-	assert.match(text, /not a bill/);
+	assert.match(text, /SDK-observed cost may be catalog-estimated, not provider-reported billing\./);
 	assert.doesNotMatch(text, /NaN|free/);
 	assert.equal(bg.formatUsageSummary(bg.newUsageScope()).includes("No delegated agent tasks yet this run"), true);
 	assert.match(bg.formatUsageSummary({ ...bg.newUsageScope(), running: 1 }), /Pending: 1 agent task incl\. queued, excluded until settled/);

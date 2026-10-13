@@ -7,9 +7,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostModules as resolveHostModules } from "./host-modules.ts";
 
 const thisFile = fileURLToPath(import.meta.url);
 const isBun = typeof (process.versions as Record<string, string>).bun === "string";
+const hostModules = resolveHostModules();
 
 if (isBun) {
 	const { test } = await import("bun:test");
@@ -26,7 +28,7 @@ if (isBun) {
 async function runNodeSuite(): Promise<void> {
 	const { test, afterEach } = await import("node:test");
 	const { registerHooks } = await import("node:module");
-	const installed = (rel: string) => fileURLToPath(new URL(`../../../install/releases/1.1.0/node_modules/@earendil-works/${rel}`, import.meta.url));
+	const installed = (rel: string) => path.resolve(hostModules, "@earendil-works", rel);
 	const installedUrl = (rel: string) => pathToFileURL(installed(rel)).href;
 	registerHooks({
 		resolve(specifier: string, context: object, nextResolve: (s: string, c: object) => { url: string }) {
@@ -1505,7 +1507,7 @@ async function runNodeSuite(): Promise<void> {
 		await h.bare("", menu.ctx);
 		assert.equal(menu.calls.length, 1, "exactly one dialog");
 		assert.equal(menu.calls[0].title, MENU_TITLE);
-		assert.deepEqual(menu.calls[0].options, ["Inspect workers (0)", "Edit roles", "Create agent"]);
+		assert.deepEqual(menu.calls[0].options, ["Inspect workers (0)", "Edit roles", "Create agent", "Usage"]);
 		assert.equal(menu.seen[0].selectedLabel(), "Inspect workers (0)");
 		assert.deepEqual(menu.notes, []);
 	});
@@ -1516,7 +1518,7 @@ async function runNodeSuite(): Promise<void> {
 		h.monitor.store.begin("b", "t", "anthropic/claude-opus-5-5", "high");
 		const menu = menuCtx(() => undefined);
 		await h.bare("", menu.ctx);
-		assert.deepEqual(menu.calls[0]?.options, ["Inspect workers (2)", "Edit roles", "Create agent"]);
+		assert.deepEqual(menu.calls[0]?.options, ["Inspect workers (2)", "Edit roles", "Create agent", "Usage"]);
 	});
 
 	test("bare /subagent: Inspect with no workers notifies 'No subagent workers yet.' and opens nothing", async () => {
@@ -1538,6 +1540,16 @@ async function runNodeSuite(): Promise<void> {
 		assert.deepEqual(snapshotDir(fx.dir), before);
 	});
 
+	test("bare /subagent: Usage invokes monitor control once without opening another flow", async () => {
+		const calls: string[] = [];
+		const h = bareHarness();
+		h.monitor.control = async (args: string) => { calls.push(args); };
+		const menu = menuCtx((p) => (p.title === MENU_TITLE ? "Usage" : undefined));
+		await h.bare("", menu.ctx);
+		assert.deepEqual(calls, ["usage"]);
+		assert.equal(menu.calls.length, 1, "usage must not open an inspector or another dialog");
+	});
+
 	test("bare /subagent without UI (print): one line naming the existing commands; no popup", async () => {
 		const h = bareHarness();
 		const notes: Array<{ message: string; type?: string }> = [];
@@ -1553,7 +1565,7 @@ async function runNodeSuite(): Promise<void> {
 		const h = bareHarness();
 		const menu = menuCtx(() => undefined, { mode: "rpc" });
 		await h.bare("", menu.ctx);
-		assert.deepEqual(menu.calls, [{ kind: "select", title: MENU_TITLE, options: ["Inspect workers (0)", "Edit roles", "Create agent"] }]);
+		assert.deepEqual(menu.calls, [{ kind: "select", title: MENU_TITLE, options: ["Inspect workers (0)", "Edit roles", "Create agent", "Usage"] }]);
 	});
 
 	test("bare-command args unchanged: 'roles' and 'list' still reach the control path and never open the menu", async () => {

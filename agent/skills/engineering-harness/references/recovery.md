@@ -62,7 +62,7 @@ verification belongs to test-engineer, identified by exact candidate and contrac
 Main-session spot checks remain allowed, but do not substitute for these roles.
 
 After debugger evidence, route a material unresolved persistence/schema/migration
-choice to sqlite-specialist (or the actual domain specialist needed). Do not
+choice to database-specialist (or the actual domain specialist needed). Do not
 summon a specialist solely because a test name mentions a database. Then send the
 accepted correction to the implementation worker and any selected independent
 verification to test-engineer. Preserve prior writes and candidate identity.

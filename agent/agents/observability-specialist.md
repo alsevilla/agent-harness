@@ -111,7 +111,7 @@ For databases consider:
 Coordinate with:
 - `devops-specialist`;
 - `concurrency-specialist`;
-- `sqlite-specialist`;
+- `database-specialist`;
 - `security-specialist`;
 - implementation workers.
 

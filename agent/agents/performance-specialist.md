@@ -91,7 +91,7 @@ tail latency, queue growth, failure/duplicate behavior, and recovery after the
 burst.
 
 If the bottleneck is correctness-sensitive (transaction/locking/backpressure),
-coordinate with `sqlite-specialist` or `concurrency-specialist` before tuning.
+coordinate with `database-specialist` for material unresolved database semantics or `concurrency-specialist` before tuning.
 
 
 ## Workload Modeling and Resilience Evidence

@@ -232,7 +232,7 @@ Prefer storing SQLite on a local filesystem.
 
 Do not place the active SQLite database on a network share unless the architecture has explicitly been validated for that environment.
 
-Coordinate database decisions with `sqlite-specialist`.
+Coordinate unresolved material database semantics with `database-specialist`; database-worker owns implementation.
 
 ---
 
@@ -509,8 +509,8 @@ For operational changes ask:
 
 Coordinate with:
 
-`sqlite-specialist`
-for SQLite, WAL, backups, locking, and database operational safety.
+`database-specialist`
+for materially unresolved database semantics; use engine-specific guidance for operational safety.
 
 `concurrency-specialist`
 for USB device lifecycle, drivers, discovery, and reconnect behavior.

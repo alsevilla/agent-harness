@@ -2,8 +2,8 @@
 
 This skill supplies persistence guidance beneath the engineering lifecycle.
 
-`sqlite-specialist` normally owns read-only database analysis.
-`backend-worker` remains the normal implementation writer.
+`database-specialist` handles only material unresolved SQLite semantics read-only; `database-worker` owns implementation.
+`database-worker` owns all database implementation; `backend-worker` owns non-database backend services and API/business logic.
 
 ## First principle
 

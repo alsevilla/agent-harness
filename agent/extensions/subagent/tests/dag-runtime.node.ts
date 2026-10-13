@@ -11,6 +11,7 @@ import * as path from "node:path";
 import test, { after, afterEach, before, beforeEach } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AgentConfig } from "../agents.ts";
+import { hostModules } from "./host-modules.ts";
 import { BackgroundWorkers } from "../background.ts";
 
 const indexUrl = new URL("../index.ts", import.meta.url).href;
@@ -40,7 +41,7 @@ export function spawn(_command, args, options) {
 const entryStubUrl = dataUrl("export default function providerCooldownEntry() {}\nexport function registerProviderCooldown() {}\nexport async function runProviderCooldownCommand() { return { message: '', type: 'info' }; }\nexport async function providerLaunchState() { return { state: 'launch' }; }\nexport async function guardRefusalReplayable() { return false; }");
 const indexDependencies = new Set(["@earendil-works/pi-ai", "./code-integrations.ts", "./build-env.ts"]);
 // Real installed SDK pieces for the tool-boundary check: index.ts builds its real TypeBox schema; validateToolArguments comes from the installed pi-ai.
-const INSTALL_MODULES = fileURLToPath(new URL("../../../install/releases/1.1.0/node_modules", import.meta.url));
+const INSTALL_MODULES = hostModules(["@earendil-works/pi-ai", "typebox"]);
 const typeboxUrl = pathToFileURL(`${INSTALL_MODULES}/typebox/build/index.mjs`).href;
 const piAiUrl = pathToFileURL(`${INSTALL_MODULES}/@earendil-works/pi-ai/dist/index.js`).href;
 
@@ -975,7 +976,7 @@ check("usage command: no jobs prints the empty state; one foreground single job 
 	const text = await h.usageText();
 	assert.match(text, /Foreground: 1 settled agent task \(1 completed, 0 failed, 0 aborted\); 1 attempt; 1 turn/);
 	assert.match(text, /input 2 \| output 3 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$0\.2500 reported/);
+	assert.match(text, /cost: \$0\.2500 SDK-estimated/);
 	assert.match(text, /Background: none settled/);
 });
 
@@ -999,7 +1000,7 @@ check("usage command: foreground chain, parallel and DAG each settle one job per
 	const text = await h.usageText();
 	assert.match(text, /Foreground: 6 settled agent tasks \(6 completed, 0 failed, 0 aborted\); 6 attempts; 6 turns/);
 	assert.match(text, /input 12 \| output 18 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$1\.5000 reported/);
+	assert.match(text, /cost: \$1\.5000 SDK-estimated/);
 	assert.match(text, /Background: none settled/);
 });
 
@@ -1036,7 +1037,7 @@ check("usage command: background single, chain, parallel and DAG settle in their
 	const all = await h.usageText();
 	assert.match(all, /Background: 7 settled agent tasks \(7 completed, 0 failed, 0 aborted\); 7 attempts; 7 turns/);
 	assert.match(all, /input 14 \| output 21 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(all, /cost: \$1\.7500 reported/);
+	assert.match(all, /cost: \$1\.7500 SDK-estimated/);
 	assert.match(all, /Foreground: none settled/);
 });
 
@@ -1051,7 +1052,7 @@ check("usage command: a cancelled background job keeps its finalized turn and se
 	const text = await h.usageText();
 	assert.match(text, /Background: 1 settled agent task \(0 completed, 0 failed, 1 aborted\); 1 attempt; 1 turn/);
 	assert.match(text, /input 2 \| output 3 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$0\.2500 reported/);
+	assert.match(text, /cost: \$0\.2500 SDK-estimated/);
 });
 
 check("usage command: a session change starts a fresh scope; a job from before it charges only its old scope", async () => {
@@ -1097,7 +1098,7 @@ check("usage command: foreground parallel mixes completion, failure and partial 
 	const text = await h.usageText();
 	assert.match(text, /Foreground: 3 settled agent tasks \(1 completed, 1 failed, 1 aborted\); 3 attempts; 3 turns/);
 	assert.match(text, /input 6 \| output 9 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$0\.7500 reported/);
+	assert.match(text, /cost: \$0\.7500 SDK-estimated/);
 	assert.match(text, /Background: none settled/);
 });
 
@@ -1122,7 +1123,7 @@ check("usage command: a foreground chain stops at its failed step and a DAG bloc
 	const text = await h.usageText();
 	assert.match(text, /Foreground: 4 settled agent tasks \(2 completed, 2 failed, 0 aborted\); 4 attempts; 4 turns/);
 	assert.match(text, /input 8 \| output 12 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$1\.0000 reported/);
+	assert.match(text, /cost: \$1\.0000 SDK-estimated/);
 });
 
 check("usage command: a background DAG node with a declared fallback counts both physical attempts on its one logical task", async () => {
@@ -1141,7 +1142,7 @@ check("usage command: a background DAG node with a declared fallback counts both
 	const text = await h.usageText();
 	assert.match(text, /Background: 1 settled agent task \(1 completed, 0 failed, 0 aborted\); 2 attempts; 2 turns/);
 	assert.match(text, /input 4 \| output 6 \| cacheRead 0 \| cacheWrite 0/);
-	assert.match(text, /cost: \$0\.5000 reported/);
+	assert.match(text, /cost: \$0\.5000 SDK-estimated/);
 	assert.match(text, /Foreground: none settled/);
 });
 

@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE = "@earendil-works/pi-coding-agent";
+const numericDescending = (a, b) => b.localeCompare(a, undefined, { numeric: true });
 const here = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(here, "..");
 const SENSITIVE = ["auth.json", "settings.json"];
@@ -18,9 +19,16 @@ const parseFrontmatter = loadParser();
 // House parser: the installed pi package's parseFrontmatter (same code agents.ts uses). Found relative to this profile, then by normal resolution.
 function loadParser() {
 	const candidates = [];
+	const hostModules = process.env.NATIVE_PROBE_HOST_MODULES;
+	if (hostModules) {
+		const dir = path.join(hostModules, ...PACKAGE.split("/"));
+		const file = path.join(dir, "dist", "utils", "frontmatter.js");
+		if (!realFs.existsSync(file)) throw new Error(`NATIVE_PROBE_HOST_MODULES selected ${hostModules}, but house parseFrontmatter was not found at ${file}`);
+		return createRequire(import.meta.url)(file).parseFrontmatter;
+	}
 	const releases = path.join(defaultRoot, "agent", "install", "releases");
 	try {
-		for (const v of realFs.readdirSync(releases).sort().reverse()) candidates.push(path.join(releases, v, "node_modules", ...PACKAGE.split("/")));
+		for (const v of realFs.readdirSync(releases).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(numericDescending)) candidates.push(path.join(releases, v, "node_modules", ...PACKAGE.split("/")));
 	} catch {}
 	try {
 		candidates.push(path.dirname(createRequire(import.meta.url).resolve(`${PACKAGE}/package.json`)));

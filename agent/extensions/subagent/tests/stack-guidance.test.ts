@@ -6,15 +6,39 @@ import * as fs from "node:fs";
 
 const read = (name: string) => fs.readFileSync(new URL(`../../../agents/${name}.md`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
-test("backend-worker carries .NET, dialect-aware parameterized SQL and REST notes that do not need the optional catalog", () => {
+test("backend-worker carries .NET and REST notes that do not need the optional catalog", () => {
   const text = read("backend-worker");
   assert.match(text, /\.NET/);
   assert.match(text, /ASP\.NET Core/);
-  assert.match(text, /parameterized/i);
-  assert.match(text, /dialect/i);
-  assert.match(text, /safe migrations?|forward-only/i);
   assert.match(text, /REST/);
   assert.match(text, /catalog[^\n]*(absent|not bundled)/i);
+});
+
+test("database-worker covers relational and NoSQL data access with engine-appropriate safety", () => {
+  const text = read("database-worker");
+  assert.match(text, /relational and NoSQL database implementation/i);
+  assert.match(text, /document, key-value, wide-column and graph databases/i);
+  assert.match(text, /engine-appropriate syntax and types/i);
+  assert.match(text, /parameterized queries/i);
+  assert.match(text, /additive, forward-only schema\/index rollouts/i);
+  assert.match(text, /defer destructive changes.*explicit authority/i);
+  assert.match(text, /safe typed filters\/driver constructors/i);
+  assert.match(text, /untrusted operator\/query injection/i);
+  assert.match(text, /bounded, resumable and idempotent/i);
+  assert.match(text, /ORM mappings, repositories, data access/i);
+  assert.match(text, /Do not assume NoSQL systems share consistency/i);
+});
+
+test("database-specialist covers NoSQL semantics without universalizing SQLite guidance", () => {
+  const text = read("database-specialist");
+  assert.match(text, /relational and NoSQL engines/i);
+  assert.match(text, /document, key-value, wide-column and graph databases/i);
+  assert.match(text, /engine-specific consistency\/conditional-write guarantees/i);
+  assert.match(text, /partition\/shard and access-pattern fit/i);
+  assert.match(text, /For NoSQL engines, use semantic fixtures/i);
+  assert.match(text, /do not assume ACID, serializability, eventual consistency/i);
+  assert.match(text, /only when SQLite\/SQLx is the actual stack/i);
+  assert.match(text, /For SQLite\/SQLx only/i);
 });
 
 test("frontend-worker adds React and TypeScript notes while the SolidJS rules stay conditional", () => {

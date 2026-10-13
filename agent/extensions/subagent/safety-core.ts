@@ -650,8 +650,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
-export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false): string {
-	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}) });
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: { candidate: string; pushUrl: string; branch: string }): string {
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? { pushTarget } : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -858,6 +858,18 @@ export function loadChildGate(text: string): boolean {
 	if (parsed.gateCommits === undefined) return false;
 	if (parsed.gateCommits !== true) throw new TypeError("invalid commit gate flag");
 	return true;
+}
+
+export function loadChildPushTarget(text: string): { candidate: string; pushUrl: string; branch: string } | undefined {
+	if (redirectedGitEnvironment()) return undefined;
+	const parsed = JSON.parse(text) as { v?: number; pushTarget?: unknown };
+	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
+	if (parsed.pushTarget === undefined) return undefined;
+	const value = parsed.pushTarget as Record<string, unknown>;
+	if (!value || typeof value.candidate !== "string" || !path.isAbsolute(value.candidate) || typeof value.pushUrl !== "string") throw new TypeError("invalid push target");
+	const target = pushBranchTarget(value.candidate, String(value.branch));
+	if (!target || target.pushUrl !== value.pushUrl) throw new TypeError("invalid push target");
+	return target;
 }
 
 export const MAX_DELIVERY_GRANTS = 4;
@@ -1184,7 +1196,11 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	const delivery = withLeases && role === LEASE_ROLE ? store.copyDelivery(canonicalCwd(candidate)) : [];
 	// Normal commits are gated only in the trusted release-engineer launch (same trust signal as the lease copies).
 	const gateCommits = withLeases && role === LEASE_ROLE;
-	const value = claimed.length || leases.length || delivery.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits) : undefined;
+	let pushTarget: { candidate: string; pushUrl: string; branch: string } | undefined;
+	if (gateCommits && !redirectedGitEnvironment()) {
+		try { const branch = gitRead(canonicalCwd(candidate), ["symbolic-ref", "--short", "HEAD"])?.[0]; if (branch) pushTarget = pushBranchTarget(canonicalCwd(candidate), branch); } catch { /* no automatic push context */ }
+	}
+	const value = claimed.length || leases.length || delivery.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget) : undefined;
 	return {
 		entry: guardFile,
 		grantCount: claimed.length,
@@ -1206,6 +1222,50 @@ export interface GuardBlock { block: true; reason: string }
 const UNSAFE_GIT_STATE = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"];
 const REDIRECT_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
+function redirectedGitEnvironment(): boolean {
+	return Object.keys(process.env).some((name) => REDIRECT_ENV.some((key) => key.toLowerCase() === name.toLowerCase()) || /^GIT_CONFIG_(?:KEY|VALUE)_/i.test(name) || /^(?:GH_HOST|GH_REPO)$/i.test(name));
+}
+
+function commitTargetLive(target: { candidate: string; pushUrl: string; branch: string }, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): string | undefined {
+	if (foldPath(canonicalCwd(root)) !== foldPath(target.candidate) || redirectedGitEnvironment()) return undefined;
+	const top = gitRead(root, ["rev-parse", "--show-toplevel"]);
+	if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(root)) return undefined;
+	const head = gitRead(root, ["symbolic-ref", "-q", "HEAD"]);
+	if (head?.length !== 1 || !head[0].startsWith("refs/heads/")) return undefined;
+	const branch = validatePushBranch(head[0].slice("refs/heads/".length));
+	if (branch !== target.branch || liveUrl(root, branch) !== target.pushUrl) return undefined;
+	const gitDir = gitRead(root, ["rev-parse", "--absolute-git-dir"]);
+	if (gitDir?.length !== 1 || UNSAFE_GIT_STATE.some((s) => fs.existsSync(path.join(gitDir[0], s)))) return undefined;
+	return branch;
+}
+
+function automaticArtifactAllowed(file: string, candidate: string): boolean {
+	try {
+		if (!path.isAbsolute(file) || file.includes("\\") || !/^[\x20-\x7e]+$/.test(file)) return false;
+		const common = gitRead(candidate, ["rev-parse", "--git-common-dir"]);
+		if (common?.length !== 1) return false;
+		const commonDir = canonicalCwd(path.resolve(candidate, common[0]));
+		if (path.basename(commonDir).toLowerCase() !== ".git") return false;
+		const primary = path.dirname(commonDir);
+		const group = path.join(path.dirname(primary), "worktrees", path.basename(primary));
+		const normalizedFile = normPath(file);
+		const normalizedGroup = normPath(group);
+		if (!normalizedFile.startsWith(`${normalizedGroup}/`)) return false;
+		const parts = normalizedFile.slice(normalizedGroup.length + 1).split("/");
+		if (parts.length < 3 || !["_scratch", "_evidence"].includes(parts[0])) return false;
+		const taskDir = path.join(group, parts[0], parts[1]);
+		const validated = validateArtifactDir(taskDir.replace(/\\/g, "/"), candidate);
+		return checkArtifactFile(file, validated) === undefined;
+	} catch { return false; }
+}
+
+function normalTrustedCommit(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_COMMIT") return false;
+	const normal = parseNormalCommit(decision.op.command);
+	if (!normal) return false;
+	try { return commitTargetLive(target, decision.op.cwd, liveUrl) !== undefined && (normal.file === undefined || automaticArtifactAllowed(normal.file, target.candidate)); } catch { return false; }
+}
+
 // A child release-engineer normal commit that matches a live commit lease: exact normal commit form, only GIT_COMMIT, cwd is the leased candidate root on the leased branch with the live origin binding, no merge-like state, no redirect env. Non-consuming; any throw or mismatch refuses.
 function leasedCommit(store: GrantStore, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
 	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_COMMIT") return false;
@@ -1222,8 +1282,8 @@ function leasedCommit(store: GrantStore, decision: Extract<Decision, { action: "
 		const url = liveUrl(root, branch);
 		const lease = url === undefined ? undefined : store.findLease(root, branch, url);
 		if (lease?.commits !== true) return false;
-		const gitDir = gitRead(root, ["rev-parse", "--absolute-git-dir"]);
-		if (gitDir?.length !== 1 || UNSAFE_GIT_STATE.some((s) => fs.existsSync(path.join(gitDir[0], s)))) return false;
+		const target = { candidate: root, pushUrl: url!, branch };
+		if (commitTargetLive(target, root, liveUrl) === undefined) return false;
 		if (normal.file !== undefined && (!lease.artifactDir || checkArtifactFile(normal.file, lease.artifactDir) !== undefined)) return false;
 		return true;
 	} catch {
@@ -1232,6 +1292,61 @@ function leasedCommit(store: GrantStore, decision: Extract<Decision, { action: "
 }
 
 // A child release-engineer push that matches a live lease: exact normal push, only GIT_PUBLISH, live binding must equal the lease. Non-consuming; any throw or mismatch refuses.
+function trustedTargetLive(target: { candidate: string; pushUrl: string; branch: string }, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (foldPath(canonicalCwd(cwd)) !== foldPath(target.candidate) || redirectedGitEnvironment()) return false;
+	const top = gitRead(target.candidate, ["rev-parse", "--show-toplevel"]);
+	const head = gitRead(target.candidate, ["symbolic-ref", "--short", "HEAD"]);
+	return top?.length === 1 && foldPath(canonicalCwd(top[0])) === foldPath(target.candidate) && head?.length === 1 && validatePushBranch(head[0]) === target.branch && liveUrl(target.candidate, target.branch) === target.pushUrl;
+}
+
+function normalTrustedPush(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const normal = parseNormalPush(decision.op.command);
+	if (!normal || normal.branch !== target.branch) return false;
+	try { return trustedTargetLive(target, decision.op.cwd, liveUrl); } catch { return false; }
+}
+
+function normalTrustedPrMerge(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const command = parseDeliveryCommand(decision.op.command);
+	if (!command || command.kind !== "merge" || !BARE_SHA.test(command.sha)) return false;
+	try {
+		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
+		const repo = parseRepoFromPushUrl(target.pushUrl);
+		if (!repo || command.repo !== repo || typeof live.env === "function" && (live.env().GH_HOST !== undefined || live.env().GH_REPO !== undefined)) return false;
+		const view = live.ghJson(["pr", "view", String(command.pr), "--repo", repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository"]);
+		if (!view || typeof view !== "object") return false;
+		const pr = view as Record<string, unknown>;
+		return (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target.candidate)) && pr.state === "OPEN" && pr.isCrossRepository === false && pr.headRefName === target.branch && pr.headRefOid === command.sha && typeof pr.baseRefName === "string" && pr.baseRefName !== target.branch && baseBranchOk(pr.baseRefName);
+	} catch { return false; }
+}
+
+function normalTrustedRelease(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const command = parseDeliveryCommand(decision.op.command);
+	if (!command || command.kind !== "release" || (command.notes === undefined) === (command.notesFile === undefined) || command.generate || !BARE_SHA.test(command.target)) return false;
+	try {
+		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
+		const repo = parseRepoFromPushUrl(target.pushUrl);
+		if (!repo || command.repo !== repo || typeof live.env === "function" && (live.env().GH_HOST !== undefined || live.env().GH_REPO !== undefined) || live.tagStatus(target.pushUrl, command.tag) !== 2 || command.notesFile !== undefined && !automaticArtifactAllowed(command.notesFile, target.candidate)) return false;
+		const merged = live.ghJson(["pr", "list", "--repo", repo, "--head", target.branch, "--state", "merged", "--json", "number,mergeCommit,mergedAt,isCrossRepository,headRefName,baseRefName", "--limit", "20"]);
+		if (!Array.isArray(merged) || merged.some((pr) => !pr || typeof pr !== "object")) return false;
+		const matches = (merged as Record<string, any>[]).filter((pr) => pr.mergeCommit?.oid === command.target && pr.isCrossRepository === false && pr.headRefName === target.branch && typeof pr.baseRefName === "string" && pr.baseRefName !== target.branch && baseBranchOk(pr.baseRefName));
+		return matches.length === 1;
+	} catch { return false; }
+}
+
+function normalTrustedPrCreate(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const command = parseDeliveryCommand(decision.op.command);
+	if (!command || command.kind !== "create" || (command.body === undefined) === (command.bodyFile === undefined)) return false;
+	try {
+		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
+		const repo = parseRepoFromPushUrl(target.pushUrl);
+		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target.candidate));
+	} catch { return false; }
+}
+
 function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
 	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
 	const normal = parseNormalPush(decision.op.command);
@@ -1245,12 +1360,17 @@ function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "bl
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: { candidate: string; pushUrl: string; branch: string } }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") return undefined;
 	if (decision.grantable && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
+	if (guard.scope === "child" && normalTrustedPush(guard.pushTarget, decision, liveUrl)) return undefined;
+	if (guard.scope === "child" && (guard.gateCommits === true || guard.pushTarget !== undefined) && normalTrustedPrCreate(guard.pushTarget, decision, liveUrl)) return undefined;
+	if (guard.scope === "child" && guard.pushTarget !== undefined && normalTrustedRelease(guard.pushTarget, decision, guard.live ?? defaultDeliveryLive(liveUrl), liveUrl)) return undefined;
+	if (guard.scope === "child" && guard.pushTarget !== undefined && normalTrustedPrMerge(guard.pushTarget, decision, guard.live ?? defaultDeliveryLive(liveUrl), liveUrl)) return undefined;
 	if (guard.scope === "child" && leasedPush(guard.store, decision, liveUrl)) return undefined;
+	if (guard.scope === "child" && guard.gateCommits === true && normalTrustedCommit(guard.pushTarget, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, guard.live ?? defaultDeliveryLive(liveUrl))) return undefined;
 	const how = decision.grantable ? "needs exact operator authorization via request_authorization" : "not grantable to a model: use the operator out-of-band";

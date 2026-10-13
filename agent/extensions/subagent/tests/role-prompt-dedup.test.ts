@@ -89,18 +89,16 @@ const DISPOSITIONS: Disposition[] = [
 const NEW_AFTER = ["c708d8e8", "33322dbf"];
 // Reviewed F1 rewrite of frontend-worker (framework-aware role). The BEFORE fixture is unchanged; these are the reviewed post-change frontmatter sha and sentence hashes for that one role only.
 // REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
-const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5" };
-const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["2e241d33"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"] };
-const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d186309c"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"] };
+const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5", "live/backend-worker": "413f9b80a968b35c772de6e61e90677566c5adcc82a53fd7483d51cfefa2b0b8" };
+const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
+const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d186309c", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {
 	"backend-worker": [
-		"**.NET, SQL and REST notes (the backend catalog is optional and not bundled; when it is absent, use the project's own guidance with these notes):**",
 		"- For C# and ASP.NET Core, use the SDK pinned by the project, async APIs end to end, and pass CancellationToken through I/O.",
 		"- Keep ASP.NET Core endpoints thin: validate input at the boundary, map failures to ProblemDetails and never leak exception text.",
 		"- Use parameterized SQL only (ADO.NET parameters, Dapper or EF Core parameters); never concatenate caller input into SQL text.",
-		"- SQL is dialect-specific: name the target engine (SQL Server, PostgreSQL, SQLite or other) and use only its syntax and types.",
 		"- Migrations are safe by default: additive and forward-only first, batched backfill, and destructive drops only in a later reviewed change.",
 		"- REST behaviour follows the accepted API contract; status codes, resource names and pagination changes go to api-specialist first.",
 	],
@@ -153,6 +151,7 @@ const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/role-prompt-dedup
 // Only live (agent/) shapes remain: the retired pi-package defaults shape was removed with the pi-package layout.
 function assembled(shape: string, role: string): { text: string; sourceText: string } {
 	assert.equal(shape, "live");
+	assert.notEqual(role, "sqlite-specialist", "retired role fixture must not be assembled as a live role");
 	const sourceText = fs.readFileSync(new URL(`../../../agents/${role}.md`, import.meta.url), "utf8");
 	const agent = { name: role, systemPrompt: bodyOf(sourceText), source: "user", filePath: "", description: role, tools: [] };
 	return { text: assembleChildSystemPrompt(agent as never, { codeIntegrationsEnabled: true, cwd: repo, packageRoot: null, launchArgs: FULL_LAUNCH, qmdExtension: FILES.qmd, globalGraphDirectory: EMPTY_GLOBAL }), sourceText };
@@ -164,6 +163,7 @@ const HEADINGS_NEW_HERE = ["## Integration and graph authority"];
 test("every role/profile keeps frontmatter; sentences and headings change only by the reviewed closed-world mapping", () => {
 	for (const [key, before] of Object.entries(fixture.entries)) {
 		const [shape, role] = key.split("/");
+		if (key === "live/sqlite-specialist") continue; // Historical fixture retained; explicitly retired live role.
 		const { text, sourceText } = assembled(shape, role);
 		assert.equal(frontmatterSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} frontmatter changed`);
 		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
@@ -207,10 +207,17 @@ test("Rust build detail is emitted only when a Cargo manifest is structurally ne
 	assert.doesNotMatch(assembleChildSystemPrompt(agent, { ...options, cwd: withoutCargo }), /## Rust build output/);
 });
 
+test("the historical sqlite-specialist fixture is explicitly retired and has no live prompt source", () => {
+	assert.ok(fixture.entries["live/sqlite-specialist"], "preserve immutable historical baseline");
+	assert.ok(!fs.existsSync(new URL("../../../agents/sqlite-specialist.md", import.meta.url)));
+	assert.ok(fs.existsSync(new URL("../../../agents/database-specialist.md", import.meta.url)));
+});
+
 test("the redundant no-helper restatements are absent from every assembled prompt that stated them", () => {
 	const offenders: string[] = [];
 	for (const [key, before] of Object.entries(fixture.entries)) {
 		const [shape, role] = key.split("/");
+		if (role === "sqlite-specialist") continue; // Historical fixture retained; role retired in favor of database-specialist.
 		const after = sentenceHashes(assembled(shape, role).text);
 		if (before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h))) for (const h of REDUNDANT_HASHES) if (after.has(h)) offenders.push(key);
 	}
@@ -220,7 +227,7 @@ test("the redundant no-helper restatements are absent from every assembled promp
 test("assembled prompts shrink where a redundant restatement was removed", () => {
 	const unchanged: string[] = [];
 	for (const [key, before] of Object.entries(fixture.entries)) {
-		if (!before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h))) continue;
+		if (!before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h)) || key === "live/sqlite-specialist") continue;
 		const [shape, role] = key.split("/");
 		if (assembled(shape, role).text.length >= before.chars) unchanged.push(key);
 	}
@@ -260,7 +267,7 @@ test("variant requirements survive dedup: oracle subscription guard, release-eng
 // Essential no-helper boundary for all 19 live roles (the fixture covers the 18 pre-platform generic roles): the leaf prohibition, the no-subagent-tool statement and the shell-launch prohibition remain, and the removed restatements stay absent.
 test("every live role keeps the no-helper boundary and no longer restates the removed phrases", () => {
 	const names = fs.readdirSync(new URL("../../../agents/", import.meta.url)).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)).sort();
-	assert.equal(names.length, 19, "live role count");
+	assert.equal(names.length, 20, "live role count");
 	const missing: string[] = [];
 	for (const role of names) {
 		const text = assembled("live", role).text;

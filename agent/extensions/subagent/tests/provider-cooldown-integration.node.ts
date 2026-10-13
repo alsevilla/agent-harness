@@ -8,8 +8,9 @@ import test from "node:test";
 import * as os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createCooldownStore, type CooldownStore } from "../provider-cooldown.ts";
+import { hostModules } from "./host-modules.ts";
 
-const PKG = fileURLToPath(new URL("../../../install/releases/1.1.0/node_modules/@earendil-works", import.meta.url));
+const PKG = path.join(hostModules(), "@earendil-works");
 const SCRATCH = process.env.PROVIDER_COOLDOWN_SCRATCH ?? path.join(os.tmpdir(), "provider-cooldown-integration");
 const urls = {
 	"@earendil-works/pi-coding-agent": pathToFileURL(`${PKG}/pi-coding-agent/dist/index.js`).href,

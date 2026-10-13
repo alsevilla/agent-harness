@@ -32,7 +32,7 @@ backend/<name>/index.md. Use only the capabilities justified by the task.
 
 Default role links include:
 - backend-worker -> rust-axum-engineering (Rust/Axum stacks only)
-- sqlite-specialist -> sqlite-sqlx-engineering
+- database-specialist -> sqlite-sqlx-engineering (only when the actual stack is SQLite/SQLx); database-worker -> project database guidance
 
 `load-resilience-testing` remains conditional for performance, concurrency, SQLite, reviewer, and verification work when burst/overload/resilience evidence is actually material. Do not preload it for ordinary hot-path profiling or localized performance questions.
 

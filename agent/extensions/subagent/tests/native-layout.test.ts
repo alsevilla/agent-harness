@@ -1,6 +1,6 @@
 // Native layout: the repo-root package.json declares the native resources directly, and agent/ is the resource root.
 // Discovery runs in Node probes against isolated profiles (PI_CODING_AGENT_DIR, HOME/USERPROFILE set to temp dirs); nothing is installed or written outside temp dirs.
-// Probes resolve host packages from the supported install tree (agent/install/releases/1.1.0/node_modules, passed as NATIVE_PROBE_HOST_MODULES), not a checkout node_modules; a checkout without that install tree fails these probes.
+// Probes resolve host packages from NATIVE_PROBE_HOST_MODULES or the supported install tree, not a checkout node_modules.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -14,13 +14,14 @@ const REPO = path.resolve(HERE, "../../../..");
 const PROBE = path.join(HERE, "fixtures", "native-probe.mjs");
 const AGENTS_TS = path.join(REPO, "agent", "extensions", "subagent", "agents.ts");
 const HOST_PACKAGES = ["@earendil-works/pi-agent-core", "@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"];
-const NATIVE_EXTENSIONS = ["./agent/extensions/subagent/index.ts", "./agent/extensions/ask-user/index.ts", "./agent/extensions/external-compaction/index.ts"];
+import { hostModules } from "./host-modules.ts";
+const NATIVE_EXTENSIONS = ["./agent/extensions/subagent/index.ts", "./agent/extensions/ask-user/index.ts"];
 const NATIVE_SKILLS = ["./agent/skills/engineering-harness", "./agent/skills/agent-creation"];
 const NATIVE_PROMPTS = ["./agent/prompts/learn.md"]; // the only prompt template the package exports
 
 // Cold probes (fresh copies, first module load) exceed bun's 5 s default; used for both the test timeout and the probe spawn.
 const PROBE_TIMEOUT_MS = 60_000;
-const HOST_MODULES = path.join(REPO, "agent", "install", "releases", "1.1.0", "node_modules");
+const HOST_MODULES = hostModules(HOST_PACKAGES);
 const probeTest = (name: string, fn: () => void) => test(name, fn, PROBE_TIMEOUT_MS);
 
 const dirs: string[] = [];
@@ -108,13 +109,13 @@ test("the trust-boundary scan checks single-quoted and double-quoted imports ali
 	assert.deepEqual(undeclaredImports(`import { z } from '@earendil-works/unlisted-host';`), ["@earendil-works/unlisted-host"]);
 });
 
-probeTest("a fresh isolated profile resolves the 19 bundled roles from the native package and writes nothing", () => {
+probeTest("a fresh isolated profile resolves the 20 bundled roles from the native package and writes nothing", () => {
 	const profile = tmp("native-profile-");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"));
 	assert.equal(found.error, null);
 	assert.equal(found.packageRoot, path.join(REPO, "agent"));
 	const roles = JSON.parse(fs.readFileSync(path.join(REPO, "agent", "roles.json"), "utf8")) as { name: string }[];
-	assert.equal(roles.length, 19);
+	assert.equal(roles.length, 20);
 	assert.deepEqual(found.agents.map((agent) => agent.name).sort(), roles.map((role) => role.name).sort());
 	for (const agent of found.agents) {
 		assert.equal(agent.source, "package", agent.name);
@@ -133,7 +134,7 @@ probeTest("a project-local role overrides the bundled role and private project r
 	assert.equal(found.error, null);
 	assert.equal(found.agents.find((agent) => agent.name === "reviewer")?.source, "project");
 	assert.equal(found.agents.find((agent) => agent.name === "private-domain-role")?.source, "project");
-	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 18);
+	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 19);
 });
 
 probeTest("a renamed root manifest is inert: no package mode and no bundled roles", () => {
@@ -206,7 +207,7 @@ probeTest("a user agent file with a bundled role's name wins over the bundled de
 	fs.writeFileSync(path.join(profile, "agents", "general-worker.md"), "---\nname: general-worker\ndescription: user override\ntools: read\n---\nUser override body.\n");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user");
 	assert.equal(found.error, null);
-	assert.equal(found.agents.length, 19);
+	assert.equal(found.agents.length, 20);
 	const general = found.agents.find((agent) => agent.name === "general-worker");
 	assert.equal(general?.source, "user");
 	assert.deepEqual(general?.tools, ["read"]);
@@ -309,7 +310,7 @@ test("the README's primary install, update and remove commands use the Git sourc
 	assert.doesNotMatch(readme, /git:github\.com\/alsevilla\/pi-agent-harness-pi-package|x-access-token|ghp_|github_pat_/);
 });
 
-test("the README states the three native extensions, two native skills, manual prompts and optional components", () => {
+test("the README states the two default native extensions, opt-in external compaction, two native skills, manual prompts and optional components", () => {
 	const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
 	for (const rel of [...NATIVE_EXTENSIONS.map((r) => path.posix.dirname(r.slice(2))), ...NATIVE_SKILLS.map((r) => r.slice(2))]) assert.ok(readme.includes(rel), rel);
 	assert.doesNotMatch(readme, /Five profile skills|registers one browser skill/);

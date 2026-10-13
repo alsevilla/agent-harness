@@ -46,12 +46,12 @@ function effectiveTools(agent: ReturnType<typeof role>) {
   assert.ok(index >= 0 && args[index + 1], "effective allowlist missing");
   return args[index + 1].split(",");
 }
-for (const name of ["backend-worker", "frontend-worker", "general-worker"]) {
+for (const name of ["backend-worker", "frontend-worker", "general-worker", "database-worker"]) {
   test(`${name} actual frontmatter keeps precise edit, excludes write and six Serena mutations`, () => {
     const agent = role(name);
     assert.ok(agent.tools.includes("edit"));
     assert.ok(!agent.tools.includes("write"));
-    const tools = effectiveTools(agent);
+    const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, () => effectiveTools(agent));
     for (const tool of agent.tools) assert.ok(tools.includes(tool), `role tool lost: ${tool}`);
     assert.ok(!tools.includes("write"));
     for (const tool of unsafeMutations) assert.ok(!tools.includes(tool), `unexpected mutation: ${tool}`);
@@ -88,10 +88,17 @@ test("package resource guidance states precedence and empty outside the package"
   assert.match(note, /Backend, frontend, graphify and browser skill catalogs are not bundled/);
   assert.match(note, /Roles not bundled in this package are unavailable and are never dispatched\./);
 });
+test("database-specialist remains read-only with no precise-edit or write grant", () => {
+  const agent = role("database-specialist");
+  assert.ok(!agent.tools.includes("edit") && !agent.tools.includes("write"));
+  const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, () => effectiveTools(agent));
+  for (const tool of [...agent.tools, ...config.readOnlyTools]) assert.ok(tools.includes(tool), tool);
+  for (const tool of ["edit", "write", ...unsafeMutations]) assert.ok(!tools.includes(tool), tool);
+});
 test("actual read-only scout grants remain unchanged", () => {
   const agent = role("scout");
   assert.ok(!agent.tools.includes("edit") && !agent.tools.includes("write"));
-  const tools = effectiveTools(agent);
+  const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, () => effectiveTools(agent));
   for (const tool of [...agent.tools, ...config.readOnlyTools]) assert.ok(tools.includes(tool), tool);
   for (const tool of ["edit", "write", ...unsafeMutations]) assert.ok(!tools.includes(tool), tool);
 });

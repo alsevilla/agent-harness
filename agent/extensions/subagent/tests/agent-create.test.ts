@@ -7,9 +7,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { hostModules as resolveHostModules } from "./host-modules.ts";
 
 const thisFile = fileURLToPath(import.meta.url);
 const isBun = typeof (process.versions as Record<string, string>).bun === "string";
+const hostModules = resolveHostModules();
 /** Test-only: an explicit Python 3 for the real-CLI test. Bare `python` on Windows is often the Store stub (exit 9009). */
 const TEST_PYTHON_ENV = "SUBAGENT_CREATE_TEST_PYTHON";
 
@@ -38,7 +40,7 @@ if (isBun) {
 async function runNodeSuite(): Promise<void> {
 	const { test, after } = await import("node:test");
 	const { registerHooks } = await import("node:module");
-	const installed = (rel: string) => fileURLToPath(new URL(`../../../install/releases/1.1.0/node_modules/@earendil-works/${rel}`, import.meta.url));
+	const installed = (rel: string) => path.resolve(hostModules, "@earendil-works", rel);
 	const installedUrl = (rel: string) => pathToFileURL(installed(rel)).href;
 	registerHooks({
 		resolve(specifier: string, context: object, nextResolve: (s: string, c: object) => { url: string }) {

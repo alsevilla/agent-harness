@@ -11,8 +11,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { register } from "node:module";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const piRelease = process.env.PI_INSTALL_DIR ?? path.join(os.homedir(), ".pi", "agent", "install", "releases", "1.1.0");
-const piEntry = path.join(piRelease, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js");
+const piRelease = process.env.PI_INSTALL_DIR;
+const piModules = process.env.NATIVE_PROBE_HOST_MODULES ?? (piRelease
+	? path.join(piRelease, "node_modules")
+	: path.join(os.homedir(), ".pi", "agent", "install", "releases", fs.readdirSync(path.join(os.homedir(), ".pi", "agent", "install", "releases")).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true })).find((name) => fs.existsSync(path.join(os.homedir(), ".pi", "agent", "install", "releases", name, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"))) ?? "", "node_modules"));
+const piEntry = path.join(piModules, "@earendil-works", "pi-coding-agent", "dist", "index.js");
 if (!fs.existsSync(piEntry)) throw new Error(`host Pi package entry missing: ${piEntry}`);
 register("data:text/javascript," + encodeURIComponent(`export async function resolve(specifier, context, next) { return specifier === "@earendil-works/pi-coding-agent" ? { url: ${JSON.stringify(pathToFileURL(piEntry).href)}, shortCircuit: true } : next(specifier, context); }`));
 

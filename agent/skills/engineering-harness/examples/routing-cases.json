@@ -24,8 +24,8 @@
       "critical": true,
       "expect": {
         "routes": ["T3_SPECIALIST_FIRST"],
-        "roles_required": ["sqlite-specialist"],
-        "roles_allowed": ["sqlite-specialist", "backend-worker"],
+        "roles_required": ["database-specialist"],
+        "roles_allowed": ["database-specialist", "database-worker"],
         "skills_required": ["backend/sqlite-sqlx-engineering"],
         "skills_forbidden": []
       }

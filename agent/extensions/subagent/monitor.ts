@@ -498,8 +498,9 @@ export class WorkerMonitor {
     let choice: string | undefined;
     try {
       const { pickFrom, editRoleConfig } = await import("./roles-editor.ts");
-      choice = await pickFrom(ctx as any, "Subagent workers", [inspect, "Edit roles", "Create agent"], { searchable: false });
-      if (choice === "Edit roles") await editRoleConfig(ctx as any);
+      choice = await pickFrom(ctx as any, "Subagent workers", [inspect, "Edit roles", "Create agent", "Usage"], { searchable: false });
+      if (choice === "Usage") await this.control?.("usage", ctx);
+      else if (choice === "Edit roles") await editRoleConfig(ctx as any);
       else if (choice === "Create agent") await (await import("./agent-create.ts")).runAgentCreate(ctx as any, "");
     } finally {
       this.menuOpen = false;

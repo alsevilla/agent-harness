@@ -988,7 +988,7 @@ When SQLite persistence is material inspect:
 - concurrent writers;
 - uniqueness.
 
-Use `sqlite-specialist` when needed.
+Use `database-specialist` only for materially unresolved database semantics; `database-worker` owns implementation.
 
 ---
 
@@ -1381,7 +1381,7 @@ Use only when risk/evidence justifies them.
 
 Examples:
 
-- `sqlite-specialist`;
+- `database-specialist`;
 - `concurrency-specialist`;
 - `security-specialist`;
 - `performance-specialist`;

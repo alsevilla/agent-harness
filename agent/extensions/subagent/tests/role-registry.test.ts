@@ -1,9 +1,12 @@
-// Role registry and lifecycle contracts (RED first): the packaged profile registers exactly the 19 generic roles, every definition agrees
+// Role registry and lifecycle contracts (RED first): the packaged profile registers exactly the 20 generic roles, every definition agrees
 // with the registry, and lifecycle ownership stays explicit. Project-local domain roles are not part of this generic profile.
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { parseFrontmatter } from "../../../install/releases/1.1.0/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
+import * as os from "node:os";
+import { hostModules } from "./host-modules.ts";
+const modules = hostModules(["@earendil-works/pi-coding-agent"]);
+const { parseFrontmatter } = await import(`${modules}/@earendil-works/pi-coding-agent/dist/index.js`);
 
 const integrations = JSON.parse(fs.readFileSync(new URL("../integrations.json", import.meta.url), "utf8"));
 const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8"));
@@ -11,7 +14,7 @@ const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.m
 const GENERIC_ROLES = [
   "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
   "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer",
-  "reviewer", "scout", "security-specialist", "sqlite-specialist", "test-engineer", "ui-ux-specialist", "platform-worker",
+  "reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "test-engineer", "ui-ux-specialist", "platform-worker",
 ];
 
 function frontmatter(name: string) {
@@ -27,9 +30,9 @@ function parseDefinition(name: string, text: string) {
   return { text, name: field("name"), tools: field("tools") ?? "", model: field("model"), fallbackModel: field("fallbackModel"), thinking: field("thinking") };
 }
 
-test("registry registers exactly the 19 generic roles, unique, without statusline-setup", () => {
-  assert.equal(roles.length, 19);
-  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 19);
+test("registry registers exactly the 20 generic roles, unique, without statusline-setup", () => {
+  assert.equal(roles.length, 20);
+  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 20);
   assert.deepEqual(roles.map((r: { name: string }) => r.name).sort(), [...GENERIC_ROLES].sort());
   assert.ok(!roles.some((r: { name: string }) => r.name === "statusline-setup"));
   assert.ok(!fs.existsSync(new URL("../../../agents/statusline-setup.md", import.meta.url)), "statusline-setup definition removed");
@@ -37,7 +40,9 @@ test("registry registers exactly the 19 generic roles, unique, without statuslin
 });
 
 test("every generic role receives standard code navigation integrations", () => {
-  assert.equal(integrations.roles.length, 19);
+  assert.equal(integrations.roles.length, 20);
+  assert.ok(integrations.roles.includes("database-worker"));
+  assert.ok(integrations.roles.includes("database-specialist"));
   assert.deepEqual([...integrations.roles].sort(), roles.map((r: { name: string }) => r.name).sort());
 });
 
@@ -75,11 +80,20 @@ test("registry mirrors precise edit restriction for implementation workers", () 
   }
 });
 
+test("database-worker uses implementation-worker metadata and database ownership", () => {
+  const role = roles.find((r: { name: string }) => r.name === "database-worker");
+  assert.ok(role);
+  assert.deepEqual({ provider: role.provider, model: role.model, fallbackModel: role.fallbackModel, thinking: role.thinking, tools: role.tools }, { provider: "anthropic", model: "claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" });
+  const text = fs.readFileSync(new URL("../../../agents/database-worker.md", import.meta.url), "utf8");
+  assert.match(text, /schema.*migrations.*transactions/is);
+  assert.match(text, /database-specialist/i);
+});
+
 test("implementation workers are backend, frontend, general and platform with the inherited rust defaults", () => {
   assert.equal(roles.find((r: { name: string }) => r.name === "rust-worker"), undefined, "rust-worker retired from registry");
   assert.equal(fs.existsSync(new URL("../../../agents/rust-worker.md", import.meta.url)), false, "rust-worker definition retired");
   const defaults = { provider: "anthropic", model: "claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" };
-  for (const name of ["backend-worker", "frontend-worker", "general-worker", "platform-worker"]) {
+  for (const name of ["backend-worker", "frontend-worker", "general-worker", "platform-worker", "database-worker"]) {
     const role = roles.find((r: { name: string }) => r.name === name);
     assert.ok(role, name);
     assert.deepEqual({ provider: role.provider, model: role.model, fallbackModel: role.fallbackModel, thinking: role.thinking, tools: role.tools }, defaults, name);
@@ -105,7 +119,8 @@ test("lifecycle ownership is explicit: main PLAN, release SHIP and LEARN", () =>
 test("routing keeps generic domain adjacency and leaves project-local domain specialists to the project", () => {
   const route = fs.readFileSync(new URL("../../../skills/engineering-harness/references/routing.md", import.meta.url), "utf8");
   assert.match(route, /project-local domain specialists/i);
-  assert.match(route, /SQLite.*sqlite-specialist/i);
+  assert.match(route, /database-worker/i);
+  assert.match(route, /database-specialist/i);
   assert.match(route, /Tokio.*concurrency-specialist/i);
   assert.match(route, /deployment.*devops-specialist/i);
   assert.match(route, /self-contained packet.*exact unresolved question/is);

@@ -1334,8 +1334,8 @@ Examples:
 devops-specialist
 → service/deployment/packaging
 
-sqlite-specialist
-→ migration/backup/recovery
+database-specialist
+→ unresolved migration/backup/recovery semantics; database-worker owns implementation
 
 security-specialist
 → secrets/production exposure

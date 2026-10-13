@@ -11,7 +11,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(TESTS_DIR, "..", "index.ts");
 const SKILLS_DIR = path.resolve(TESTS_DIR, "..", "..", "..", "skills");
-const PI_MODULES = path.resolve(TESTS_DIR, "..", "..", "..", "install", "releases", "1.2.0", "node_modules", "@earendil-works");
+import { hostModules } from "./host-modules.ts";
+const PI_MODULES = path.join(hostModules(), "@earendil-works");
 const pi: any = await import(pathToFileURL(path.join(PI_MODULES, "pi-coding-agent", "dist", "index.js")).href);
 const ai: any = await import(pathToFileURL(path.join(PI_MODULES, "pi-ai", "dist", "index.js")).href);
 
