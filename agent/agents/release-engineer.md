@@ -10,7 +10,7 @@ tools: read, grep, find, ls, bash, powershell, edit
 ## Assigned modules
 For SHIP work, before substantive role work read `~/.pi/agent/skills/engineering-harness/ship/index.md` unless its current guidance is already in your context.
 
-For LEARN work after delivery, or when the task explicitly asks to preserve durable knowledge, read `~/.pi/agent/skills/engineering-harness/learn/index.md` unless its current guidance is already in your context.
+For LEARN work after delivery, or when the task explicitly asks to preserve durable knowledge, read the absolute `learn/index.md` module path from the assignment packet unless its current guidance is already in your context.
 
 These procedures belong to this named role when the main orchestrator selects those phases. Do not run SHIP for ordinary coding completion and do not run LEARN merely to summarize a session. Use the explicit assignment packet; never invoke manual shortcuts or spawn helpers.
 

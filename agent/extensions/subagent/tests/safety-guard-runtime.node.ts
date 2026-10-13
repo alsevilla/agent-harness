@@ -2,7 +2,7 @@
 //   node --experimental-transform-types --test agent/extensions/subagent/tests/safety-guard-runtime.node.ts
 // A real installed Pi CLI child loads the production guard entry via claimChildGuard plus a scratch faux provider generated under STAGE1_PROBE_SCRATCH (or os.tmpdir()). Observed through tool_execution_end; no real credentials, network or model calls.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -10,7 +10,7 @@ import * as path from "node:path";
 import readline from "node:readline";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { authorizableOp, canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore } from "../safety-core.ts";
+import { authorizableOp, canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, pushBranchTarget } from "../safety-core.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const profileRoot = path.resolve(here, "../../../..");
@@ -173,12 +173,13 @@ async function openMain(steps: SdkStep[], opts: { ui?: { confirm: (...a: any[]) 
 	await resourceLoader.reload();
 	const { session } = await pi.createAgentSession({ cwd, agentDir, settingsManager, resourceLoader, model: core.models[0], sessionManager: pi.SessionManager.inMemory(cwd) });
 	const confirms: any[][] = [];
-	const uiContext = opts.ui ? { notify() {}, setStatus() {}, setWidget() {}, confirm: (...a: any[]) => { confirms.push(a); return opts.ui!.confirm(...a); } } : undefined;
+	const notes: any[][] = [];
+	const uiContext = opts.ui ? { notify: (...a: any[]) => { notes.push(a); }, setStatus() {}, setWidget() {}, confirm: (...a: any[]) => { confirms.push(a); return opts.ui!.confirm(...a); } } : undefined;
 	await session.bindExtensions({ uiContext, mode: opts.mode ?? "tui" });
 	const results = () => session.messages.filter((m: any) => m.role === "toolResult").map((m: any) => ({ tool: m.toolName, isError: m.isError === true, text: textOf(m.content) }));
 	const run = async (prompt = "probe") => { await session.prompt(prompt); return results(); };
 	const unchanged = () => fixtures.every((p, i) => sha(p) === before[i]);
-	return { core, session, cwd, agentDir, confirms, run, results, unchanged, shutdown: () => (session.extensionRunner.hasHandlers("session_shutdown") ? session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }) : undefined), cleanup: () => { session.dispose(); if (!opts.dir) fs.rmSync(main, { recursive: true, force: true }); } };
+	return { core, session, cwd, agentDir, confirms, notes, run, results, unchanged, shutdown: () => (session.extensionRunner.hasHandlers("session_shutdown") ? session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }) : undefined), cleanup: () => { session.dispose(); if (!opts.dir) fs.rmSync(main, { recursive: true, force: true }); } };
 }
 
 test("main A (simulated TUI): risky bash with no grant is blocked, no dialog, raw command not echoed", { timeout: 120_000 }, async () => {
@@ -526,4 +527,89 @@ test("child lease (runtime): project-source agents and other roles get no lease 
 	const other = await runChild(script, undefined, mint, "general-worker", { dir: repo, withLeases: true });
 	assert.equal(other.ends.length, 1, other.stderr);
 	assert.match(other.ends[0].text, /Blocked by harness safety guard/, "other role");
+});
+
+// Commit-lease runtime cases: simulated TUI for the re-prompt ladder and refusals, real child for the commit gate.
+function artifactDirFor(): string {
+	const dir = path.join(os.tmpdir(), "worktrees", `pi-auth-${randomBytes(4).toString("hex")}`, "_scratch", "task");
+	fs.mkdirSync(dir, { recursive: true });
+	return fs.realpathSync.native(dir).replace(/\\/g, "/");
+}
+const COMMIT_TEXT = "feat x: add y";
+
+test("main U (simulated TUI): push-only then commit re-prompts once; the commit lease covers push-only with no dialog; the identical commit request is covered", { timeout: 180_000 }, async () => {
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "u0" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x", commits: true } }, id: "u1" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x", commits: true } }, id: "u2" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "u3" }, { text: "done" }], { ui: approve, repo: true });
+	try {
+		const r = await s.run();
+		assert.equal(s.confirms.length, 2, "push-only, then the commit upgrade");
+		assert.match(String(s.confirms[1][1]), /normal commits/);
+		assert.equal(r[0].isError, false, r[0].text);
+		assert.equal(r[1].isError, false, r[1].text);
+		assert.match(r[1].text, /push and commit/);
+		assert.match(r[2].text, /Already authorized this session.*push and commit/);
+		assert.match(r[3].text, /Already authorized/);
+	} finally { s.cleanup(); }
+});
+
+test("main V (simulated TUI): commit-only request shapes that are invalid never reach the dialog", { timeout: 240_000 }, async () => {
+	const art = artifactDirFor();
+	const bad: Array<[string, Record<string, unknown>]> = [
+		["artifact_dir without commits", { push_branch: { branch: "feat/x", artifact_dir: art } }],
+		["commits not boolean", { push_branch: { branch: "feat/x", commits: "yes" } }],
+		["relative artifact_dir", { push_branch: { branch: "feat/x", commits: true, artifact_dir: "relative/dir" } }],
+		["artifact_dir outside placement", { push_branch: { branch: "feat/x", commits: true, artifact_dir: fs.realpathSync.native(os.tmpdir()).replace(/\\/g, "/") } }],
+	];
+	for (const [label, args] of bad) {
+		const s = await openMain([{ tool: "request_authorization", args, id: "v0" }, { text: "done" }], { ui: approve, repo: true });
+		try {
+			const r = await s.run();
+			assert.equal(s.confirms.length, 0, label);
+			assert.equal(r[0].isError, true, label);
+		} finally { s.cleanup(); }
+	}
+});
+
+test("main W (simulated TUI): a commit lease binds its artifact directory; the same directory is covered and a different one re-prompts", { timeout: 180_000 }, async () => {
+	const art = artifactDirFor();
+	const other = artifactDirFor();
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x", commits: true, artifact_dir: art } }, id: "w0" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x", commits: true, artifact_dir: art } }, id: "w1" }, { tool: "request_authorization", args: { push_branch: { branch: "feat/x", commits: true, artifact_dir: other } }, id: "w2" }, { text: "done" }], { ui: approve, repo: true });
+	try {
+		const r = await s.run();
+		assert.equal(s.confirms.length, 2, "a different artifact directory is a new binding");
+		assert.ok(String(s.confirms[0][1]).includes(art), "dialog names the bound artifact directory");
+		assert.equal(r[0].isError, false, r[0].text);
+		assert.match(r[1].text, /Already authorized/);
+		assert.equal(r[2].isError, false, r[2].text);
+	} finally { s.cleanup(); }
+});
+
+test("child commit gate: a trusted release-engineer child refuses a normal commit without a commit lease, allows it with one, and only the trusted role is gated", { timeout: 240_000 }, async () => {
+	const work = fs.mkdtempSync(path.join(scratchBase, "gate-"));
+	const repo = makeRepo(path.join(work, "repo"));
+	assert.equal(spawnSync("git", ["checkout", "-q", "feat/x"], { cwd: repo, windowsHide: true }).status, 0);
+	const commit = [{ tool: "bash", args: { command: `git commit -m "${COMMIT_TEXT}"` }, id: "g1" }, { text: "done" }];
+	const noLease = await runChild(commit, undefined, undefined, "release-engineer", { dir: repo, withLeases: true });
+	assert.equal(noLease.ends.length, 1, noLease.stderr);
+	assert.match(noLease.ends[0].text, /Blocked by harness safety guard \[GIT_COMMIT\]/);
+	const withLease = await runChild(commit, undefined, (store) => store.mintLease({ ...pushBranchTarget(repo, "feat/x")!, commits: true }), "release-engineer", { dir: repo, withLeases: true });
+	assert.equal(withLease.ends.length, 1, withLease.stderr);
+	assert.doesNotMatch(withLease.ends[0].text, /Blocked by harness safety guard/);
+	const other = await runChild(commit, undefined, undefined, "general-worker", { dir: repo, withLeases: true });
+	assert.doesNotMatch(other.ends[0].text, /Blocked by harness safety guard/, "policy-only for other roles");
+});
+
+test("main X (simulated TUI): /authorization is read-only and secret-free: it names the push+commit lease and opens no dialog", { timeout: 120_000 }, async () => {
+	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x", commits: true } }, id: "x0" }, { text: "done" }], { ui: approve, repo: true });
+	try {
+		await s.run();
+		const before = s.confirms.length;
+		await s.run("/authorization");
+		assert.equal(s.confirms.length, before, "status opens no dialog");
+		const note = String(s.notes.at(-1)?.[0] ?? "");
+		assert.match(note, /push leases: 1/, note);
+		assert.match(note, /- push\+commit: repo .*branch feat\/x/, note);
+		assert.match(note, /valid/, note);
+		assert.doesNotMatch(note, /https?:\/\/|token|Bearer|request_authorization|git commit/i);
+		assert.ok(!note.includes(ORIGIN), "no push URL in the status");
+	} finally { s.cleanup(); }
 });

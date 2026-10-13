@@ -16,6 +16,7 @@ const AGENTS_TS = path.join(REPO, "agent", "extensions", "subagent", "agents.ts"
 const HOST_PACKAGES = ["@earendil-works/pi-agent-core", "@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"];
 const NATIVE_EXTENSIONS = ["./agent/extensions/subagent/index.ts", "./agent/extensions/ask-user/index.ts", "./agent/extensions/external-compaction/index.ts"];
 const NATIVE_SKILLS = ["./agent/skills/engineering-harness", "./agent/skills/agent-creation"];
+const NATIVE_PROMPTS = ["./agent/prompts/learn.md"]; // the only prompt template the package exports
 
 // Cold probes (fresh copies, first module load) exceed bun's 5 s default; used for both the test timeout and the probe spawn.
 const PROBE_TIMEOUT_MS = 60_000;
@@ -79,8 +80,8 @@ function sourceFiles(dir: string): string[] {
 test("root manifest declares the native resources directly and the host packages only as peers", () => {
 	const manifest = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8"));
 	assert.equal(manifest.name, "@alsevilla/pi-engineering-harness");
-	assert.deepEqual(manifest.pi, { extensions: NATIVE_EXTENSIONS, skills: NATIVE_SKILLS });
-	for (const rel of [...NATIVE_EXTENSIONS, ...NATIVE_SKILLS]) assert.ok(fs.existsSync(path.join(REPO, rel)), rel);
+	assert.deepEqual(manifest.pi, { extensions: NATIVE_EXTENSIONS, skills: NATIVE_SKILLS, prompts: NATIVE_PROMPTS });
+	for (const rel of [...NATIVE_EXTENSIONS, ...NATIVE_SKILLS, ...NATIVE_PROMPTS]) assert.ok(fs.existsSync(path.join(REPO, rel)), rel);
 	assert.deepEqual(manifest.peerDependencies, Object.fromEntries(HOST_PACKAGES.map((name) => [name, "*"])));
 	assert.deepEqual(Object.keys(manifest.dependencies ?? {}).filter((name) => HOST_PACKAGES.includes(name) || name.startsWith("@earendil-works/")), []);
 	assert.equal(manifest.license, "MIT");
@@ -185,8 +186,9 @@ probeTest("the public SDK loader lists exactly the native extensions and skills 
 	const extensions = out.extensions.filter((file) => file.startsWith(agentRoot)).map((file) => path.relative(REPO, file).split(path.sep).join("/")).sort();
 	assert.deepEqual(extensions, NATIVE_EXTENSIONS.map((rel) => rel.slice(2)).sort());
 	assert.deepEqual(out.extensionErrors, []);
-	// Workflow and domain prompts are manual, optional files under agent/prompts/; the native package exports none.
-	assert.deepEqual(out.prompts, []);
+	// Only /learn is exported from agent/prompts/; every other workflow and domain prompt stays a manual, optional file.
+	assert.deepEqual(out.prompts, ["learn"]);
+	assert.deepEqual(out.promptFiles.map((file) => path.relative(REPO, file).split(path.sep).join("/")), NATIVE_PROMPTS.map((rel) => rel.slice(2)));
 	const skills = out.skills.filter((skill) => skill.filePath.startsWith(agentRoot)).map((skill) => skill.name).sort();
 	assert.deepEqual(skills, ["agent-creation", "engineering-harness"]);
 	assert.deepEqual(listFiles(profile), [], "SDK loading writes nothing into the profile");
@@ -311,7 +313,8 @@ test("the README states the three native extensions, two native skills, manual p
 	const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
 	for (const rel of [...NATIVE_EXTENSIONS.map((r) => path.posix.dirname(r.slice(2))), ...NATIVE_SKILLS.map((r) => r.slice(2))]) assert.ok(readme.includes(rel), rel);
 	assert.doesNotMatch(readme, /Five profile skills|registers one browser skill/);
-	assert.match(readme, /native package exports no prompt templates/);
+	assert.match(readme, /native package exports one prompt template, `\/learn`/);
+	assert.doesNotMatch(readme, /exports no prompt templates|the public SDK loader reports none/);
 	assert.match(readme, /manual, optional prompt templates/i);
 	assert.match(readme, /`engineering-environment`, `qmd` and `refresh` are not in the default exports/);
 	assert.doesNotMatch(readme, /lists only optional/);

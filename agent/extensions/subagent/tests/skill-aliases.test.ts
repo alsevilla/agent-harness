@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION = path.resolve(TESTS_DIR, "..", "index.ts");
 const SKILLS_DIR = path.resolve(TESTS_DIR, "..", "..", "..", "skills");
-const PI_MODULES = path.resolve(TESTS_DIR, "..", "..", "..", "install", "releases", "1.1.0", "node_modules", "@earendil-works");
+const PI_MODULES = path.resolve(TESTS_DIR, "..", "..", "..", "install", "releases", "1.2.0", "node_modules", "@earendil-works");
 const pi: any = await import(pathToFileURL(path.join(PI_MODULES, "pi-coding-agent", "dist", "index.js")).href);
 const ai: any = await import(pathToFileURL(path.join(PI_MODULES, "pi-ai", "dist", "index.js")).href);
 
@@ -61,7 +61,7 @@ function captureExtension(sent: string[], gate?: Promise<void>) {
 	};
 }
 
-type OpenOptions = { gate?: Promise<void>; templates?: string[]; extra?: Array<(pi: any) => void>; withUi?: boolean };
+type OpenOptions = { gate?: Promise<void>; templates?: string[]; extra?: Array<(pi: any) => void>; withUi?: boolean; skillPaths?: string[] };
 
 async function openSession(options: OpenOptions) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "harness-skill-aliases-"));
@@ -80,7 +80,8 @@ async function openSession(options: OpenOptions) {
 		agentDir,
 		settingsManager,
 		additionalExtensionPaths: [EXTENSION],
-		additionalSkillPaths: [SKILLS_DIR],
+		noSkills: true,
+		additionalSkillPaths: options.skillPaths ?? [SKILLS_DIR],
 		extensionFactories: [captureExtension(sent, options.gate), ...(options.extra ?? [])],
 		disabledBuiltinExtensions: ["mcp", "codemode", "tool-search", "llama.cpp"],
 		skillsOverride: (base: any) => ({ skills: base.skills.filter((s: any) => HARNESS_SKILLS.includes(s.name)), diagnostics: base.diagnostics }),
@@ -123,6 +124,31 @@ function skillBody(name: string): { file: string; body: string } {
 }
 
 const t = (name: string, body: () => Promise<void>) => test(name, body, 60_000);
+
+t("alias expansion reflects updated skill contents after the supported resource reload", () => {
+	const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "harness-alias-skill-"));
+	const skillFile = path.join(fixture, "engineering-harness", "SKILL.md");
+	const oldMarker = "ALIAS_LIFECYCLE_OLD_7c94a1";
+	const newMarker = "ALIAS_LIFECYCLE_NEW_2e83bf";
+	fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+	fs.writeFileSync(skillFile, `---\nname: engineering-harness\ndescription: lifecycle fixture\n---\n${oldMarker}\n`);
+	return withSession({ skillPaths: [fixture] }, async ({ session, sent }) => {
+		try {
+			await session.prompt("/engineering-harness");
+			await settle(session, sent, 1);
+			expect(sent[0]).toContain(oldMarker);
+			expect(sent[0]).not.toContain(newMarker);
+			fs.writeFileSync(skillFile, `---\nname: engineering-harness\ndescription: lifecycle fixture\n---\n${newMarker}\n`);
+			await session.resourceLoader.reload();
+			await session.prompt("/engineering-harness");
+			await settle(session, sent, 2);
+			expect(sent[1]).toContain(newMarker);
+			expect(sent[1]).not.toContain(oldMarker);
+		} finally {
+			fs.rmSync(fixture, { recursive: true, force: true });
+		}
+	});
+});
 
 t("bare harness aliases are registered as native-skill commands with the expected description", () =>
 	withSession({}, async ({ session }) => {

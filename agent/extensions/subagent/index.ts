@@ -34,13 +34,14 @@ import {
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
 import { getFallbackSequence, nextFallbackModel } from "./model-routing.ts";
+import { registerMainPolicy } from "./main-policy.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
-import { assertBatchDisplayable, authorizableOp, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, pushBranchTarget, type ClaimWindow, type GuardOp, validateArtifactDir } from "./safety-core.ts";
+import { assertBatchDisplayable, authorizableOp, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type GuardOp, validateArtifactDir } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -647,10 +648,14 @@ function registerSkillAliases(pi: ExtensionAPI) {
 }
 
 // One TUI confirmation per new binding; a live binding already approved this session is reused without a dialog. Revalidates repo and URL before and after the dialog.
-async function authorizePushBranch(params: { role?: string; ttl_minutes?: number; push_branch: { branch: string; cwd?: string } }, ctx: { cwd: string; ui: { confirm(title: string, message: string, options?: { timeout?: number }): Promise<boolean> } }) {
+async function authorizePushBranch(params: { role?: string; ttl_minutes?: number; push_branch: { branch: string; cwd?: string; commits?: boolean; artifact_dir?: string } }, ctx: { cwd: string; ui: { confirm(title: string, message: string, options?: { timeout?: number }): Promise<boolean> } }) {
 	const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
+	const ok = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
 	if (params.role !== undefined && params.role !== LEASE_ROLE) return fail(`push_branch is only for role ${LEASE_ROLE}; no lease minted.`);
 	if (params.ttl_minutes !== undefined) return fail("push_branch leases are session-only and take no ttl; no lease minted.");
+	const { commits, artifact_dir: artifactInput } = params.push_branch;
+	if (commits !== undefined && typeof commits !== "boolean") return fail("push_branch.commits must be true or false; no lease minted.");
+	if (artifactInput !== undefined && commits !== true) return fail("push_branch.artifact_dir needs commits: true; no lease minted.");
 	let target: ReturnType<typeof pushBranchTarget>;
 	try {
 		target = pushBranchTarget(path.resolve(ctx.cwd, params.push_branch.cwd ?? "."), params.push_branch.branch);
@@ -658,9 +663,22 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 		return fail(`${(error as Error).message}; no lease minted.`);
 	}
 	if (!target) return fail("not a verified git repository with exactly one origin push URL; no lease minted.");
-	if (safetyGrants.hasLease(target.candidate, target.branch, target.pushUrl)) return { content: [{ type: "text" as const, text: `Already authorized this session: ${LEASE_ROLE} may push ${target.branch} to the approved origin of ${target.candidate}.` }], details: {} };
-	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nBranch: ${target.branch}\nPush URL: ${target.pushUrl}\nScope: this session only; normal push of this branch (no tags, force, delete, mirror or other refs). /revoke-authorization or session end withdraws it.`;
-	const approved = await ctx.ui.confirm("Authorize release-engineer branch pushes?", text, { timeout: 120_000 });
+	let artifactDir: string | undefined;
+	try {
+		artifactDir = artifactInput === undefined ? undefined : validateArtifactDir(artifactInput, target.candidate);
+	} catch (error) {
+		return fail(`${(error as Error).message}; no lease minted.`);
+	}
+	const request = { commits: commits === true, artifactDir };
+	const plan = planPushRequest(safetyGrants, target, request);
+	const kind = request.commits ? "push and commit" : "push";
+	// Repeats are covered; a live delivery covers a push-only request. Neither opens a dialog.
+	if (plan.action === "covered") return ok(`Already authorized this session: ${LEASE_ROLE} may ${kind} ${target.branch} to the approved origin of ${target.candidate}.`);
+	if (plan.action === "covered-by-delivery") return ok(`Already covered by the approved delivery for ${target.branch} this session; no push lease minted.`);
+	const scope = request.commits ? `normal push and normal commits on this branch (git commit -m, or -F ${artifactDir ?? "no artifact directory"}; no amend, signing, hooks, pathspec or other commit options)` : "normal push of this branch";
+	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nBranch: ${target.branch}\nPush URL: ${target.pushUrl}\nScope: this session only; ${scope} (no tags, force, delete, mirror or other refs). /revoke-authorization or session end withdraws it.`;
+	const title = request.commits ? "Authorize release-engineer branch pushes and commits?" : "Authorize release-engineer branch pushes?";
+	const approved = await ctx.ui.confirm(title, text, { timeout: 120_000 });
 	if (!approved) return fail("Not authorized by the operator; no lease minted.");
 	let again: ReturnType<typeof pushBranchTarget>;
 	try {
@@ -669,8 +687,12 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 		again = undefined;
 	}
 	if (!again || again.candidate !== target.candidate || again.pushUrl !== target.pushUrl) return fail("repository binding changed during approval; no lease minted.");
-	safetyGrants.mintLease(again);
-	return { content: [{ type: "text" as const, text: `Authorized ${LEASE_ROLE} to push ${target.branch} for this session.` }], details: {} };
+	try {
+		safetyGrants.mintLease({ ...again, commits: request.commits, artifactDir });
+	} catch (error) {
+		return fail(`${(error as Error).message}; no lease minted.`);
+	}
+	return ok(`Authorized ${LEASE_ROLE} to ${kind} ${target.branch} for this session.`);
 }
 
 interface DeliveryParams { branch: string; base: string; cwd?: string; pr?: number; version?: string; latest?: boolean; artifact_dir?: string }
@@ -723,6 +745,12 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	pi.on("agent_settled", (event) => { if (event.aborted) safetyGrants.revokeAll(); });
 	pi.on("session_shutdown", () => safetyGrants.revokeAll(true));
+	pi.registerCommand("authorization", {
+		description: "Show session authorizations (read-only, secret-free): single-use grant counts, push and push+commit leases, delivery grants and their validity",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(authorizationStatus(safetyGrants, Date.now()), "info");
+		},
+	});
 	pi.registerCommand("revoke-authorization", {
 		description: "Withdraw session authorizations: single-use grants, release-engineer push leases and release delivery (running children keep copies until they exit or expire)",
 		handler: async (_args, ctx) => {
@@ -731,6 +759,7 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 	registerSkillAliases(pi);
+	registerMainPolicy(pi, packageRoot());
 	pi.registerCommand("provider-cooldown", {
 		description: "Show provider cooldown state, or refresh one provider's auth after re-authenticating",
 		handler: async (args, ctx) => {
@@ -1098,10 +1127,10 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool(subagentTool);
     pi.registerTool({
         name: "request_authorization", label: "Request authorization",
-        description: "Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked, or exclusively via push_branch a session-only release-engineer push lease for one feature branch, or exclusively via delivery a session-scoped reusable release-engineer delivery (push, PR create/edit/merge, release create) bound to one repo/branch/base. Refused outside the interactive TUI.",
+        description: "Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked, or exclusively via push_branch a session-only release-engineer push lease for one feature branch (commits: true also allows normal commits, artifact_dir binds -F message files), or exclusively via delivery a session-scoped reusable release-engineer delivery (push, PR create/edit/merge, release create) bound to one repo/branch/base. Refused outside the interactive TUI.",
         parameters: Type.Object({
             operations: Type.Optional(Type.Array(Type.Object({ kind: StringEnum(["shell", "write"] as const), value: Type.String({ description: "Exact shell command or file path" }) }), { minItems: 1, maxItems: MAX_GRANT_OPS })),
-            push_branch: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch name; protected branches are refused" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })) }, { description: "Exclusive with operations: one session release-engineer PR-branch push lease" })),
+            push_branch: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch name; protected branches are refused" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), commits: Type.Optional(Type.Boolean({ description: "true also allows normal git commit -m or -F commits on this branch (policy-enforced only for release-engineer children)" })), artifact_dir: Type.Optional(Type.String({ description: "With commits true: absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding the -F message file" })) }, { description: "Exclusive with operations: one session release-engineer PR-branch push lease" })),
             delivery: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch to push and deliver" }), base: Type.String({ description: "PR base branch, e.g. main" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), pr: Type.Optional(Type.Number({ minimum: 1, description: "Existing PR number to bind; omit to allow the branch's open PR into the base" })), version: Type.Optional(Type.String({ description: "Approved release tag, e.g. v1.2.3" })), latest: Type.Optional(Type.Boolean({ description: "Approve release --latest; needs version" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })) }, { description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer delivery (no time expiry)" })),
             role: Type.Optional(Type.String({ description: "Child role the grant binds to; omit for main" })),
             ttl_minutes: Type.Optional(Type.Number({ minimum: 1, maximum: GRANT_TTL_MAX_MS / 60_000, description: "Default 30; rejected for push_branch and delivery (delivery is session-scoped; TTL unsupported)" })),
@@ -1118,7 +1147,7 @@ export default function (pi: ExtensionAPI) {
             if (role !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(role)) return denied("invalid role name; no grant minted.");
             const candidate = canonicalCwd(ctx.cwd);
             let ops: GuardOp[];
-            try { ops = params.operations.map((o) => authorizableOp(o.kind, o.value, candidate, getAgentDir())); assertBatchDisplayable(ops); } catch (error) { return denied(`${(error as Error).message}; no grant minted.`); }
+            try { ops = params.operations.map((o) => authorizableOp(o.kind, o.value, candidate, getAgentDir(), role === LEASE_ROLE)); assertBatchDisplayable(ops); } catch (error) { return denied(`${(error as Error).message}; no grant minted.`); }
             const ttlMs = Math.min(GRANT_TTL_MAX_MS, Math.max(1, params.ttl_minutes ?? GRANT_TTL_DEFAULT_MS / 60_000) * 60_000);
             const list = ops.map((op, i) => `${i + 1}. ${describeOp(op)}`).join("\n");
             const approved = await ctx.ui.confirm("Authorize exact risky operations?", `Role: ${role ?? "main"}\nCandidate: ${candidate}\nTTL: ${ttlMs / 60_000} min, each single use\n${list}`, { timeout: 120_000 });

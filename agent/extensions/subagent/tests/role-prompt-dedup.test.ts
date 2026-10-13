@@ -90,8 +90,8 @@ const NEW_AFTER = ["c708d8e8", "33322dbf"];
 // Reviewed F1 rewrite of frontend-worker (framework-aware role). The BEFORE fixture is unchanged; these are the reviewed post-change frontmatter sha and sentence hashes for that one role only.
 // REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
 const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5" };
-const REPAIR_REMOVED: Record<string, string[]> = { "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"] };
-const REPAIR_ADDED: Record<string, string[]> = { "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"] };
+const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["2e241d33"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"] };
+const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d186309c"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {

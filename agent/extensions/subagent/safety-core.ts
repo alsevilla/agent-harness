@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type RiskRule =
-	| "GIT_PUBLISH" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
+	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
 	| "LAUNCH_PI" | "CURL_SHELL" | "OPAQUE_UNPARSEABLE" | "SECRET" | "CONFIG_WRITE" | "PATH_AMBIGUOUS";
 
 export type GuardOp = { kind: "shell"; command: string; cwd: string } | { kind: "write"; path: string } | { kind: "read"; path: string };
@@ -294,7 +294,9 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 		if (sub === "branch" && lower.some((a) => a === "-d" || a === "--delete")) add(out, "GIT_DESTRUCTIVE");
 		if (sub === "worktree" && lower.some((a) => a === "remove" || a === "prune")) add(out, "GIT_DESTRUCTIVE");
 		if (sub === "tag" && lower.includes("-d")) add(out, "GIT_DESTRUCTIVE");
-		if (sub === "commit" && lower.includes("--amend")) add(out, "GIT_DESTRUCTIVE");
+		if (sub === "commit") add(out, "GIT_COMMIT");
+		// git accepts any unambiguous long-option prefix of --amend (--am, --ame, --amen).
+		if (sub === "commit" && lower.some((a) => a.split("=")[0].length >= 4 && "--amend".startsWith(a.split("=")[0]))) add(out, "GIT_DESTRUCTIVE");
 		if (sub === "config" && lower.some((a) => a === "--global" || a === "--system")) add(out, "PRIVILEGE_PERSIST");
 		if (sub === "config" && lower.some((a) => a.includes("hookspath"))) add(out, "CONFIG_WRITE");
 		if (lower.some((a) => a.startsWith("core.hookspath="))) add(out, "CONFIG_WRITE");
@@ -344,11 +346,13 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 
 // Git Bash argv collapses each backslash pair before the shell parses it (a run of n reaches the shell as ceil(n/2)): classify raw and collapsed text, a conservative union. Grant text stays raw (decideToolCall).
 // shortcut: collapse applies on every platform and shell (over-blocks PowerShell/POSIX text with backslash pairs), upgrade by gating on the verified Git Bash argv transport.
-export function classifyShell(command: string): ShellClassification {
+export function classifyShell(command: string, gateCommits = false): ShellClassification {
 	const text = String(command ?? "");
 	const out = new Set<RiskRule>();
 	classifyText(text, out, 0);
 	classifyText(text.replace(/\\\\/g, "\\"), out, 0);
+	// Commits are gated only in the trusted release-engineer child; elsewhere git commit stays unclassified as before.
+	if (!gateCommits) out.delete("GIT_COMMIT");
 	const rules = [...out];
 	return { rules, grantable: !rules.some((r) => NOT_GRANTABLE.has(r)) };
 }
@@ -429,10 +433,10 @@ function block(rules: RiskRule[], op: GuardOp): Decision {
 	return { action: "block", rules, grantable, op, digest: createHash("sha256").update(keyOf(op)).digest("hex").slice(0, 16) };
 }
 
-export function decideToolCall(toolName: string, input: Record<string, unknown>, cwd: string, agentDir: string): Decision {
+export function decideToolCall(toolName: string, input: Record<string, unknown>, cwd: string, agentDir: string, gateCommits = false): Decision {
 	if (toolName === "bash" || toolName === "powershell") {
 		const command = String(input.command ?? "");
-		const { rules } = classifyShell(command);
+		const { rules } = classifyShell(command, gateCommits);
 		return rules.length ? block(rules, { kind: "shell", command, cwd: canonicalCwd(cwd) }) : { action: "allow" };
 	}
 	if (toolName === "write" || toolName === "edit") {
@@ -489,7 +493,8 @@ export interface GrantStore {
 	importRecords(records: GrantRecord[]): void;
 	revokeAll(includeLeases?: boolean): void;
 	size(): number;
-	mintLease(request: { candidate: string; pushUrl: string; branch: string }): PushLease;
+	mintLease(request: { candidate: string; pushUrl: string; branch: string; commits?: boolean; artifactDir?: string }): PushLease;
+	findLease(candidate: string, branch: string, pushUrl: string): PushLease | undefined;
 	hasLease(candidate: string, branch: string, pushUrl: string): boolean;
 	copyLeases(candidate: string): PushLease[];
 	importLeases(incoming: PushLease[]): void;
@@ -499,6 +504,9 @@ export interface GrantStore {
 	copyDelivery(candidate: string): DeliveryGrant[];
 	importDelivery(incoming: DeliveryGrant[]): void;
 	deliveryCount(): number;
+	summary(now: number): { count: number; main: number; roleBound: number; shell: number; write: number; read: number; nextExpiry?: number };
+	listLeases(): PushLease[];
+	listDelivery(): DeliveryGrant[];
 }
 
 function validateRecord(value: unknown): GrantRecord {
@@ -552,22 +560,38 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 				delivery = [];
 			}
 		},
-		mintLease({ candidate, pushUrl, branch }) {
+		mintLease({ candidate, pushUrl, branch, commits, artifactDir }) {
 			if (!path.isAbsolute(candidate)) throw new TypeError("candidate must be absolute");
-			const lease = validateLease({ role: LEASE_ROLE, candidate: canonicalCwd(candidate), pushUrl, branch });
+			const lease = validateLease({ role: LEASE_ROLE, candidate: canonicalCwd(candidate), pushUrl, branch, commits: commits === true ? true : undefined, artifactDir: commits === true ? artifactDir : undefined });
 			const existing = leases.find((l) => sameLease(l, lease));
-			if (existing) return { ...existing };
+			if (existing) {
+				// Upgrade only: a push-only repeat keeps the stored commit scope; a commit grant sets the artifact directory it approved.
+				if (lease.commits) {
+					existing.commits = true;
+					if (lease.artifactDir) existing.artifactDir = lease.artifactDir;
+					else delete existing.artifactDir;
+				}
+				return { ...existing };
+			}
+			if (leases.length >= MAX_PUSH_LEASES) throw new RangeError(`at most ${MAX_PUSH_LEASES} push leases per session`);
 			leases.push(lease);
 			return { ...lease };
 		},
 		hasLease(candidate, branch, pushUrl) {
 			return leases.some((l) => foldPath(l.candidate) === foldPath(candidate) && l.branch === branch && l.pushUrl === pushUrl);
 		},
+		findLease(candidate, branch, pushUrl) {
+			return leases.find((l) => foldPath(l.candidate) === foldPath(candidate) && l.branch === branch && l.pushUrl === pushUrl);
+		},
 		copyLeases(candidate) {
 			return leases.filter((l) => foldPath(l.candidate) === foldPath(candidate)).map((l) => ({ ...l }));
 		},
 		importLeases(incoming) {
-			for (const lease of incoming.map((l) => validateLease(l))) if (!leases.some((l) => sameLease(l, lease))) leases.push(lease);
+			for (const lease of incoming.map((l) => validateLease(l))) {
+				if (leases.some((l) => sameLease(l, lease))) continue;
+				if (leases.length >= MAX_PUSH_LEASES) throw new RangeError(`at most ${MAX_PUSH_LEASES} push leases per session`);
+				leases.push(lease);
+			}
 		},
 		leaseCount() {
 			return leases.length;
@@ -599,6 +623,25 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			live();
 			return delivery.length;
 		},
+		summary(at) {
+			const mine = records.filter((r) => r.expiresAt > at);
+			const expiries = mine.map((r) => r.expiresAt);
+			return {
+				count: mine.length,
+				main: mine.filter((r) => r.role === null).length,
+				roleBound: mine.filter((r) => r.role !== null).length,
+				shell: mine.filter((r) => r.op.kind === "shell").length,
+				write: mine.filter((r) => r.op.kind === "write").length,
+				read: mine.filter((r) => r.op.kind === "read").length,
+				nextExpiry: expiries.length ? Math.min(...expiries) : undefined,
+			};
+		},
+		listLeases() {
+			return leases.slice(0, MAX_PUSH_LEASES).map((l) => ({ ...l }));
+		},
+		listDelivery() {
+			return delivery.slice(0, MAX_DELIVERY_GRANTS).map((d) => ({ ...d }));
+		},
 		size() {
 			return records.length;
 		},
@@ -607,8 +650,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
-export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = []): string {
-	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { delivery } : {}) });
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false): string {
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -619,7 +662,9 @@ export function loadChildGrants(text: string): GrantRecord[] {
 
 // Release-engineer PR-branch push lease: a trusted-main approval binds candidate, origin push URL and one feature branch. Session-only (memory), no expiry, never written to disk or config.
 export const LEASE_ROLE = "release-engineer";
-export interface PushLease { role: string; candidate: string; pushUrl: string; branch: string }
+// At most this many distinct push/commit bindings per session; a further distinct binding is refused, never evicted.
+export const MAX_PUSH_LEASES = 8;
+export interface PushLease { role: string; candidate: string; pushUrl: string; branch: string; commits?: true; artifactDir?: string }
 
 const PUSH_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/;
 const PROTECTED_BRANCH = /(^|\/)(master|main|head|trunk|develop|releases?|prod|production)([-._\/]|$)/i;
@@ -643,6 +688,23 @@ export function parseNormalPush(command: string): { branch: string } | undefined
 	}
 }
 
+// Normal commit grammar (whole command, ASCII, single spaces): git commit -m "<safe message>" or git commit -F "<absolute path>". Anything else is not a normal commit.
+const COMMIT_MESSAGE = /^(?:"([A-Za-z0-9 .,:_\/#()+-]{1,200})"|'([A-Za-z0-9 .,:_\/#()+-]{1,200})')$/;
+const COMMIT_FILE = /^"([A-Za-z0-9 ._\/:-]+)"$/;
+export function parseNormalCommit(command: string): { message?: string; file?: string } | undefined {
+	const text = String(command ?? "");
+	if (!/^[\x20-\x7e]+$/.test(text)) return undefined;
+	const match = /^git commit (-m|-F) (.+)$/.exec(text);
+	if (!match) return undefined;
+	if (match[1] === "-m") {
+		const m = COMMIT_MESSAGE.exec(match[2]);
+		const message = m ? (m[1] ?? m[2]) : undefined;
+		return message && /[A-Za-z0-9]/.test(message) ? { message } : undefined;
+	}
+	const f = COMMIT_FILE.exec(match[2]);
+	return f && path.isAbsolute(f[1]) && !badSegments(f[1]) ? { file: f[1] } : undefined;
+}
+
 function assertPushUrl(url: string): void {
 	if (typeof url !== "string" || !url) throw new TypeError("push URL missing");
 	assertDisplayable(url);
@@ -662,10 +724,29 @@ function gitRead(cwd: string, args: string[]): string[] | undefined {
 	}
 }
 
-// Live binding: repo root is the candidate, exactly one push URL for origin, no mirror, push.followTags or custom receivepack, and the branch resolves only to refs/heads/<branch> (not a same-named tag). Any read problem refuses.
-export function livePushUrl(candidate: string, branch: string): string | undefined {
+// Live binding: repo root is the candidate, exactly one push URL for origin, no mirror, push.followTags, custom receivepack or pushurl, and the branch resolves only to refs/heads/<branch> (not a same-named tag). Reasons are fixed strings: no URL, no raw git text.
+// Exit status of a read-only git call: 0 found, 1 no such ref; undefined when git could not run or timed out.
+function gitExit(cwd: string, args: string[]): number | undefined {
+	try {
+		childProcess.execFileSync("git", ["-C", cwd, ...args], { cwd: NEUTRAL_EXEC_CWD, timeout: PUSH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
+		return 0;
+	} catch (error) {
+		const status = (error as { status?: unknown }).status;
+		return typeof status === "number" ? status : undefined;
+	}
+}
+
+export type PushDiagnosis = { pushUrl: string } | { reason: string };
+export function diagnosePushBranch(candidate: string, branch: string): PushDiagnosis {
 	const top = gitRead(candidate, ["rev-parse", "--show-toplevel"]);
-	if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(canonicalCwd(candidate))) return undefined;
+	if (top === undefined) return { reason: "git could not be read" };
+	if (top.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(canonicalCwd(candidate))) return { reason: "not the repository root of the candidate" };
+	const exists = gitExit(candidate, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+	if (exists === 1) return { reason: "local branch is missing" };
+	if (exists !== 0) return { reason: "git could not be read" };
+	const ref = gitRead(candidate, ["rev-parse", "--symbolic-full-name", branch]);
+	if (ref === undefined) return { reason: "git could not be read" };
+	if (ref.length !== 1 || ref[0] !== `refs/heads/${branch}`) return { reason: "branch name is ambiguous (matches another ref)" };
 	const urls = gitRead(candidate, ["remote", "get-url", "--push", "--all", "origin"]);
 	const mirror = gitRead(candidate, ["config", "--type=bool", "--get-all", "remote.origin.mirror"]);
 	const followTags = gitRead(candidate, ["config", "--type=bool", "--get-all", "push.followTags"]);
@@ -674,11 +755,64 @@ export function livePushUrl(candidate: string, branch: string): string | undefin
 	// Effective submodule recursion (push.recurseSubmodules, and submodule.recurse) would push other repos: only unset or false is allowed.
 	const recurse = gitRead(candidate, ["config", "--type=bool", "--get-all", "push.recurseSubmodules"]);
 	const submodules = gitRead(candidate, ["config", "--type=bool", "--get-all", "submodule.recurse"]);
-	const ref = gitRead(candidate, ["rev-parse", "--symbolic-full-name", branch]);
+	if (!urls || !mirror || !followTags || !receive || !pushurls || !recurse || !submodules) return { reason: "git could not be read" };
+	if (urls.length !== 1) return { reason: "origin remote is missing or has more than one push URL" };
 	// An explicit remote.origin.pushurl is never part of the approved binding, even a single one (it replaces the fetch URL for pushes).
-	if (urls?.length !== 1 || !mirror || !followTags || !receive || !pushurls || pushurls.length || !recurse || !submodules || ref?.length !== 1) return undefined;
-	if (mirror.includes("true") || followTags.includes("true") || recurse.includes("true") || submodules.includes("true") || receive.length || ref[0] !== `refs/heads/${branch}`) return undefined;
-	return urls[0];
+	if (mirror.includes("true") || followTags.includes("true") || recurse.includes("true") || submodules.includes("true") || receive.length || pushurls.length) return { reason: "origin push configuration is unsafe" };
+	return { pushUrl: urls[0] };
+}
+
+export function livePushUrl(candidate: string, branch: string): string | undefined {
+	const diagnosis = diagnosePushBranch(candidate, branch);
+	return "pushUrl" in diagnosis ? diagnosis.pushUrl : undefined;
+}
+
+// Planner for a push or push+commit request: covered (no dialog), covered-by-delivery (push-only that an existing delivery already approves; mints no lease) or ask (new confirm). A delivery never covers a commit.
+export function planPushRequest(store: GrantStore, target: { candidate: string; pushUrl: string; branch: string }, request: { commits: boolean; artifactDir?: string }): { action: "covered" | "covered-by-delivery" | "ask" } {
+	const lease = store.findLease(target.candidate, target.branch, target.pushUrl);
+	if (lease) return { action: !request.commits || (lease.commits === true && lease.artifactDir === request.artifactDir) ? "covered" : "ask" };
+	if (!request.commits && store.copyDelivery(target.candidate).some((d) => d.branch === target.branch && d.pushUrl === target.pushUrl)) return { action: "covered-by-delivery" };
+	return { action: "ask" };
+}
+
+// Owner/repo label from a parsed URL pathname or SCP-style path only; ambiguous origins stay neutral.
+function repoLabel(origin: string): string {
+	let pathname: string;
+	if (/^[^/@:\s]+@[^/:\s]+:.+/.test(origin)) {
+		pathname = origin.slice(origin.indexOf(":") + 1);
+		if (/[?#]/.test(pathname)) return "repo not shown";
+	}
+	else {
+		try {
+			const url = new URL(origin);
+			if (!url.protocol || !url.hostname) return "repo not shown";
+			pathname = url.pathname;
+		} catch {
+			return "repo not shown";
+		}
+	}
+	const match = /^\/?([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(pathname);
+	return match ? `${match[1]}/${match[2]}` : "repo not shown";
+}
+
+function validityOf(candidate: string, branch: string, pushUrl: string): string {
+	const diagnosis = diagnosePushBranch(candidate, branch);
+	if ("pushUrl" in diagnosis && diagnosis.pushUrl === pushUrl) return "valid";
+	return `invalid: ${"reason" in diagnosis ? diagnosis.reason : "live origin URL differs from the approved one"}`;
+}
+
+// Read-only, secret-free session status for /authorization: counts, scopes, expiry and bounded validity reasons. No command text, digests, ids, bearer values, URLs or raw git/gh error text.
+export function authorizationStatus(store: GrantStore, now: number): string {
+	const grants = store.summary(now);
+	const next = grants.nextExpiry === undefined ? "" : `; next expiry ${new Date(grants.nextExpiry).toISOString()}`;
+	const lines = [`single-use grants: ${grants.count} live (main ${grants.main}, child roles ${grants.roleBound}; shell ${grants.shell}, write ${grants.write}, read ${grants.read}${next})`];
+	const leases = store.listLeases();
+	lines.push(leases.length ? `push leases: ${leases.length} (session only, no expiry)` : "push leases: none");
+	for (const lease of leases) lines.push(`- ${lease.commits ? "push+commit" : "push"}: repo ${repoLabel(lease.pushUrl)}, branch ${lease.branch}, candidate ${lease.candidate}, artifact dir ${lease.artifactDir ?? "none"}, ${validityOf(lease.candidate, lease.branch, lease.pushUrl)}`);
+	const deliveries = store.listDelivery();
+	lines.push(deliveries.length ? `delivery grants: ${deliveries.length} (approved scope, session only)` : "delivery grants: none");
+	for (const d of deliveries) lines.push(`- delivery: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr ?? "none"}, version ${d.version ?? "none"}, latest ${d.latest ? "yes" : "no"}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}`);
+	return lines.join("\n");
 }
 
 // Trusted-main lease target: canonical candidate, live push URL and validated branch; undefined when the folder is not a verified repo.
@@ -701,7 +835,11 @@ function validateLease(value: unknown): PushLease {
 	const l = value as PushLease;
 	if (!l || typeof l !== "object" || l.role !== LEASE_ROLE || typeof l.candidate !== "string" || !path.isAbsolute(l.candidate)) throw new TypeError("invalid push lease");
 	assertPushUrl(l.pushUrl);
-	return { role: LEASE_ROLE, candidate: l.candidate, pushUrl: l.pushUrl, branch: validatePushBranch(l.branch) };
+	const branch = validatePushBranch(l.branch);
+	if (l.commits !== undefined && l.commits !== true) throw new TypeError("invalid lease commit flag");
+	if (l.artifactDir !== undefined && (l.commits !== true || typeof l.artifactDir !== "string")) throw new TypeError("artifact directory needs a commit lease");
+	const artifactDir = l.artifactDir === undefined ? undefined : validateArtifactDir(l.artifactDir, l.candidate);
+	return { role: LEASE_ROLE, candidate: l.candidate, pushUrl: l.pushUrl, branch, ...(l.commits ? { commits: true as const } : {}), ...(artifactDir ? { artifactDir } : {}) };
 }
 
 export function loadChildLeases(text: string): PushLease[] {
@@ -713,6 +851,15 @@ export function loadChildLeases(text: string): PushLease[] {
 }
 
 // Release delivery (human-approved, reusable for the current PI session, like a push lease: no time expiry). Bound to candidate, origin push URL, repo, branch and base; release-engineer children only; non-consuming. Cleared by explicit revoke or session shutdown; abort keeps it.
+// Commit gate flag in the child envelope: only the trusted release-engineer launch sends true. Absent means ungated; any other value fails closed.
+export function loadChildGate(text: string): boolean {
+	const parsed = JSON.parse(text) as { v?: number; gateCommits?: unknown };
+	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
+	if (parsed.gateCommits === undefined) return false;
+	if (parsed.gateCommits !== true) throw new TypeError("invalid commit gate flag");
+	return true;
+}
+
 export const MAX_DELIVERY_GRANTS = 4;
 const GH_TIMEOUT_MS = 15_000;
 const DELIVERY_FILE_MAX = 65_536;
@@ -1018,6 +1165,7 @@ export interface ChildGuardLaunch {
 	grantCount: number;
 	leaseCount: number;
 	deliveryCount: number;
+	gateCommits: boolean;
 	childEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 }
 
@@ -1034,12 +1182,15 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	const leases = withLeases && role === LEASE_ROLE ? store.copyLeases(canonicalCwd(candidate)) : [];
 	// Delivery copies follow the lease rule: non-consuming, release-engineer only, same absolute expiry for every spawn of this candidate.
 	const delivery = withLeases && role === LEASE_ROLE ? store.copyDelivery(canonicalCwd(candidate)) : [];
-	const value = claimed.length || leases.length || delivery.length ? serializeGrants(claimed, leases, delivery) : undefined;
+	// Normal commits are gated only in the trusted release-engineer launch (same trust signal as the lease copies).
+	const gateCommits = withLeases && role === LEASE_ROLE;
+	const value = claimed.length || leases.length || delivery.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits) : undefined;
 	return {
 		entry: guardFile,
 		grantCount: claimed.length,
 		leaseCount: leases.length,
 		deliveryCount: delivery.length,
+		gateCommits,
 		childEnv(base) {
 			const env: NodeJS.ProcessEnv = { ...base };
 			delete env[CHILD_GRANT_ENV];
@@ -1050,6 +1201,35 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 }
 
 export interface GuardBlock { block: true; reason: string }
+
+// Git state that makes a plain commit a different operation (merge, cherry-pick, revert, rebase, sequencer) and env that redirects repository, index, objects, namespace or config.
+const UNSAFE_GIT_STATE = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"];
+const REDIRECT_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+
+// A child release-engineer normal commit that matches a live commit lease: exact normal commit form, only GIT_COMMIT, cwd is the leased candidate root on the leased branch with the live origin binding, no merge-like state, no redirect env. Non-consuming; any throw or mismatch refuses.
+function leasedCommit(store: GrantStore, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_COMMIT") return false;
+	const normal = parseNormalCommit(decision.op.command);
+	if (!normal) return false;
+	try {
+		const root = decision.op.cwd;
+		if (REDIRECT_ENV.some((k) => process.env[k] !== undefined) || Object.keys(process.env).some((k) => k.startsWith("GIT_CONFIG_KEY_") || k.startsWith("GIT_CONFIG_VALUE_"))) return false;
+		const top = gitRead(root, ["rev-parse", "--show-toplevel"]);
+		if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(root)) return false;
+		const head = gitRead(root, ["symbolic-ref", "-q", "HEAD"]);
+		if (head?.length !== 1 || !head[0].startsWith("refs/heads/")) return false;
+		const branch = validatePushBranch(head[0].slice("refs/heads/".length));
+		const url = liveUrl(root, branch);
+		const lease = url === undefined ? undefined : store.findLease(root, branch, url);
+		if (lease?.commits !== true) return false;
+		const gitDir = gitRead(root, ["rev-parse", "--absolute-git-dir"]);
+		if (gitDir?.length !== 1 || UNSAFE_GIT_STATE.some((s) => fs.existsSync(path.join(gitDir[0], s)))) return false;
+		if (normal.file !== undefined && (!lease.artifactDir || checkArtifactFile(normal.file, lease.artifactDir) !== undefined)) return false;
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 // A child release-engineer push that matches a live lease: exact normal push, only GIT_PUBLISH, live binding must equal the lease. Non-consuming; any throw or mismatch refuses.
 function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
@@ -1065,19 +1245,21 @@ function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "bl
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
-	const decision = decideToolCall(toolName, input, cwd, guard.agentDir);
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+	// Commit gating is a trusted-child policy only; the main guard never gates commits.
+	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") return undefined;
 	if (decision.grantable && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
 	if (guard.scope === "child" && leasedPush(guard.store, decision, liveUrl)) return undefined;
+	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, guard.live ?? defaultDeliveryLive(liveUrl))) return undefined;
 	const how = decision.grantable ? "needs exact operator authorization via request_authorization" : "not grantable to a model: use the operator out-of-band";
 	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}.` };
 }
 
 // Authorization requests are accepted only for operations the guard would actually block and that are grantable.
-export function authorizableOp(kind: "shell" | "write", value: string, candidate: string, agentDir: string): GuardOp {
-	const decision = kind === "shell" ? decideToolCall("bash", { command: value }, candidate, agentDir) : decideToolCall("write", { path: value }, candidate, agentDir);
+export function authorizableOp(kind: "shell" | "write", value: string, candidate: string, agentDir: string, gateCommits = false): GuardOp {
+	const decision = kind === "shell" ? decideToolCall("bash", { command: value }, candidate, agentDir, gateCommits) : decideToolCall("write", { path: value }, candidate, agentDir);
 	if (decision.action !== "block" || !decision.grantable) throw new RangeError("operation is not a grantable risky operation");
 	validateOp(decision.op);
 	return decision.op;

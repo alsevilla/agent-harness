@@ -21,7 +21,7 @@ if (mode === "discover") {
 	const exts = loader.getExtensions();
 	const skills = loader.getSkills();
 	const prompts = loader.getPrompts();
-	console.log(JSON.stringify({ prompts: prompts.prompts.map((p) => p.name ?? p.filePath), extensions: exts.extensions.map((e) => e.resolvedPath), extensionErrors: exts.errors.map((e) => e.error), skills: skills.skills.map((s) => ({ name: s.name, filePath: s.filePath })), skillDiagnostics: skills.diagnostics.map((d) => String(d.message ?? d)) }));
+	console.log(JSON.stringify({ prompts: prompts.prompts.map((p) => p.name ?? p.filePath), promptFiles: prompts.prompts.map((p) => p.filePath), extensions: exts.extensions.map((e) => e.resolvedPath), extensionErrors: exts.errors.map((e) => e.error), skills: skills.skills.map((s) => ({ name: s.name, filePath: s.filePath })), skillDiagnostics: skills.diagnostics.map((d) => String(d.message ?? d)) }));
 } else {
 	throw new Error(`unknown probe mode: ${mode}`);
 }

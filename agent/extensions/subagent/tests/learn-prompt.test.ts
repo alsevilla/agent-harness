@@ -1,0 +1,106 @@
+// /learn prompt contract (static): the exported prompt resolves the installed engineering-harness module from the advertised SKILL.md path,
+// dedupes via bounded QMD or file-search fallback, and dispatches release-engineer with explicit destination authority.
+// Static checks only; they do not prove a live save, a live QMD query or a live subagent run.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { test } from "bun:test";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(HERE, "../../../..");
+const read = (rel: string) => fs.readFileSync(path.join(REPO, rel), "utf8");
+
+test("package.json exports only the learn prompt template", () => {
+	const manifest = JSON.parse(read("package.json"));
+	assert.deepEqual(manifest.pi.prompts, ["./agent/prompts/learn.md"]);
+	assert.ok(fs.existsSync(path.join(REPO, "agent/prompts/learn.md")));
+});
+
+test("learn prompt resolves the advertised engineering-harness SKILL.md and loads learn/index.md", () => {
+	const prompt = read("agent/prompts/learn.md");
+	assert.match(prompt, /^---\r?\ndescription: .+\r?\n---/);
+	assert.match(prompt, /advertised/i);
+	assert.match(prompt, /engineering-harness[\s\S]*SKILL\.md/);
+	assert.match(prompt, /learn\/index\.md/);
+	assert.match(prompt, /\$ARGUMENTS/);
+	assert.doesNotMatch(prompt, /~\/\.pi\/agent\/skills/, "no hardcoded home-directory skill path");
+});
+
+test("learn prompt names the three outcomes and forbids unverified SAVED", () => {
+	const prompt = read("agent/prompts/learn.md");
+	for (const outcome of ["SAVED", "NO LESSON", "BLOCKED"]) assert.match(prompt, new RegExp(outcome));
+	assert.match(prompt, /verif[\s\S]*destination[\s\S]*SAVED|SAVED[\s\S]*only after[\s\S]*verif/i);
+});
+
+test("learn prompt dedupes with bounded QMD or a file-search fallback, without refreshing the index", () => {
+	const prompt = read("agent/prompts/learn.md");
+	assert.match(prompt, /qmd_search/);
+	assert.match(prompt, /maxResults[\s\S]{0,40}(<=|at most)\s*5|at most 5/);
+	assert.match(prompt, /knowledge-general/);
+	assert.match(prompt, /knowledge-harness/);
+	assert.match(prompt, /fallback/i);
+	assert.match(prompt, /no automatic QMD refresh|does not refresh|not refresh/i);
+});
+
+test("learn prompt dispatches release-engineer with absolute module path and explicit scope", () => {
+	const prompt = read("agent/prompts/learn.md");
+	assert.match(prompt, /subagent/);
+	assert.match(prompt, /release-engineer/);
+	assert.match(prompt, /background:\s*false|background: false/);
+	for (const field of ["candidate", "evidence", "destination", "scope", "checks"]) assert.match(prompt, new RegExp(field));
+	assert.match(prompt, /absolute/i);
+	assert.match(prompt, /new (document|doc)[\s\S]{0,80}explicit/i);
+});
+
+test("learn module records the knowledge fields and authority rules from docs/knowledge/README.md", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	for (const field of ["Title", "claim", "Source", "Evidence status", "Context and date", "Revalidate when"]) assert.match(mod, new RegExp(field));
+	assert.match(mod, /docs\/knowledge\/README\.md/);
+	assert.match(mod, /explicit[\s\S]{0,60}destination/i);
+	assert.match(mod, /new document[\s\S]{0,80}explicit/i);
+	assert.match(mod, /QMD[\s\S]{0,80}(not|never)[\s\S]{0,40}authority/i);
+});
+
+test("release-engineer LEARN path resolution uses the packet's absolute module path", () => {
+	const role = read("agent/agents/release-engineer.md");
+	assert.match(role, /LEARN[\s\S]{0,200}absolute[\s\S]{0,120}(packet|module path)/i);
+});
+
+test("README reconciles no-prompts claims for learn only", () => {
+	const readme = read("README.md");
+	assert.match(readme, /exports one prompt template, `\/learn`/);
+	assert.match(readme, /other workflow and domain prompts[\s\S]{0,80}manual/i);
+});
+
+test("learn module defines the three-distinct-incident trigger with a confirmed shared root cause and REPORT evidence", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /three distinct completed incidents/i);
+	assert.match(mod, /sharing a confirmed root cause/i);
+	assert.match(mod, /completed Debug, Verify or worker REPORTs?/i);
+	assert.match(mod, /Retries or attempts of the same task are one incident/i);
+	assert.match(mod, /Similar error symptoms alone do not establish recurrence/i);
+	assert.match(mod, /prompts main to (review|trigger) a LEARN review|trigger main LEARN review/i);
+});
+
+test("three-incident trigger is evidence-driven: no history scan, counter, ledger or background pipeline; three is not a minimum", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /no mandatory history scan/i);
+	assert.match(mod, /already relevant to the current work/i);
+	assert.match(mod, /no counter, ledger/i);
+	assert.match(mod, /background pipeline/i);
+	assert.match(mod, /not a minimum/i);
+	assert.match(mod, /security or data-loss lesson/i);
+	assert.match(mod, /correction was requested at least twice/i, "distinct correction-twice trigger preserved");
+});
+
+test("LEARN reviews verify evidence, updates the canonical record, stays selective and never substitutes for a root-cause fix", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /review the Verify evidence and root cause/i);
+	assert.match(mod, /update the canonical (existing )?(record|lesson)[\s\S]{0,80}not (add|create) a duplicate/i);
+	assert.match(mod, /Retrieve selectively/i);
+	assert.match(mod, /revalidat/i);
+	assert.match(mod, /never substitutes? for (a |the )?root-cause fix or (a )?regression test/i);
+	assert.match(mod, /Saving remains an explicitly authorized release-engineer action/i);
+	assert.match(mod, /main verifies the actual destination content/i);
+});
