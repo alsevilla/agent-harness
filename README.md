@@ -1,12 +1,12 @@
-# Pi agent harness
+# Agent Harness
 
 #ai #coding #ai-agents #pi #developer-tools #agent-orchestration
 
 An independent, unofficial harness profile for [Pi](https://github.com/earendil-works/pi), the minimal extensible coding agent by Mario Zechner. It is not an official Pi project and is not endorsed by its authors.
 
-- Tested baseline: Pi 1.1.0 on Windows with Node 24.20.0 (targeted checks; see [Status and limits](#status-and-limits)).
-- Source release: v1.5.1.
-- The native Pi package `@alsevilla/pi-engineering-harness` (root `package.json`) is not published to npm. Install it with `pi install git:github.com/alsevilla/pi-agent-harness` as described in [Quickstart](#quickstart) and [Install](#install); a local checkout is an optional development alternative. The retired pi-package build and manual profile copies are no longer the install path.
+- Current support target: the current Pi release on Node.js 22.19.0 or newer. Historical targeted checks used Pi 1.1.0 and Node 24.20.0 on Windows; see [Status and limits](#status-and-limits).
+- Source release: v1.5.2.
+- The native Pi package `@alsevilla/pi-engineering-harness` (root `package.json`) is not published to npm. Install it with `pi install git:github.com/alsevilla/agent-harness` as described in [Quickstart](#quickstart) and [Install](#install); a local checkout is an optional development alternative. The retired pi-package build and manual profile copies are no longer the install path.
 
 ## What it does
 
@@ -36,10 +36,10 @@ The full policy is [agent/AGENTS.md](agent/AGENTS.md). Routing criteria and proc
 
 ## Quickstart
 
-Prerequisites: Pi 1.1.0, Node 24.20.0 (the tested Windows baseline), and your own Claude subscription or ChatGPT/Codex sign-in. No credentials are included.
+Prerequisites: a current Pi installation, Node.js 22.19.0 or newer, and your own Claude subscription or ChatGPT/Codex sign-in. No credentials are included.
 
-1. Check out this repository at a path you control, for example `C:/path/to/pi-agent-harness`.
-2. Install it as a native package with `pi install git:github.com/alsevilla/pi-agent-harness`. Details, including the default-branch note and the optional local checkout: [Install](#install).
+1. Check out this repository at a path you control, for example `C:/path/to/agent-harness`.
+2. Install it as a native package with `pi install git:github.com/alsevilla/agent-harness`. Details, including the default-branch note and the optional local checkout: [Install](#install).
 3. Optionally install the third-party integrations and create local configuration from the examples (`engineering-environment`, `qmd` and `refresh` only if you load them separately). Core orchestration does not need them.
 4. Restart Pi and sign in with `/login anthropic` and `/login openai-codex`.
 5. Run Pi from your project and open the worker inspector with `/subagent`.
@@ -55,7 +55,7 @@ Two kinds of command exist:
 
 ### Workflow prompts (AI workflow)
 
-Prompt templates: `/learn` is exported by the native package; the other workflow templates are manual, optional files. They send a packet to the model when loaded. The workflow commands load a procedure; only `/debug`, `/verify` and `/review` dispatch a named subagent. Provider or model availability failures retry once with the agent's configured GitHub Copilot fallback, only before any tool call.
+Prompt templates: `/learn` is exported by the native package; the other workflow templates are manual, optional files. They send a packet to the model when loaded. The workflow commands load a procedure; only `/debug`, `/verify` and `/review` dispatch a named subagent. Provider or model availability failures retry once with an available configured fallback, only before any tool call. GitHub Copilot support is planned but not currently available.
 
 | Command | What it does | Source |
 | --- | --- | --- |
@@ -191,7 +191,7 @@ Verified scope: the live check covered background batching and `/subagent usage`
 
 ## Status and limits
 
-- Install steps below name Pi 1.1.0 as the tested baseline; Pi 1.0.4 is historical. Targeted local checks ran on Windows with Node 24.20.0 and Pi 1.1.0 (subagent package defaults, roles editor and agent-creation collision guard). Public `pi-ai/compat` imports were verified on Pi 1.1.0 only; no minimum historical Pi version is claimed. Historical targeted Node 22.19 and Node 24.20 Windows checks for the subagent push-authorization fix (guard, unit and runtime suites; see [safety-core tests](agent/extensions/subagent/tests/safety-core.test.ts) and [guard runtime tests](agent/extensions/subagent/tests/safety-guard-runtime.node.ts)) are not full-stack Node 22 compatibility. Native macOS and Linux runs, live TTY behaviour, a clean host and interactive TTY behaviour are also unverified. These are not a blanket compatibility claim.
+- Current support target is the current Pi release on Node.js 22.19.0 or newer; no minimum historical Pi version is claimed. Historical targeted local checks ran on Windows with Node 24.20.0 and Pi 1.1.0 (subagent package defaults, roles editor and agent-creation collision guard). Public `pi-ai/compat` imports were verified on Pi 1.1.0 only. Historical targeted Node 22.19 and Node 24.20 Windows checks for the subagent push-authorization fix (guard, unit and runtime suites; see [safety-core tests](agent/extensions/subagent/tests/safety-core.test.ts) and [guard runtime tests](agent/extensions/subagent/tests/safety-guard-runtime.node.ts)) are not full-stack Node 22 compatibility. Native macOS and Linux runs, live TTY behaviour, a clean host and interactive TTY behaviour are also unverified. These are not a blanket compatibility claim.
 - Roles use Anthropic (Claude) and OpenAI Codex (GPT) models. The profile uses direct Claude subscription and ChatGPT/Codex sign-in; CLIProxyAPI is not required. You need your own sign-in or API key; no credentials are included.
 - Role discovery covers the bundled generic roles (`agent/roles.json` and `agent/agents/*.md` in the native package), your user roles in the Pi agent directory's `agents/` folder (`~/.pi/agent/agents/` by default; user `roles.json` fields override a bundled role's fields), and project roles in `.pi/agents/`, which use their own frontmatter. Precedence: package < user < project.
 - Changes to subagent extension files take effect only after a Pi reload or restart at a safe point, once active workers finish.
@@ -207,15 +207,15 @@ Verified scope: the live check covered background batching and `/subagent usage`
 Native installation from the Git source. There is no automatic installer, and the package is not published to npm. Installing adds one package entry to `~/.pi/agent/settings.json`; `--local` or `-l` writes it to `.pi/settings.json` instead, which Pi reads only after project trust.
 
 ```text
-pi install git:github.com/alsevilla/pi-agent-harness
+pi install git:github.com/alsevilla/agent-harness
 ```
 
-Pi treats a `git:` source as a Git package: it clones the repository and reconciles the checkout to the selected ref (`docs/packages.md`). Only a tag or commit ref is pinned, for example `git:github.com/alsevilla/pi-agent-harness@<tag-or-commit>`. The unqualified source and a branch ref such as `@fix/worker-prompts-and-domain-separation` are not pinned, so `pi update` can move them to newer commits. The unqualified source requires this change on the repository's default branch; until it is merged there, PR testing can use `pi install git:github.com/alsevilla/pi-agent-harness@fix/worker-prompts-and-domain-separation` if necessary.
+Pi treats a `git:` source as a Git package: it clones the repository and reconciles the checkout to the selected ref (`docs/packages.md`). Only a tag or commit ref is pinned, for example `git:github.com/alsevilla/agent-harness@<tag-or-commit>`. The unqualified source is not pinned: it follows the repository's default branch (`master`) and can move to newer commits when you run `pi update`; use a tag or commit ref when you need a pinned version.
 
 **Optional development alternative: local checkout.** To run a working copy, install its absolute path. Pi loads the root `package.json` in place: the checkout is not copied into `~/.pi/agent`, and you update that checkout yourself.
 
 ```text
-pi install C:/path/to/pi-agent-harness
+pi install C:/path/to/agent-harness
 ```
 
 Use an absolute path for a local checkout. The install, remove and update commands in this section are standard Pi commands from Pi's package documentation (`docs/packages.md`, `docs/cli.md`); they were not executed in this verification. The package declares two default extensions (`agent/extensions/subagent`, `agent/extensions/ask-user`) and two skills (`agent/skills/engineering-harness`, `agent/skills/agent-creation`). The 20 generic roles are read from `agent/roles.json` and `agent/agents/`. `engineering-environment`, `qmd` and `refresh` are not in the default exports: they stay in the repository, and the sections below that describe them apply only if you load them separately.
@@ -240,9 +240,9 @@ Apply the optional connector correction as described in [patches/claude-subscrip
 
 Run Pi from your project. `/subagent` opens worker history and live activity; its command controls and the orchestrator's `subagent_control` tool support steering and pause/resume. See the [subagent documentation](agent/extensions/subagent/README.md). The inspector's outside-click compatibility path depends on Pi TUI internals and should be rechecked after a Pi upgrade. Changes to subagent extension files take effect only after a Pi reload or restart at a safe point, once active workers finish.
 
-**Update.** `pi update git:github.com/alsevilla/pi-agent-harness` reconciles this package (`pi update --extensions` reconciles all installed packages; `pi update` alone updates Pi itself). Then restart Pi, or reload at a safe point after active workers finish. A local checkout is updated by you, not by Pi. The update command was not run in this verification, and this repository does not test the update flow.
+**Update.** `pi update git:github.com/alsevilla/agent-harness` reconciles this package (`pi update --extensions` reconciles all installed packages; `pi update` alone updates Pi itself). Then restart Pi, or reload at a safe point after active workers finish. A local checkout is updated by you, not by Pi. The update command was not run in this verification, and this repository does not test the update flow.
 
-**Remove.** `pi remove git:github.com/alsevilla/pi-agent-harness` removes the package and its settings entry (`pi uninstall` is an alias), then restart Pi. Pi identifies git packages by repository URL without the ref. For a local checkout, use `pi remove C:/path/to/pi-agent-harness`. The removal command was not run in this verification.
+**Remove.** `pi remove git:github.com/alsevilla/agent-harness` removes the package and its settings entry (`pi uninstall` is an alias), then restart Pi. Pi identifies git packages by repository URL without the ref. For a local checkout, use `pi remove C:/path/to/agent-harness`. The removal command was not run in this verification.
 
 **Old manual copies (double-load).** Earlier installs copied `agent/` files into `~/.pi/agent`. Those copies and the native package can both load the same extensions and skills. Migrating them is a separate, coordinated step: this change does not remove, edit or reload any live copy. Back up `~/.pi/agent` before removing old copies, and remove them deliberately.
 
@@ -287,7 +287,7 @@ Your agent directory already discovers every catalog when the checkout's `agent/
 {
   "skills": [
     "!**/.agents/skills/browser/SKILL.md",
-    "C:/path/to/pi-agent-harness/agent/skills/backend/SKILL.md"
+    "C:/path/to/agent-harness/agent/skills/backend/SKILL.md"
   ]
 }
 ```
@@ -305,7 +305,7 @@ Your agent directory already discovers every catalog when the checkout's `agent/
 ### Parent sessions and subagents
 
 - Skills and `--skill` apply to the parent Pi session. Subagent children start with `--no-skills` (`agent/extensions/subagent/index.ts`), so they do not receive catalogs from your settings.
-- For a worker to use a module, the task packet must give its absolute path, for example `C:/path/to/pi-agent-harness/agent/skills/backend/rust-axum-engineering/index.md`, and say to read it.
+- For a worker to use a module, the task packet must give its absolute path, for example `C:/path/to/agent-harness/agent/skills/backend/rust-axum-engineering/index.md`, and say to read it.
 - Role files and prompts refer to `~/.pi/agent/skills/...` literally (for example `agent/agents/frontend-worker.md`). Skill settings do not repoint those paths: keep the catalogs there or edit the references.
 - The Graphify code integration passes `--skill <agent-dir>/skills/graphify/SKILL.md` when enabled ([code navigation setup](#code-navigation-setup-optional)).
 

@@ -295,16 +295,16 @@ test("the README's primary install, update and remove commands use the Git sourc
 	};
 	const quickstart = section("## Quickstart");
 	const install = section("## Install");
-	const GIT = "git:github.com/alsevilla/pi-agent-harness";
+	const GIT = "git:github.com/alsevilla/agent-harness";
 	assert.ok(quickstart.includes(`pi install ${GIT}`), "Quickstart installs from the Git source");
 	assert.ok(install.includes("```text\npi install " + GIT + "\n```"), "Install's first command is the Git source");
 	assert.ok(install.includes(`pi update ${GIT}`), "update names the Git source");
 	assert.ok(install.includes(`pi remove ${GIT}`), "remove names the Git source");
 	assert.match(install, /not pinned/, "unqualified source is not described as pinned");
-	assert.match(install, /default branch/, "unqualified source requires this change on the default branch");
-	assert.ok(install.includes("@fix/worker-prompts-and-domain-separation"), "PR testing ref");
+	assert.match(install, /default branch \(`master`\)/, "unqualified source follows the target default branch");
+	assert.doesNotMatch(install, /@fix\/worker-prompts-and-domain-separation/, "obsolete feature branch is not offered as an install target");
 	assert.match(install, /optional development/i, "local checkout is an optional development alternative");
-	assert.ok(install.includes("pi install C:/path/to/pi-agent-harness"), "local checkout command stays documented");
+	assert.ok(install.includes("pi install C:/path/to/agent-harness"), "local checkout command stays documented");
 	assert.match(install, /not executed/, "install, update and remove were not executed");
 	assert.doesNotMatch(readme, /Install it from a local checkout|pi install <absolute checkout path>|`git:` sources are not covered/);
 	assert.doesNotMatch(readme, /git:github\.com\/alsevilla\/pi-agent-harness-pi-package|x-access-token|ghp_|github_pat_/);
@@ -315,6 +315,7 @@ test("the README states the two default native extensions, opt-in external compa
 	for (const rel of [...NATIVE_EXTENSIONS.map((r) => path.posix.dirname(r.slice(2))), ...NATIVE_SKILLS.map((r) => r.slice(2))]) assert.ok(readme.includes(rel), rel);
 	assert.doesNotMatch(readme, /Five profile skills|registers one browser skill/);
 	assert.match(readme, /native package exports one prompt template, `\/learn`/);
+	assert.match(readme, /GitHub Copilot support is planned but not currently available/);
 	assert.doesNotMatch(readme, /exports no prompt templates|the public SDK loader reports none/);
 	assert.match(readme, /manual, optional prompt templates/i);
 	assert.match(readme, /`engineering-environment`, `qmd` and `refresh` are not in the default exports/);
