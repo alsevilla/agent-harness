@@ -315,7 +315,7 @@ test("the README states the two default native extensions, opt-in external compa
 	for (const rel of [...NATIVE_EXTENSIONS.map((r) => path.posix.dirname(r.slice(2))), ...NATIVE_SKILLS.map((r) => r.slice(2))]) assert.ok(readme.includes(rel), rel);
 	assert.doesNotMatch(readme, /Five profile skills|registers one browser skill/);
 	assert.match(readme, /native package exports one prompt template, `\/learn`/);
-	assert.match(readme, /GitHub Copilot support is planned but not currently available/);
+	assert.match(readme, /Copilot CLI harness integration is not available yet; this does not remove Pi's built-in GitHub Copilot model provider/);
 	assert.doesNotMatch(readme, /exports no prompt templates|the public SDK loader reports none/);
 	assert.match(readme, /manual, optional prompt templates/i);
 	assert.match(readme, /`engineering-environment`, `qmd` and `refresh` are not in the default exports/);
