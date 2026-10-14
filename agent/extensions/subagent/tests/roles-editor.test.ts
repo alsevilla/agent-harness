@@ -1768,4 +1768,130 @@ async function runNodeSuite(): Promise<void> {
 		fs.rmSync(path.join(fx.dir, "agents"), { recursive: true });
 		assert.throws(() => editor.readRoleSnapshot(fx.dir, "ghost", pkg), (e: Error) => e.name === "RoleEditError" && /missing definition file/.test(e.message));
 	});
+
+	// Tier-only registry (new format): roles.json entries carry defaultModelTier + modelTiers and no provider; annotated definitions carry pi.* metadata.
+	const TIER_ROLES = [
+		{ name: "alpha", defaultModelTier: "capable", modelTiers: { economy: { model: "anthropic/claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna||github-copilot/gpt-6-luna", thinking: "low" }, capable: { model: "openai-codex/gpt-6.1-sol", fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } }, tools: "read, grep" },
+		{ name: "beta", defaultModelTier: "economy", modelTiers: { economy: { model: "openai-codex/gpt-6-luna", fallbackModel: "", thinking: "medium" } }, tools: "read" },
+	];
+	// Annotated definition: native root model/tools/body are fixed; only metadata pi.model/pi.fallbackModel/pi.thinking follow the default tier.
+	function tierMd(role: any, native = "claude-native-root"): string {
+		const tier = role.modelTiers[role.defaultModelTier];
+		return ["---", `name: ${role.name}`, `description: ${role.name} tier test role`, `tools: ${role.tools}`, `model: ${native}`, "metadata:", `  pi.model: "${tier.model}"`, `  pi.fallbackModel: "${tier.fallbackModel}"`, `  pi.thinking: "${tier.thinking}"`, `  pi.tools: "${role.tools}"`, "---", `Body for ${role.name}.`, "", "Second paragraph.", ""].join("\n");
+	}
+	function tierFixture(roles: any[], md: Record<string, string> = {}) {
+		return newFixture({ roles, md: { ...Object.fromEntries(roles.map((r) => [r.name, tierMd(r)])), ...md } });
+	}
+	function overlayFixture(roles: any[]) {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "roles-editor-overlay-"));
+		dirs.push(dir);
+		fs.writeFileSync(path.join(dir, "roles.json"), formatJson(roles, "\n"));
+		fs.mkdirSync(path.join(dir, "agents"));
+		process.env.PI_CODING_AGENT_DIR = dir;
+		return { dir, registryPath: path.join(dir, "roles.json") };
+	}
+	function tierPackage(): string {
+		const pkg = fs.mkdtempSync(path.join(os.tmpdir(), "roles-editor-tierpkg-"));
+		dirs.push(pkg);
+		fs.mkdirSync(path.join(pkg, "agents"), { recursive: true });
+		fs.writeFileSync(path.join(pkg, "roles.json"), formatJson(TIER_ROLES, "\n"));
+		for (const role of TIER_ROLES) fs.writeFileSync(path.join(pkg, "agents", `${role.name}.md`), tierMd(role));
+		return pkg;
+	}
+
+	test("tier registry: a default-tier save rewrites only that tier; other tiers, defaultModelTier, tools and name keep their bytes; the annotated definition changes only pi.* metadata", async () => {
+		const fx = tierFixture(TIER_ROLES);
+		const run = fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true });
+		await editor.editRoleConfig(run.ctx, { packageRoot: null });
+		const expected = TIER_ROLES.map((r) => (r.name !== "alpha" ? r : { ...r, modelTiers: { economy: r.modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } } }));
+		assert.equal(fs.readFileSync(fx.registryPath, "utf8"), formatJson(expected, "\n"));
+		assert.equal(fs.readFileSync(fx.agentPath("alpha"), "utf8"), tierMd(expected[0]), "native root model, tools and body must not change");
+		assert.equal(fs.readFileSync(fx.agentPath("beta"), "utf8"), tierMd(TIER_ROLES[1]));
+		const found = agents.discoverAgents(fx.dir, "user").agents.find((a: any) => a.name === "alpha");
+		assert.ok(found, "discovery must load the saved tier role");
+		assert.equal(found.model, SLASH_REF);
+		assert.deepEqual(found.fallbackModel, ["anthropic/claude-sonnet-5-5"]);
+		assert.equal(found.thinking, "high");
+	});
+
+	test("tier package default: a fresh-profile save writes a user overlay with the complete effective tier map and no tools copy; package bytes unchanged", async () => {
+		const pkg = tierPackage();
+		const dir = freshProfile();
+		const pkgBefore = snapshotDir(pkg);
+		const run = fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true });
+		await editor.editRoleConfig(run.ctx, { packageRoot: pkg });
+		const expected = [{ name: "alpha", defaultModelTier: "capable", modelTiers: { economy: TIER_ROLES[0].modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } } }];
+		assert.equal(fs.readFileSync(path.join(dir, "roles.json"), "utf8"), formatJson(expected, "\n"));
+		assert.equal(fs.existsSync(path.join(dir, "agents")), false, "no definition copy may be created");
+		assert.deepEqual(snapshotDir(pkg), pkgBefore, "package defaults are read-only");
+	});
+
+	test("tools-only overlay inherits the packaged tier map and keeps its tools; a modelTiers overlay replaces the package map atomically (no package slot refilled)", async () => {
+		const pkg = tierPackage();
+		const toolsOnly = overlayFixture([{ name: "alpha", tools: "read" }]);
+		await editor.editRoleConfig(fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true }).ctx, { packageRoot: pkg });
+		assert.equal(fs.readFileSync(toolsOnly.registryPath, "utf8"), formatJson([{ name: "alpha", defaultModelTier: "capable", modelTiers: { economy: TIER_ROLES[0].modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } }, tools: "read" }], "\n"));
+		const atomic = overlayFixture([{ name: "alpha", modelTiers: { capable: { model: "openai-codex/gpt-6.1-sol", fallbackModel: "", thinking: "high" } } }]);
+		await editor.editRoleConfig(fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true }).ctx, { packageRoot: pkg });
+		assert.equal(fs.readFileSync(atomic.registryPath, "utf8"), formatJson([{ name: "alpha", defaultModelTier: "capable", modelTiers: { capable: { model: SLASH_REF, fallbackModel: "", thinking: "high" } } }], "\n"));
+	});
+
+	test("tier registry refusals: invalid defaultModelTier, malformed tier fallbackModel and mixed legacy fields refuse with no fallback to the package and no writes", async () => {
+		const pkg = tierPackage();
+		const cases: Array<[string, unknown, RegExp]> = [
+			["invalid defaultModelTier", { name: "alpha", defaultModelTier: "premium", modelTiers: TIER_ROLES[0].modelTiers, tools: "read" }, /defaultModelTier must be economy or capable/],
+			["malformed tier fallbackModel", { name: "alpha", defaultModelTier: "capable", modelTiers: { capable: { model: "openai-codex/gpt-6.1-sol", fallbackModel: "not qualified", thinking: "high" } } }, /fallbackModel must be/],
+			["mixed legacy provider", { name: "alpha", provider: "openai-codex", defaultModelTier: "capable", modelTiers: TIER_ROLES[0].modelTiers }, /mixes defaultModelTier/],
+		];
+		for (const [label, entry, pattern] of cases) {
+			const fx = overlayFixture([entry]);
+			const before = snapshotDir(fx.dir);
+			assert.throws(() => editor.readRoleSnapshot(fx.dir, "alpha", pkg), (e: Error) => e.name === "RoleEditError" && pattern.test(e.message), label);
+			const run = fakeCtx([]);
+			await editor.editRoleConfig(run.ctx, { packageRoot: pkg });
+			assert.equal(run.dialogs.length, 0, label);
+			assert.equal(run.notes.at(-1)?.type, "error", label);
+			assert.deepEqual(snapshotDir(fx.dir), before, label);
+		}
+	});
+
+	test("explicit empty modelTiers under a configured default fails closed: nothing refills from the package, no dialog past the name, no write", async () => {
+		const pkg = tierPackage();
+		const fx = overlayFixture([{ name: "alpha", defaultModelTier: "capable", modelTiers: {} }]);
+		const before = snapshotDir(fx.dir);
+		assert.throws(() => editor.readRoleSnapshot(fx.dir, "alpha", pkg), (e: Error) => e.name === "RoleEditError" && /defaultModelTier "capable" is not configured/.test(e.message));
+		const run = fakeCtx(["alpha"]);
+		await editor.editRoleConfig(run.ctx, { packageRoot: pkg });
+		assert.equal(run.dialogs.length, 1);
+		assert.equal(run.notes.at(-1)?.type, "error");
+		assert.deepEqual(snapshotDir(fx.dir), before);
+	});
+
+	test("annotated definition whose pi.* metadata disagrees with the effective roles.json default is refused, not masked by the package default", async () => {
+		const pkg = tierPackage();
+		// Profile alpha moves its capable model; its definition still carries the packaged default in metadata.
+		const moved = TIER_ROLES.map((r) => (r.name !== "alpha" ? r : { ...r, modelTiers: { ...r.modelTiers, capable: { ...r.modelTiers.capable, model: SLASH_REF } } }));
+		const fx = tierFixture(moved, { alpha: tierMd(TIER_ROLES[0]) });
+		const before = snapshotDir(fx.dir);
+		assert.throws(() => editor.readRoleSnapshot(fx.dir, "alpha", pkg), (e: Error) => e.name === "RoleEditError" && /metadata/.test(e.message));
+		const run = fakeCtx(["alpha"]);
+		await editor.editRoleConfig(run.ctx, { packageRoot: pkg });
+		assert.equal(run.notes.at(-1)?.type, "error");
+		assert.deepEqual(snapshotDir(fx.dir), before);
+	});
+
+	test("tier oracle with empty fallback: Cancel writes nothing; Save keeps fallbackModel \"\" in roles.json and pi.fallbackModel, native model and body unchanged", async () => {
+		const oracle = { name: "oracle", defaultModelTier: "capable", modelTiers: { capable: { model: CURRENT_REF, fallbackModel: "", thinking: "high" } }, tools: "read, grep, find, ls, bash, powershell" };
+		const fx = tierFixture([oracle], { oracle: tierMd(oracle, "claude-opus-5.5") });
+		const before = snapshotDir(fx.dir);
+		const steps = ["oracle", choose(`Current ${CURRENT_REF}`), "Done", choose("medium")];
+		await editor.editRoleConfig(fakeCtx([...steps, CANCEL], true, { custom: true }).ctx, { packageRoot: null });
+		assert.deepEqual(snapshotDir(fx.dir), before, "Cancel must leave every byte identical");
+		await editor.editRoleConfig(fakeCtx([...steps, SAVE], true, { custom: true }).ctx, { packageRoot: null });
+		const saved = JSON.parse(fs.readFileSync(fx.registryPath, "utf8"))[0];
+		assert.deepEqual(saved.modelTiers.capable, { model: CURRENT_REF, fallbackModel: "", thinking: "medium" });
+		const edited = { ...oracle, modelTiers: { capable: { model: CURRENT_REF, fallbackModel: "", thinking: "medium" } } };
+		assert.equal(fs.readFileSync(fx.agentPath("oracle"), "utf8"), tierMd(edited, "claude-opus-5.5"));
+		assert.match(fs.readFileSync(fx.agentPath("oracle"), "utf8"), /^  pi\.fallbackModel: ""$/m);
+	});
 }

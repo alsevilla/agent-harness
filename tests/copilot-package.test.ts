@@ -78,13 +78,14 @@ const agentNames = () => JSON.parse(readFileSync(join(root, "agent", "roles.json
 
 test("all profiles expose native Copilot headers and preserve Pi runtime settings", async () => {
   const aliases: Record<string, string> = { read: "read", grep: "search", find: "search", ls: "search", bash: "execute", powershell: "execute", edit: "edit", write: "edit" };
-  const roles = JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")) as Array<Record<string, string>>;
+  const roles = JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")) as Array<{ name: string; defaultModelTier: string; modelTiers: Record<string, { model: string; fallbackModel: string; thinking: string }>; tools: string }>;
   for (const role of roles) {
+    const tier = role.modelTiers[role.defaultModelTier];
     const text = readFileSync(join(nativeAgents, `${role.name}.md`), "utf8");
     const { metadata } = frontmatter(text);
     const sdk = await sdkFrontmatter(text);
-    const expected = { "pi.model": `${role.provider}/${role.model}`, "pi.fallbackModel": role.fallbackModel, "pi.thinking": role.thinking, "pi.tools": role.tools };
-    expect(metadata.model).toBe(copilotModels[`${role.provider}/${role.model}`]);
+    const expected = { "pi.model": tier.model, "pi.fallbackModel": tier.fallbackModel, "pi.thinking": tier.thinking, "pi.tools": role.tools };
+    expect(metadata.model).toBe(copilotModels[tier.model]);
     expect(metadata.fallbackModel).toBeUndefined();
     expect(metadata.thinking).toBeUndefined();
     expect(metadata.pi).toBeUndefined();

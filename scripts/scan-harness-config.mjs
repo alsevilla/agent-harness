@@ -11,9 +11,16 @@ const numericDescending = (a, b) => b.localeCompare(a, undefined, { numeric: tru
 const here = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(here, "..");
 const SENSITIVE = ["auth.json", "settings.json"];
-const TOOLS_KEYS = ["provider", "model", "thinking", "tools"];
 const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 const ROLE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+// Shape constants mirror the house reader (agents.ts): new-format keys, legacy flat keys, tier names, effort vocabulary and qualified IDs.
+const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools"];
+const LEGACY_ROLE_KEYS = ["provider", "model", "fallbackModel", "thinking"];
+const TIER_NAMES = ["economy", "capable"];
+const TIER_KEYS = ["model", "fallbackModel", "thinking"];
+const LEGACY_TIER_KEYS = ["provider", "model", "fallbackModel"];
+const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const QUALIFIED_MODEL = /^[^\s/]+\/\S+$/;
 const parseFrontmatter = loadParser();
 
 // House parser: the installed pi package's parseFrontmatter (same code agents.ts uses). Found relative to this profile, then by normal resolution.
@@ -41,6 +48,107 @@ function loadParser() {
 	throw new Error(`house parseFrontmatter unavailable: install ${PACKAGE} for this profile`);
 }
 
+const isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+// Same grammar as agents.ts parseQualifiedFallbacks: "" means no fallback; otherwise ||-separated tokens (a blank token is invalid).
+const parseFallbacks = (text) => (text === "" ? [] : text.split("||").map((token) => token.trim()));
+const fallbackKey = (text) => [...new Set(parseFallbacks(String(text ?? "")))].join("||");
+
+// agents.ts entryFormat: "tier" (defaultModelTier or tier-only definitions), "legacy" (flat or per-tier provider), "mixed" or "neutral".
+function entryFormat(entry) {
+	const values = isPlainObject(entry.modelTiers) ? Object.values(entry.modelTiers) : [];
+	const legacy = LEGACY_ROLE_KEYS.some((key) => key in entry) || values.some((value) => isPlainObject(value) && "provider" in value);
+	const tier = "defaultModelTier" in entry || values.some((value) => !isPlainObject(value) || !("provider" in value) || "thinking" in value);
+	if (legacy && tier) return "mixed";
+	return tier ? "tier" : legacy ? "legacy" : "neutral";
+}
+
+// Field-name-only problems for one tier definition; no value is ever echoed.
+function tierProblems(at, def) {
+	if (!isPlainObject(def)) return [`${at} must be an object`];
+	const found = [];
+	const unknown = Object.keys(def).filter((key) => !TIER_KEYS.includes(key)).length;
+	if (unknown) found.push(`${at} has ${unknown} unknown key(s)`);
+	if (typeof def.model !== "string" || !QUALIFIED_MODEL.test(def.model)) found.push(`${at}.model must be a provider/id model`);
+	if (typeof def.fallbackModel !== "string" || !parseFallbacks(def.fallbackModel).every((token) => QUALIFIED_MODEL.test(token))) found.push(`${at}.fallbackModel must be "" or provider/id models separated by ||`);
+	if (!EFFORTS.includes(def.thinking)) found.push(`${at}.thinking must be one of ${EFFORTS.join(", ")}`);
+	return found;
+}
+
+// New format: the declared slot is modelTiers[defaultModelTier]; every configured tier is validated, and a defective default yields no slot.
+function tierSlot(r, problems) {
+	const name = r.name;
+	if (!("defaultModelTier" in r)) problems.push(`${name}.defaultModelTier is required for the new format`);
+	else if (!TIER_NAMES.includes(r.defaultModelTier)) problems.push(`${name}.defaultModelTier must be economy or capable`);
+	if (!isPlainObject(r.modelTiers)) {
+		problems.push(`${name}.modelTiers must be an object`);
+		return null;
+	}
+	const defective = new Set();
+	for (const [tier, def] of Object.entries(r.modelTiers)) {
+		if (!TIER_NAMES.includes(tier)) {
+			problems.push(`${name}.modelTiers has an unknown tier name`);
+			continue;
+		}
+		const found = tierProblems(`${name}.modelTiers.${tier}`, def);
+		if (found.length) defective.add(tier);
+		problems.push(...found);
+	}
+	const dflt = r.defaultModelTier;
+	if (!TIER_NAMES.includes(dflt)) return null;
+	if (!Object.hasOwn(r.modelTiers, dflt)) {
+		problems.push(`${name}.defaultModelTier is not configured in modelTiers`);
+		return null;
+	}
+	if (defective.has(dflt)) return null;
+	const tier = r.modelTiers[dflt];
+	return { model: tier.model, fallbackModel: [...new Set(parseFallbacks(tier.fallbackModel))], thinking: tier.thinking, tools: r.tools };
+}
+
+// Bounded legacy (flat scalars or per-tier provider) and neutral entries: the slot is the flat provider/model; per-tier rows are checked like agents.ts.
+function legacySlot(r, problems) {
+	const name = r.name;
+	for (const key of ["provider", "model", "thinking"]) if (typeof r[key] !== "string" || !r[key].trim()) problems.push(`${name}.${key} must be a non-empty string`);
+	if (typeof r.fallbackModel !== "string") problems.push(`${name}.fallbackModel must be a string (may be empty)`);
+	if (r.modelTiers !== undefined && !isPlainObject(r.modelTiers)) problems.push(`${name}.modelTiers must be an object`);
+	for (const [tier, def] of Object.entries(isPlainObject(r.modelTiers) ? r.modelTiers : {})) {
+		if (!TIER_NAMES.includes(tier)) {
+			problems.push(`${name}.modelTiers has an unknown tier name`);
+			continue;
+		}
+		const unknown = isPlainObject(def) ? Object.keys(def).filter((key) => !LEGACY_TIER_KEYS.includes(key)).length : 0;
+		if (!isPlainObject(def) || unknown || typeof def.provider !== "string" || !def.provider.trim() || typeof def.model !== "string" || !def.model.trim() || typeof def.fallbackModel !== "string" || !parseFallbacks(def.fallbackModel).some(Boolean)) problems.push(`${name}.modelTiers.${tier} has invalid provider, model or fallbackModel`);
+	}
+	if (problems.length) return null;
+	const model = r.model.trim();
+	return { model: model.includes("/") ? model : `${r.provider}/${model}`, fallbackModel: [...new Set(parseFallbacks(r.fallbackModel))], thinking: r.thinking, tools: r.tools };
+}
+
+// One roles.json entry: every problem is field-named; the slot is returned only when the entry has none, so no annotation or legacy field can stand in for a broken default.
+function checkRole(r) {
+	const format = entryFormat(r);
+	const problems = [];
+	let slot = null;
+	if (format === "mixed") problems.push(`${r.name} mixes defaultModelTier or tier thinking with legacy provider, model, fallbackModel or thinking fields`);
+	else {
+		const unknown = Object.keys(r).filter((key) => !ROLE_KEYS.includes(key)).length;
+		if (unknown) problems.push(`${r.name} has ${unknown} unknown key(s)`);
+		if (typeof r.tools !== "string" || !r.tools.trim()) problems.push(`${r.name}.tools must be a non-empty string`);
+		slot = format === "tier" ? tierSlot(r, problems) : legacySlot(r, problems);
+	}
+	return { problems, slot: problems.length ? null : slot };
+}
+
+// Declared default per shipped role (name -> {model, fallbackModel[], thinking, tools}); entries with any shape problem are omitted.
+export function declaredDefaults(registry) {
+	const slots = new Map();
+	for (const r of Array.isArray(registry) ? registry : []) {
+		if (!isPlainObject(r) || typeof r.name !== "string" || slots.has(r.name)) continue;
+		const { slot } = checkRole(r);
+		if (slot) slots.set(r.name, slot);
+	}
+	return slots;
+}
+
 export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, packageRoot } = {}) {
 	const findings = [];
 	const add = (level, rule, file, message) => findings.push({ level, rule, file, message });
@@ -62,14 +170,14 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 		}
 	};
 	// Names only: the parity message never repeats a value.
-	const checkParity = (role, fm, file) => {
+	const checkParity = (slot, fm, file) => {
 		const normTools = (v) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean).join(", ") : "");
 		const metadata = fm.metadata && typeof fm.metadata === "object" && !Array.isArray(fm.metadata) ? fm.metadata : {};
 		const fields = [
-			["model", `${role.provider}/${role.model}`, "model"],
-			["fallbackModel", role.fallbackModel ?? "", "fallbackModel"],
-			["thinking", role.thinking ?? "", "thinking"],
-			["tools", normTools(role.tools), "tools"],
+			["model", slot.model, "model"],
+			["fallbackModel", slot.fallbackModel.join("||"), "fallbackModel"],
+			["thinking", slot.thinking, "thinking"],
+			["tools", normTools(slot.tools), "tools"],
 		];
 		for (const [label, expected, key] of fields) {
 			const annotation = `pi.${key}`;
@@ -82,7 +190,7 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 				add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${annotation} is invalid`);
 				continue;
 			}
-			const normalized = key === "tools" ? normTools(actual) : actual;
+			const normalized = key === "tools" ? normTools(actual) : key === "fallbackModel" ? fallbackKey(actual) : actual;
 			if (String(expected) !== String(normalized ?? "")) add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${annotation} differs from roles.json`);
 		}
 	};
@@ -106,7 +214,7 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 
 	const roles = readJson("agent/roles.json");
 	const roleNames = new Set();
-	const roleByName = new Map();
+	const slotByName = new Map();
 	if (Array.isArray(roles)) {
 		for (const [i, r] of roles.entries()) {
 			if (!r || typeof r !== "object" || typeof r.name !== "string" || !r.name) {
@@ -116,11 +224,9 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 			if (!ROLE_NAME.test(r.name)) add("ERROR", "UNSAFE_PATH", "agent/roles.json", `entry ${i} has an unsafe role name`);
 			if (roleNames.has(r.name)) add("ERROR", "ROLE_DUPLICATE", "agent/roles.json", `duplicate role ${r.name}`);
 			roleNames.add(r.name);
-			if (!roleByName.has(r.name)) roleByName.set(r.name, r);
-			for (const key of TOOLS_KEYS) {
-				if (typeof r[key] !== "string" || !r[key].trim()) add("ERROR", "ROLE_SHAPE", "agent/roles.json", `${r.name}.${key} must be a non-empty string`);
-			}
-			if (typeof r.fallbackModel !== "string") add("ERROR", "ROLE_SHAPE", "agent/roles.json", `${r.name}.fallbackModel must be a string (may be empty)`);
+			const { problems, slot } = checkRole(r);
+			for (const message of problems) add("ERROR", "ROLE_SHAPE", "agent/roles.json", message);
+			if (slot && !slotByName.has(r.name)) slotByName.set(r.name, slot);
 			if (typeof r.tools === "string" && r.tools.includes("*")) add("ERROR", "GRANT_WILDCARD", "agent/roles.json", `${r.name}.tools contains a wildcard`);
 			if (typeof r.tools === "string") checkGrants(r.tools.split(","), "agent/roles.json", `${r.name}.tools`);
 		}
@@ -141,8 +247,8 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 				continue;
 			}
 			if (fm.name !== base) add("ERROR", "FRONTMATTER_NAME_MISMATCH", rel, `frontmatter name ${fm.name === undefined ? "missing" : "differs from file name"}`);
-			const role = roleByName.get(base);
-			if (role) checkParity(role, fm, rel);
+			const slot = slotByName.get(base);
+			if (slot) checkParity(slot, fm, rel);
 		}
 	} catch {
 		add("ERROR", "FILE_MISSING", "agent/agents", "agents directory missing");

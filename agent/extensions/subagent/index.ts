@@ -861,12 +861,14 @@ export default function (pi: ExtensionAPI) {
 			if (!preparedDispatch) {
 				for (let i = 0; i < tierRequests.length; i++) {
 					const request = tierRequests[i] as { agent: string; modelTier?: unknown; id?: string };
-					if (request.modelTier === undefined) continue;
 					const location = hasDag ? `dag node "${request.id}"` : hasChain ? `chain[${i}]` : hasTasks ? `tasks[${i}]` : "single";
-					if (request.modelTier !== "economy" && request.modelTier !== "capable") return { content: [{ type: "text", text: `Invalid modelTier: ${location}: expected economy or capable.` }], details: makeDetails(mode)([]), isError: true };
+					if (request.modelTier !== undefined && request.modelTier !== "economy" && request.modelTier !== "capable") return { content: [{ type: "text", text: `Invalid modelTier: ${location}: expected economy or capable.` }], details: makeDetails(mode)([]), isError: true };
 					const agent = agents.find((entry) => entry.name === request.agent);
-					if (!agent) return { content: [{ type: "text", text: `Invalid modelTier: ${location}: unknown agent "${request.agent}".` }], details: makeDetails(mode)([]), isError: true };
-					try { selected.set(i, resolveModelTier(agent, request.modelTier)); }
+					if (!agent) {
+						if (request.modelTier === undefined) continue; // unknown omitted role keeps the existing unknown-agent path
+						return { content: [{ type: "text", text: `Invalid modelTier: ${location}: unknown agent "${request.agent}".` }], details: makeDetails(mode)([]), isError: true };
+					}
+					try { selected.set(i, resolveModelTier(agent, request.modelTier as ModelTier | undefined)); }
 					catch (error) { return { content: [{ type: "text", text: `Invalid modelTier: ${location}: ${error instanceof Error ? error.message : String(error)}` }], details: makeDetails(mode)([]), isError: true }; }
 				}
 			}

@@ -313,7 +313,7 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	finish(children()[0], "legacy single result");
 	const singleResult = await single;
 	assert.notEqual(singleResult.isError, true);
-	assert.equal(Object.hasOwn(singleResult.details.results[0], "modelTier"), false);
+	assert.equal(singleResult.details.results[0].modelTier, "capable"); // omitted new-format role labels its resolved default tier
 	const batch = tool.execute("omitted-tier-batch", { background: false, agentScope: "both", tasks: [
 		{ agent: "backend-worker", task: "batch one", cwd: makeRepo("omitted-tier-batch-one") },
 		{ agent: "backend-worker", task: "batch two", cwd: makeRepo("omitted-tier-batch-two") },
@@ -324,7 +324,7 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	finish(children()[1], "batch one result"); finish(children()[2], "batch two result");
 	const batchResult = await batch;
 	assert.notEqual(batchResult.isError, true);
-	assert.ok(batchResult.details.results.every((row: any) => !Object.hasOwn(row, "modelTier")));
+	assert.deepEqual(batchResult.details.results.map((row: any) => row.modelTier), ["capable", "capable"]);
 	children().length = 0;
 	const launch = tool.execute("omitted-tier", { background: false, agentScope: "both", chain: [
 		{ agent: "backend-worker", task: "legacy omitted" },
@@ -377,23 +377,34 @@ for (const { roleName, tier } of [
 	}
 });
 
-// Missing (no roles.json, or no modelTiers key) and empty (modelTiers: {}) api-specialist config: every tier is refused before any child spawns.
-check("api-specialist tier with missing or empty roles.json config is refused before any child spawns", async () => {
-	const registry = path.join(userDir, "roles.json");
-	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
-	try {
-		for (const overlay of [undefined, [{ name: "api-specialist" }], [{ name: "api-specialist", modelTiers: {} }]]) for (const tier of ["economy", "capable"] as const) {
-			if (overlay === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, JSON.stringify(overlay));
-			const pi = fakePi(); subagentExtension(pi);
-			const result = await pi.tools.get("subagent")!.execute("specialist-refusal", { background: false, agentScope: "both", agent: "api-specialist", task: "must refuse", modelTier: tier }, undefined, undefined, dagCtx(makeRepo("specialist-refusal")));
+// Shipped api-specialist is capable-only: the shipped or neutral overlay keeps capable launchable, a missing economy tier is refused, and an empty modelTiers overlay fails discovery for every tier.
+check("api-specialist tiers follow shipped and overlaid roles.json: missing economy is refused and an empty modelTiers overlay refuses every tier before any child spawns", async () => {
+	const cases: Array<[unknown, "economy" | "capable", RegExp | "launch"]> = [
+		[undefined, "economy", /not supported for role "api-specialist"/],
+		[undefined, "capable", "launch"],
+		[[{ name: "api-specialist" }], "economy", /not supported for role "api-specialist"/],
+		[[{ name: "api-specialist" }], "capable", "launch"],
+		[[{ name: "api-specialist", modelTiers: {} }], "economy", /Subagent roles unavailable/],
+		[[{ name: "api-specialist", modelTiers: {} }], "capable", /Subagent roles unavailable/],
+	];
+	for (const [overlay, tier, expected] of cases) await withUserRoles(overlay, async () => {
+		const pi = fakePi(); subagentExtension(pi);
+		const base = children().length;
+		const launch = pi.tools.get("subagent")!.execute(`specialist-${tier}`, { background: false, agentScope: "both", agent: "api-specialist", task: "tier probe", modelTier: tier }, undefined, undefined, dagCtx(makeRepo(`specialist-${tier}`)));
+		if (expected === "launch") {
+			await waitFor(() => children().length === base + 1, `${JSON.stringify(overlay)} capable launches`);
+			assert.equal(flagValue(children()[base], "--model"), "openai-codex/gpt-6.1-sol");
+			assert.equal(flagValue(children()[base], "--thinking"), "high");
+			finish(children()[base], "ok");
+			assert.notEqual((await launch).isError, true);
+		} else {
+			const result = await launch;
 			assert.equal(result.isError, true, `${JSON.stringify(overlay)} ${tier}`);
-			assert.match(result.content[0].text, /not supported for role "api-specialist"/);
-			assert.equal(children().length, 0, `${JSON.stringify(overlay)} ${tier} spawned a child`);
+			assert.match(result.content[0].text, expected);
+			assert.equal(children().length, base, `${JSON.stringify(overlay)} ${tier} spawned a child`);
 			assert.equal(pi.sent.length, 0);
 		}
-	} finally {
-		if (previous === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, previous);
-	}
+	});
 });
 
 check("explicit package role tier selects configured model without changing role", async () => {
@@ -406,6 +417,103 @@ check("explicit package role tier selects configured model without changing role
 	finish(children()[0], "ok");
 	const result = await launch;
 	assert.equal(result.isError, undefined);
+});
+
+// Fixture overlay with distinct per-tier thinking on a non-Anthropic pair (no subscription guard): omitted and explicit launches must differ from flat effort.
+const LAUNCH_CAPABLE = { model: "openai-codex/gpt-6.1-sol", thinking: "high" }, LAUNCH_ECONOMY = { model: "openai-codex/gpt-6-luna", thinking: "low" };
+const fixtureTiers = [{ name: "backend-worker", defaultModelTier: "capable", modelTiers: {
+	economy: { model: LAUNCH_ECONOMY.model, fallbackModel: "github-copilot/gpt-6-luna", thinking: LAUNCH_ECONOMY.thinking },
+	capable: { model: LAUNCH_CAPABLE.model, fallbackModel: "github-copilot/gpt-6.1-sol", thinking: LAUNCH_CAPABLE.thinking },
+} }];
+const flagValue = (child: Child, flag: string) => child.args[child.args.indexOf(flag) + 1];
+async function withUserRoles(overlay: unknown, body: () => Promise<void>) {
+	const registry = path.join(userDir, "roles.json");
+	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
+	try {
+		if (overlay === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, JSON.stringify(overlay));
+		await body();
+	} finally {
+		if (previous === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, previous);
+	}
+}
+// Finishes each child in spawn order as it appears, so FG and BG launches settle without busy polling.
+async function settleInOrder(launch: Promise<any>, expected: number, base: number) {
+	for (let i = 0; i < expected; i++) {
+		await waitFor(() => children().length > base + i, `child ${i + 1} of ${expected} spawns`);
+		finish(children()[base + i], "ok");
+	}
+	return launch;
+}
+
+check("omitted and explicit tiers launch their own model and thinking across single, parallel, chain and DAG in foreground and background", async () => {
+	await withUserRoles(fixtureTiers, async () => {
+		for (const background of [false, true]) for (const shape of ["single", "parallel", "chain", "dag"] as const) {
+			const positions: Array<"economy" | undefined> = shape === "single" ? [undefined] : [undefined, "economy"];
+			const tag = `${shape}-${background ? "bg" : "fg"}`;
+			const pi = fakePi(); subagentExtension(pi);
+			const tierOf = (tier: "economy" | undefined) => (tier === undefined ? {} : { modelTier: tier });
+			const params = shape === "single" ? { background, agent: "backend-worker", task: tag, ...tierOf(positions[0]) }
+				: shape === "parallel" ? { background, tasks: positions.map((tier, i) => ({ agent: "backend-worker", task: `${tag} ${i}`, ...tierOf(tier) })) }
+				: shape === "chain" ? { background, chain: positions.map((tier, i) => ({ agent: "backend-worker", task: `${tag} ${i}`, ...tierOf(tier) })) }
+				: { background, dag: positions.map((tier, i) => node(`n${i}`, "backend-worker", `${tag} ${i}`, { ...tierOf(tier), ...(i ? { dependsOn: ["n0"] } : {}) })) };
+			const base = children().length;
+			const launch = pi.tools.get("subagent")!.execute(tag, params, undefined, undefined, dagCtx(makeRepo(tag)));
+			await settleInOrder(launch, positions.length, base);
+			const settled = await launch;
+			assert.notEqual(settled.isError, true, tag);
+			if (!background) assert.deepEqual((settled.details?.results ?? []).map((row: { modelTier?: string }) => row.modelTier), positions.map((tier) => tier ?? "capable"), `${tag} resolved labels`);
+			for (const [i, tier] of positions.entries()) {
+				const expected = tier === "economy" ? LAUNCH_ECONOMY : LAUNCH_CAPABLE;
+				assert.equal(flagValue(children()[base + i], "--model"), expected.model, `${tag} position ${i} model`);
+				assert.equal(flagValue(children()[base + i], "--thinking"), expected.thinking, `${tag} position ${i} thinking`);
+			}
+		}
+	});
+});
+
+check("invalid tier at any position refuses the whole batch with no child, job or prompt, even after a valid omitted position", async () => {
+	await withUserRoles(fixtureTiers, async () => {
+		const valid = { agent: "backend-worker", task: "valid omitted" };
+		for (const background of [false, true]) for (const bad of [{ agent: "backend-worker", task: "null", modelTier: null }, { agent: "backend-worker", task: "empty", modelTier: "" }, { agent: "backend-worker", task: "unknown", modelTier: "default" }, { agent: "writer", task: "source", modelTier: "economy" }]) for (const shape of ["chain", "tasks"] as const) {
+			const pi = fakePi(); subagentExtension(pi);
+			const tool = pi.tools.get("subagent")!;
+			const params = shape === "chain" ? { background, chain: [valid, bad] } : { background, tasks: [valid, bad] };
+			const result = await tool.execute(`invalid-${shape}-${bad.task}`, params, undefined, undefined, dagCtx(makeRepo(`invalid-${bad.task}`)));
+			assert.equal(result.isError, true, `${shape} ${bad.task} ${background}`);
+			assert.equal(children().length, 0, `${shape} ${bad.task} spawned a child`);
+			assert.equal(pi.sent.length, 0);
+			assert.equal(result.details?.jobId, undefined);
+		}
+	});
+});
+
+check("omitted tier with a default missing from roles.json refuses discovery before any child spawns", async () => {
+	await withUserRoles([{ name: "backend-worker", defaultModelTier: "capable", modelTiers: { economy: { model: LAUNCH_ECONOMY.model, fallbackModel: "github-copilot/gpt-6-luna", thinking: "low" } } }], async () => {
+		const pi = fakePi(); subagentExtension(pi);
+		const result = await pi.tools.get("subagent")!.execute("default-missing", { background: false, chain: [{ agent: "backend-worker", task: "omitted" }] }, undefined, undefined, dagCtx(makeRepo("default-missing")));
+		assert.equal(result.isError, true);
+		assert.match(result.content[0].text, /Subagent roles unavailable/);
+		assert.equal(children().length, 0);
+		assert.equal(pi.sent.length, 0);
+	});
+});
+
+check("background chain freezes admitted tiers: step edits and roles.json changes after admission never change a later launch", async () => {
+	await withUserRoles(fixtureTiers, async () => {
+		const pi = fakePi(); subagentExtension(pi);
+		const params = { background: true, chain: [{ agent: "backend-worker", task: "first", modelTier: "economy" }, { agent: "backend-worker", task: "second" }] };
+		const acknowledgement = await pi.tools.get("subagent")!.execute("snapshot-chain", params, undefined, undefined, dagCtx(makeRepo("snapshot-chain")));
+		assert.equal(acknowledgement.isError, undefined);
+		await waitFor(() => children().length === 1, "first chain step launches");
+		assert.equal(flagValue(children()[0], "--model"), LAUNCH_ECONOMY.model);
+		params.chain[1] = { agent: "backend-worker", task: "second", modelTier: "economy" };
+		fs.writeFileSync(path.join(userDir, "roles.json"), JSON.stringify([{ name: "backend-worker", defaultModelTier: "capable", modelTiers: { economy: { model: LAUNCH_ECONOMY.model, fallbackModel: "github-copilot/gpt-6-luna", thinking: "low" }, capable: { model: "openai-codex/gpt-5-after-admission", fallbackModel: "github-copilot/gpt-5-after-admission", thinking: "minimal" } } }]));
+		finish(children()[0], "ok");
+		await waitFor(() => children().length === 2, "second chain step launches");
+		assert.equal(flagValue(children()[1], "--model"), LAUNCH_CAPABLE.model);
+		assert.equal(flagValue(children()[1], "--thinking"), LAUNCH_CAPABLE.thinking);
+		finish(children()[1], "ok");
+	});
 });
 
 let runSingleAgent: any;
@@ -440,6 +548,7 @@ beforeEach(() => {
 afterEach(async () => {
 	for (const child of children()) if (!child.exited) child.exit(0);
 	await settle(10);
+	fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true }); // guard fixture; a failed assertion skips a test's own cleanup
 });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

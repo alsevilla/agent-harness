@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as scanner from "../../../../scripts/scan-harness-config.mjs";
 
 const scanHarnessConfig = (options: Record<string, unknown>) => (scanner as any).scanHarnessConfig(options);
@@ -222,4 +222,156 @@ test("review M3: frontmatter must match roles.json field by field (names the fie
 		assert.match(hits[0].message, /model/);
 		assert.ok(!JSON.stringify(report).includes("other-model"), "values are not reported");
 	} finally { f.cleanup(); }
+});
+
+// Stage 2 RED (tier-only registry): the declared default tier is the only Pi source; annotations must match it field by field.
+const TIER_TOOLS = "read, grep, find, ls, bash, edit";
+const tierRole = (modelTiers: unknown, extra: Record<string, unknown> = {}) => ({ name: "general-worker", defaultModelTier: "capable", modelTiers, tools: TIER_TOOLS, ...extra });
+const tierAgent = (meta: Record<string, string>) => `---\nname: general-worker\ndescription: test\nmetadata:\n${Object.entries(meta).map(([k, v]) => `  pi.${k}: ${v}`).join("\n")}\n---\nbody\n`;
+const CAPABLE_TUPLE = { model: "anthropic/m", fallbackModel: "", thinking: "medium" };
+const CAPABLE_META = { model: '"anthropic/m"', fallbackModel: '""', thinking: '"medium"', tools: `"${TIER_TOOLS}"` };
+function scanFixture(options: Parameters<typeof fixture>[0]) {
+	const f = fixture(options);
+	try {
+		return scanHarnessConfig({ root: f.root }) as { errors: number; findings: Array<{ level: string; rule: string; file: string; message: string }> };
+	} finally { f.cleanup(); }
+}
+const parityFields = (findings: Array<{ rule: string; message: string }>) => findings.filter((x) => x.rule === "PARITY_MISMATCH").map((x) => x.message.match(/pi\.(\w+)/)?.[1]);
+
+test("tier-only shipped shape: declared default tier matches annotations and scans clean", () => {
+	const report = scanFixture({ roles: [tierRole({ capable: CAPABLE_TUPLE })], agents: { "general-worker": tierAgent(CAPABLE_META) } });
+	assert.equal(report.errors, 0, JSON.stringify(report.findings));
+});
+
+test("tier-only parity compares the declared default slot, including per-tier thinking and model", () => {
+	const economy = { model: "anthropic/haiku", fallbackModel: "openai/luna", thinking: "low" };
+	const capable = { model: "openai/sol", fallbackModel: "anthropic/sonnet", thinking: "high" };
+	const economyMeta = { model: '"anthropic/haiku"', fallbackModel: '"openai/luna"', thinking: '"low"', tools: `"${TIER_TOOLS}"` };
+	const capableMeta = { model: '"openai/sol"', fallbackModel: '"anthropic/sonnet"', thinking: '"high"', tools: `"${TIER_TOOLS}"` };
+	const cases: Array<{ label: string; defaultTier: string; meta: Record<string, string>; fields: string[] }> = [
+		{ label: "economy default, economy annotations", defaultTier: "economy", meta: economyMeta, fields: [] },
+		{ label: "economy default, capable thinking annotated", defaultTier: "economy", meta: { ...economyMeta, thinking: '"high"' }, fields: ["thinking"] },
+		{ label: "capable default, economy annotations", defaultTier: "capable", meta: economyMeta, fields: ["model", "fallbackModel", "thinking"] },
+		{ label: "capable default, capable annotations", defaultTier: "capable", meta: capableMeta, fields: [] },
+	];
+	for (const c of cases) {
+		const report = scanFixture({ roles: [tierRole({ economy, capable }, { defaultModelTier: c.defaultTier })], agents: { "general-worker": tierAgent(c.meta) } });
+		assert.deepEqual(parityFields(report.findings), c.fields, `${c.label}: ${JSON.stringify(report.findings)}`);
+		assert.equal(report.errors, c.fields.length, `${c.label}: ${JSON.stringify(report.findings)}`);
+	}
+});
+
+test("single tier with empty fallback (Oracle shape): empty annotation is valid, a non-empty annotation is a field mismatch", () => {
+	const oracle = { capable: { model: "anthropic/opus", fallbackModel: "", thinking: "high" } };
+	const meta = (fallback: string) => ({ model: '"anthropic/opus"', fallbackModel: fallback, thinking: '"high"', tools: `"${TIER_TOOLS}"` });
+	const clean = scanFixture({ roles: [tierRole(oracle)], agents: { "general-worker": tierAgent(meta('""')) } });
+	assert.equal(clean.errors, 0, JSON.stringify(clean.findings));
+	const drift = scanFixture({ roles: [tierRole(oracle)], agents: { "general-worker": tierAgent(meta('"anthropic/sonnet"')) } });
+	assert.deepEqual(parityFields(drift.findings), ["fallbackModel"], JSON.stringify(drift.findings));
+});
+
+// Fail closed: every invalid new-format shape is a field-named ROLE_SHAPE; competing correct annotations/root scalars are never used as a fallback.
+test("tier-only invalid shapes fail closed with field-named ROLE_SHAPE and no annotation or root-scalar fallback", () => {
+	const good = { model: "anthropic/m", fallbackModel: "", thinking: "medium" };
+	const tier = (patch: Record<string, unknown>) => ({ capable: { ...good, ...patch } });
+	const rows: Array<[string, Record<string, unknown>, RegExp]> = [
+		["defaultModelTier missing", { defaultModelTier: undefined }, /defaultModelTier/],
+		["defaultModelTier null", { defaultModelTier: null }, /defaultModelTier/],
+		["defaultModelTier unknown", { defaultModelTier: "premium" }, /defaultModelTier/],
+		["defaultModelTier not configured", { defaultModelTier: "economy" }, /defaultModelTier.*not configured/],
+		["modelTiers missing", { modelTiers: undefined }, /modelTiers/],
+		["modelTiers null", { modelTiers: null }, /modelTiers/],
+		["modelTiers array", { modelTiers: [good] }, /modelTiers/],
+		["modelTiers empty", { modelTiers: {} }, /not configured/],
+		["unknown tier name", { modelTiers: { capable: good, premium: good } }, /unknown tier/],
+		["tier definition null", { modelTiers: { capable: null } }, /modelTiers\.capable/],
+		["tier thinking missing", { modelTiers: tier({ thinking: undefined }) }, /modelTiers\.capable\.thinking/],
+		["tier thinking outside vocabulary", { modelTiers: tier({ thinking: "ultra" }) }, /modelTiers\.capable\.thinking/],
+		["tier thinking null", { modelTiers: tier({ thinking: null }) }, /modelTiers\.capable\.thinking/],
+		["tier thinking secret-bearing", { modelTiers: tier({ thinking: SENTINEL }) }, /modelTiers\.capable\.thinking/],
+		["tier model unqualified", { modelTiers: tier({ model: "claude-sonnet" }) }, /modelTiers\.capable\.model/],
+		["tier model surrounding whitespace", { modelTiers: tier({ model: " anthropic/m" }) }, /modelTiers\.capable\.model/],
+		["tier model secret-bearing", { modelTiers: tier({ model: SENTINEL }) }, /modelTiers\.capable\.model/],
+		["tier fallbackModel null", { modelTiers: tier({ fallbackModel: null }) }, /modelTiers\.capable\.fallbackModel/],
+		["tier fallbackModel array", { modelTiers: tier({ fallbackModel: ["anthropic/x"] }) }, /modelTiers\.capable\.fallbackModel/],
+		["tier fallbackModel trailing delimiter", { modelTiers: tier({ fallbackModel: "anthropic/x||" }) }, /modelTiers\.capable\.fallbackModel/],
+		["tier fallbackModel unqualified", { modelTiers: tier({ fallbackModel: "gpt" }) }, /modelTiers\.capable\.fallbackModel/],
+		["tier fallbackModel missing", { modelTiers: tier({ fallbackModel: undefined }) }, /modelTiers\.capable\.fallbackModel/],
+		["per-tier provider beside thinking", { modelTiers: { capable: { ...good, provider: "anthropic" } } }, /mixes/],
+		["root provider beside new format", { provider: "anthropic" }, /mixes/],
+		["root model beside new format", { model: "anthropic/m" }, /mixes/],
+		["unknown root key", { extra: "x" }, /unknown/],
+	];
+	for (const [label, patch, field] of rows) {
+		const report = scanFixture({ roles: [tierRole(tier(good), patch)], agents: { "general-worker": tierAgent(CAPABLE_META) } });
+		const shape = report.findings.filter((x) => x.level === "ERROR" && x.rule === "ROLE_SHAPE");
+		assert.ok(shape.length >= 1, `${label}: ${JSON.stringify(report.findings)}`);
+		assert.ok(shape.some((x) => field.test(x.message)), `${label}: ${JSON.stringify(shape)}`);
+		assert.deepEqual(parityFields(report.findings), [], `${label}: annotation fallback`);
+		assert.ok(!JSON.stringify(report).includes(SENTINEL), `${label}: secret redaction`);
+	}
+});
+
+// Bounded legacy: external flat and per-tier-provider entries keep their root-scalar parity and reader-level shape checks.
+test("legacy flat and per-tier-provider entries stay bounded-compatible with root-scalar parity", () => {
+	const legacy = (tiers?: unknown) => ({ name: "general-worker", provider: "anthropic", model: "m", fallbackModel: "", thinking: "medium", tools: TIER_TOOLS, ...(tiers ? { modelTiers: tiers } : {}) });
+	const legacyMeta = { model: '"anthropic/m"', fallbackModel: '""', thinking: '"medium"', tools: `"${TIER_TOOLS}"` };
+	const perTier = { capable: { provider: "openai-codex", model: "gpt", fallbackModel: "anthropic/x" } };
+	const clean = scanFixture({ roles: [legacy(perTier)], agents: { "general-worker": tierAgent(legacyMeta) } });
+	assert.equal(clean.errors, 0, JSON.stringify(clean.findings));
+	const drift = scanFixture({ roles: [legacy()], agents: { "general-worker": tierAgent({ ...legacyMeta, model: '"anthropic/other"' }) } });
+	assert.deepEqual(parityFields(drift.findings), ["model"], JSON.stringify(drift.findings));
+	const emptyTierFallback = scanFixture({ roles: [legacy({ capable: { provider: "openai-codex", model: "gpt", fallbackModel: "" } })], agents: { "general-worker": tierAgent(legacyMeta) } });
+	assert.ok(emptyTierFallback.findings.some((x) => x.rule === "ROLE_SHAPE" && /modelTiers\.capable/.test(x.message)), JSON.stringify(emptyTierFallback.findings));
+});
+
+// Golden: the declared default of every shipped role equals the independent pre-migration normal tuple (no approved delta touches a default).
+test("candidate declared defaults equal the independent pre-migration golden for all 20 roles", () => {
+	const golden = JSON.parse(fs.readFileSync(new URL("./fixtures/tier-only-baseline.json", import.meta.url), "utf8")) as { roles: Array<{ name: string; normal: { model: string; fallbackModel: string[]; thinking: string; tools: string[] } }> };
+	const registry = JSON.parse(fs.readFileSync(path.join(repo, "agent", "roles.json"), "utf8"));
+	const declared = (scanner as any).declaredDefaults(registry) as Map<string, { model: string; fallbackModel: string[]; thinking: string; tools: string }>;
+	assert.equal(golden.roles.length, 20);
+	assert.equal(declared.size, 20);
+	for (const role of golden.roles) {
+		const d = declared.get(role.name);
+		assert.ok(d, role.name);
+		assert.deepEqual({ model: d.model, fallbackModel: d.fallbackModel, thinking: d.thinking, tools: d.tools.split(",").map((t) => t.trim()) }, role.normal, role.name);
+	}
+});
+
+// Candidate CLI: the migrated shipped registry scans clean (exit 0) and an error fixture exits 1 without echoing secrets.
+test("CLI exits 0 on the candidate and 1 on an error fixture, without echoing secrets", () => {
+	const script = fileURLToPath(new URL("../../../../scripts/scan-harness-config.mjs", import.meta.url));
+	const ok = spawnSync(process.execPath, [script], { cwd: repo, env: process.env, encoding: "utf8" });
+	assert.equal(ok.status, 0, `${ok.stderr}\n${String(ok.stdout).slice(0, 400)}`);
+	assert.equal(JSON.parse(ok.stdout).errors, 0);
+	const f = fixture({ roles: [tierRole({ capable: { ...CAPABLE_TUPLE, model: SENTINEL } })] });
+	try {
+		const bad = spawnSync(process.execPath, [script, "--root", f.root], { cwd: repo, env: process.env, encoding: "utf8" });
+		assert.equal(bad.status, 1, String(bad.stderr));
+		assert.ok(!String(bad.stdout).includes(SENTINEL), "CLI output must not echo secret-bearing values");
+	} finally { f.cleanup(); }
+});
+
+// Retention guard for a preserved requirement: the latest NUMERIC installed release is the house parser source (not lexical, not hardcoded).
+test("SDK host selection picks the latest numeric installed release when no explicit override is set", () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "stage1-host-"));
+	try {
+		fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
+		fs.copyFileSync(fileURLToPath(new URL("../../../../scripts/scan-harness-config.mjs", import.meta.url)), path.join(root, "scripts", "scan-harness-config.mjs"));
+		for (const v of ["1.2.0", "1.10.0"]) {
+			const dir = path.join(root, "agent", "install", "releases", v, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "utils");
+			fs.mkdirSync(dir, { recursive: true });
+			fs.writeFileSync(path.join(dir, "frontmatter.js"), `exports.parseFrontmatter = (text) => ({ frontmatter: { name: ${JSON.stringify(v)} }, body: text });\n`);
+		}
+		fs.mkdirSync(path.join(root, "agent", "agents"), { recursive: true });
+		fs.writeFileSync(path.join(root, "agent", "agents", "1.10.0.md"), "---\nname: 1.10.0\n---\nbody\n");
+		const env = { ...process.env };
+		delete env.NATIVE_PROBE_HOST_MODULES;
+		const url = pathToFileURL(path.join(root, "scripts", "scan-harness-config.mjs")).href;
+		const child = spawnSync(process.execPath, ["--input-type=module", "-e", `import(${JSON.stringify(url)}).then((m) => process.stdout.write(JSON.stringify(m.scanHarnessConfig({ root: ${JSON.stringify(root)} }).findings)));`], { encoding: "utf8", env });
+		assert.equal(child.status, 0, String(child.stderr));
+		const findings = JSON.parse(child.stdout) as Array<{ rule: string }>;
+		assert.ok(!findings.some((x) => x.rule === "FRONTMATTER_NAME_MISMATCH" || x.rule === "FRONTMATTER_INVALID"), JSON.stringify(findings));
+	} finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

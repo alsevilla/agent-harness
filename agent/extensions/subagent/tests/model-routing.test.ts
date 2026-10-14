@@ -21,7 +21,8 @@ test("all supported role tiers resolve exact same-tier pairs without mutating co
     assert.equal(resolved.model, model);
     assert.equal(resolved.modelTier, tier);
     assert.deepEqual(resolved.fallbackModel, [fallback]);
-    assert.equal(resolved.tools, original.tools);
+    assert.notEqual(resolved.tools, original.tools);
+    assert.deepEqual(resolved.tools, original.tools);
     assert.equal(resolved.thinking, original.thinking);
     assert.equal(resolved.systemPrompt, original.systemPrompt);
     assert.equal(original.model, "configured/model");
@@ -37,6 +38,69 @@ test("all supported role tiers resolve exact same-tier pairs without mutating co
   }
   for (const source of ["user", "project"] as const) assert.throws(() => resolveModelTier(agent("backend-worker", source), "economy"), /canonical package roles/);
   assert.throws(() => resolveModelTier(agent("unknown"), "economy"), /not supported/);
+});
+
+const tiered = (name: string, source: AgentConfig["source"] = "package"): AgentConfig => ({
+  ...agent(name, source),
+  thinking: "medium",
+  defaultModelTier: "capable",
+  modelTiers: {
+    economy: { model: "fixture-economy/model", fallbackModel: ["fixture-economy/fallback"], thinking: "low" },
+    capable: { model: "fixture-capable/model", fallbackModel: ["fixture-capable/fallback"], thinking: "high" },
+  },
+} as unknown as AgentConfig);
+
+test("omitted selection resolves the configured default tier with its own thinking and labels the resolved tier", () => {
+  const role = tiered("backend-worker");
+  const omitted = resolveModelTier(role);
+  assert.equal(omitted.model, "fixture-capable/model");
+  assert.deepEqual(omitted.fallbackModel, ["fixture-capable/fallback"]);
+  assert.equal(omitted.thinking, "high");
+  assert.equal(omitted.modelTier, "capable");
+  const explicit = resolveModelTier(role, "economy");
+  assert.equal(explicit.thinking, "low");
+  assert.equal(explicit.modelTier, "economy");
+  assert.equal(role.thinking, "medium");
+});
+
+test("omitted selection owns its fallback and tools arrays after admission", () => {
+  const role = tiered("backend-worker");
+  const resolved = resolveModelTier(role);
+  assert.notEqual(resolved.tools, role.tools);
+  assert.deepEqual(resolved.tools, role.tools);
+  role.modelTiers!.capable!.fallbackModel[0] = "changed-after-admission";
+  (role.tools as string[])[0] = "changed-tool";
+  assert.deepEqual(resolved.fallbackModel, ["fixture-capable/fallback"]);
+  assert.deepEqual(resolved.tools, ["read"]);
+});
+
+test("legacy omitted selection keeps the flat projection and no tier label", () => {
+  const legacy = agent("general-worker");
+  const resolved = resolveModelTier(legacy);
+  assert.equal(Object.hasOwn(resolved, "modelTier"), false);
+  assert.equal(resolved.model, "configured/model");
+  assert.deepEqual(resolved.fallbackModel, ["configured/fallback"]);
+  assert.equal(resolved.thinking, "high");
+  assert.notEqual(resolved.fallbackModel, legacy.fallbackModel);
+});
+
+test("explicit tier on a legacy-shaped entry without thinking inherits the flat thinking", () => {
+  const legacy = { ...agent("backend-worker"), modelTiers: { capable: { model: "configured/capable", fallbackModel: [] } } };
+  assert.equal(resolveModelTier(legacy as AgentConfig, "capable").thinking, "high");
+});
+
+test("omitted selection refuses a default tier missing from the tier map", () => {
+  const role = { ...tiered("backend-worker"), defaultModelTier: "capable", modelTiers: { economy: { model: "fixture-economy/model", fallbackModel: [], thinking: "low" } } } as unknown as AgentConfig;
+  assert.throws(() => resolveModelTier(role), /defaultModelTier "capable" is not configured for role "backend-worker"/);
+});
+
+test("omitted selection executes user and project shadows with a default tier while explicit tiers stay package-only", () => {
+  for (const source of ["user", "project"] as const) {
+    const shadow = tiered("backend-worker", source);
+    assert.equal(resolveModelTier(shadow).model, "fixture-capable/model");
+    assert.equal(resolveModelTier(shadow).modelTier, "capable");
+    assert.throws(() => resolveModelTier(shadow, "economy"), /canonical package roles/);
+  }
 });
 
 test("tier resolution uses only the validated selection and preserves an immutable diagnostic snapshot", () => {
