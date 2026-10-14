@@ -32,6 +32,28 @@ const normalize = (text: string) => text.replace(/\r\n/g, "\n").replace(/\\/g, "
 const sentences = (text: string) => normalize(text).split(/\n+|(?<=\.) /).map((s) => s.trim()).filter((s) => s.length >= 20);
 const sentenceHashes = (text: string) => new Set(sentences(text).map((s) => sha(s).slice(0, 8)));
 const frontmatterSha = (text: string) => sha(/^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/\r\n/g, "\n"))?.[1] ?? "");
+// Exact [approved current value, original HEAD/golden value]; never consult roles.json while hashing.
+const DECLARATION_CHANGES: Record<string, Partial<Record<string, readonly [string, string]>>> = {
+	"api-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"architecture-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"concurrency-specialist": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"debugger": { fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"devops-specialist": { model: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna"], fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/gpt-6-luna"] },
+	"frontend-worker": { model: ["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5"], fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
+	"observability-specialist": { model: ["anthropic/claude-haiku-5-5","openai-codex/gpt-6-luna"], fallbackModel: ["openai-codex/gpt-6-luna","github-copilot/gpt-6-luna"] },
+	"performance-specialist": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"reviewer": { fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"general-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
+	"platform-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"backend-worker": { model: ["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5"], fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
+	"scout": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"security-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-sonnet-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"database-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"database-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"test-engineer": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"ui-ux-specialist": { fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"release-engineer": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"] },
+};
 const effectiveLegacyHeaderSha = (text: string) => {
 	const normalized = text.replace(/\r\n/g, "\n");
 	const header = /^---\n([\s\S]*?)\n---/.exec(normalized)?.[1];
@@ -55,7 +77,13 @@ const effectiveLegacyHeaderSha = (text: string) => {
 	const identity = lines.filter((line) => /^(name|description): /.test(line));
 	assert.deepEqual(identity.map((line) => line.split(":", 1)[0]), ["name", "description"]);
 	const legacy = [...identity, ...["model", "fallbackModel", "thinking", "tools"].map((field) => {
-		const value = metadata.get(field)!;
+		let value = metadata.get(field)!;
+		const role = /^name: (.+)$/m.exec(header)?.[1];
+		const approved = DECLARATION_CHANGES[role ?? ""]?.[field];
+		if (approved) {
+			assert.equal(value, approved[0], `${role} approved pi.${field} value changed`);
+			value = approved[1];
+		}
 		return `${field}: ${value === "" ? '""' : value}`;
 	})].join("\n");
 	return sha(legacy);
@@ -184,6 +212,23 @@ function assembled(shape: string, role: string): { text: string; sourceText: str
 	const agent = { name: role, systemPrompt: bodyOf(sourceText), source: "user", filePath: "", description: role, tools: [] };
 	return { text: assembleChildSystemPrompt(agent as never, { codeIntegrationsEnabled: true, cwd: repo, packageRoot: null, launchArgs: FULL_LAUNCH, qmdExtension: FILES.qmd, globalGraphDirectory: EMPTY_GLOBAL }), sourceText };
 }
+
+test("declaration normalization rejects unapproved identity, tool and approved-field changes", () => {
+	const source = fs.readFileSync(new URL("../../../agents/api-specialist.md", import.meta.url), "utf8");
+	const changed = (from: string, to: string) => {
+		const result = source.replace(from, to);
+		assert.notEqual(result, source, "negative control must mutate the current header");
+		return result;
+	};
+	const currentHeader = effectiveLegacyHeaderSha(source);
+	assert.notEqual(effectiveLegacyHeaderSha(changed('pi.tools: "read, grep', 'pi.tools: "write, grep')), currentHeader);
+	assert.notEqual(effectiveLegacyHeaderSha(changed("name: api-specialist", "name: changed-role")), currentHeader);
+	assert.notEqual(effectiveLegacyHeaderSha(changed("description: Read-only", "description: Changed")), currentHeader);
+	for (const field of ["model", "fallbackModel", "thinking"]) {
+		const current = DECLARATION_CHANGES["api-specialist"][field]![0];
+		assert.throws(() => effectiveLegacyHeaderSha(changed('pi.' + field + ': "' + current + '"', 'pi.' + field + ': "unauthorized/value"')), /approved pi\./);
+	}
+});
 
 // Closed world: every BEFORE hash that is missing AFTER, and every AFTER hash that is new, must be a reviewed disposition for that role. Nothing else may change.
 const HEADINGS_ABSENT_HERE = ["## Rust build output", "## Global graph reference (separate corpus)"];

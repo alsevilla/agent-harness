@@ -2,10 +2,11 @@
 name: database-specialist
 description: Read-only specialist for relational and NoSQL database invariants and semantics,
 tools: read, search, execute
+model: gpt-6.1-sol
 metadata:
-  pi.model: "anthropic/claude-haiku-5-5"
-  pi.fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"
-  pi.thinking: "medium"
+  pi.model: "openai-codex/gpt-6.1-sol"
+  pi.fallbackModel: "anthropic/claude-sonnet-5-5"
+  pi.thinking: "high"
   pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 

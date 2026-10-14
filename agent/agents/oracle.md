@@ -2,6 +2,7 @@
 name: oracle
 description: Independent high-intelligence second-opinion agent for difficult architecture, correctness, concurrency, database, security, and disputed engineering decisions. Use only for high-risk uncertainty or disagreement.
 tools: read, search, execute
+model: claude-opus-5.5
 metadata:
   pi.model: "anthropic/claude-opus-5-5"
   pi.fallbackModel: ""

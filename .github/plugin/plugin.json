@@ -4,5 +4,6 @@
   "description": "Engineering workflow for GitHub Copilot CLI",
   "agents": "./agent/agents",
   "skills": "./agent/skills",
+  "hooks": "./.github/plugin/hooks.json",
   "repository": "https://github.com/alsevilla/agent-harness"
 }

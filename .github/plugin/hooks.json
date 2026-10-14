@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "node \"${PLUGIN_ROOT}/.github/plugin/session-start.mjs\"",
+        "powershell": "node \"$env:COPILOT_PLUGIN_ROOT/.github/plugin/session-start.mjs\"; exit $LASTEXITCODE",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

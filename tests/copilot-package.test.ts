@@ -16,7 +16,7 @@ test("Copilot plugin manifest has supported metadata and contained shared paths"
     expect(readFileSync(join(resolved, sentinel), "utf8")).toBeTruthy();
   }
   expect(() => readFileSync(join(root, ".copilot", "plugin.json"), "utf8")).toThrow();
-  expect(readdirSync(join(root, ".copilot"))).not.toContain("agents");
+  if (readdirSync(root).includes(".copilot")) expect(readdirSync(join(root, ".copilot"))).not.toContain("agents");
   expect(() => readFileSync(join(root, "plugin.json"))).toThrow();
   expect(readFileSync(join(root, "agent", "roles.json"), "utf8")).toBeTruthy();
 });
@@ -34,19 +34,19 @@ test("Copilot marketplace lists this plugin and its platform-specific source", (
   expect(readFileSync(join(root, "package.json"), "utf8")).toContain('"name": "@alsevilla/pi-engineering-harness"');
 });
 
-test("backend-worker Copilot metadata inherits its model and preserves Pi runtime settings", async () => {
+test("backend-worker Copilot metadata matches its declared primary and preserves Pi runtime settings", async () => {
   const text = readFileSync(join(nativeAgents, "backend-worker.md"), "utf8");
   const { metadata } = frontmatter(text);
   const sdkMetadata = await sdkFrontmatter(text);
   expect(metadata.name).toBe("backend-worker");
   expect(metadata.description).toMatch(/^Implements authorized backend services/);
-  expect(metadata.model).toBeUndefined();
+  expect(metadata.model).toBe("claude-sonnet-5.5");
   expect(metadata.fallbackModel).toBeUndefined();
   expect(metadata.thinking).toBeUndefined();
   expect(metadata.metadata).toEqual({
-    "pi.model": "anthropic/claude-haiku-5-5",
-    "pi.fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "pi.thinking": "low",
+    "pi.model": "anthropic/claude-sonnet-5-5",
+    "pi.fallbackModel": "openai-codex/gpt-6.1-sol",
+    "pi.thinking": "medium",
     "pi.tools": "read, grep, find, ls, bash, powershell, edit",
   });
   expect(sdkMetadata.metadata).toEqual(metadata.metadata);
@@ -73,6 +73,7 @@ const sdkFrontmatter = async (text: string) => {
   const { parseFrontmatter } = await import(`${modules}/@earendil-works/pi-coding-agent/dist/index.js`);
   return parseFrontmatter(text).frontmatter as Record<string, unknown>;
 };
+const copilotModels: Record<string, string> = { "anthropic/claude-haiku-5-5": "claude-haiku-5.5", "anthropic/claude-sonnet-5-5": "claude-sonnet-5.5", "anthropic/claude-opus-5-5": "claude-opus-5.5", "openai-codex/gpt-6-luna": "gpt-6-luna", "openai-codex/gpt-6.1-sol": "gpt-6.1-sol" };
 const agentNames = () => JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")).map((r: { name: string }) => r.name);
 
 test("all profiles expose native Copilot headers and preserve Pi runtime settings", async () => {
@@ -83,7 +84,7 @@ test("all profiles expose native Copilot headers and preserve Pi runtime setting
     const { metadata } = frontmatter(text);
     const sdk = await sdkFrontmatter(text);
     const expected = { "pi.model": `${role.provider}/${role.model}`, "pi.fallbackModel": role.fallbackModel, "pi.thinking": role.thinking, "pi.tools": role.tools };
-    expect(metadata.model).toBeUndefined();
+    expect(metadata.model).toBe(copilotModels[`${role.provider}/${role.model}`]);
     expect(metadata.fallbackModel).toBeUndefined();
     expect(metadata.thinking).toBeUndefined();
     expect(metadata.pi).toBeUndefined();

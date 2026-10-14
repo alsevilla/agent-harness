@@ -1,57 +1,57 @@
 [
   {
     "name": "api-specialist",
-    "provider": "anthropic",
-    "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "thinking": "medium",
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "architecture-specialist",
-    "provider": "anthropic",
-    "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "thinking": "medium",
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "concurrency-specialist",
     "provider": "openai-codex",
-    "model": "gpt-6-luna",
-    "fallbackModel": "github-copilot/gpt-6-luna",
-    "thinking": "medium",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "debugger",
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
-    "fallbackModel": "openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5",
-    "thinking": "medium",
+    "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "devops-specialist",
-    "provider": "openai-codex",
-    "model": "gpt-6-luna",
-    "fallbackModel": "github-copilot/gpt-6-luna",
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "fallbackModel": "openai-codex/gpt-6.1-sol",
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "frontend-worker",
     "provider": "anthropic",
-    "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "thinking": "low",
+    "model": "claude-sonnet-5-5",
+    "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
   {
     "name": "observability-specialist",
-    "provider": "openai-codex",
-    "model": "gpt-6-luna",
-    "fallbackModel": "github-copilot/gpt-6-luna",
+    "provider": "anthropic",
+    "model": "claude-haiku-5-5",
+    "fallbackModel": "openai-codex/gpt-6-luna",
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell"
   },
@@ -66,72 +66,72 @@
   {
     "name": "performance-specialist",
     "provider": "openai-codex",
-    "model": "gpt-6-luna",
-    "fallbackModel": "github-copilot/gpt-6-luna",
-    "thinking": "medium",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "reviewer",
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
-    "fallbackModel": "openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5",
-    "thinking": "medium",
+    "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "general-worker",
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "thinking": "low",
+    "fallbackModel": "openai-codex/gpt-6-luna",
+    "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
   {
     "name": "platform-worker",
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
+    "fallbackModel": "openai-codex/gpt-6-luna",
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
   {
     "name": "backend-worker",
     "provider": "anthropic",
-    "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "thinking": "low",
+    "model": "claude-sonnet-5-5",
+    "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
   {
     "name": "scout",
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
+    "fallbackModel": "openai-codex/gpt-6-luna",
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "security-specialist",
-    "provider": "anthropic",
-    "model": "claude-sonnet-5-5",
-    "fallbackModel": "openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5",
-    "thinking": "medium",
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "database-specialist",
-    "provider": "anthropic",
-    "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
-    "thinking": "medium",
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "database-worker",
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
+    "fallbackModel": "openai-codex/gpt-6-luna",
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
@@ -139,7 +139,7 @@
     "name": "test-engineer",
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
-    "fallbackModel": "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna",
+    "fallbackModel": "openai-codex/gpt-6-luna",
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell"
   },
@@ -147,15 +147,15 @@
     "name": "ui-ux-specialist",
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
-    "fallbackModel": "github-copilot/claude-sonnet-5",
-    "thinking": "medium",
+    "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "thinking": "high",
     "tools": "read, grep, find, ls, bash, powershell"
   },
   {
     "name": "release-engineer",
     "provider": "openai-codex",
-    "model": "gpt-6-luna",
-    "fallbackModel": "github-copilot/gpt-6-luna",
+    "model": "gpt-6.1-sol",
+    "fallbackModel": "anthropic/claude-sonnet-5-5",
     "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   }

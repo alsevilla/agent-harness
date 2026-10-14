@@ -2,10 +2,11 @@
 name: concurrency-specialist
 description: Read-only Rust/Tokio concurrency specialist for task ownership, channels, shared state, locking, races, backpressure, cancellation, graceful shutdown, retries, duplicate processing, and overload correctness.
 tools: read, search, execute
+model: gpt-6.1-sol
 metadata:
-  pi.model: "openai-codex/gpt-6-luna"
-  pi.fallbackModel: "github-copilot/gpt-6-luna"
-  pi.thinking: "medium"
+  pi.model: "openai-codex/gpt-6.1-sol"
+  pi.fallbackModel: "anthropic/claude-sonnet-5-5"
+  pi.thinking: "high"
   pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
