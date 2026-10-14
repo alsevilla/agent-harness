@@ -46,6 +46,12 @@ Live role bodies (`agent/agents/*.md`) do not repeat "Never spawn another agent.
 ## Measurement
 Measure orchestrator input/output tokens separately from child tokens and provider cached tokens. Compare equal-complexity tasks and review quality, not only request counts. Reduced orchestrator input can increase total cost when unnecessary agents are spawned. No measured token or cost saving is established by this change; use actual observations.
 
+### Usage record accounting
+- Total: sum unique model attempts from existing usage records across main, worker, specialist, verify and retries; report the total as partial when a record is missing and name the missing attempt; do not estimate it.
+- Reasoning: reasoning tokens already included in reported output tokens are not added again.
+- Cache: cached input usage and cost are reported separately from uncached input and output.
+- Scope: guidance only: no collector, recorder, schema or budget is added; read the records that already exist.
+
 ### Static prompt size (characters, not tokens)
 `node --experimental-strip-types scripts/measure-child-prompt.mjs --label <name> --out <absolute dir outside the repository> [--agent-dir <empty absolute dir outside the repository>]` writes `measure-<name>.json` and each assembled prompt for five roles, in live and package shapes, against a Cargo and a non-Cargo candidate. `--agent-dir` measures the missing-integration profile; a non-reviewer launch is refused when Ponytail is absent, as in `index.ts`. The script reports characters and hashes only; it does not count tokens.
 
