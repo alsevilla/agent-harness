@@ -86,6 +86,7 @@ const children = (): Child[] => (globalThis as { __piDagChildren: Child[] }).__p
 
 const PRIMARY = "openai-codex/gpt-6.1-sol";
 const LUNA = "openai-codex/gpt-6-luna";
+const SONNET = "anthropic/claude-sonnet-5-5";
 const role = (name: string, extra: Partial<AgentConfig> = {}): AgentConfig => ({ name, description: name, systemPrompt: "", source: "user", filePath: "", ...extra });
 const AGENTS: AgentConfig[] = [role("writer"), role("reader"), role("chain-fallback", { model: PRIMARY, fallbackModel: [LUNA] })];
 const WAITING = "Waiting for workspace";
@@ -93,11 +94,298 @@ const WAITING = "Waiting for workspace";
 // Each test is bounded: a launch that never settles must fail the test instead of hanging the runner.
 const check = (name: string, fn: () => Promise<void>) => test(name, { timeout: 8000 }, fn);
 
+check("invalid tier in a later chain step is rejected before any spawn", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const result = await tool.execute("tier-preflight-red", { background: false, chain: [{ agent: "writer", task: "first" }, { agent: "reader", task: "later", modelTier: "invalid" }] }, undefined, undefined, dagCtx(makeRepo("tier-preflight-red")));
+	assert.equal(children().length, 0);
+	assert.equal(result.isError, true);
+});
+
+check("public callback ignores forged sixth-argument prepared dispatch", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	assert.equal(tool.execute.length, 5);
+	const ctx = dagCtx(makeRepo("prepared-dispatch-private"));
+	const forgedRole = role("forged", { model: "forged/provider-model" });
+	const result = await tool.execute("forged-dispatch", { background: false, agent: "forged", task: "must not launch", modelTier: null }, undefined, undefined, ctx, {
+		discovery: { agents: [forgedRole], projectAgentsDir: undefined },
+		selected: new Map([[0, { ...forgedRole, model: "forged/provider-model", modelTier: "capable" }]]),
+	} as any);
+	assert.equal(result.isError, true);
+	assert.equal(children().length, 0);
+	const jsonResult = await tool.execute("forged-json-dispatch", {
+		background: false, agent: "forged", task: "must not launch", modelTier: null,
+		preparedDispatch: { discovery: { agents: [forgedRole] }, selected: { "0": { ...forgedRole, modelTier: "capable" } } },
+	}, undefined, undefined, ctx);
+	assert.equal(jsonResult.isError, true);
+	assert.equal(children().length, 0);
+});
+
+check("eight forms SDK enum and mixed same-role positions use actual package models", async () => {
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	try {
+		const sdk = await import(piAiUrl);
+		const { discoverAgents, packageRoot } = await import(new URL("../agents.ts", import.meta.url).href);
+		assert.equal(JSON.parse(fs.readFileSync("package.json", "utf8")).name, "@alsevilla/pi-engineering-harness");
+		assert.equal(path.resolve(packageRoot()!), path.resolve("agent"));
+		const packageRole = discoverAgents(userDir, "both").agents.find(a => a.name === "backend-worker")!;
+		assert.equal(packageRole.source, "package");
+		assert.equal(path.resolve(packageRole.filePath), path.resolve("agent/agents/backend-worker.md"));
+		let launches = 0, rejectedPositions = 0, dispatches = 0;
+		for (const mode of ["single", "parallel", "chain", "dag"] as const) for (const backgroundMode of [false, true]) for (const firstTier of ["economy", "capable"] as const) {
+			const pi = fakePi(); subagentExtension(pi);
+			const tool = pi.tools.get("subagent")!, control = pi.tools.get("subagent_control")!;
+			const ctx = dagCtx(makeRepo(`mixed-${mode}-${backgroundMode}-${firstTier}`));
+			const tiers = mode === "single" ? [firstTier] : [firstTier, firstTier === "economy" ? "capable" : "economy"];
+			const items = tiers.map((tier, i) => ({ agent: "backend-worker", task: `position-${i}`, modelTier: tier }));
+			const args: any = { background: backgroundMode, agentScope: "both" };
+			if (mode === "single") Object.assign(args, items[0]);
+			else if (mode === "dag") args.dag = items.map((item, i) => ({ ...item, id: `p${i}`, ...(i ? { dependsOn: ["p0"] } : {}) }));
+			else args[mode === "parallel" ? "tasks" : "chain"] = items;
+			const call = (arguments_: any) => ({ type: "toolCall" as const, id: "mixed", name: "subagent", arguments: arguments_ });
+			for (let i = 0; i < tiers.length; i++) {
+				const invalid = structuredClone(args);
+				if (mode === "single") invalid.modelTier = "anthropic/claude-sonnet-5-5";
+				else invalid[mode === "dag" ? "dag" : mode === "parallel" ? "tasks" : "chain"][i].modelTier = "anthropic/claude-sonnet-5-5";
+				assert.throws(() => sdk.validateToolArguments(tool, call(invalid)), /Validation failed/);
+				const count = children().length;
+				const rejected = await tool.execute("bad position", invalid, undefined, undefined, ctx);
+				assert.equal(rejected.isError, true); assert.equal(children().length, count); assert.equal(pi.sent.length, 0);
+				rejectedPositions++;
+			}
+			const valid = sdk.validateToolArguments(tool, call(args));
+			const offset = children().length;
+			const launch = tool.execute("mixed", valid, undefined, undefined, ctx);
+			const acknowledgement = backgroundMode ? await launch : undefined;
+			if (backgroundMode) { assert.notEqual(acknowledgement!.isError, true); assert.ok(acknowledgement!.details.jobId); }
+			for (let i = 0; i < tiers.length; i++) {
+				await waitFor(() => children().length === offset + i + 1, `${mode} ${backgroundMode} position-${i} spawn`);
+				const child = children()[offset + i];
+				await waitFor(() => child.received.some(m => m.type === "prompt"), `position-${i} prompt`);
+				assert.equal(child.model, tiers[i] === "economy" ? LUNA : SONNET);
+				assert.ok(child.args.includes("--append-system-prompt"));
+				if (tiers[i] === "capable") assert.ok(child.args.includes(path.join(guardDir, "subscription-guard.ts")));
+				finish(child, `position-${i} tier result`); launches++;
+			}
+			let result: any;
+			if (backgroundMode) {
+				const jobId = acknowledgement!.details.jobId;
+				await waitFor(() => pi.sent.some((m: any) => m.details?.jobId === jobId && m.details.state === "completed"), "completed receipt");
+				assert.equal(pi.sent.length, 1);
+				result = await control.execute("result", { action: "result", target: jobId }, undefined, undefined, ctx);
+			} else result = await launch;
+			assert.notEqual(result.isError, true);
+			assert.equal(result.details.results.length, tiers.length);
+			for (let i = 0; i < tiers.length; i++) {
+				const row = result.details.results[i];
+				assert.equal(row.agent, "backend-worker"); assert.equal(row.agentSource, "package"); assert.equal(row.model, tiers[i] === "economy" ? LUNA : SONNET); assert.equal(row.modelTier, tiers[i]); assert.equal(row.exitCode, 0);
+				assert.match(finalText(row), new RegExp(`position-${i} tier result`));
+			}
+			dispatches++;
+		}
+		assert.equal(dispatches, 16); assert.equal(launches, 28); assert.equal(rejectedPositions, 28);
+	} finally { fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true }); }
+});
+
+check("inactive empty arrays cannot bypass single or parallel tier preflight", async () => {
+	for (const background of [false, true]) for (const args of [
+		{ background, agent: "writer", task: "bounded", modelTier: "economy", chain: [] },
+		{ background, agent: "writer", task: "bounded", modelTier: null, tasks: [] },
+		{ background, agent: "writer", task: "bounded", modelTier: "unsupported", chain: [] },
+		{ background, chain: [], tasks: [{ agent: "writer", task: "first" }, { agent: "reader", task: "later", modelTier: null }] },
+	]) {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const tool = pi.tools.get("subagent")!;
+		const launch = tool.execute("inactive-tier-array", args, undefined, undefined, dagCtx(makeRepo("inactive-tier-array")));
+		const spawned = [...children()];
+		for (const child of spawned) finish(child, "offline cleanup");
+		const result = await launch;
+		assert.equal(result.isError, true, JSON.stringify(args));
+		assert.equal(spawned.length, 0, JSON.stringify(args));
+	}
+});
+
+check("batch root tiers and unsupported custom-role tiers fail before all launches", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const ctx = dagCtx(makeRepo("tier-batch-invalid"));
+	for (const args of [
+		{ background: false, modelTier: "economy", chain: [{ agent: "writer", task: "first" }] },
+		{ background: false, chain: [{ agent: "writer", task: "first", modelTier: "economy" }] },
+	]) {
+		const result = await tool.execute("tier-batch-invalid", args, undefined, undefined, ctx);
+		assert.equal(result.isError, true);
+		assert.equal(children().length, 0);
+	}
+});
+
+check("accepted package role configuration survives a later user-registry change", async () => {
+	const { discoverAgents } = await import(new URL("../agents.ts", import.meta.url).href);
+	const baseline = discoverAgents(userDir, "both").agents.find(a => a.name === "backend-worker")!;
+	assert.equal(baseline.source, "package");
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	const registry = path.join(userDir, "roles.json");
+	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
+	const pi = fakePi(); subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	try {
+		const acknowledgement = await tool.execute("snapshot", { background: true, agentScope: "both", chain: [
+			{ agent: "backend-worker", task: "tiered", modelTier: "economy" },
+			{ agent: "backend-worker", task: "legacy" },
+		] }, undefined, undefined, dagCtx(makeRepo("snapshot")));
+		assert.ok(acknowledgement.details.jobId);
+		await waitFor(() => children().length === 1, "accepted first chain child");
+		fs.writeFileSync(registry, JSON.stringify([{ name: "backend-worker", provider: "openai-codex", model: "gpt-6-luna", fallbackModel: "anthropic/claude-haiku-5-5", modelTiers: { economy: { provider: "openai-codex", model: "gpt-6.1-sol", fallbackModel: "anthropic/claude-opus-5-5" }, capable: { provider: "anthropic", model: "claude-opus-5-5", fallbackModel: "openai-codex/gpt-6-luna" } }, thinking: "low", tools: "read" }]));
+		assert.equal(children()[0].model, baseline.modelTiers!.economy.model);
+		assert.equal(children()[0].args[children()[0].args.indexOf("--thinking") + 1], baseline.thinking);
+		children()[0].emitLine({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "503 provider unavailable", usage } });
+		children()[0].exit(1);
+		await waitFor(() => children().length === 2, "frozen economy fallback child");
+		assert.equal(children()[1].model, baseline.modelTiers!.economy.fallbackModel[0]);
+		finish(children()[1], "frozen fallback result");
+		await waitFor(() => children().length === 3, "later chain child");
+		assert.equal(children()[2].model, baseline.model);
+		assert.equal(children()[2].args[children()[2].args.indexOf("--thinking") + 1], baseline.thinking);
+		finish(children()[2], "second snapshot result");
+		await waitFor(() => pi.sent.some((message: any) => message.details?.jobId === acknowledgement.details.jobId && message.details.state === "completed"), "background completion receipt");
+		const result = await pi.tools.get("subagent_control")!.execute("snapshot result", { action: "result", target: acknowledgement.details.jobId }, undefined, undefined, dagCtx(makeRepo("snapshot-result")));
+		assert.notEqual(result.isError, true);
+	} finally {
+		if (previous === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, previous);
+		fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true });
+	}
+});
+
+check("package backend-worker tier failures never upgrade to capable", async () => {
+	const { discoverAgents } = await import(new URL("../agents.ts", import.meta.url).href);
+	const baseline = discoverAgents(userDir, "both").agents.find(a => a.name === "backend-worker")!;
+	assert.equal(baseline.source, "package");
+	assert.ok(baseline.modelTiers?.capable, "the package role has a configured capable tier");
+	for (const scenario of ["ordinary failure", "availability after tool activity", "abort"] as const) {
+		const pi = fakePi(); subagentExtension(pi);
+		const tool = pi.tools.get("subagent")!;
+		const controller = new AbortController();
+		const offset = children().length;
+		const launch = tool.execute(`tier-economy-${scenario}`, { agent: "backend-worker", task: scenario, modelTier: "economy", background: false, agentScope: "both" }, controller.signal, undefined, dagCtx(makeRepo(`tier-economy-${scenario}`)));
+		let settled = false;
+		const outcome = Promise.allSettled([launch]).then(result => { settled = true; return result; });
+		await waitFor(() => children().length === offset + 1, `${scenario} primary spawn`);
+		const primary = children()[offset];
+		assert.equal(primary.model, baseline.modelTiers!.economy.model, `${scenario} uses only the selected economy primary`);
+		await waitFor(() => primary.received.some(message => message.type === "prompt"), `${scenario} primary prompt`);
+		if (scenario === "abort") {
+			controller.abort();
+			await waitFor(() => primary.signals.length > 0, "abort terminates the primary");
+			primary.exit(null);
+		} else {
+			if (scenario === "availability after tool activity") primary.emitLine({ type: "tool_execution_start" });
+			primary.emitLine({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: scenario === "ordinary failure" ? "implementation failed" : "503 provider unavailable", usage } });
+			primary.exit(1);
+		}
+		await waitFor(() => settled, `${scenario} foreground execute settles`);
+		const [result] = await outcome;
+		assert.equal(result.status, scenario === "abort" ? "rejected" : "fulfilled");
+		assert.equal(children().length, offset + 1, `${scenario} cannot launch a fallback or automatically upgrade to capable`);
+	}
+});
+
+check("omitted tiers keep package defaults in legacy and mixed chain positions", async () => {
+	const { discoverAgents } = await import(new URL("../agents.ts", import.meta.url).href);
+	const baseline = discoverAgents(userDir, "both").agents.find(a => a.name === "backend-worker")!;
+	assert.equal(baseline.source, "package");
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	const pi = fakePi(); subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const single = tool.execute("omitted-tier-single", { background: false, agentScope: "both", agent: "backend-worker", task: "legacy single" }, undefined, undefined, dagCtx(makeRepo("omitted-tier-single")));
+	await waitFor(() => children().length === 1, "legacy single child");
+	assert.equal(children()[0].model, baseline.model);
+	finish(children()[0], "legacy single result");
+	const singleResult = await single;
+	assert.notEqual(singleResult.isError, true);
+	assert.equal(Object.hasOwn(singleResult.details.results[0], "modelTier"), false);
+	const batch = tool.execute("omitted-tier-batch", { background: false, agentScope: "both", tasks: [
+		{ agent: "backend-worker", task: "batch one", cwd: makeRepo("omitted-tier-batch-one") },
+		{ agent: "backend-worker", task: "batch two", cwd: makeRepo("omitted-tier-batch-two") },
+	] }, undefined, undefined, dagCtx(makeRepo("omitted-tier-batch")));
+	await waitFor(() => children().length === 3, "legacy batch children");
+	assert.equal(children()[1].model, baseline.model);
+	assert.equal(children()[2].model, baseline.model);
+	finish(children()[1], "batch one result"); finish(children()[2], "batch two result");
+	const batchResult = await batch;
+	assert.notEqual(batchResult.isError, true);
+	assert.ok(batchResult.details.results.every((row: any) => !Object.hasOwn(row, "modelTier")));
+	children().length = 0;
+	const launch = tool.execute("omitted-tier", { background: false, agentScope: "both", chain: [
+		{ agent: "backend-worker", task: "legacy omitted" },
+		{ agent: "backend-worker", task: "explicit", modelTier: "economy" },
+		{ agent: "backend-worker", task: "legacy again" },
+	] }, undefined, undefined, dagCtx(makeRepo("omitted-tier")));
+	for (const expected of [baseline.model, baseline.modelTiers!.economy.model, baseline.model]) {
+		await waitFor(() => children().length > 0 && !children().at(-1)!.exited, "chain child");
+		const child = children().at(-1)!;
+		assert.equal(child.model, expected);
+		finish(child, "tier regression result");
+		if (expected === baseline.model && children().length < 2) await waitFor(() => children().length >= 2, "next chain position");
+	}
+	assert.notEqual((await launch).isError, true);
+	fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true });
+});
+
+check("configured scout capable tier is rejected before dispatch while package source is preserved", async () => {
+	const { discoverAgents } = await import(new URL("../agents.ts", import.meta.url).href);
+	const registry = path.join(userDir, "roles.json");
+	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
+	try {
+		fs.writeFileSync(registry, JSON.stringify([{ name: "scout", modelTiers: {
+			economy: { provider: "openai-codex", model: "configured/scout-economy", fallbackModel: "anthropic/configured-scout-economy-fallback" },
+			capable: { provider: "openai-codex", model: "configured/scout-capable", fallbackModel: "anthropic/configured-scout-capable-fallback" },
+		} }]));
+		const scout = discoverAgents(userDir, "both").agents.find(agent => agent.name === "scout")!;
+		assert.equal(scout.source, "package");
+		assert.equal(scout.modelTiers?.capable.model, "configured/scout-capable");
+		const pi = fakePi(); subagentExtension(pi);
+		const tool = pi.tools.get("subagent")!;
+		const sdk = await import(piAiUrl);
+		const call = { type: "toolCall" as const, id: "scout-capable", name: "subagent", arguments: { background: true, agentScope: "both", agent: "scout", task: "must not dispatch", modelTier: "capable" } };
+		const valid = sdk.validateToolArguments(tool, call);
+		const result = await tool.execute("scout-capable", valid, undefined, undefined, dagCtx(makeRepo("scout-capable")));
+		assert.equal(result.isError, true);
+		assert.equal(children().length, 0);
+		assert.equal(pi.sent.length, 0);
+	} finally {
+		if (previous === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, previous);
+	}
+});
+
+check("explicit package role tier selects configured model without changing role", async () => {
+	const pi = fakePi();
+	subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const launch = tool.execute("tier-package", { background: false, agentScope: "both", agent: "backend-worker", task: "tier probe", modelTier: "economy" }, undefined, undefined, dagCtx(makeRepo("tier-package")));
+	await waitFor(() => children().length === 1, "canonical package role launches");
+	assert.equal(children()[0].args[children()[0].args.indexOf("--model") + 1], "openai-codex/gpt-6-luna");
+	finish(children()[0], "ok");
+	const result = await launch;
+	assert.equal(result.isError, undefined);
+});
+
 let runSingleAgent: any;
 let subagentExtension: any;
 const created: string[] = [];
 const aliases: Array<{ dir: string; link: string }> = [];
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+const guardSource = path.join(originalAgentDir ?? path.join(os.homedir(), '.pi', 'agent'), 'npm', 'node_modules', 'pi-claude-subscription-connector', 'extensions', 'subscription-guard.ts');
 const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "dag-admission-user-"));
 
 before(async () => {
@@ -751,10 +1039,12 @@ check("dag tool boundary: installed SDK validation refuses malformed nodes with 
 		["empty graph", { dag: [], background: false }],
 	];
 	for (const [label, args] of refused) assert.throws(() => sdk.validateToolArguments(tool, call(args)), /Validation failed/, label);
+	assert.throws(() => sdk.validateToolArguments(tool, call({ dag: [node("a", "writer", "t", { modelTier: "openai/model" })], background: false })), /Validation failed/, "raw model IDs are outside the schema enum");
 	const nulls: Array<[string, Record<string, unknown>]> = [
 		["null dependsOn", node("a", "writer", "t", { dependsOn: null })],
 		["null cwd", node("a", "writer", "t", { cwd: null })],
 		["null readOnly", node("a", "writer", "t", { readOnly: null })],
+		["null modelTier", node("a", "writer", "t", { modelTier: null })],
 	];
 	for (const [label, dagNode] of nulls) {
 		const validated = sdk.validateToolArguments(tool, call({ dag: [dagNode], background: false }));

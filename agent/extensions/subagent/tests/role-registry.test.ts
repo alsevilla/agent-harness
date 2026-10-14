@@ -7,6 +7,7 @@ import * as os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostModules } from "./host-modules.ts";
+import { resolveModelTier } from "../model-routing.ts";
 const modules = hostModules(["@earendil-works/pi-coding-agent"]);
 const { parseFrontmatter } = await import(pathToFileURL(`${modules}/@earendil-works/pi-coding-agent/dist/index.js`).href);
 const probePath = fileURLToPath(new URL("./fixtures/role-registry-probe.mjs", import.meta.url));
@@ -138,6 +139,32 @@ test("every generic role receives standard code navigation integrations", () => 
   assert.deepEqual([...integrations.roles].sort(), roles.map((r: { name: string }) => r.name).sort());
 });
 
+test("registry contains the approved tier pairs without changing default role fields", () => {
+  const expected: Record<string, { economy: [string, string]; capable?: [string, string] }> = {
+    "backend-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "frontend-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "database-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"] },
+    "general-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "platform-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "test-engineer": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    scout: { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"] },
+  };
+  for (const [name, tiers] of Object.entries(expected)) {
+    const role = roles.find((item: { name: string }) => item.name === name);
+    assert.ok(role);
+    for (const [tier, [model, fallback]] of Object.entries(tiers)) {
+      const configured = role.modelTiers[tier];
+      assert.ok(configured, `${name}.${tier}`);
+      assert.equal(`${configured.provider}/${configured.model}`, model);
+      assert.equal(configured.fallbackModel, fallback);
+    }
+  }
+  assert.equal(Object.values(expected).reduce((count, tiers) => count + Object.keys(tiers).length, 0), 13);
+  assert.equal(roles.find((role: { name: string }) => role.name === "backend-worker").model, "claude-sonnet-5-5");
+  assert.equal(roles.find((role: { name: string }) => role.name === "backend-worker").fallbackModel, "openai-codex/gpt-6.1-sol");
+  assert.equal(roles.find((role: { name: string }) => role.name === "scout").modelTiers.capable, undefined);
+});
+
 test("every role definition agrees with the registry", () => {
   for (const role of roles) {
     const fm = frontmatter(role.name);
@@ -146,6 +173,60 @@ test("every role definition agrees with the registry", () => {
     assert.equal(fm.fallbackModel, role.fallbackModel, `${role.name}: fallbackModel`);
     assert.equal(fm.thinking, role.thinking, `${role.name}: thinking`);
     assert.equal(fm.tools, role.tools, `${role.name}: tools`);
+  }
+});
+
+test("package discovery normalizes tier registry data and field-wise user tier overlay", () => {
+  const cwd = fs.mkdtempSync(`${os.tmpdir()}/pi-tier-overlay-`);
+  const user = `${cwd}/user`;
+  fs.mkdirSync(`${user}/agents`, { recursive: true });
+  fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: { economy: { provider: "fixture-provider", model: "fixture-primary", fallbackModel: "fixture-fallback" } } }]));
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = user;
+  try {
+    const result = discoverAgents(cwd, "both");
+    assert.equal(result.error, undefined);
+    const role = result.agents.find((item) => item.name === "backend-worker");
+    assert.ok(role);
+    assert.equal(role.source, "package");
+    assert.equal(role.model, "anthropic/claude-sonnet-5-5");
+    assert.deepEqual(role.modelTiers?.economy, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
+    assert.equal(role.modelTiers?.capable, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
+    fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: {} }]));
+    const emptyOverlay = discoverAgents(cwd, "both");
+    const emptyRole = emptyOverlay.agents.find((item) => item.name === "backend-worker");
+    assert.ok(emptyRole);
+    assert.deepEqual(emptyRole.modelTiers, {}, "an explicit empty tier field replaces package tiers");
+    assert.equal(emptyRole.model, role.model);
+    assert.deepEqual(emptyRole.fallbackModel, role.fallbackModel);
+    assert.deepEqual(emptyRole.tools, role.tools);
+    assert.equal(emptyRole.thinking, role.thinking);
+    assert.throws(() => resolveModelTier(emptyRole, "economy"), /not supported/);
+    assert.throws(() => resolveModelTier(emptyRole, "capable"), /not supported/);
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("malformed tier registry fails closed", () => {
+  for (const modelTiers of [{ extra: { provider: "p", model: "m", fallbackModel: "f" } }, { economy: { provider: "p", fallbackModel: "f" } }, { economy: { provider: "p", model: "m", fallbackModel: 3 } }, { economy: { provider: "p", model: "m", fallbackModel: "||" } }, { economy: { provider: "p", model: "m", fallbackModel: "f", tools: "edit" } }]) {
+    const cwd = fs.mkdtempSync(`${os.tmpdir()}/pi-invalid-tier-registry-`);
+    const user = `${cwd}/user`;
+    fs.mkdirSync(`${user}/agents`, { recursive: true });
+    fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers }]));
+    const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = user;
+    try {
+      const result = discoverAgents(cwd, "both");
+      assert.equal(result.error?.includes("modelTiers"), true);
+      assert.deepEqual(result.agents, []);
+    } finally {
+      if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   }
 });
 

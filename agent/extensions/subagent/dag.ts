@@ -1,11 +1,12 @@
 // Pure DAG scheduler: validates the graph, then runs ready nodes through an injected runner.
 // Imports nothing: agent registry, runner, acceptance and report extraction come from the adapter.
 // Parent reports are built by concatenation, never String.replace, so $-patterns and {previous} stay literal.
+import type { ModelTier } from "./model-routing.ts";
 
 export const DAG_NODE_LIMIT = 8;
 const NODE_ID = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 // Unknown keys are refused so a misspelled field (e.g. dependson) cannot silently drop an edge.
-const NODE_KEYS = new Set(["id", "agent", "task", "cwd", "readOnly", "dependsOn"]);
+const NODE_KEYS = new Set(["id", "agent", "task", "cwd", "readOnly", "dependsOn", "modelTier"]);
 
 export interface DagAgentRegistry {
 	has(name: string): boolean;
@@ -16,6 +17,7 @@ export interface DagNodeSpec {
 	readonly task: string;
 	readonly cwd?: string;
 	readonly readOnly?: boolean; // trusted main-supplied declaration, passed through and never inferred
+	readonly modelTier?: ModelTier;
 	readonly dependsOn: readonly string[];
 }
 export interface DagParentReport {
@@ -71,6 +73,7 @@ export function validateDag(input: unknown, agents: DagAgentRegistry): DagNodeSp
 		if (typeof n.task !== "string" || n.task.trim() === "") fail(`dag node "${id}" needs a non-empty task`);
 		if (n.cwd !== undefined && (typeof n.cwd !== "string" || n.cwd.trim() === "")) fail(`dag node "${id}" has an invalid cwd`);
 		if (n.readOnly !== undefined && typeof n.readOnly !== "boolean") fail(`dag node "${id}" has an invalid readOnly flag`);
+		if (n.modelTier !== undefined && n.modelTier !== "economy" && n.modelTier !== "capable") fail(`dag node "${id}" has an invalid modelTier`);
 		const deps = n.dependsOn === undefined ? [] : n.dependsOn;
 		if (!Array.isArray(deps) || deps.some((dep) => typeof dep !== "string")) fail(`dag node "${id}" dependsOn must be an array of node ids`);
 		return {
@@ -79,6 +82,7 @@ export function validateDag(input: unknown, agents: DagAgentRegistry): DagNodeSp
 			task: n.task,
 			...(n.cwd !== undefined ? { cwd: n.cwd as string } : {}),
 			...(n.readOnly !== undefined ? { readOnly: n.readOnly as boolean } : {}),
+			...(n.modelTier !== undefined ? { modelTier: n.modelTier as ModelTier } : {}),
 			dependsOn: [...(deps as string[])],
 		};
 	});

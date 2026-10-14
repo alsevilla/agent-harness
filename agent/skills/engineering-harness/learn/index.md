@@ -22,6 +22,8 @@ Before recording, review the Verify evidence and root cause; record only what th
 
 Retrieve selectively: open only the QMD hits or files the decision needs. When an existing record covers the claim, update the canonical record (refine, correct or revalidate it) and do not add a duplicate. Keep each claim to one concise, actionable line with its source, verification, date and revalidation condition.
 
+After successful merge and task-owned artifact disposition, main evaluates verified reusable lessons with bounded dedup and selects/coordinates LEARN when warranted; this is a workflow checkpoint, not automatic logging. Only the release engineer performs authorized persistence to the exact named canonical knowledge destination and verifies its content before reporting SAVED. The terminal knowledge-disposition checkpoint is SAVED (exact path/evidence), NO LESSON (reason), or BLOCKED (specific evidence, destination, or authority gap). Archiving a report or fixture is evidence, not learning completion. If learning is BLOCKED after merge, report that gap without implying rollback of the completed merge.
+
 Saving remains an explicitly authorized release-engineer action; main verifies the actual destination content after the child returns.
 
 ## Optional retrospective triggers

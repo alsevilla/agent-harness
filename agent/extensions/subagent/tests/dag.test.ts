@@ -63,6 +63,8 @@ const INVALID_GRAPHS: [string, unknown][] = [
 	["non-string task", [{ ...spec("a"), task: 3 }]],
 	["blank cwd", [{ ...spec("a"), cwd: " " }]],
 	["non-boolean readOnly", [{ ...spec("a"), readOnly: "yes" }]],
+	["unknown modelTier", [{ ...spec("a"), modelTier: "fast" }]],
+	["null modelTier", [{ ...spec("a"), modelTier: null }]],
 	["missing dependency", [spec("a", ["zz"])]],
 	["self dependency", [spec("a", ["a"])]],
 	["duplicate parent", [spec("a"), spec("b", ["a", "a"])]],
@@ -81,6 +83,20 @@ for (const [name, input] of INVALID_GRAPHS) {
 		assert.deepEqual(run.launches, []);
 	});
 }
+
+test("preserves optional modelTier on validated nodes and runner input", async () => {
+	const run = recorder((id) => ok(id));
+	const rows = await runDag([{ ...spec("a"), modelTier: "economy" }], options(async (node) => {
+		assert.equal(node.modelTier, "economy");
+		return run.run(node, [], new AbortController().signal);
+	}));
+	assert.equal(rows[0].status, "accepted");
+	const omitted = await runDag([spec("b")], options((node) => {
+		assert.equal(node.modelTier, undefined);
+		return ok(node.id);
+	}));
+	assert.equal(omitted[0].status, "accepted");
+});
 
 test("rejects invalid concurrency before any runner call", async () => {
 	for (const concurrency of [0, 1.5, Number.NaN]) {

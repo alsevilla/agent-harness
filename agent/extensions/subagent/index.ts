@@ -33,7 +33,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
-import { getFallbackSequence, nextFallbackModel } from "./model-routing.ts";
+import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
@@ -62,6 +62,7 @@ interface UsageStats {
 
 interface SingleResult {
 	workerId?: string;
+	modelTier?: ModelTier;
 	nodeId?: string; // DAG mode: node identity, stable even when agents repeat
 	dag?: { status: DagStatus; blockedBy?: string[]; started: boolean }; // DAG mode: node outcome
     toolActivity?: boolean;
@@ -168,7 +169,7 @@ const WORKSPACE_WAITING = "Waiting for workspace";
 async function runSingleAgent(
 	defaultCwd: string,
 	dispatchDefaults: DispatchDefaults,
-	agents: AgentConfig[],
+	agents: SelectedAgent[],
 	agentName: string,
 	task: string,
 	cwd: string | undefined,
@@ -193,7 +194,7 @@ async function runSingleAgent(
 async function runSingleAgentJob(
 	defaultCwd: string,
 	dispatchDefaults: DispatchDefaults,
-	agents: AgentConfig[],
+	agents: SelectedAgent[],
 	agentName: string,
 	task: string,
 	cwd: string | undefined,
@@ -220,13 +221,13 @@ async function runSingleAgentJob(
 			signal,
 			onQueued: () => {
 				setWaiting(WORKSPACE_WAITING);
-				if (!jobId) onUpdate?.({ content: [{ type: "text", text: WORKSPACE_WAITING }], details: makeDetails([{ agent: agentName, agentSource: agent.source, task, exitCode: -1, messages: [], stderr: "", usage, step }]) });
+				if (!jobId) onUpdate?.({ content: [{ type: "text", text: WORKSPACE_WAITING }], details: makeDetails([{ agent: agentName, agentSource: agent.source, task, exitCode: -1, messages: [], stderr: "", usage, step, ...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}) }]) });
 			},
 		});
 	} catch (error) {
 		setWaiting(undefined);
 		if (signal?.aborted) throw new Error("Subagent was aborted");
-		if (error instanceof WorkspaceAdmissionError) return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: error.message, usage, step, stopReason: "error", errorMessage: error.message };
+		if (error instanceof WorkspaceAdmissionError) return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: error.message, usage, step, stopReason: "error", errorMessage: error.message, ...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}) };
 		throw error;
 	}
 	setWaiting(undefined);
@@ -241,7 +242,7 @@ async function runSingleAgentJob(
 async function runAgentAttempt(
 	defaultCwd: string,
 	dispatchDefaults: DispatchDefaults,
-	agents: AgentConfig[],
+	agents: SelectedAgent[],
 	agentName: string,
 	task: string,
 	cwd: string | undefined,
@@ -306,10 +307,10 @@ async function runAgentAttempt(
                 fallback.stderr = `Model ${model} skipped (provider cooldown ${launch.state}); retried with ${remaining[0]}.\n${fallback.stderr}`;
                 return fallback;
             }
-            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}` };
+            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, ...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}) };
         }
     }
-    const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined);
+    const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier);
     if (worker && dispatchDefaults.jobId) dispatchDefaults.runtime?.note(dispatchDefaults.jobId, worker.id, dispatchDefaults.waitKey);
     let codeIntegrationsEnabled = false;
     try {
@@ -341,6 +342,7 @@ async function runAgentAttempt(
 
     const currentResult: SingleResult = {
         workerId: worker?.id,
+		...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}),
 		agent: agentName,
 		agentSource: agent.source,
 		task,
@@ -567,6 +569,7 @@ const TaskItem = Type.Object({
 	task: Type.String({ description: "Task to delegate to the agent" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration: this task only reads its checkout (default write). Not an OS sandbox." })),
+	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
 });
 
 const ChainItem = Type.Object({
@@ -574,6 +577,7 @@ const ChainItem = Type.Object({
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration: this step only reads its checkout (default write). Not an OS sandbox." })),
+	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
 });
 
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
@@ -589,10 +593,12 @@ const DagNode = Type.Object({
 	cwd: Type.Optional(Type.Union([Type.String({ description: "Working directory for this node" }), Type.Null()])),
 	dependsOn: Type.Optional(Type.Union([Type.Array(Type.String(), { description: "IDs of direct parent nodes" }), Type.Null()])),
 	readOnly: Type.Optional(Type.Union([Type.Boolean({ description: "Trusted declaration: this node only reads its checkout (default write). Not an OS sandbox." }), Type.Null()])),
+	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
 }, { additionalProperties: false });
 
 const SubagentParams = Type.Object({
     background: Type.Optional(Type.Boolean({description: "Default true: return a job ID immediately; completion arrives automatically. Set false to explicitly wait for the entire task.", default: true})),
+	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()], { description: "Optional Pi model tier for a single task; select per entry in batch modes." })),
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -782,7 +788,7 @@ export default function (pi: ExtensionAPI) {
 		].join(" "),
 		parameters: SubagentParams,
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx, preparedDispatch?: { discovery: ReturnType<typeof discoverAgents>; selected: Map<number, SelectedAgent> }) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const dispatchDefaults: DispatchDefaults = {
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
@@ -793,7 +799,7 @@ export default function (pi: ExtensionAPI) {
                     return slash < 0 ? undefined : ctx.modelRegistry?.find(ref.slice(0, slash), ref.slice(slash + 1))?.contextWindow;
                 },
 			};
-			const discovery = discoverAgents(ctx.cwd, agentScope);
+			const discovery = preparedDispatch?.discovery ?? discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
@@ -848,6 +854,24 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
+			const batchMode = hasChain || hasTasks || hasDag;
+			if (batchMode && params.modelTier !== undefined) return { content: [{ type: "text", text: "Invalid modelTier: root selection is only valid for a single task." }], details: makeDetails(mode)([]), isError: true };
+			const tierRequests = hasDag ? dagNodes! : hasChain ? params.chain! : hasTasks ? params.tasks! : hasSingle ? [{ agent: params.agent!, modelTier: params.modelTier }] : [];
+			const selected = preparedDispatch?.selected ?? new Map<number, SelectedAgent>();
+			if (!preparedDispatch) {
+				for (let i = 0; i < tierRequests.length; i++) {
+					const request = tierRequests[i] as { agent: string; modelTier?: unknown; id?: string };
+					if (request.modelTier === undefined) continue;
+					const location = hasDag ? `dag node "${request.id}"` : hasChain ? `chain[${i}]` : hasTasks ? `tasks[${i}]` : "single";
+					if (request.modelTier !== "economy" && request.modelTier !== "capable") return { content: [{ type: "text", text: `Invalid modelTier: ${location}: expected economy or capable.` }], details: makeDetails(mode)([]), isError: true };
+					const agent = agents.find((entry) => entry.name === request.agent);
+					if (!agent) return { content: [{ type: "text", text: `Invalid modelTier: ${location}: unknown agent "${request.agent}".` }], details: makeDetails(mode)([]), isError: true };
+					try { selected.set(i, resolveModelTier(agent, request.modelTier)); }
+					catch (error) { return { content: [{ type: "text", text: `Invalid modelTier: ${location}: ${error instanceof Error ? error.message : String(error)}` }], details: makeDetails(mode)([]), isError: true }; }
+				}
+			}
+			const taskAgents = (index: number): SelectedAgent[] => selected.has(index) ? [selected.get(index)!] : agents;
+
 			if (
 				(agentScope === "project" || agentScope === "both") &&
 				confirmProjectAgents &&
@@ -889,7 +913,7 @@ export default function (pi: ExtensionAPI) {
                 const unknown = requests.filter(t => !agents.some(a => a.name === t.agent)).map(t => t.agent);
                 if (unknown.length) return {isError: true, content: [{type: "text", text: "Unknown agents: " + unknown.join(", ")}], details: makeDetails("single")([])};
                 if (signal?.aborted) throw new Error("Dispatch was aborted");
-                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any));
+                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected }));
                 return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + ". This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop."}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
             }
 
@@ -902,7 +926,7 @@ export default function (pi: ExtensionAPI) {
 					accept: (result: SingleResult) => !isFailedResult(result) && !printedToolMarkup(result),
 					report: (result: SingleResult) => withTerminalDiagnostics(extractFinalText(result.messages), result),
 					run: (node, parents, nodeSignal) => {
-						return runSingleAgent(ctx.cwd, { ...dispatchDefaults, waitKey: node.id, onSpawn: () => launched.add(node.id) }, agents, node.agent, appendParentReports(node.task, parents), node.cwd, undefined, nodeSignal, undefined, makeDetails("dag"), node.readOnly ? "read" : "write");
+						return runSingleAgent(ctx.cwd, { ...dispatchDefaults, waitKey: node.id, onSpawn: () => launched.add(node.id) }, taskAgents(dagNodes!.findIndex((entry) => entry.id === node.id)), node.agent, appendParentReports(node.task, parents), node.cwd, undefined, nodeSignal, undefined, makeDetails("dag"), node.readOnly ? "read" : "write");
 					},
 				});
 				const rowById = new Map(rows.map((row) => [row.nodeId, row]));
@@ -910,7 +934,8 @@ export default function (pi: ExtensionAPI) {
 					const row = rowById.get(node.id)!;
 					const cause = row.cause === undefined ? undefined : row.cause instanceof Error ? row.cause.message : String(row.cause);
 					const base: SingleResult = row.result ?? { agent: node.agent, agentSource: "unknown", task: node.task, exitCode: 1, messages: [], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: cause === undefined ? undefined : "error", errorMessage: cause };
-					return { ...base, nodeId: node.id, dag: { status: row.status, blockedBy: row.blockedBy, started: launched.has(node.id) } };
+					const selectedAgent = selected.get(dagNodes!.indexOf(node));
+					return { ...base, ...(selectedAgent?.modelTier !== undefined ? { modelTier: selectedAgent.modelTier } : {}), nodeId: node.id, dag: { status: row.status, blockedBy: row.blockedBy, started: launched.has(node.id) } };
 				});
 				const accepted = results.filter((r) => r.dag?.status === "accepted").length;
 				return {
@@ -946,7 +971,7 @@ export default function (pi: ExtensionAPI) {
 					const result = await runSingleAgent(
 						ctx.cwd,
 						dispatchDefaults,
-						agents,
+						taskAgents(i),
 						step.agent,
 						taskWithContext,
 						step.cwd,
@@ -1001,6 +1026,7 @@ export default function (pi: ExtensionAPI) {
 						messages: [],
 						stderr: "",
 						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+						...(selected.get(i)?.modelTier !== undefined ? { modelTier: selected.get(i)!.modelTier } : {}),
 					};
 				}
 
@@ -1021,7 +1047,7 @@ export default function (pi: ExtensionAPI) {
 					const result = await runSingleAgent(
 						ctx.cwd,
 						dispatchDefaults,
-						agents,
+						taskAgents(index),
 						t.agent,
 						t.task,
 						t.cwd,
@@ -1040,7 +1066,7 @@ export default function (pi: ExtensionAPI) {
 						// Per-task fail closed: a launch that throws (e.g. missing Claude subscription guard) is one failed task; siblings keep their evidence. Abort still rejects.
 						if (signal?.aborted) throw error;
 						const message = error instanceof Error ? error.message : String(error);
-						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: "error", errorMessage: message };
+						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: "error", errorMessage: message, ...(selected.get(index)?.modelTier !== undefined ? { modelTier: selected.get(index)!.modelTier } : {}) };
 					});
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -1071,7 +1097,7 @@ export default function (pi: ExtensionAPI) {
 				const result = await runSingleAgent(
 					ctx.cwd,
 					dispatchDefaults,
-					agents,
+					taskAgents(0),
 					params.agent,
 					params.task,
 					params.cwd,
@@ -1119,12 +1145,17 @@ export default function (pi: ExtensionAPI) {
             const failed = results.filter(r => r.exitCode !== -1 && isFailedResult(r)).length;
             const done = results.filter(r => r.exitCode === 0 && !isFailedResult(r)).length;
             const status = isPartial ? `Working · ${done} done · ${failed} failed` : result.isError || failed ? `Finished with errors · ${failed} failed` : `Finished · ${done} done`;
-            const names = results.map(r => r.agent).join(", ").replace(/[\r\n\x1b]/g, " ").slice(0, 120);
+            const names = results.map(r => `${r.agent}${r.modelTier !== undefined ? ` [tier: ${r.modelTier}]` : ""}`).join(", ").replace(/[\r\n\x1b]/g, " ").slice(0, 120);
             const hint = results.length ? "Click to inspect · /subagent" : (result.content.find(c => c.type === "text")?.text ?? "No workers launched").replace(/\s+/g, " ").slice(0, 180);
             return monitor.compact(theme.fg(failed || result.isError ? "error" : "muted", `${status} · ${names}`) + "\n" + hint, results[0]?.workerId);
         },
     };
-    pi.registerTool(subagentTool);
+    pi.registerTool({
+        ...subagentTool,
+        async execute(_toolCallId, params, signal, onUpdate, ctx) {
+            return subagentTool.execute(_toolCallId, params, signal, onUpdate, ctx);
+        },
+    });
     pi.registerTool({
         name: "request_authorization", label: "Request authorization",
         description: "Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked, or exclusively via push_branch a session-only release-engineer push lease for one feature branch (commits: true also allows normal commits, artifact_dir binds -F message files), or exclusively via delivery a session-scoped reusable release-engineer delivery (push, PR create/edit/merge, release create) bound to one repo/branch/base. Refused outside the interactive TUI.",

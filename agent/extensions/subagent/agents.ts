@@ -9,6 +9,8 @@ import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/
 import { parseFallbackModels } from "./model-routing.ts";
 
 export type AgentScope = "user" | "project" | "both";
+export type ModelTier = "economy" | "capable";
+export interface TierModelConfig { model: string; fallbackModel: string[]; }
 
 export interface AgentConfig {
 	name: string;
@@ -20,6 +22,7 @@ export interface AgentConfig {
 	systemPrompt: string;
 	source: "user" | "project" | "package";
 	filePath: string;
+	modelTiers?: Partial<Record<ModelTier, TierModelConfig>>;
 }
 
 export interface AgentDiscoveryResult {
@@ -72,12 +75,15 @@ function parseToolList(value: unknown): string[] | undefined {
 interface RoleOverride {
 	model?: string;
 	fallbackModel?: string[];
+	modelTiers?: Partial<Record<ModelTier, TierModelConfig>>;
 	thinking?: string;
 	tools?: string[];
 }
 
-const ROLE_KEYS = ["name", "provider", "model", "fallbackModel", "thinking", "tools"];
+const ROLE_KEYS = ["name", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools"];
 const ROLE_TEXT_KEYS = ["provider", "model", "fallbackModel", "thinking"];
+const TIER_KEYS = ["economy", "capable"];
+const TIER_MODEL_KEYS = ["provider", "model", "fallbackModel"];
 
 /**
  * Shared roles.json contract for package defaults, package user overrides and the roles editor.
@@ -95,6 +101,17 @@ export function roleRegistryViolation(registry: unknown, complete = false): stri
 		for (const key of ROLE_TEXT_KEYS) {
 			if (entry[key] === undefined && !complete) continue;
 			if (typeof entry[key] !== "string") return `entry ${index} has a ${complete ? "missing or " : ""}non-string ${key}`;
+		}
+		if (entry.modelTiers !== undefined) {
+			if (typeof entry.modelTiers !== "object" || entry.modelTiers === null || Array.isArray(entry.modelTiers)) return `entry ${index} has invalid modelTiers`;
+			for (const [tier, definition] of Object.entries(entry.modelTiers as Record<string, unknown>)) {
+				if (!TIER_KEYS.includes(tier)) return `entry ${index} has unknown modelTiers key ${tier}`;
+				if (typeof definition !== "object" || definition === null || Array.isArray(definition)) return `entry ${index} has invalid modelTiers.${tier}`;
+				const model = definition as Record<string, unknown>;
+				const unknownModelKeys = Object.keys(model).filter((key) => !TIER_MODEL_KEYS.includes(key));
+				if (unknownModelKeys.length) return `entry ${index} modelTiers.${tier} has unknown key ${unknownModelKeys.join(", ")}`;
+				if (typeof model.provider !== "string" || !model.provider.trim() || typeof model.model !== "string" || !model.model.trim() || typeof model.fallbackModel !== "string" || !parseFallbackModels(model.fallbackModel).length) return `entry ${index} has invalid modelTiers.${tier} provider, model or fallbackModel`;
+			}
 		}
 		const tools = entry.tools;
 		if (tools !== undefined && typeof tools !== "string" && !(Array.isArray(tools) && tools.every((t) => typeof t === "string"))) return `entry ${index} has invalid tools (a string or a list of strings)`;
@@ -126,12 +143,24 @@ function loadRoleRegistry(file: string, label?: string, missingOk = false): { ro
 	if (!Array.isArray(registry)) return { roles };
 	for (const role of registry) {
 		if (typeof role !== "object" || role === null) continue;
-		const entry = role as { name?: unknown; provider?: unknown; model?: unknown; fallbackModel?: unknown; thinking?: unknown; tools?: unknown };
+		const entry = role as { name?: unknown; provider?: unknown; model?: unknown; fallbackModel?: unknown; modelTiers?: unknown; thinking?: unknown; tools?: unknown };
 		if (typeof entry.name !== "string") continue;
 		const model = typeof entry.model === "string" ? entry.model.trim() : "";
+		const modelTiers: Partial<Record<ModelTier, TierModelConfig>> = {};
+		if (entry.modelTiers && typeof entry.modelTiers === "object" && !Array.isArray(entry.modelTiers)) {
+			for (const [tier, definition] of Object.entries(entry.modelTiers as Record<string, { provider?: unknown; model?: unknown; fallbackModel?: unknown }>)) {
+				if (!TIER_KEYS.includes(tier) || typeof definition !== "object" || definition === null || Array.isArray(definition) || typeof definition.provider !== "string" || typeof definition.model !== "string" || typeof definition.fallbackModel !== "string") continue;
+				const tierModel = definition.model.trim();
+				modelTiers[tier as ModelTier] = {
+					model: tierModel && !tierModel.includes("/") ? `${definition.provider}/${tierModel}` : tierModel,
+					fallbackModel: parseFallbackModels(definition.fallbackModel),
+				};
+			}
+		}
 		roles.set(entry.name, {
 			model: model && typeof entry.provider === "string" && !model.includes("/") ? `${entry.provider}/${model}` : model || undefined,
 			fallbackModel: typeof entry.fallbackModel === "string" ? parseFallbackModels(entry.fallbackModel) : undefined,
+			modelTiers: entry.modelTiers !== undefined ? modelTiers : undefined,
 			thinking: typeof entry.thinking === "string" ? entry.thinking : undefined,
 			tools: parseToolList(entry.tools),
 		});
@@ -202,6 +231,7 @@ function loadAgentsFromDir(
 				role?.fallbackModel ??
 				(fallbackAnnotation !== undefined ? parseFallbackModels(fallbackAnnotation) :
 					(typeof frontmatter.fallbackModel === "string" ? parseFallbackModels(frontmatter.fallbackModel) : undefined)),
+			modelTiers: role?.modelTiers,
 			thinking: role?.thinking ?? annotationText("thinking") ?? (typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined),
 			systemPrompt: body,
 			source,
@@ -277,6 +307,7 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 			packageRoles.set(name, {
 				model: user?.model ?? baseRole.model,
 				fallbackModel: user?.fallbackModel ?? baseRole.fallbackModel,
+				modelTiers: user?.modelTiers ?? baseRole.modelTiers,
 				thinking: user?.thinking ?? baseRole.thinking,
 				tools: user?.tools ?? baseRole.tools,
 			});

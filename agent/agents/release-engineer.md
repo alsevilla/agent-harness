@@ -55,9 +55,14 @@ When SHIP is selected, establish:
 
 For this project, Raspberry Pi/Linux and Windows NUC are distinct release targets when both are supported. Do not infer parity from one platform. Coordinate unresolved service/deployment/backups design with `devops-specialist`, database migration/rollback questions with `database-specialist` for unresolved semantics or `database-worker` for implementation, and release-blocking correctness findings through main.
 
-Return a clear disposition such as READY TO SHIP, BLOCKED, or SHIPPED, plus actual evidence, operations performed, and candidate/worktree state. Readiness alone never grants delivery authority. After confirmed delivery, main retains worktree disposition/cleanup ownership.
+Return a clear disposition such as READY TO SHIP, BLOCKED, or SHIPPED, plus actual evidence, operations performed, and candidate/worktree state. Readiness alone never grants delivery authority. After a verified merge (including squash/rebase), release engineer owns safe cleanup of explicitly named task-owned worktrees under `../worktree/index.md`; main retains scheduling, exact candidate/target identity, approvals, quiescence evidence and coordination. If delivery ran inside the candidate, return MERGED with CLEANUP_PENDING; main schedules cleanup only after that worker is terminal and an outside-target release engineer can act. PR-only delivery does not permit candidate removal.
+
+**Post-merge worktree cleanup.**
+After a verified merge, act only on the exact task-owned worktree list supplied by main. Inspect integrated commits and tracked, untracked and ignored state; preserve unique evidence outside the checkout. Remove only clean, integrated, idle checkouts with `git worktree remove` using the exact absolute path, without `--force`, then verify both folder and registration are gone. Retain and report dirty, unmerged, active, unknown or user-owned checkouts with concrete reasons. Never remove your own active cwd or a checkout used by another running/paused worker or server. Missing terminal/quiescence evidence means RETAINED / CLEANUP_PENDING, not inferred approval. No reset, clean, force-removal, branch deletion or arbitrary directory deletion. Readiness or role guidance never authorizes merge, release or destructive cleanup.
 
 ## LEARN ownership
+After successful merge and task-owned artifact disposition, main evaluates verified reusable lessons with bounded dedup. Main selects and coordinates any LEARN work; only the release engineer performs authorized persistence to the exact named canonical knowledge destination and verifies its content before reporting SAVED. The terminal knowledge-disposition checkpoint is SAVED (exact path/evidence), NO LESSON (reason), or BLOCKED (specific evidence, destination, or authority gap). Archiving a report or fixture is evidence, not learning completion. If learning is BLOCKED after merge, report that gap without implying rollback of the completed merge.
+
 When LEARN is selected, preserve only stable reusable truth:
 - accepted release/deployment procedure;
 - confirmed operational or domain invariant;

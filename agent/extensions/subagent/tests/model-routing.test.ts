@@ -1,6 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getFallbackSequence, isProviderAvailabilityFailure, nextFallbackModel, parseFallbackModels, shouldRetryWithFallback } from "../model-routing.ts";
+import { getFallbackSequence, isProviderAvailabilityFailure, nextFallbackModel, parseFallbackModels, resolveModelTier, shouldRetryWithFallback, type ModelTier } from "../model-routing.ts";
+import type { AgentConfig } from "../agents.ts";
+
+const agent = (name: string, source: AgentConfig["source"] = "package"): AgentConfig => ({ name, description: "role", source, filePath: "role.md", systemPrompt: "prompt", model: "configured/model", fallbackModel: ["configured/fallback"], tools: ["read"], thinking: "high" });
+
+test("all supported role tiers resolve exact same-tier pairs without mutating configured roles", () => {
+  const expected: Record<string, Partial<Record<ModelTier, [string, string]>>> = {
+    "backend-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "frontend-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "database-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"] },
+    "general-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "platform-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "test-engineer": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    scout: { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"] },
+  };
+  for (const [name, tiers] of Object.entries(expected)) for (const [tier, [model, fallback]] of Object.entries(tiers)) {
+    const original = { ...agent(name), modelTiers: { [tier]: { model, fallbackModel: [fallback] } } };
+    const resolved = resolveModelTier(original, tier as ModelTier);
+    assert.equal(resolved.model, model);
+    assert.equal(resolved.modelTier, tier);
+    assert.deepEqual(resolved.fallbackModel, [fallback]);
+    assert.equal(resolved.tools, original.tools);
+    assert.equal(resolved.thinking, original.thinking);
+    assert.equal(resolved.systemPrompt, original.systemPrompt);
+    assert.equal(original.model, "configured/model");
+  }
+  const configuredScout = { ...agent("scout"), modelTiers: { economy: { model: "configured/economy", fallbackModel: [] }, capable: { model: "configured/capable", fallbackModel: [] } } };
+  assert.equal(resolveModelTier(configuredScout, "economy").model, "configured/economy");
+  assert.throws(() => resolveModelTier(configuredScout, "capable"), /not supported/);
+  for (const source of ["user", "project"] as const) assert.throws(() => resolveModelTier(agent("backend-worker", source), "economy"), /canonical package roles/);
+  assert.throws(() => resolveModelTier(agent("unknown"), "economy"), /canonical package roles/);
+});
+
+test("tier resolution uses only the validated selection and preserves an immutable diagnostic snapshot", () => {
+  const fallbackModel = ["fixture-fallback"];
+  const configured = { ...agent("backend-worker"), modelTier: "capable", modelTiers: {
+    economy: { model: "fixture-provider/shared-primary", fallbackModel },
+    capable: { model: "fixture-provider/shared-primary", fallbackModel: ["capable-fallback"] },
+  } } as AgentConfig & { modelTier: string };
+  const resolved = resolveModelTier(configured, "economy");
+  assert.equal(resolved.model, "fixture-provider/shared-primary");
+  assert.equal(resolved.modelTier, "economy");
+  assert.notEqual(resolved.fallbackModel, fallbackModel);
+  assert.deepEqual(resolved.fallbackModel, ["fixture-fallback"]);
+  assert.equal(Object.hasOwn(configured, "modelTier"), true);
+  assert.equal(configured.modelTier, "capable");
+  fallbackModel[0] = "changed-after-selection";
+  assert.deepEqual(resolved.fallbackModel, ["fixture-fallback"]);
+});
 
 test("fallback strings parse as ordered normalized model sequences", () => {
   assert.deepEqual(parseFallbackModels(" openai-codex/gpt-6-luna || || github-copilot/gpt-6-luna || openai-codex/gpt-6-luna "), [

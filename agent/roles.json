@@ -44,6 +44,18 @@
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
     "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "modelTiers": {
+      "economy": {
+        "provider": "anthropic",
+        "model": "claude-haiku-5-5",
+        "fallbackModel": "openai-codex/gpt-6-luna"
+      },
+      "capable": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol"
+      }
+    },
     "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
@@ -84,6 +96,18 @@
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
     "fallbackModel": "openai-codex/gpt-6-luna",
+    "modelTiers": {
+      "economy": {
+        "provider": "anthropic",
+        "model": "claude-haiku-5-5",
+        "fallbackModel": "openai-codex/gpt-6-luna"
+      },
+      "capable": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol"
+      }
+    },
     "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
@@ -92,6 +116,18 @@
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
     "fallbackModel": "openai-codex/gpt-6-luna",
+    "modelTiers": {
+      "economy": {
+        "provider": "anthropic",
+        "model": "claude-haiku-5-5",
+        "fallbackModel": "openai-codex/gpt-6-luna"
+      },
+      "capable": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol"
+      }
+    },
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
@@ -100,6 +136,18 @@
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
     "fallbackModel": "openai-codex/gpt-6.1-sol",
+    "modelTiers": {
+      "economy": {
+        "provider": "openai-codex",
+        "model": "gpt-6-luna",
+        "fallbackModel": "anthropic/claude-haiku-5-5"
+      },
+      "capable": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol"
+      }
+    },
     "thinking": "medium",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
@@ -108,6 +156,13 @@
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
     "fallbackModel": "openai-codex/gpt-6-luna",
+    "modelTiers": {
+      "economy": {
+        "provider": "anthropic",
+        "model": "claude-haiku-5-5",
+        "fallbackModel": "openai-codex/gpt-6-luna"
+      }
+    },
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell"
   },
@@ -132,6 +187,18 @@
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
     "fallbackModel": "openai-codex/gpt-6-luna",
+    "modelTiers": {
+      "economy": {
+        "provider": "openai-codex",
+        "model": "gpt-6-luna",
+        "fallbackModel": "anthropic/claude-haiku-5-5"
+      },
+      "capable": {
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol",
+        "fallbackModel": "anthropic/claude-sonnet-5-5"
+      }
+    },
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
@@ -140,6 +207,18 @@
     "provider": "anthropic",
     "model": "claude-haiku-5-5",
     "fallbackModel": "openai-codex/gpt-6-luna",
+    "modelTiers": {
+      "economy": {
+        "provider": "openai-codex",
+        "model": "gpt-6-luna",
+        "fallbackModel": "anthropic/claude-haiku-5-5"
+      },
+      "capable": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol"
+      }
+    },
     "thinking": "low",
     "tools": "read, grep, find, ls, bash, powershell"
   },
