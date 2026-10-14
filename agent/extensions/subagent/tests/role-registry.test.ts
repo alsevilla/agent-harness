@@ -590,7 +590,7 @@ const PROFILE_LF_SHA256: Record<string, string> = {
   "ui-ux-specialist": "eca72528cfb10065d2a0280014ca9c4b39aa903b6713c24386c8b041ca0d2924",
 };
 // Approved post-change LF digest of the one profile whose pi.tools/body changed for the write grant; replaces its pre-change PROFILE_LF_SHA256 pin for the byte check.
-const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "17d1cf1b0bec122b05a0883db9a17b25ddcf14d8243ec337184c7e40408402b8" };
+const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "7954c2c8e292081d48eff6fc1427d1b2b368a5764441df3a8408b01161978ac5" };
 type RawTier = { model: string; fallbackModel: string; thinking: string };
 type RawRole = { name: string; defaultModelTier: "economy" | "capable"; modelTiers: Partial<Record<"economy" | "capable", RawTier>>; tools: string };
 const RAW_ROLES = () => JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8")) as RawRole[];

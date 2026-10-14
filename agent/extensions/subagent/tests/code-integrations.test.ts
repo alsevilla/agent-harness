@@ -75,7 +75,7 @@ test("shared guidance treats live SQLite and running executables as relocation b
   assert.match(CORE_GUIDANCE, /Restart only with verified DB_PATH[\s\S]*otherwise leave services stopped/i);
 });
 test("worktree policy permits safe relocation without a known restart configuration", () => {
-  const paths = ["../../../AGENTS.md", "../../../../README.md", "../README.md", "../../../skills/engineering-harness/worktree/index.md", "../../../skills/engineering-harness/worktree/guide.md"];
+  const paths = ["../../../AGENTS.md", "../../../../README.md", "../README.md", "../../../skills/engineering-harness/worktree/index.md"];
   for (const path of paths) {
     const policy = fs.readFileSync(new URL(path, import.meta.url), "utf8");
     assert.match(policy, /unknown restart configuration does not block authorized relocation/i, path);

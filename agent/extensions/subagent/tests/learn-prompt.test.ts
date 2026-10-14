@@ -2,6 +2,7 @@
 // dedupes via bounded QMD or file-search fallback, and dispatches release-engineer with explicit destination authority.
 // Static checks only; they do not prove a live save, a live QMD query or a live subagent run.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -138,4 +139,75 @@ test("release-engineer write is limited to named knowledge or release artifacts 
 	assert.match(role, /explicitly named[\s\S]{0,120}(knowledge|release)/i);
 	assert.match(role, /shell (redirection|heredoc)[^\n]*not a bypass/i);
 	assert.match(role, /normal guards still apply/i);
+});
+
+const CANONICAL_LEARN_FILES = ["agent/agents/release-engineer.md", "agent/skills/engineering-harness/ship/index.md", "agent/skills/engineering-harness/worktree/index.md", "agent/skills/engineering-harness/learn/index.md"];
+
+test("LEARN runs before the final commit or PR; the old after-merge order is absent from every canonical copy", () => {
+	for (const rel of [...CANONICAL_LEARN_FILES, "agent/prompts/learn.md", "agent/AGENTS.md"]) {
+		assert.doesNotMatch(read(rel), /After successful merge and task-owned artifact disposition/, `${rel}: old after-merge LEARN order`);
+	}
+	for (const rel of CANONICAL_LEARN_FILES) assert.match(read(rel), /Before the final commit or PR/, `${rel}: LEARN before final commit or PR`);
+	assert.match(read("agent/AGENTS.md"), /LEARN[^\n]{0,200}before the final commit or PR/);
+	assert.match(read("agent/prompts/learn.md"), /before the final commit or PR/);
+});
+
+test("release-engineer assigned LEARN module applies before the final commit or PR, not after delivery", () => {
+	const role = read("agent/agents/release-engineer.md");
+	assert.match(role, /For LEARN work before the final commit or PR/);
+	assert.doesNotMatch(role, /For LEARN work after delivery/);
+});
+
+test("knowledge records must not be git-ignored, join the commit/PR set and become tracked only at commit; private and local notes never leave git-ignore or get cited", () => {
+	const readme = read("docs/knowledge/README.md");
+	assert.match(readme, /must not be git-ignored/);
+	assert.match(readme, /named in the commit\/PR set that introduces them/);
+	assert.match(readme, /become Git-tracked when that commit exists/);
+	assert.match(readme, /Local SAVED grants no staging, commit or push authority/);
+	assert.doesNotMatch(readme, /Git-tracked and not ignored/);
+	assert.match(readme, /docs\/knowledge\/private\/[^\n]{0,40}git-ignored and unindexed/);
+	assert.match(readme, /never receive exported private, secret or unconfirmed notes/);
+	assert.match(readme, /Source fields cite repo-relative files or commits, which survive artifact disposal; _scratch and _evidence are never the only proof/);
+	const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "docs/knowledge/README.md", "docs/knowledge/general/README.md", "docs/knowledge/harness/README.md"], { cwd: REPO, encoding: "utf8" });
+	assert.equal(tracked.status, 0, `knowledge READMEs must be tracked: ${tracked.stderr}`);
+	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/README.md"], { cwd: REPO }).status, 1, "tracked knowledge README is not ignored");
+	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/private/probe.md"], { cwd: REPO }).status, 0, "private notes stay ignored");
+	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/local/probe.md"], { cwd: REPO }).status, 0, "local notes stay ignored");
+});
+
+test("LEARN module: SAVED is file plus readback only, a late lesson needs a follow-up PR, and a post-merge BLOCKED never rolls back the merge", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /not git-ignored/);
+	assert.match(mod, /named in the commit\/PR set/);
+	assert.match(mod, /untracked until that commit exists/);
+	assert.match(mod, /no implicit staging/i);
+	assert.doesNotMatch(mod, /Git-tracked and not ignored|included in the same PR/);
+	assert.match(mod, /SAVED means the file and readback exist; it is not proof of remote commit, merge or publication/);
+	assert.match(mod, /authorized follow-up PR before cleanup of the affected artifacts/);
+	assert.match(mod, /cannot be claimed as already published/);
+	assert.match(mod, /never rolls back the merge/);
+});
+
+test("learn prompt sequences LEARN before the final commit or PR and reports SAVED as file plus readback only", () => {
+	const prompt = read("agent/prompts/learn.md");
+	assert.match(prompt, /before the final commit or PR/);
+	assert.match(prompt, /not git-ignored/);
+	assert.match(prompt, /commit\/PR set/);
+	assert.match(prompt, /no implicit staging/i);
+	assert.doesNotMatch(prompt, /Git-tracked and not ignored|included in the same PR/);
+	assert.match(prompt, /not proof of remote commit, merge or publication/);
+});
+
+test("release-engineer and AGENTS keep local SAVED separate from remote integration; cleanup waits for verified remote integration or NO LESSON", () => {
+	const role = read("agent/agents/release-engineer.md");
+	assert.match(role, /not git-ignored/);
+	assert.match(role, /commit\/PR set/);
+	assert.match(role, /no implicit staging/i);
+	assert.doesNotMatch(role, /Git-tracked and not ignored|included in the same PR/);
+	assert.match(role, /local SAVED[^.]{0,80}never sufficient/);
+	assert.match(role, /verified remote integration/);
+	const agents = read("agent/AGENTS.md");
+	assert.doesNotMatch(agents, /waits for its SAVED or NO LESSON checkpoint/);
+	assert.match(agents, /SAVED with verified remote integration or a NO LESSON checkpoint/);
+	assert.match(agents, /local SAVED is never sufficient/);
 });

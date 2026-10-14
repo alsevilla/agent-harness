@@ -62,15 +62,11 @@ registrations as part of this procedure. This is a workflow step, not a watcher;
 abandoning a task still requires disposition. Readiness or role guidance is not
 operation authority.
 
-After successful merge and task-owned artifact disposition, main evaluates
-verified reusable lessons with bounded dedup. Main selects and coordinates any
-LEARN work; only the release engineer performs authorized persistence to the
-exact named canonical knowledge destination and verifies its content before
-reporting SAVED. The terminal knowledge-disposition checkpoint is SAVED (exact
-path/evidence), NO LESSON (reason), or BLOCKED (specific evidence, destination,
-or authority gap). Archiving a report or fixture is evidence, not learning
-completion. If learning is BLOCKED after merge, report that gap without implying
-rollback of the completed merge.
+The cleanup set is exactly three targets, each named in the parent packet by exact absolute path: (1) the clean, integrated, idle, task-owned checkout, removed with `git worktree remove <exact absolute path>` (no `--force`); (2) the exact `_evidence/<task>` directory; (3) the exact `_scratch/<task>` directory. The parent packet supplies the exact host-appropriate removal operation for each artifact directory, applied one exact path at a time. Forbidden: no archive-by-default, no bulk copy, no sweep, no wildcard, no shared-parent removal, no parent-directory removal, no prune, no branch deletion, no force, reset or clean. A target holding unique or unreproduced required evidence or user data whose preservation requirement is not met is RETAINED and reported; it is not copied or archived by default.
+Retain and report RETAINED with a concrete reason for any target that is dirty, unmerged, unknown, under explicit retention or missing authority, or that has an active or paused job, a running service, a database with live -wal or -shm sidecars, shared or uniquely owned data, user data, or a BLOCKED knowledge checkpoint. Unmerged or PR-only candidates are retained.
+Cleanup worker temp, log and report destinations lie outside all three deletion targets: use inline or approved external report paths only, and no file is recreated in a removed target after delete.
+Knowledge gate before cleanup: LEARN completes before the final commit or PR (canonical checkpoint in `../learn/index.md`). Cleanup after a verified merge runs only once the merged state includes the knowledge record and index, or after a NO LESSON checkpoint. Verify from a freshly fetched remote base, read-only: `git fetch <remote> <base>`; take the merged SHA from `git rev-parse <remote>/<base>`, not commit ancestry, because squash merges do not keep the feature commits; for each exact record and index path, `git rev-parse <merged-sha>:<path>` must equal the `git -C <exact checkout path> hash-object -- <path>` output for the local readback file, run before any removal. Local SAVED alone is never sufficient before deletion. A BLOCKED knowledge checkpoint retains the affected targets and reports the concrete gap; it never rolls back the merge. A lesson verified only after merge needs an authorized follow-up PR before cleanup of the affected artifacts, and cannot be claimed as already published.
+Before the final commit or PR, main selects LEARN when warranted; the knowledge-disposition checkpoint (SAVED, NO LESSON or BLOCKED), no-staging and not-git-ignored rules are canonical in `../learn/index.md`. Archiving a report or fixture is evidence, not learning completion.
 Load `references/extended.md` only for recovery or multi-worktree complexity.
 
 Resolve relative references from this module folder. This procedure supplies guidance; the selected named role still must actually run.

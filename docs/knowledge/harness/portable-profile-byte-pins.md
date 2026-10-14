@@ -1,0 +1,8 @@
+# Portable profile byte pins
+
+- Claim: Normalize only CRLF to LF with a byte-preserving latin1 round-trip for portable profile digests; retain immutable baseline provenance and independent canonical pins so real content changes still fail.
+- Source: [`fileSha256`, canonical pins and mutation regressions](../../../agent/extensions/subagent/tests/role-registry.test.ts) (lines 551–636) and [pre-migration baseline](../../../agent/extensions/subagent/tests/fixtures/tier-only-baseline.json) (lines 1–28), inspected at commit `4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47`; baseline provenance is `e2ddaedbed4f05028d6a319e36d38b73a37115d7`. Explicit approved profile deltas are separate from the original pins.
+- Evidence status: Verified source inspection: 20 canonical pins, key-set checks, LF/CRLF/mixed-ending equivalence, and header/tools/body/trailing-space mutation controls. Historical completed DEBUG/REPAIR evidence supplied by the curator reports 17 mixed endings lost in a fresh CRLF checkout while Git blobs stayed unchanged, then 35 registry and 590 root tests passed with 3 skipped. These are historical results, not a current rerun; no actual fresh LF clone was tested.
+- Context: Checkout line endings are not profile content; trimming whitespace or UTF-8-decoding arbitrary bytes would weaken the byte oracle.
+- Date: 2026-10-15 (persistence and source inspection).
+- Revalidate when: Profile content, approved deltas, baseline provenance, digest normalization or checkout encoding policy changes; regenerate canonical pins only from independently accepted content.

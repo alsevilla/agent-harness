@@ -1,0 +1,8 @@
+# Semantic frontmatter regression checks
+
+- Claim: Compare YAML-decoded frontmatter values, not raw regex captures, so quoted empty fallback values match registry emptiness while genuine non-empty fallbacks remain distinguishable.
+- Source: [Public parser use and empty/non-empty controls](../../../agent/extensions/subagent/tests/role-registry.test.ts) (lines 13, 34–48, 389–396), [agent definition parsing](../../../agent/extensions/subagent/agents.ts) (lines 339, 368–371), and [empty-value serialization](../../../agent/extensions/subagent/roles-editor.ts) (lines 271–274), inspected at commit `4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47`.
+- Evidence status: Verified source inspection: the regression uses public parseFrontmatter and checks both quoted empty forms plus a non-empty discriminating control. Historical completed DEBUG/REPAIR evidence supplied by the curator confirms the raw capture counted two quotation characters as content; RED 11 passed/1 failed became GREEN 13/13. No current rerun; current coverage resides in role-registry.test.ts rather than the former RFID-specific test.
+- Context: The editor intentionally serializes an empty value as double quotes. Tests must follow production YAML semantics without treating a real fallback as empty or weakening registry comparisons.
+- Date: 2026-10-15 (persistence and source inspection).
+- Revalidate when: The public frontmatter parser, empty/null semantics, metadata precedence, registry fallback representation or editor serialization changes.

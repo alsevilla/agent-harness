@@ -1,0 +1,8 @@
+# Stateful UTF-8 decoding for RPC streams
+
+- Claim: Use separate per-spawn stdout and stderr UTF-8 StringDecoders, write each chunk through its decoder, and flush both at close before parsing the remaining stdout line.
+- Source: [RPC stream handling](../../../agent/extensions/subagent/index.ts) (lines 410–477) and [split-byte regressions](../../../agent/extensions/subagent/tests/dag-runtime.node.ts) (lines 910–980), inspected at commit `4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47`.
+- Evidence status: Verified source inspection covers split emoji, 200000-character multibyte output, DAG propagation, trailing-line parsing and native U+FFFD for truncated stderr. Historical completed repair evidence supplied by the curator reports RED 30 passed/4 failed to GREEN 34/34; independent verification used four installed-CLI foreground runs with zero U+FFFD versus four U+FFFD in the control. No current test rerun; real CLI stderr and DAG were not exercised (test doubles only), and live-provider, TUI and typecheck behavior was not proven.
+- Context: Pipe chunks can split a multibyte codepoint; independent per-chunk string conversion corrupts otherwise valid UTF-8. A truly truncated tail should retain the decoder's native replacement behavior rather than be silently dropped.
+- Date: 2026-10-15 (persistence and source inspection).
+- Revalidate when: Spawn lifecycle, stream encoding, chunk handling, close-time flushing or RPC line parsing changes.
