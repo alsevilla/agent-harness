@@ -9,7 +9,7 @@ const root = join(import.meta.dir, "..");
 test("Copilot plugin manifest has supported metadata and contained shared paths", () => {
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
   expect(manifest.name).toBe("agent-harness");
-  expect(manifest.version).toBe("1.6.0");
+  expect(manifest.version).toBe("1.7.0");
   expect(manifest.agents).toBe("./agent/agents");
   expect(manifest.skills).toBe("./agent/skills");
   for (const [path, sentinel] of [[manifest.agents, "general-worker.md"], [manifest.skills, "engineering-harness/SKILL.md"]]) {
@@ -34,6 +34,16 @@ test("Copilot marketplace lists this plugin and its platform-specific source", (
     ]),
   );
   expect(readFileSync(join(root, "package.json"), "utf8")).toContain('"name": "@alsevilla/pi-engineering-harness"');
+});
+
+test("README Copilot install commands use the marketplace and plugin names from the manifests", () => {
+  const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
+  const marketplace = JSON.parse(readFileSync(join(root, ".github", "plugin", "marketplace.json"), "utf8"));
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  expect(marketplace.plugins).toEqual(expect.arrayContaining([expect.objectContaining({ name: manifest.name })]));
+  expect(readme).toContain(`copilot plugin marketplace add ${manifest.repository.replace("https://github.com/", "")}`);
+  expect(readme).toContain(`copilot plugin install ${manifest.name}@${marketplace.name}`);
+  expect(readme).toContain("copilot --plugin-dir ");
 });
 
 test("backend-worker Copilot metadata matches its declared primary and preserves Pi runtime settings", async () => {

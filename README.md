@@ -15,7 +15,7 @@
   - [Practices we draw on](#practices-we-draw-on)
 - [Orchestrator and subagent problems solved](#orchestrator-and-subagent-problems-solved)
 - [Status and limits](#status-and-limits)
-- [Install](#install)
+- [Installation](#installation)
 - [Interactive user questions (ask_user)](#interactive-user-questions-ask_user)
 - [Selective instruction loading](#selective-instruction-loading)
 - [Optional skill catalogs](#optional-skill-catalogs)
@@ -39,7 +39,7 @@
 
 | Asset or capability | Copilot CLI preview status |
 | --- | --- |
-| Source release | v1.6.0 (GitHub repository: [alsevilla/agent-harness](https://github.com/alsevilla/agent-harness); migrated with preserved history). |
+| Source release | v1.7.0 (GitHub repository: [alsevilla/agent-harness](https://github.com/alsevilla/agent-harness); migrated with preserved history). |
 | Agents and skills | The native plugin displayed all 20 canonical agents and six shared skills. One `backend-worker` read-only delegation and an `engineering-harness` skill invocation were observed; this does not establish execution of every role or skill, model inheritance across roles, or every module path. Native Copilot models stay static: each `agent/agents/*.md` header `model:` is a fixed native value (using CLI catalog spellings) and is not derived from `agent/roles.json` tiers, so editing a Pi tier does not rewrite it. Copilot settings may override the header, and precedence has not been live-verified. The canonical `agent/AGENTS.md` is shared source, not an automatic Copilot-global policy. |
 | Session startup context | The native SessionStart hook loads the same installed canonical `agent/AGENTS.md` and `agent/skills/SKILLS.md` from `COPILOT_PLUGIN_ROOT`; relevant skill modules remain lazy-loaded. This reuses canonical context without duplicating policy, index or role trees. Five focused hook cases and two bounded native fixture prompts (with no available tools) verified injection; this does not establish global marketplace installation, resume variants, all roles, or Pi lifecycle/job/grant/extension/patch parity. The hook reads only those two policy files, never `agent/roles.json` or tier presets; it is a native preview, not Pi TypeScript runtime parity. |
 | Pi-specific runtime assets | Pi extensions, patches, `agent/roles.json` and `settings.example` remain Pi-specific; no Pi prompt export or Copilot emulation of Pi controls is claimed. The observed `unknown field ignored: metadata` warning reflects Pi-only metadata and was accepted, not suppressed. The observed CLI was Copilot v1.0.97; this is historical evidence, not a pinned minimum or SDK-loader compatibility claim. |
@@ -77,7 +77,7 @@ The full policy is [agent/AGENTS.md](agent/AGENTS.md). Routing criteria and proc
 Prerequisites: a current Pi installation, Node.js 22.19.0 or newer, and your own Claude subscription or ChatGPT/Codex sign-in. No credentials are included.
 
 1. Check out this repository at a path you control, for example `C:/path/to/agent-harness`.
-2. Install it as a native package with `pi install git:github.com/alsevilla/agent-harness`. Details, including the default-branch note and the optional local checkout: [Install](#install).
+2. Install it as a native package with `pi install git:github.com/alsevilla/agent-harness`. Details, including the default-branch note and the optional local checkout: [Installation](#installation).
 3. Optionally install the third-party integrations and create local configuration from the examples (`engineering-environment`, `qmd` and `refresh` only if you load them separately). Core orchestration does not need them.
 4. Restart Pi and sign in with `/login anthropic` and `/login openai-codex`.
 5. Run Pi from your project and open the worker inspector with `/subagent`.
@@ -159,7 +159,7 @@ Human-facing guides, grouped by purpose:
 - [Quickstart](#quickstart): first native install and first commands.
 
 **How-to**
-- [Install](#install): native package installation, optional packages, configuration and login.
+- [Installation](#installation): Pi and GitHub Copilot CLI installation, optional packages, configuration and login.
 - [Code navigation setup (optional)](#code-navigation-setup-optional): Serena, Graphify and QMD.
 - [Manual data refresh](#manual-data-refresh) and the [refresh guide](agent/extensions/refresh/README.md).
 - [Worktree placement and disposition](#worktree-placement-and-disposition).
@@ -240,7 +240,11 @@ Verified scope: the live check covered background batching and `/subagent usage`
 - Models and providers depend on your account and catalog.
 - Repository history was migrated and preserved at [alsevilla/agent-harness](https://github.com/alsevilla/agent-harness). The older root-level GSD/skills/extensions stack is retired; do not reinstall it alongside the current profile.
 
-## Install
+## Installation
+
+Install each supported harness separately. This repository declares two: Pi (the native package) and GitHub Copilot CLI (limited native preview). Other harnesses are not declared or supported here.
+
+### Pi
 
 Native installation from the Git source. There is no automatic installer, and the package is not published to npm. Installing adds one package entry to `~/.pi/agent/settings.json`; `--local` or `-l` writes it to `.pi/settings.json` instead, which Pi reads only after project trust.
 
@@ -287,6 +291,37 @@ Run Pi from your project. `/subagent` opens worker history and live activity; it
 **Skill name collisions.** Pi discovers skills from several locations. When two skills share a name, Pi keeps the first one discovered and warns; the other is ignored. This package sets no priority between its skills and your user or project skills, so rename or remove a duplicate to get a predictable result.
 
 **Local overrides.** Project-local roles under `.pi/agents/` stay project-scoped. A project role with the same name as a bundled role overrides it only in that project (covered by the isolated-profile tests).
+
+### GitHub Copilot CLI
+
+Limited native preview. This plugin is installed separately from the Pi package above; installing one does not install or change the other. Scope and limits: [Copilot CLI preview boundary](#copilot-cli-preview-boundary).
+
+1. Register the marketplace (`alsevilla` is the marketplace name in `.github/plugin/marketplace.json`):
+
+```text
+copilot plugin marketplace add alsevilla/agent-harness
+```
+
+2. Install the plugin (`agent-harness` is the plugin name in `.github/plugin/plugin.json`):
+
+```text
+copilot plugin install agent-harness@alsevilla
+```
+
+3. Check discovery: `copilot plugin list` should list `agent-harness`. Start a Copilot session in your project; the plugin's SessionStart hook then loads the canonical policy context. This is a preview check, not a full activation test.
+
+For a local checkout (the tested preview path), load the directory without installing it and confirm it is listed:
+
+```text
+copilot --plugin-dir C:/path/to/agent-harness plugin list
+copilot --plugin-dir C:/path/to/agent-harness
+```
+
+Limits:
+
+- The marketplace commands read the GitHub repository's default branch. Until this change is merged there, they do not install it. The remote add and install commands were not executed in this verification.
+- Only the `copilot plugin` subcommands above were checked against the installed CLI help (version 1.0.97). The in-session `/plugin` form is not verified here.
+- The plugin supplies agents, skills and SessionStart context. Pi-only parts are not part of the Copilot preview: shared prompt files are not exported, so `/learn` and the manual workflow prompts (such as `/debug`, `/verify`, `/review`) are Pi-only; the subagent and ask-user extensions, the QMD, Serena, Graphify and Ponytail integrations, `agent/roles.json` tiers and job/grant controls stay on the Pi side.
 
 ## Interactive user questions (ask_user)
 
@@ -360,7 +395,7 @@ Your agent directory already discovers every catalog when the checkout's `agent/
 
 ### Skills and tools
 
-Skills add guidance only. Commands and tools come from extensions: the native extensions register their own (see [Install](#install)), and `graphify-pi` adds `/graphify`. Loading a catalog changes none of them.
+Skills add guidance only. Commands and tools come from extensions: the native extensions register their own (see [Installation](#installation)), and `graphify-pi` adds `/graphify`. Loading a catalog changes none of them.
 
 ### Limits
 
@@ -403,7 +438,7 @@ The full code-navigation experience needs three separately installed components.
 - **Graphify** (architecture graph references): `pi install npm:graphify-pi` and an existing Graphify Python interpreter. Reads an existing `graphify-out/graph.json`; no graph is built here, and you maintain it (`/refresh graph` updates an existing one).
 - **QMD** (BM25 search over indexed local notes): install the QMD CLI, copy `agent/extensions/qmd/config.example.json` to `config.json`, set the Node and CLI paths and the existing index name, and create your own collections. No index is shipped or rebuilt by retrieval.
 
-The code workers also load Ponytail (`npm:@dietrichgebert/ponytail`). Setup steps are in the [install section](#install), with details in the [refresh](agent/extensions/refresh/README.md), [QMD](agent/extensions/qmd/README.md) and [engineering environment](agent/extensions/engineering-environment/README.md) READMEs.
+The code workers also load Ponytail (`npm:@dietrichgebert/ponytail`). Setup steps are in the [installation section](#installation), with details in the [refresh](agent/extensions/refresh/README.md), [QMD](agent/extensions/qmd/README.md) and [engineering environment](agent/extensions/engineering-environment/README.md) READMEs.
 
 Current behavior: code roles are listed in `agent/extensions/subagent/integrations.json`. Ponytail is required for every listed role except `reviewer`; a missing Ponytail extension fails that launch with a `Code integration missing` error that names the package to install, and no configuration overrides that. QMD, Serena and Graphify are optional: a missing one is skipped, its integration-only tools are not granted, and the launch note names it so the worker uses permitted read/grep/find navigation. Launch checks detect missing files only; a present but unhealthy backend is not detected, and a failing tool is reported rather than retried. The native package lists code roles only through `integrations.json`; those roles still need Ponytail as described above.
 
