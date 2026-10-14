@@ -158,56 +158,117 @@ test("release-engineer assigned LEARN module applies before the final commit or 
 	assert.doesNotMatch(role, /For LEARN work after delivery/);
 });
 
-test("knowledge records must not be git-ignored, join the commit/PR set and become tracked only at commit; private and local notes never leave git-ignore or get cited", () => {
-	const readme = read("docs/knowledge/README.md");
-	assert.match(readme, /must not be git-ignored/);
-	assert.match(readme, /named in the commit\/PR set that introduces them/);
-	assert.match(readme, /become Git-tracked when that commit exists/);
-	assert.match(readme, /Local SAVED grants no staging, commit or push authority/);
-	assert.doesNotMatch(readme, /Git-tracked and not ignored/);
-	assert.match(readme, /docs\/knowledge\/private\/[^\n]{0,40}git-ignored and unindexed/);
-	assert.match(readme, /never receive exported private, secret or unconfirmed notes/);
-	assert.match(readme, /Source fields cite repo-relative files or commits, which survive artifact disposal; _scratch and _evidence are never the only proof/);
-	const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "docs/knowledge/README.md", "docs/knowledge/general/README.md", "docs/knowledge/harness/README.md"], { cwd: REPO, encoding: "utf8" });
-	assert.equal(tracked.status, 0, `knowledge READMEs must be tracked: ${tracked.stderr}`);
-	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/README.md"], { cwd: REPO }).status, 1, "tracked knowledge README is not ignored");
-	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/private/probe.md"], { cwd: REPO }).status, 0, "private notes stay ignored");
-	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/local/probe.md"], { cwd: REPO }).status, 0, "local notes stay ignored");
+test("LOCAL-ONLY default: LEARN saves only to the explicitly selected primary's existing ignored docs/knowledge/local/ store", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	const prompt = read("agent/prompts/learn.md");
+	const role = read("agent/agents/release-engineer.md");
+	for (const text of [mod, prompt, role]) assert.match(text, /LOCAL-ONLY/, "LOCAL-ONLY default named");
+	for (const text of [mod, prompt]) {
+		assert.match(text, /docs\/knowledge\/local\//);
+		assert.match(text, /explicitly selected primary/i);
+		assert.match(text, /Do not assume a profile path/i);
+		assert.match(text, /never edit `\.gitignore`/i);
+	}
+	assert.match(mod, /missing[^\n]{0,160}BLOCKED/i, "missing destination is BLOCKED");
+	assert.match(role, /LOCAL-ONLY[^\n]{0,200}docs\/knowledge\/local\//);
 });
 
-test("LEARN module: SAVED is file plus readback only, a late lesson needs a follow-up PR, and a post-merge BLOCKED never rolls back the merge", () => {
+test("a LOCAL record sits outside every packet candidate, _evidence and _scratch deletion target", () => {
+	assert.match(read("agent/skills/engineering-harness/learn/index.md"), /outside all three packet deletion targets \(candidate, `_evidence` and `_scratch`\), so it survives their cleanup/);
+	assert.match(read("agent/skills/engineering-harness/worktree/index.md"), /SAVED \(local:[^)]*outside all three deletion targets\)/);
+	assert.match(read("agent/skills/engineering-harness/worktree/index.md"), /A destination inside any of the three deletion targets is not durable/);
+	assert.match(read("agent/agents/release-engineer.md"), /outside every cleanup target/);
+});
+
+test("universal Git tracking, commit/PR-set and remote-integration requirements are removed from canonical LEARN, cleanup and knowledge text", () => {
+	const files = [...CANONICAL_LEARN_FILES, "agent/prompts/learn.md", "agent/AGENTS.md", "agent/skills/engineering-harness/knowledge/index.md"];
+	const forbidden = [/must not be git-ignored/, /not git-ignored/, /reports no match/, /named in the commit\/PR set/, /become Git-tracked/, /untracked until that commit exists/, /Git-tracked and not ignored/, /included in the same PR/, /waits for SAVED with verified remote integration/, /remote verification of the record and index/, /local SAVED[^.\n]{0,80}never sufficient/, /authorized follow-up PR before cleanup/];
+	for (const rel of files) for (const pattern of forbidden) assert.doesNotMatch(read(rel), pattern, `${rel}: ${pattern}`);
+});
+
+test("shared publication is separate explicit authority, not a default completion gate", () => {
+	for (const rel of ["agent/skills/engineering-harness/learn/index.md", "agent/AGENTS.md", "agent/skills/engineering-harness/worktree/index.md"]) {
+		assert.match(read(rel), /Shared publication is separate explicit authority, not a default completion gate/, rel);
+	}
+});
+
+test("local ignore policy: docs/knowledge/local/ stays in the existing .gitignore, is checked read-only and is never edited by LEARN", () => {
+	assert.match(read(".gitignore"), /^docs\/knowledge\/local\/\r?$/m);
+	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/local/probe.md"], { cwd: REPO }).status, 0, "local notes stay ignored");
+	assert.equal(spawnSync("git", ["check-ignore", "-q", "docs/knowledge/private/probe.md"], { cwd: REPO }).status, 0, "private notes stay ignored");
+	assert.match(read("agent/skills/engineering-harness/learn/index.md"), /git check-ignore/);
+});
+
+test("KNOWLEDGE: QMD is optional prior evidence; ignored unindexed local notes get a bounded targeted read; nothing is indexed, embedded or refreshed", () => {
+	const knowledge = read("agent/skills/engineering-harness/knowledge/index.md");
+	assert.match(knowledge, /QMD is optional/);
+	assert.match(knowledge, /docs\/knowledge\/local\//);
+	assert.match(knowledge, /bounded/i);
+	assert.match(knowledge, /unindexed/i);
+	assert.match(knowledge, /do not index, embed or refresh/i);
+});
+
+test("saving grants no implicit staging, commit, push, publication or QMD index or refresh", () => {
+	for (const rel of ["agent/skills/engineering-harness/learn/index.md", "agent/agents/release-engineer.md", "agent/prompts/learn.md"]) {
+		assert.match(read(rel), /no implicit staging, commit, push, publication or QMD index or refresh/i, rel);
+	}
+});
+
+test("LEARN module: SAVED is local file plus readback only; a late lesson may be saved locally outside targets; a shared copy needs a follow-up PR; a post-merge BLOCKED never rolls back the merge", () => {
 	const mod = read("agent/skills/engineering-harness/learn/index.md");
-	assert.match(mod, /not git-ignored/);
-	assert.match(mod, /named in the commit\/PR set/);
-	assert.match(mod, /untracked until that commit exists/);
-	assert.match(mod, /no implicit staging/i);
-	assert.doesNotMatch(mod, /Git-tracked and not ignored|included in the same PR/);
 	assert.match(mod, /SAVED means the file and readback exist; it is not proof of remote commit, merge or publication/);
-	assert.match(mod, /authorized follow-up PR before cleanup of the affected artifacts/);
+	assert.match(mod, /may be saved locally outside the deletion targets/);
+	assert.match(mod, /shared copy[^.]{0,120}authorized follow-up PR/);
 	assert.match(mod, /cannot be claimed as already published/);
 	assert.match(mod, /never rolls back the merge/);
+	assert.match(mod, /no implicit staging/i);
 });
 
-test("learn prompt sequences LEARN before the final commit or PR and reports SAVED as file plus readback only", () => {
+test("learn prompt sequences LEARN before the final commit or PR, verifies the local ignore rule and reports SAVED as file plus readback only", () => {
 	const prompt = read("agent/prompts/learn.md");
 	assert.match(prompt, /before the final commit or PR/);
-	assert.match(prompt, /not git-ignored/);
-	assert.match(prompt, /commit\/PR set/);
-	assert.match(prompt, /no implicit staging/i);
-	assert.doesNotMatch(prompt, /Git-tracked and not ignored|included in the same PR/);
+	assert.match(prompt, /existing ignore rule/);
+	assert.match(prompt, /git check-ignore/);
+	assert.match(prompt, /SAVED[^\n]{0,80}file plus readback/);
 	assert.match(prompt, /not proof of remote commit, merge or publication/);
 });
 
-test("release-engineer and AGENTS keep local SAVED separate from remote integration; cleanup waits for verified remote integration or NO LESSON", () => {
+test("release-engineer and AGENTS: local SAVED outside every cleanup target is the knowledge checkpoint; shared integration is separate and authorized only when requested", () => {
 	const role = read("agent/agents/release-engineer.md");
-	assert.match(role, /not git-ignored/);
-	assert.match(role, /commit\/PR set/);
-	assert.match(role, /no implicit staging/i);
-	assert.doesNotMatch(role, /Git-tracked and not ignored|included in the same PR/);
-	assert.match(role, /local SAVED[^.]{0,80}never sufficient/);
-	assert.match(role, /verified remote integration/);
+	assert.match(role, /local SAVED[\s\S]{0,160}outside every cleanup target/);
 	const agents = read("agent/AGENTS.md");
+	assert.match(agents, /post-merge cleanup waits for SAVED \(local, outside every cleanup target, with readback\) or a NO LESSON checkpoint/);
 	assert.doesNotMatch(agents, /waits for its SAVED or NO LESSON checkpoint/);
-	assert.match(agents, /SAVED with verified remote integration or a NO LESSON checkpoint/);
-	assert.match(agents, /local SAVED is never sufficient/);
+});
+
+test("LOCAL-REVIEW-REPAIR storage subject: private and local stores stay ignored and unindexed and never receive exported private, secret or unconfirmed notes", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /`docs\/knowledge\/private\/` and `docs\/knowledge\/local\/` remain ignored by the existing `\.gitignore` rule and unindexed and never receive exported private, secret or unconfirmed notes/);
+	assert.match(mod, /release engineer checks the ignore rule read-only with `git check-ignore` and never edits `\.gitignore`/);
+	assert.doesNotMatch(mod, /and never receives exported private/);
+});
+
+test("LOCAL-REVIEW-REPAIR: a LOCAL-ONLY destination that is not ignored is BLOCKED before SAVED; a shared record is not blocked by the local ignore check", () => {
+	for (const rel of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md"]) {
+		assert.match(read(rel), /LOCAL-ONLY destination[^\n]{0,200}not ignored[^\n]{0,160}BLOCKED/, `${rel}: un-ignored LOCAL-ONLY destination is BLOCKED`);
+	}
+	assert.match(read("agent/prompts/learn.md"), /LOCAL-ONLY destination[^\n]{0,200}git check-ignore/, "ignore check qualified to LOCAL-ONLY destinations");
+	assert.match(read("agent/skills/engineering-harness/learn/index.md"), /shared record[^\n]{0,200}not blocked by the local ignore check/);
+});
+
+test("LOCAL-REVIEW-REPAIR: the local store is outside all three packet deletion targets; a primary-checkout candidate is retained, not deleted", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /primary[- ]checkout candidate is retained, not deleted/);
+	assert.doesNotMatch(mod, /outside every packet candidate/);
+	assert.doesNotMatch(read("agent/prompts/learn.md"), /outside every packet candidate/);
+});
+
+test("LOCAL-REVIEW-REPAIR: the Shared publication sentence starts a new sentence and keeps its exact policy wording", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /QMD index or refresh\. Shared publication is separate explicit authority, not a default completion gate\./);
+	assert.doesNotMatch(mod, /; Shared publication/);
+});
+
+test("LOCAL-REVIEW-REPAIR: README supplies record fields only; the LOCAL-ONLY storage default in LEARN overrides its storage text", () => {
+	assert.match(read("agent/skills/engineering-harness/learn/index.md"), /Record fields follow `docs\/knowledge\/README\.md` \(fields only; the LOCAL-ONLY storage default below overrides its storage text\)/);
 });

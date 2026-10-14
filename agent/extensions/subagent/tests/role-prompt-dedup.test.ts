@@ -147,7 +147,7 @@ const NEW_AFTER = ["c708d8e8", "33322dbf"];
 // REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
 const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5", "live/backend-worker": "413f9b80a968b35c772de6e61e90677566c5adcc82a53fd7483d51cfefa2b0b8" };
 const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["f699bace", "2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b", "24903de1"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
-const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "3f459c5e", "5b9429cd", "5bd5093c", "76d48a37", "996f9e76", "e902b5e5"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
+const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "3f459c5e", "5b9429cd", "5bd5093c", "76d48a37"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {
@@ -252,21 +252,23 @@ test("post-merge cleanup removes exactly three named targets and never bulk-copi
 });
 
 test("post-merge cleanup waits for the knowledge checkpoint; a BLOCKED checkpoint retains the target and never rolls back the merge", () => {
-	assert.ok(skillText("worktree/index.md").includes("merged state includes the knowledge record and index, or after a NO LESSON checkpoint"), "worktree: canonical knowledge gate before cleanup");
+	assert.ok(skillText("worktree/index.md").includes("runs once the knowledge checkpoint is SAVED"), "worktree: canonical knowledge gate before cleanup");
+	assert.ok(skillText("worktree/index.md").includes("or after a NO LESSON checkpoint"), "worktree: NO LESSON alternative");
 	assert.ok(skillText("ship/index.md").includes("worktree/index.md"), "ship points to the canonical knowledge gate");
 	assert.ok(!skillText("ship/index.md").includes("merged state includes"), "ship does not duplicate the gate paragraph");
 	const worktree = skillText("worktree/index.md");
 	assert.ok(worktree.includes("BLOCKED knowledge checkpoint"), "BLOCKED retention");
 	assert.ok(worktree.includes("never rolls back the merge"), "no rollback of merge");
-	assert.ok(worktree.includes("authorized follow-up PR before cleanup"), "late lesson needs follow-up PR");
+	assert.ok(worktree.includes("may be saved locally outside the deletion targets"), "late local lesson stays outside targets");
+	assert.ok(worktree.includes("cannot be claimed as already published"), "shared copy is not claimed as published");
 });
 
-test("cleanup verifies remote integration from a freshly fetched base by blob id, never by squash-prone commit ancestry; local SAVED is never sufficient", () => {
+test("shared publication is verified from a freshly fetched base by blob id, never by squash-prone commit ancestry; a destination inside a deletion target is never durable", () => {
 	const worktree = skillText("worktree/index.md");
-	for (const term of ["freshly fetched remote base", "git fetch", "git rev-parse", "git -C <exact checkout path> hash-object", "not commit ancestry", "Local SAVED alone is never sufficient before deletion"]) assert.ok(worktree.includes(term), term);
+	for (const term of ["freshly fetched remote base", "git fetch", "git rev-parse", "git -C <exact checkout path> hash-object", "not commit ancestry", "A destination inside any of the three deletion targets is not durable"]) assert.ok(worktree.includes(term), term);
 	const release = fs.readFileSync(new URL("../../../agents/release-engineer.md", import.meta.url), "utf8");
 	assert.match(release, /worktree\/index\.md/, "release-engineer points to the canonical cleanup gate");
-	assert.match(release, /local SAVED[^.]{0,80}never sufficient/);
+	assert.match(release, /local SAVED[\s\S]{0,160}outside every cleanup target/);
 });
 
 test("cleanup retains a target with unique or unreproduced required evidence or user data; no default archive or bulk copy", () => {

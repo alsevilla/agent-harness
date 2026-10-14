@@ -23,7 +23,7 @@ Before an authorized commit or PR, read `../references/git-attribution.md`. Read
 
 After a verified merge (including squash/rebase), release engineer owns safe cleanup of explicitly named task-owned worktrees under `../worktree/index.md`. Main retains scheduling, exact candidate/target identity, approvals, terminal-owner/quiescence evidence and coordination. If the delivery worker ran inside the candidate, return MERGED with CLEANUP_PENDING; main schedules a cleanup release engineer from outside the target only after that worker is terminal. PR-only delivery never triggers removal of its unmerged candidate. Readiness does not authorize cleanup.
 
-Before the final commit or PR, main selects LEARN when warranted. The knowledge-disposition checkpoint (SAVED, NO LESSON or BLOCKED) is canonical in `../learn/index.md`. Post-merge cleanup follows the knowledge gate in `../worktree/index.md`: remote verification of the record and index, or a NO LESSON checkpoint; local SAVED is never sufficient for deletion. Archiving a report or fixture is evidence, not learning completion.
+Before the final commit or PR, main selects LEARN when warranted. The knowledge-disposition checkpoint (SAVED, NO LESSON or BLOCKED) is canonical in `../learn/index.md`. Post-merge cleanup follows the knowledge gate in `../worktree/index.md`: a local SAVED checkpoint outside every deletion target, or a NO LESSON checkpoint; shared publication is verified only when separately authorized. Archiving a report or fixture is evidence, not learning completion.
 
 Do not repair product source in SHIP. Return implementation defects to main for the appropriate writer. Do not run SHIP for ordinary coding completion.
 Load `references/extended.md` for release-critical workflows.

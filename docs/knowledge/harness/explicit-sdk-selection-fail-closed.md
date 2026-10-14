@@ -1,8 +1,0 @@
-# Explicit SDK selection fails closed
-
-- Claim: Validate a nonempty explicit NATIVE_PROBE_HOST_MODULES selection and reject failures rather than silently auditing against a different installed SDK.
-- Source: [Scanner selection](../../../scripts/scan-harness-config.mjs) (lines 27–35), [shared hostModules helper](../../../agent/extensions/subagent/tests/host-modules.ts) (lines 7–15), [scanner negative](../../../agent/extensions/subagent/tests/safety-config-scan.test.ts) (lines 46–54), [policy valid/invalid controls](../../../agent/extensions/subagent/tests/main-policy-host-override.test.ts) (lines 15–39), and [policy helper import](../../../agent/extensions/subagent/tests/main-policy-activation.test.ts) (line 20), inspected at commit `4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47`.
-- Evidence status: Verified current source/test inspection. Historical HOST-REVIEW-REPORT identifies fallback and blind-parent defects; POLICY-BOUNDARY-REVIEW-REPORT reports 16 focused passes. Historical real 1.1.0/1.2.0 controls are not the present permanent matrix: current negative uses an absent temporary path with a valid-host control. No current test rerun.
-- Context: GREEN against the wrong SDK does not validate the requested SDK. Unset/empty selection retains normal latest-installed discovery. This is offline scanner/test selection, not a runtime/model override or a guarantee about concurrent installation replacement or arbitrary layouts.
-- Date: 2026-10-15 (persistence and source inspection).
-- Revalidate when: Host resolution, explicit/unset conventions, installed layouts, parser loading or negative selection controls change.
