@@ -47,7 +47,7 @@ test("exact-operation grants are documented against the recorded tool cwd, not a
 
 test("complex work and unsupported tier names never take the economy route", () => {
   const text = compact(routing);
-  assert.match(text, /never economy for complex, unresolved, security-sensitive, concurrency, persistence or cross-layer work; that work keeps the omitted default or a specialist route/i);
+  assert.match(text, /never economy for complex, unresolved, security-sensitive, concurrency, persistence or cross-layer work; that work stays on capable \(the omitted default when it is capable, or explicit `capable` on an economy-default role\) or a specialist route/i);
   assert.match(text, /backend-worker: auth, secrets, migration or concurrency change -> no explicit economy/);
   assert.match(text, /frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy/);
   assert.match(text, /unsupported tier names \(for example `complex`, `fast` or `premium`\) are refused before launch/);
@@ -67,4 +67,21 @@ test("usage accounting reads existing records without a collector or double-coun
   assert.match(compact(manifest), /## Usage summary \(optional, complex runs\)/);
   assert.match(compact(manifest), /partial when a record is missing/);
   assert.match(compact(manifest), /cached usage and cost stay separate/);
+});
+
+// Docs-level expectations only: these pin the written policy, not whether an orchestrator chooses the tier.
+test("high-risk work on economy-default roles requests configured capable; an unconfigured capable route is unresolved, never economy by omission", () => {
+  const text = compact(routing);
+  assert.match(text, /high-risk work on an economy-default role requests configured `capable` explicitly/i);
+  assert.match(text, /omission would run economy/);
+  assert.match(text, /when that role does not configure `capable`, the selection is unresolved and goes to main, never economy by omission/);
+  assert.match(text, /database-worker: consequential migration or persistence change -> explicit `capable`/);
+  assert.match(text, /platform-worker: consequential infrastructure change -> explicit `capable`/);
+  assert.match(text, /test-engineer: data-integrity verification -> explicit `capable`/);
+  assert.match(text, /scout or observability-specialist \(economy only\): high-risk task -> unresolved, main decides or a specialist route/);
+  assert.match(text, /no automatic escalation or retry upgrade/);
+  assert.match(compact(policy), /high-risk work on an economy-default role requests configured `capable`/i);
+  assert.match(compact(runtime), /high-risk work on an economy-default role requests configured `capable`/i);
+  assert.match(compact(runtime), /loads the 20 user agent definitions/);
+  assert.doesNotMatch(compact(runtime), /loads the 22 user agent definitions/);
 });

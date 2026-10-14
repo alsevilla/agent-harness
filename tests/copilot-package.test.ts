@@ -1,6 +1,8 @@
 import { test, expect } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+import { hostModules } from "../agent/extensions/subagent/tests/host-modules.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -54,6 +56,20 @@ test("backend-worker Copilot metadata matches its declared primary and preserves
   expect(metadata.pi).toBeUndefined();
 });
 
+test("SDK declaration check without NATIVE_PROBE_HOST_MODULES reads the latest complete installed host", async () => {
+  const previous = process.env.NATIVE_PROBE_HOST_MODULES;
+  delete process.env.NATIVE_PROBE_HOST_MODULES;
+  try {
+    const text = readFileSync(join(nativeAgents, "backend-worker.md"), "utf8");
+    const sdk = await sdkFrontmatter(text);
+    expect(sdk.name).toBe("backend-worker");
+    expect(sdk.metadata).toEqual(frontmatter(text).metadata.metadata);
+  } finally {
+    if (previous === undefined) delete process.env.NATIVE_PROBE_HOST_MODULES;
+    else process.env.NATIVE_PROBE_HOST_MODULES = previous;
+  }
+});
+
 test("Copilot metadata reuses shared Pi component sources without duplicate adapters", () => {
   expect(() => readdirSync(join(root, ".copilot", "agents"))).toThrow();
   expect(() => readdirSync(join(root, ".copilot", "skills"))).toThrow();
@@ -67,10 +83,10 @@ const frontmatter = (text: string) => {
   if (!match) throw new Error("missing YAML frontmatter");
   return { metadata: Bun.YAML.parse(match[1]) as Record<string, unknown>, body: text.slice(match[0].length) };
 };
+// NATIVE_PROBE_HOST_MODULES pins an explicit host tree; unset uses the latest complete installed release (hostModules keeps its version-compat failure).
 const sdkFrontmatter = async (text: string) => {
-  const modules = process.env.NATIVE_PROBE_HOST_MODULES;
-  if (!modules) throw new Error("NATIVE_PROBE_HOST_MODULES is required for the SDK declaration check");
-  const { parseFrontmatter } = await import(`${modules}/@earendil-works/pi-coding-agent/dist/index.js`);
+  const modules = hostModules(["@earendil-works/pi-coding-agent"]);
+  const { parseFrontmatter } = await import(pathToFileURL(join(modules, "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
   return parseFrontmatter(text).frontmatter as Record<string, unknown>;
 };
 const copilotModels: Record<string, string> = { "anthropic/claude-haiku-5-5": "claude-haiku-5.5", "anthropic/claude-sonnet-5-5": "claude-sonnet-5.5", "anthropic/claude-opus-5-5": "claude-opus-5.5", "openai-codex/gpt-6-luna": "gpt-6-luna", "openai-codex/gpt-6.1-sol": "gpt-6.1-sol" };

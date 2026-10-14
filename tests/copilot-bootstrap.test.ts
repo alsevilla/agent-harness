@@ -76,6 +76,44 @@ test("configured PowerShell hook uses its installed root from an unrelated cwd",
   }
 });
 
+test("configured Bash hook uses its installed root from an unrelated cwd with spaces and Unicode", () => {
+  // Runs the hooks.json bash command string as written (PLUGIN_ROOT, not the PowerShell COPILOT_PLUGIN_ROOT variable).
+  const hooks = JSON.parse(readFileSync(join(root, ".github", "plugin", "hooks.json"), "utf8"));
+  const command = hooks.hooks.sessionStart[0].bash;
+  const scratch = mkdtempSync(join(tmpdir(), "copilot-bootstrap-bash-"));
+  const installedRoot = join(scratch, "plugin ü with spaces");
+  const unrelatedCwd = join(scratch, "unrelated cwd");
+  mkdirSync(unrelatedCwd);
+  try {
+    cpSync(join(root, ".github", "plugin"), join(installedRoot, ".github", "plugin"), { recursive: true });
+    cpSync(join(root, "agent"), join(installedRoot, "agent"), { recursive: true });
+    const env: Record<string, string | undefined> = { ...process.env, PLUGIN_ROOT: installedRoot };
+    delete env.COPILOT_PLUGIN_ROOT;
+    const result = spawnSync("bash", ["-c", command], {
+      cwd: unrelatedCwd,
+      env: env as NodeJS.ProcessEnv,
+      input: JSON.stringify({ sessionId: "bootstrap-test", timestamp: 1700000000000, cwd: unrelatedCwd, source: "startup" }),
+      encoding: "utf8",
+      timeout: 15000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    const lines = result.stdout.trim().split(/\r?\n/);
+    expect(lines).toHaveLength(1);
+    const response = JSON.parse(lines[0]);
+    expect(response.additionalContext).toContain(installedRoot);
+    expect(response.additionalContext).toContain(join(installedRoot, "agent", "AGENTS.md"));
+    for (const rel of [["agent", "AGENTS.md"], ["agent", "skills", "SKILLS.md"]]) {
+      const installed = readFileSync(join(installedRoot, ...rel), "utf8");
+      expect(installed).toBe(readFileSync(join(root, ...rel), "utf8"));
+      expect(response.additionalContext).toContain(installed.trim());
+    }
+    expect(result.stderr).toBe("");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("malformed input fails without echoing untrusted content", () => {
   for (const marker of ["UNTRUSTED_SECRET_5279", "TOPSECRET_INITIAL_PROMPT"]) {
     const result = spawnSync("node", [join(root, ".github", "plugin", "session-start.mjs")], {

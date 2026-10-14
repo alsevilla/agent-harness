@@ -168,6 +168,53 @@ test("registry contains the approved tier pairs without changing default role fi
   assert.equal(roles.find((role: { name: string }) => role.name === "scout").modelTiers.capable, undefined);
 });
 
+// Scenario regression for the written tier policy (routing.md "Explicit Pi model tier"). Fixtures pin what the existing resolver
+// returns for a requested tier on the real package registry; they do not measure whether an orchestrator chooses that tier.
+test("written tier scenarios resolve through the real package registry to the configured model, fallback and thinking", () => {
+  const cwd = fs.mkdtempSync(`${os.tmpdir()}/pi-tier-scenarios-`);
+  const user = `${cwd}/user`;
+  fs.mkdirSync(`${user}/agents`, { recursive: true });
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = user;
+  try {
+    const result = discoverAgents(cwd, "both");
+    assert.equal(result.error, undefined);
+    const role = (name: string) => {
+      const found = result.agents.find((agent) => agent.name === name);
+      assert.ok(found, name);
+      return found;
+    };
+    const scenarios: Array<[string, "economy" | "capable", string, string, string]> = [
+      ["backend-worker", "economy", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5", "medium"], // bounded backend change
+      ["frontend-worker", "economy", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna", "medium"], // bounded presentational change
+      ["database-worker", "capable", "openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5", "low"], // consequential migration
+      ["platform-worker", "capable", "anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol", "low"], // consequential infrastructure
+      ["test-engineer", "capable", "anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol", "low"], // data-integrity verification
+    ];
+    for (const [name, tier, model, fallback, thinking] of scenarios) {
+      const resolved = resolveModelTier(role(name), tier);
+      assert.equal(resolved.modelTier, tier, `${name}: tier`);
+      assert.equal(resolved.model, model, `${name}.${tier}: model`);
+      assert.deepEqual(resolved.fallbackModel, [fallback], `${name}.${tier}: fallback`);
+      assert.equal(resolved.thinking, thinking, `${name}.${tier}: thinking`);
+    }
+    // Omission on an economy-default role runs economy, so high-risk work must request capable explicitly.
+    const omitted = resolveModelTier(role("database-worker"));
+    assert.equal(omitted.modelTier, "economy");
+    assert.equal(omitted.model, "anthropic/claude-haiku-5-5");
+    assert.deepEqual(omitted.fallbackModel, ["openai-codex/gpt-6-luna"]);
+    assert.equal(omitted.thinking, "low");
+    // Roles without a configured capable tier are refused for capable: the selection is unresolved, not economy.
+    for (const name of ["scout", "observability-specialist"]) assert.throws(() => resolveModelTier(role(name), "capable"), /not supported/, name);
+    // The resolver refuses any tier the role does not configure, including unsupported names.
+    assert.throws(() => resolveModelTier(role("backend-worker"), "complex" as unknown as "economy"), /not supported/);
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+}, 30000);
+
 test("every role definition agrees with the registry", () => {
   for (const role of roles) {
     const fm = frontmatter(role.name);
