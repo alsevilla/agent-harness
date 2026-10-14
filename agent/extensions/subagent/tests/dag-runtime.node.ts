@@ -342,27 +342,55 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true });
 });
 
-check("configured scout capable tier is rejected before dispatch while package source is preserved", async () => {
+// Config-driven eligibility: a tier dispatches only when the discovered package role carries that tier in the overlaid roles.json.
+for (const { roleName, tier } of [
+	{ roleName: "scout", tier: "capable" },
+	{ roleName: "api-specialist", tier: "economy" },
+	{ roleName: "api-specialist", tier: "capable" },
+] as const) check(`configured ${roleName} ${tier} tier dispatches with the validated package model`, async () => {
 	const { discoverAgents } = await import(new URL("../agents.ts", import.meta.url).href);
 	const registry = path.join(userDir, "roles.json");
 	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
+	const expected = `configured/${roleName}-${tier}`;
 	try {
-		fs.writeFileSync(registry, JSON.stringify([{ name: "scout", modelTiers: {
-			economy: { provider: "openai-codex", model: "configured/scout-economy", fallbackModel: "anthropic/configured-scout-economy-fallback" },
-			capable: { provider: "openai-codex", model: "configured/scout-capable", fallbackModel: "anthropic/configured-scout-capable-fallback" },
+		fs.writeFileSync(registry, JSON.stringify([{ name: roleName, modelTiers: {
+			economy: { provider: "openai-codex", model: `configured/${roleName}-economy`, fallbackModel: `anthropic/configured-${roleName}-economy-fallback` },
+			capable: { provider: "openai-codex", model: `configured/${roleName}-capable`, fallbackModel: `anthropic/configured-${roleName}-capable-fallback` },
 		} }]));
-		const scout = discoverAgents(userDir, "both").agents.find(agent => agent.name === "scout")!;
-		assert.equal(scout.source, "package");
-		assert.equal(scout.modelTiers?.capable.model, "configured/scout-capable");
+		const found = discoverAgents(userDir, "both").agents.find(agent => agent.name === roleName)!;
+		assert.equal(found.source, "package");
+		assert.equal(found.modelTiers?.[tier]?.model, expected);
 		const pi = fakePi(); subagentExtension(pi);
 		const tool = pi.tools.get("subagent")!;
 		const sdk = await import(piAiUrl);
-		const call = { type: "toolCall" as const, id: "scout-capable", name: "subagent", arguments: { background: true, agentScope: "both", agent: "scout", task: "must not dispatch", modelTier: "capable" } };
+		const call = { type: "toolCall" as const, id: `${roleName}-${tier}`, name: "subagent", arguments: { background: false, agentScope: "both", agent: roleName, task: "configured dispatch", modelTier: tier } };
 		const valid = sdk.validateToolArguments(tool, call);
-		const result = await tool.execute("scout-capable", valid, undefined, undefined, dagCtx(makeRepo("scout-capable")));
-		assert.equal(result.isError, true);
-		assert.equal(children().length, 0);
-		assert.equal(pi.sent.length, 0);
+		const launch = tool.execute(`${roleName}-${tier}`, valid, undefined, undefined, dagCtx(makeRepo(`${roleName}-${tier}`)));
+		await waitFor(() => children().length === 1, `configured ${roleName} role launches`);
+		assert.equal(children()[0].args[children()[0].args.indexOf("--model") + 1], expected);
+		finish(children()[0], "ok");
+		const result = await launch;
+		assert.equal(result.isError, undefined);
+		assert.equal(result.details.results[0].modelTier, tier);
+	} finally {
+		if (previous === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, previous);
+	}
+});
+
+// Missing (no roles.json, or no modelTiers key) and empty (modelTiers: {}) api-specialist config: every tier is refused before any child spawns.
+check("api-specialist tier with missing or empty roles.json config is refused before any child spawns", async () => {
+	const registry = path.join(userDir, "roles.json");
+	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
+	try {
+		for (const overlay of [undefined, [{ name: "api-specialist" }], [{ name: "api-specialist", modelTiers: {} }]]) for (const tier of ["economy", "capable"] as const) {
+			if (overlay === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, JSON.stringify(overlay));
+			const pi = fakePi(); subagentExtension(pi);
+			const result = await pi.tools.get("subagent")!.execute("specialist-refusal", { background: false, agentScope: "both", agent: "api-specialist", task: "must refuse", modelTier: tier }, undefined, undefined, dagCtx(makeRepo("specialist-refusal")));
+			assert.equal(result.isError, true, `${JSON.stringify(overlay)} ${tier}`);
+			assert.match(result.content[0].text, /not supported for role "api-specialist"/);
+			assert.equal(children().length, 0, `${JSON.stringify(overlay)} ${tier} spawned a child`);
+			assert.equal(pi.sent.length, 0);
+		}
 	} finally {
 		if (previous === undefined) fs.rmSync(registry, { force: true }); else fs.writeFileSync(registry, previous);
 	}

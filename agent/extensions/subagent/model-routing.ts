@@ -6,11 +6,8 @@ export interface SelectedAgent extends AgentConfig {
 	readonly modelTier?: ModelTier;
 }
 
-const TIER_ROLES = ["backend-worker", "frontend-worker", "database-worker", "general-worker", "platform-worker", "test-engineer", "scout"];
-
 export function resolveModelTier(agent: AgentConfig, tier: ModelTier): SelectedAgent {
-	if (agent.source !== "package" || !TIER_ROLES.includes(agent.name)) throw new Error(`modelTier is only supported for canonical package roles (\"${agent.name}\")`);
-	if (agent.name === "scout" && tier === "capable") throw new Error(`modelTier "${tier}" is not supported for role "${agent.name}"`);
+	if (agent.source !== "package") throw new Error(`modelTier is only supported for canonical package roles (\"${agent.name}\")`);
 	const models = agent.modelTiers?.[tier];
 	if (!models) throw new Error(`modelTier \"${tier}\" is not supported for role \"${agent.name}\"`);
 	return { ...agent, model: models.model, fallbackModel: [...models.fallbackModel], modelTier: tier };

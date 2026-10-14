@@ -28,9 +28,15 @@ test("all supported role tiers resolve exact same-tier pairs without mutating co
   }
   const configuredScout = { ...agent("scout"), modelTiers: { economy: { model: "configured/economy", fallbackModel: [] }, capable: { model: "configured/capable", fallbackModel: [] } } };
   assert.equal(resolveModelTier(configuredScout, "economy").model, "configured/economy");
-  assert.throws(() => resolveModelTier(configuredScout, "capable"), /not supported/);
+  assert.equal(resolveModelTier(configuredScout, "capable").model, "configured/capable");
+  for (const name of ["api-specialist", "reviewer"]) {
+    const configured = { ...agent(name), modelTiers: { capable: { model: "configured/specialist", fallbackModel: [] } } };
+    assert.equal(resolveModelTier(configured, "capable").model, "configured/specialist");
+    assert.throws(() => resolveModelTier({ ...agent(name), modelTiers: {} }, "capable"), /not supported/);
+    for (const source of ["user", "project"] as const) assert.throws(() => resolveModelTier({ ...agent(name, source), modelTiers: { capable: { model: "configured/specialist", fallbackModel: [] } } }, "capable"), /canonical package roles/);
+  }
   for (const source of ["user", "project"] as const) assert.throws(() => resolveModelTier(agent("backend-worker", source), "economy"), /canonical package roles/);
-  assert.throws(() => resolveModelTier(agent("unknown"), "economy"), /canonical package roles/);
+  assert.throws(() => resolveModelTier(agent("unknown"), "economy"), /not supported/);
 });
 
 test("tier resolution uses only the validated selection and preserves an immutable diagnostic snapshot", () => {
