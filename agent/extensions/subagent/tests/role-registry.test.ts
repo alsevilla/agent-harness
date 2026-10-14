@@ -318,11 +318,13 @@ test("release engineer links its assigned ship module and keeps model metadata",
   assert.ok(fm.text.includes("engineering-harness/ship/index.md"), "release-engineer: missing assigned module engineering-harness/ship/index.md");
 });
 
-test("release engineer has precise edit but not bulk write", () => {
+test("release engineer gains native write only as the named knowledge/release artifact grant", () => {
   const fm = frontmatter("release-engineer");
-  assert.match(fm.tools, /(^|,\s*)edit(\s*,|$)/);
-  assert.ok(!/(^|,\s*)write(\s*,|$)/.test(fm.tools));
+  assert.equal(fm.tools, "read, grep, find, ls, bash, powershell, edit, write");
   assert.match(fm.text, /do \*\*not\*\* modify product implementation code/i);
+  assert.match(fm.text, /`write`[^\n]*new files? only[^\n]*explicitly named/i);
+  assert.match(fm.text, /shell (redirection|heredoc)[^\n]*not a bypass/i);
+  assert.match(fm.text, /normal guards still apply/i);
 });
 
 test("registry mirrors precise edit restriction for implementation workers", () => {
@@ -552,7 +554,8 @@ const baseline = JSON.parse(fs.readFileSync(new URL("./fixtures/tier-only-baseli
   profileSha256: Record<string, string>;
   roles: { name: string; normal: { model: string; fallbackModel: string[]; thinking: string; tools: string[] }; tiers: Record<string, { model: string; fallbackModel: string[]; thinking: string }> }[];
 };
-const fileSha256 = (file: URL) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+// Checkout EOL only: CRLF->LF; latin1 round-trip keeps every other byte exact (utf8 decoding would mangle non-UTF-8 bytes).
+const fileSha256 = (file: URL) => createHash("sha256").update(Buffer.from(fs.readFileSync(file).toString("latin1").replace(/\r\n/g, "\n"), "latin1")).digest("hex");
 // Provenance literals: pre-migration agent/roles.json at e2ddaed (CRLF checkout bytes; git blob adf8b6c9714cb844bcc97fea83580e0ce152c14a).
 const ORIGINAL_ROLES_SHA256 = "40381940f244381ae91f24ff7e467dedd88e9c071f2061cd106fc61db70c4219";
 // Only explicit, user-approved tier changes against the golden fixture; every other pinned tier stays golden.
@@ -560,6 +563,34 @@ const APPROVED_TIER_DELTAS: Record<string, { model: string; fallbackModel: strin
   "database-worker.economy": { model: "anthropic/claude-haiku-5-5", fallbackModel: ["openai-codex/gpt-6-luna"], thinking: "low" },
   "test-engineer.economy": { model: "anthropic/claude-haiku-5-5", fallbackModel: ["openai-codex/gpt-6-luna"], thinking: "low" },
 };
+// The one approved tool delta: release-engineer gains native write for named knowledge/release artifacts only (tools otherwise pinned; model tuples never change here).
+const APPROVED_TOOL_DELTAS: Record<string, string[]> = { "release-engineer": ["read", "grep", "find", "ls", "bash", "powershell", "edit", "write"] };
+// Test-local LF digests of the 20 shipped profiles: git blobs at e2ddaed (== HEAD) with CRLF->LF only. Checkout EOL (core.autocrlf) is not content;
+// the fixture's raw profileSha256 pins the historical mixed-EOL checkout (line 5 LF) and stays byte-immutable.
+const PROFILE_LF_SHA256: Record<string, string> = {
+  "api-specialist": "2a1cd5468e0d4a91d2ca05a7466ca858f9539adcff8a12f72d37e072a9aa3c3d",
+  "architecture-specialist": "8106df81a7aabe10afc04a9775ac0c6f431ac321c524696967d1c4180f410be8",
+  "backend-worker": "302848b0fb88377940a683f4a20198d699a1fa91cceee54085821954222c69b2",
+  "concurrency-specialist": "c0257bb5d0a3c4c554c2c0515cc47b36cc3234b7546f5e0097b1519f040dfcfc",
+  "database-specialist": "4cb3a4e9d8fad5c940048289502cc5fd5a9f5ba9433710d68f64cf1d8990091a",
+  "database-worker": "ecac5169a646f2809d311b39cde97a877781ad3cec46249f22abea122abee529",
+  "debugger": "075f7d677d115d2ac5ee4496d711239a58182d2e0518c5005d2ee06e6c53424c",
+  "devops-specialist": "d298ebdf6261996cac69754b4e186875b177bc509281789a03e4d7b45691ff35",
+  "frontend-worker": "69959fd558924e6652f850fc47a10d2789b1fc21c7489412d4f5c006399ae839",
+  "general-worker": "a6736ddf7d437112a2fc5c6cb1af82bf68187ec335297b33d979802ec8946c22",
+  "observability-specialist": "919593d1a33de204261a447f89145c858de7b1c34e562945020b2152f01c9733",
+  "oracle": "7a0f4b2f6f352badefe704c85130c45ceb1f7fc169cc3c3ec64365b11bcf643a",
+  "performance-specialist": "6b2f515634a9d28eed126d559485e65d951dd7c149a50f6bab171abd9381e982",
+  "platform-worker": "622a779038cf1772f623cceda07bce73f041060926ccb866b6fda55e6bcf2337",
+  "release-engineer": "ab82c1de6975d585fbfb4bb11e714268b6dbb2c4a493dd2bd765891d86861dda",
+  "reviewer": "2fa4f83c09325a8a5ec7d4974a594ad24d393e64cf91662a1fc9dc2c23ee0dcb",
+  "scout": "ea3751237a9bc5918f59007e00316f99e7b5c9d46e86485568e1a2fe13eb0f50",
+  "security-specialist": "11ba6c3bfcd3e1a24cfb2e029014fa2cfea13b986e150862a2cab30f26c564b0",
+  "test-engineer": "4e4b76045f54123b91ae66792f26b708331a37f320050545be67ea9497f7eb46",
+  "ui-ux-specialist": "eca72528cfb10065d2a0280014ca9c4b39aa903b6713c24386c8b041ca0d2924",
+};
+// Approved post-change LF digest of the one profile whose pi.tools/body changed for the write grant; replaces its pre-change PROFILE_LF_SHA256 pin for the byte check.
+const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "17d1cf1b0bec122b05a0883db9a17b25ddcf14d8243ec337184c7e40408402b8" };
 type RawTier = { model: string; fallbackModel: string; thinking: string };
 type RawRole = { name: string; defaultModelTier: "economy" | "capable"; modelTiers: Partial<Record<"economy" | "capable", RawTier>>; tools: string };
 const RAW_ROLES = () => JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8")) as RawRole[];
@@ -569,9 +600,42 @@ test("tier-only baseline pins the 20 shipped roles and their raw profile bytes",
   assert.equal(baseline.roles.length, 20);
   assert.deepEqual(baseline.roles.map((role) => role.name).sort(), [...GENERIC_ROLES].sort());
   assert.equal(Object.keys(baseline.profileSha256).length, 20);
+  assert.deepEqual(Object.keys(PROFILE_LF_SHA256).sort(), Object.keys(baseline.profileSha256).sort(), "LF pin set matches the fixture's 20 profiles");
   assert.equal(baseline.rolesJsonSha256, ORIGINAL_ROLES_SHA256, "fixture provenance: pinned roles.json is the pre-migration e2ddaed bytes");
-  for (const [name, digest] of Object.entries(baseline.profileSha256)) {
-    assert.equal(fileSha256(new URL(`../../../agents/${name}.md`, import.meta.url)), digest, `${name}: profile bytes changed`);
+  for (const [name, digest] of Object.entries(PROFILE_LF_SHA256)) {
+    assert.equal(fileSha256(new URL(`../../../agents/${name}.md`, import.meta.url)), APPROVED_PROFILE_DIGESTS[name] ?? digest, `${name}: profile bytes changed`);
+  }
+});
+
+test("profile digest ignores CRLF/LF checkout EOL but pins every content byte (header, body, tools and trailing-space mutations fail)", () => {
+  const dir = fs.mkdtempSync(`${os.tmpdir()}/pi-profile-eol-`);
+  try {
+    const base = fs.readFileSync(new URL("../../../agents/general-worker.md", import.meta.url)).toString("latin1").replace(/\r\n/g, "\n");
+    const expected = PROFILE_LF_SHA256["general-worker"];
+    const lines = base.split("\n");
+    const variants: Record<string, string> = {
+      lf: base,
+      crlf: base.replace(/\n/g, "\r\n"),
+      historicalMixed: lines.map((line, i) => (i === lines.length - 1 ? line : line + (i === 4 ? "\n" : "\r\n"))).join(""),
+    };
+    for (const [label, text] of Object.entries(variants)) {
+      const file = `${dir}/${label}.md`;
+      fs.writeFileSync(file, Buffer.from(text, "latin1"));
+      assert.equal(fileSha256(pathToFileURL(file)), expected, `${label} EOL variant must match the pinned LF digest`);
+    }
+    const flipped: Record<string, number> = { header: base.indexOf("description:"), tools: base.indexOf("tools: ") + 7, body: base.trimEnd().length - 1 };
+    for (const [label, at] of Object.entries(flipped)) {
+      const bytes = Buffer.from(base, "latin1");
+      bytes[at] ^= 0x01;
+      const file = `${dir}/mutant-${label}.md`;
+      fs.writeFileSync(file, bytes);
+      assert.notEqual(fileSha256(pathToFileURL(file)), expected, `${label} one-byte mutation must fail the pin`);
+    }
+    const trailing = `${dir}/mutant-trailing-space.md`;
+    fs.writeFileSync(trailing, Buffer.from(base.replace("\n", " \n"), "latin1"));
+    assert.notEqual(fileSha256(pathToFileURL(trailing)), expected, "trailing-space mutation must fail: no whitespace trim");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -584,7 +648,7 @@ test("package discovery keeps every pre-migration normal tuple, tools and tier m
     assert.equal(agent.model, expected.normal.model, `${expected.name}: model`);
     assert.deepEqual(agent.fallbackModel, expected.normal.fallbackModel, `${expected.name}: fallbackModel`);
     assert.equal(agent.thinking, expected.normal.thinking, `${expected.name}: thinking`);
-    assert.deepEqual(agent.tools, expected.normal.tools, `${expected.name}: tools`);
+    assert.deepEqual(agent.tools, APPROVED_TOOL_DELTAS[expected.name] ?? expected.normal.tools, `${expected.name}: tools`);
     for (const [tier, golden] of Object.entries(expected.tiers)) {
       const pinned = APPROVED_TIER_DELTAS[`${expected.name}.${tier}`] ?? golden;
       const configured = agent.modelTiers?.[tier as "economy" | "capable"] as { model: string; fallbackModel: string[]; thinking?: string } | undefined;
@@ -627,7 +691,7 @@ test("raw declared default tier reproduces every pre-migration normal tuple; tie
     assert.equal(def.model, expected.normal.model, `${expected.name}: default model`);
     assert.deepEqual(parseFallback(def.fallbackModel), expected.normal.fallbackModel, `${expected.name}: default fallback order`);
     assert.equal(def.thinking, expected.normal.thinking, `${expected.name}: default thinking`);
-    assert.deepEqual(role.tools.split(",").map((tool) => tool.trim()), expected.normal.tools, `${expected.name}: tools`);
+    assert.deepEqual(role.tools.split(",").map((tool) => tool.trim()), APPROVED_TOOL_DELTAS[expected.name] ?? expected.normal.tools, `${expected.name}: tools`);
     if (Object.keys(expected.tiers).length === 0) assert.deepEqual(Object.keys(role.modelTiers), [role.defaultModelTier], `${expected.name}: one seeded tier`);
     for (const [tier, golden] of Object.entries(expected.tiers)) {
       const pinned = APPROVED_TIER_DELTAS[`${expected.name}.${tier}`] ?? golden;
@@ -637,6 +701,16 @@ test("raw declared default tier reproduces every pre-migration normal tuple; tie
       assert.deepEqual(parseFallback(cfg.fallbackModel), pinned.fallbackModel, `${expected.name}.${tier}: fallback order`);
       assert.equal(cfg.thinking, pinned.thinking, `${expected.name}.${tier}: thinking`);
     }
+  }
+});
+
+test("write is the one approved tool delta: only release-engineer gains it, pinned to its baseline tools plus write", () => {
+  const pinned = baseline.roles.find((role) => role.name === "release-engineer");
+  assert.ok(pinned);
+  assert.deepEqual(APPROVED_TOOL_DELTAS["release-engineer"], [...pinned.normal.tools, "write"]);
+  assert.equal(Object.keys(APPROVED_TOOL_DELTAS).length, 1, "no other role has an approved tool delta");
+  for (const role of RAW_ROLES()) {
+    if (role.name !== "release-engineer") assert.doesNotMatch(role.tools, /(^|,\s*)write(\s*,|$)/, `${role.name}: no write grant`);
   }
 });
 
