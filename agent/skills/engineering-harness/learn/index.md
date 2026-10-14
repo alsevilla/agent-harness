@@ -16,7 +16,13 @@ Writing durable knowledge requires explicit destination/mutation authority. `rel
 ## Record, dedupe and destination
 Record fields follow `docs/knowledge/README.md`: Title and one-line claim; Source (repo-relative path or commit; do not duplicate the authoritative doc); Evidence status (verified or provisional); Context and date; Revalidate when (the condition that makes the record stale).
 
+Storage default: each new distinct verified lesson becomes one small focused Markdown record in the selected project's existing authoritative knowledge directory (project facts: that project's `docs/knowledge/`; a scope such as `docs/knowledge/general/` or `docs/knowledge/harness/` only where it exists and fits), for example `docs/knowledge/harness/<descriptive-slug>.md`. The scope `README.md` is a link index to those records, not the default prose bucket; do not append a new lesson into a README or another broad multi-topic file. Existing historical prose stays as written unless a precise correction is authorized. For a same or refined claim, update the canonical record instead of creating a second record.
+
 Dedupe before writing: check existing records for the same claim, and whether the new lesson refines, contradicts or repeats them. QMD results are prior evidence, not authority; the authoritative doc stays the source of truth. A new document creation requires an explicit path granted in the packet; otherwise report BLOCKED. Index links are added only within the authorized scope. Saving and QMD indexing are separate; nothing here refreshes or embeds the index.
+
+Packet authority: the packet must name the exact new record path, the index path when an index link is in scope, and the mutation authority for each. A missing path or authority is BLOCKED with the exact gap; nothing is created or indexed by guess. Each record keeps only: Title and one-line claim, Source, Evidence status, Context and date, Revalidate when. No transcripts, session summaries, no automatic counters, no ledgers and no memory pipeline.
+
+Readback and SAVED: after writing, the release engineer reads back the exact record file and the authorized index entry and confirms the record fields. SAVED is reported only after that readback, with both paths. QMD refresh or embedding is separate and is not part of SAVED.
 
 Before recording, review the Verify evidence and root cause; record only what the evidence confirms. A lesson never substitutes for a root-cause fix or regression test: the fix and its test come first.
 

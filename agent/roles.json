@@ -267,6 +267,6 @@
         "thinking": "medium"
       }
     },
-    "tools": "read, grep, find, ls, bash, powershell, edit"
+    "tools": "read, grep, find, ls, bash, powershell, edit, write"
   }
 ]

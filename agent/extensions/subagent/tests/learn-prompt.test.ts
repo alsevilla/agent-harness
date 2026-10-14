@@ -104,3 +104,38 @@ test("LEARN reviews verify evidence, updates the canonical record, stays selecti
 	assert.match(mod, /Saving remains an explicitly authorized release-engineer action/i);
 	assert.match(mod, /main verifies the actual destination content/i);
 });
+
+test("knowledge storage: one small focused record per lesson, README as link index, exact record and index authority, readback before SAVED", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	const readme = read("docs/knowledge/README.md");
+	const prompt = read("agent/prompts/learn.md");
+	assert.match(mod, /one small focused Markdown record/i);
+	assert.match(mod, /docs\/knowledge\/harness\/<descriptive-slug>\.md/);
+	assert.match(mod, /link index/i);
+	assert.match(mod, /not the default prose bucket/i);
+	assert.match(mod, /exact new record path[\s\S]{0,120}index path[\s\S]{0,120}mutation authority/i);
+	assert.match(mod, /SAVED[\s\S]{0,80}only after[\s\S]{0,120}readback/i);
+	assert.match(mod, /QMD[\s\S]{0,80}separate/i);
+	assert.match(mod, /no transcripts?/i);
+	assert.match(mod, /no automatic counters?/i);
+	assert.match(readme, /link index/i);
+	assert.match(readme, /one small focused/i);
+	assert.match(readme, /Record fields/i);
+	assert.match(prompt, /small focused record/i);
+	assert.match(prompt, /record path/i);
+	assert.match(prompt, /index path/i);
+	assert.match(prompt, /readback/i);
+});
+
+test("dedupe updates the existing focused canonical record for the same or refined claim instead of adding a second record", () => {
+	const mod = read("agent/skills/engineering-harness/learn/index.md");
+	assert.match(mod, /same or refined claim[\s\S]{0,160}update the canonical record/i);
+});
+
+test("release-engineer write is limited to named knowledge or release artifacts and is never a shell or product bypass", () => {
+	const role = read("agent/agents/release-engineer.md");
+	assert.match(role, /`write`[\s\S]{0,120}new files? only/i);
+	assert.match(role, /explicitly named[\s\S]{0,120}(knowledge|release)/i);
+	assert.match(role, /shell (redirection|heredoc)[^\n]*not a bypass/i);
+	assert.match(role, /normal guards still apply/i);
+});

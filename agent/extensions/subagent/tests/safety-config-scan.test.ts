@@ -335,7 +335,9 @@ test("candidate declared defaults equal the independent pre-migration golden for
 	for (const role of golden.roles) {
 		const d = declared.get(role.name);
 		assert.ok(d, role.name);
-		assert.deepEqual({ model: d.model, fallbackModel: d.fallbackModel, thinking: d.thinking, tools: d.tools.split(",").map((t) => t.trim()) }, role.normal, role.name);
+		// The approved write grant is the only tool delta: release-engineer = golden tools + write (mirrors role-registry APPROVED_TOOL_DELTAS).
+		const tools = role.name === "release-engineer" ? [...role.normal.tools, "write"] : role.normal.tools;
+		assert.deepEqual({ model: d.model, fallbackModel: d.fallbackModel, thinking: d.thinking, tools: d.tools.split(",").map((t) => t.trim()) }, { ...role.normal, tools }, role.name);
 	}
 });
 
