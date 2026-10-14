@@ -1,10 +1,13 @@
 ---
 name: scout
 description: Read-only codebase reconnaissance agent. Use before non-trivial implementation to locate relevant files, trace dependencies and callers, identify existing patterns, tests, contracts, risks, and likely change surface. Does not implement.
-model: anthropic/claude-haiku-5-5
-fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
-thinking: low
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+model: claude-haiku-5.5
+metadata:
+  pi.model: "anthropic/claude-haiku-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6-luna"
+  pi.thinking: "low"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Assigned module

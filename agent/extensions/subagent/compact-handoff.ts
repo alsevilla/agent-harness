@@ -158,11 +158,13 @@ export function retainedEntryBlock(entry: any): string {
 	const label = dag?.status === "blocked" ? `BLOCKED by ${(dag.blockedBy ?? []).join(", ")}` : notRun ? "ABORTED before start" : failed ? "FAILED/STOPPED" : markup ? PRINTED_MARKUP_LABEL : incomplete ? incompleteLabel(entry.stopReason) : "completed";
 	const agent = String(entry?.agent ?? "unknown agent");
 	const name = entry?.nodeId !== undefined ? `node "${entry.nodeId}" (${agent})` : agent;
+	const diagnostics = entry?.modelTier !== undefined ? [`tier: ${entry.modelTier}`, ...(entry.model ? [`model: ${entry.model}`] : [])] : [];
+	const heading = `${name}${diagnostics.length ? ` · ${diagnostics.join(" · ")}` : ""}`;
 	const text = extractFinalText(Array.isArray(entry?.messages) ? entry.messages : []);
 	const issue = failed ? failureDiagnostics(entry).map((d) => `${d.label}: ${d.value}`).join("\n") : "";
 	// Failed children lead with their error; INCOMPLETE children keep the partial text first, then every terminal diagnostic.
 	const detail = notRun ? "(not run)" : incomplete ? [withTerminalDiagnostics(text, entry) || "(no final assistant output)", markup ? PRINTED_MARKUP_WARNING : ""].filter(Boolean).join("\n\n") : [issue, text || "(no final assistant output)"].filter(Boolean).join("\n");
-	return `### ${name} \u2014 ${label}\n${detail}`;
+	return `### ${heading} \u2014 ${label}\n${detail}`;
 }
 
 /** Explicit recovery: the complete retained child reports. Returns null when the job has no retained child details. */

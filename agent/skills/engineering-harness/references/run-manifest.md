@@ -33,6 +33,9 @@ Read only when a complex multi-stage run needs a durable record. Optional: simpl
 - Any new write invalidates the affected checks: mark them STALE and rerun them before PASS.
 - Job IDs from earlier sessions are historical references only. Never resume a job by its old ID after a reload.
 
+## Usage summary (optional, complex runs)
+- Record the total under the token-efficiency.md "Usage record accounting" rule: unique attempts, partial when a record is missing, and cached usage and cost stay separate from uncached input and output. Do not estimate a missing attempt.
+
 ## Resuming after a reload
 1. Inspect the actual candidate: branch, HEAD and fingerprint against the manifest.
 2. Inspect the evidence files named in the stage rows.

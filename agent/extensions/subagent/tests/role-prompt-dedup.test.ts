@@ -32,6 +32,62 @@ const normalize = (text: string) => text.replace(/\r\n/g, "\n").replace(/\\/g, "
 const sentences = (text: string) => normalize(text).split(/\n+|(?<=\.) /).map((s) => s.trim()).filter((s) => s.length >= 20);
 const sentenceHashes = (text: string) => new Set(sentences(text).map((s) => sha(s).slice(0, 8)));
 const frontmatterSha = (text: string) => sha(/^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/\r\n/g, "\n"))?.[1] ?? "");
+// Exact [approved current value, original HEAD/golden value]; never consult roles.json while hashing.
+const DECLARATION_CHANGES: Record<string, Partial<Record<string, readonly [string, string]>>> = {
+	"api-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"architecture-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"concurrency-specialist": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"debugger": { fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"devops-specialist": { model: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna"], fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/gpt-6-luna"] },
+	"frontend-worker": { model: ["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5"], fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
+	"observability-specialist": { model: ["anthropic/claude-haiku-5-5","openai-codex/gpt-6-luna"], fallbackModel: ["openai-codex/gpt-6-luna","github-copilot/gpt-6-luna"] },
+	"performance-specialist": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"reviewer": { fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"general-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
+	"platform-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"backend-worker": { model: ["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5"], fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
+	"scout": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"security-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-sonnet-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"database-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
+	"database-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"test-engineer": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
+	"ui-ux-specialist": { fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
+	"release-engineer": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"] },
+};
+const effectiveLegacyHeaderSha = (text: string) => {
+	const normalized = text.replace(/\r\n/g, "\n");
+	const header = /^---\n([\s\S]*?)\n---/.exec(normalized)?.[1];
+	assert.ok(header, "live role must have a YAML header");
+	const lines = header.split("\n");
+	const metadata = new Map<string, string>();
+	let inMetadata = false;
+	for (const line of lines) {
+		if (line === "metadata:") { inMetadata = true; continue; }
+		if (inMetadata && /^  pi\.(model|fallbackModel|thinking|tools): /.test(line)) {
+			const match = /^  pi\.(model|fallbackModel|thinking|tools): (.*)$/.exec(line)!;
+			metadata.set(match[1], match[2].replace(/^['\"]|['\"]$/g, ""));
+		} else if (inMetadata && !line.startsWith("  ")) inMetadata = false;
+	}
+	for (const field of ["model", "fallbackModel", "thinking", "tools"] as const) {
+		assert.ok(metadata.has(field), `live role missing metadata pi.${field}`);
+		const value = metadata.get(field)!;
+		if (field === "fallbackModel") assert.ok(value.length > 0 || /^['\"]{2}$/.test(lines.find((line) => line.startsWith("  pi.fallbackModel: "))!.split(": ")[1]), "pi.fallbackModel must be a string");
+		else assert.ok(value.trim().length > 0, `metadata pi.${field} must be nonempty`);
+	}
+	const identity = lines.filter((line) => /^(name|description): /.test(line));
+	assert.deepEqual(identity.map((line) => line.split(":", 1)[0]), ["name", "description"]);
+	const legacy = [...identity, ...["model", "fallbackModel", "thinking", "tools"].map((field) => {
+		let value = metadata.get(field)!;
+		const role = /^name: (.+)$/m.exec(header)?.[1];
+		const approved = DECLARATION_CHANGES[role ?? ""]?.[field];
+		if (approved) {
+			assert.equal(value, approved[0], `${role} approved pi.${field} value changed`);
+			value = approved[1];
+		}
+		return `${field}: ${value === "" ? '""' : value}`;
+	})].join("\n");
+	return sha(legacy);
+};
 const bodyOf = (text: string) => text.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n?/, "");
 
 // Redundant restatements removed by the dedup. Each is already stated by the Leaf boundary paragraph of the same prompt.
@@ -90,8 +146,8 @@ const NEW_AFTER = ["c708d8e8", "33322dbf"];
 // Reviewed F1 rewrite of frontend-worker (framework-aware role). The BEFORE fixture is unchanged; these are the reviewed post-change frontmatter sha and sentence hashes for that one role only.
 // REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
 const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5", "live/backend-worker": "413f9b80a968b35c772de6e61e90677566c5adcc82a53fd7483d51cfefa2b0b8" };
-const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
-const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d186309c", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
+const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b", "24903de1"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
+const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d186309c", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "b12fc73f", "3071e855", "9c5c7203", "4e315760", "9056f070", "6eae5fa7", "14027cde", "05c854d6", "333f18d0", "4902dcff", "e44b5f82", "edac9437"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {
@@ -157,6 +213,46 @@ function assembled(shape: string, role: string): { text: string; sourceText: str
 	return { text: assembleChildSystemPrompt(agent as never, { codeIntegrationsEnabled: true, cwd: repo, packageRoot: null, launchArgs: FULL_LAUNCH, qmdExtension: FILES.qmd, globalGraphDirectory: EMPTY_GLOBAL }), sourceText };
 }
 
+test("release cleanup policy assigns only safe post-merge task-owned removal to release engineer", () => {
+	const release = fs.readFileSync(new URL("../../../agents/release-engineer.md", import.meta.url), "utf8");
+	const ship = fs.readFileSync(new URL("../../../skills/engineering-harness/ship/index.md", import.meta.url), "utf8");
+	const worktree = fs.readFileSync(new URL("../../../skills/engineering-harness/worktree/index.md", import.meta.url), "utf8");
+	const learn = fs.readFileSync(new URL("../../../skills/engineering-harness/learn/index.md", import.meta.url), "utf8");
+	assert.match(release, /release engineer owns\s+safe cleanup of explicitly named task-owned worktrees/i);
+	assert.match(ship, /release engineer owns\s+safe cleanup of explicitly named task-owned worktrees/i);
+	assert.match(worktree, /release engineer owns\s+safe cleanup of explicitly named task-owned worktrees/i);
+	for (const text of [release, ship, worktree, learn]) {
+		assert.match(text, /knowledge-disposition checkpoint/i);
+		assert.match(text, /SAVED/);
+		assert.match(text, /NO LESSON/);
+		assert.match(text, /BLOCKED/);
+		assert.match(text, /archive|report/i);
+	}
+	for (const text of [release, worktree]) {
+		assert.match(text, /git worktree remove/);
+		assert.match(text, /(?:without|no)\s+`?--force`?/);
+		assert.match(text, /CLEANUP_PENDING/);
+		assert.match(text, /(?:missing terminal or quiescence|quiescence evidence)/i);
+	}
+});
+
+test("declaration normalization rejects unapproved identity, tool and approved-field changes", () => {
+	const source = fs.readFileSync(new URL("../../../agents/api-specialist.md", import.meta.url), "utf8");
+	const changed = (from: string, to: string) => {
+		const result = source.replace(from, to);
+		assert.notEqual(result, source, "negative control must mutate the current header");
+		return result;
+	};
+	const currentHeader = effectiveLegacyHeaderSha(source);
+	assert.notEqual(effectiveLegacyHeaderSha(changed('pi.tools: "read, grep', 'pi.tools: "write, grep')), currentHeader);
+	assert.notEqual(effectiveLegacyHeaderSha(changed("name: api-specialist", "name: changed-role")), currentHeader);
+	assert.notEqual(effectiveLegacyHeaderSha(changed("description: Read-only", "description: Changed")), currentHeader);
+	for (const field of ["model", "fallbackModel", "thinking"]) {
+		const current = DECLARATION_CHANGES["api-specialist"][field]![0];
+		assert.throws(() => effectiveLegacyHeaderSha(changed('pi.' + field + ': "' + current + '"', 'pi.' + field + ': "unauthorized/value"')), /approved pi\./);
+	}
+});
+
 // Closed world: every BEFORE hash that is missing AFTER, and every AFTER hash that is new, must be a reviewed disposition for that role. Nothing else may change.
 const HEADINGS_ABSENT_HERE = ["## Rust build output", "## Global graph reference (separate corpus)"];
 const HEADINGS_NEW_HERE = ["## Integration and graph authority"];
@@ -165,7 +261,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 		const [shape, role] = key.split("/");
 		if (key === "live/sqlite-specialist") continue; // Historical fixture retained; explicitly retired live role.
 		const { text, sourceText } = assembled(shape, role);
-		assert.equal(frontmatterSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} frontmatter changed`);
+		assert.equal(effectiveLegacyHeaderSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} effective Pi declarations changed`);
 		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
 		for (const h of HEADINGS_ABSENT_HERE) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
 		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), HEADINGS_ABSENT_HERE.slice().sort(), `${key} headings lost`);
@@ -227,7 +323,7 @@ test("the redundant no-helper restatements are absent from every assembled promp
 test("assembled prompts shrink where a redundant restatement was removed", () => {
 	const unchanged: string[] = [];
 	for (const [key, before] of Object.entries(fixture.entries)) {
-		if (!before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h)) || key === "live/sqlite-specialist") continue;
+		if (!before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h)) || key === "live/sqlite-specialist" || key === "live/release-engineer") continue;
 		const [shape, role] = key.split("/");
 		if (assembled(shape, role).text.length >= before.chars) unchanged.push(key);
 	}

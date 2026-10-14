@@ -220,7 +220,7 @@ probeTest("a user roles.json overlays a bundled default field-wise and keeps the
 	const scout = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user").agents.find((agent) => agent.name === "scout");
 	assert.equal(scout?.model, "openai-codex/gpt-6-luna");
 	assert.equal(scout?.thinking, "high");
-	assert.deepEqual(scout?.fallbackModel, ["openai-codex/gpt-6-luna", "github-copilot/gpt-6-luna"]);
+	assert.deepEqual(scout?.fallbackModel, ["openai-codex/gpt-6-luna"]);
 });
 
 // Malformed user registry in the native layout (the bundled roles.json is the baseline): an error result, never a silent fallback.
@@ -315,7 +315,8 @@ test("the README states the two default native extensions, opt-in external compa
 	for (const rel of [...NATIVE_EXTENSIONS.map((r) => path.posix.dirname(r.slice(2))), ...NATIVE_SKILLS.map((r) => r.slice(2))]) assert.ok(readme.includes(rel), rel);
 	assert.doesNotMatch(readme, /Five profile skills|registers one browser skill/);
 	assert.match(readme, /native package exports one prompt template, `\/learn`/);
-	assert.match(readme, /Copilot CLI harness integration is not available yet; this does not remove Pi's built-in GitHub Copilot model provider/);
+	assert.match(readme, /Copilot CLI integration is a limited native preview/);
+	assert.match(readme, /Pi's built-in GitHub Copilot model provider/);
 	assert.doesNotMatch(readme, /exports no prompt templates|the public SDK loader reports none/);
 	assert.match(readme, /manual, optional prompt templates/i);
 	assert.match(readme, /`engineering-environment`, `qmd` and `refresh` are not in the default exports/);

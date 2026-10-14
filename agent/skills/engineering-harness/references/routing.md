@@ -79,6 +79,19 @@ LEARN is also conditional: `release-engineer` reads `engineering-harness/learn/i
 
 `devops-specialist` owns unresolved deployment/service/backup design. `release-engineer` owns release readiness/execution against the resolved operational contract. Distinct questions may justify both; neither may launch the other.
 
+## Explicit Pi model tier
+Pi-only, main-owned judgment. Set `modelTier: "economy"` on one task only for a bounded, known-contract backend or frontend implementation: the acceptance contract, file seam and focused checks are already declared, and no design, API, security, concurrency, persistence or cross-module decision remains open. The role must configure economy. Otherwise omit the field: the role's `defaultModelTier` runs unchanged, and omission never avoids economy when that default is economy. High-risk work on an economy-default role requests configured `capable` explicitly (omission would run economy); when that role does not configure `capable`, the selection is unresolved and goes to main, never economy by omission. Otherwise `capable` is chosen only when the task's own risk needs it; there is no automatic escalation or retry upgrade. Never economy for complex, unresolved, security-sensitive, concurrency, persistence or cross-layer work; that work stays on capable (the omitted default when it is capable, or explicit `capable` on an economy-default role) or a specialist route. Requests with unsupported tier names (for example `complex`, `fast` or `premium`) are refused before launch. This selection applies only the requested tier's configured model, fallback and thinking to that task; it changes no stored role default, preset or tools, and it measures no saving.
+
+Scenarios:
+- backend-worker: add one validated field to an existing endpoint whose schema and focused tests are named in the packet -> explicit economy.
+- frontend-worker: adjust presentational state of an existing component whose design is already approved and whose focused tests are named -> explicit economy.
+- backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; the owning specialist first when a decision is open.
+- frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy.
+- database-worker: consequential migration or persistence change -> explicit `capable` (its default is economy; omission would run economy).
+- platform-worker: consequential infrastructure change -> explicit `capable` (its default is economy).
+- test-engineer: data-integrity verification -> explicit `capable` (its default is economy).
+- scout or observability-specialist (economy only): high-risk task -> unresolved, main decides or a specialist route; no capable tier exists and omission runs economy.
+
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.
 - Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.

@@ -11,7 +11,7 @@ import { getAgentDir, getSelectListTheme, parseFrontmatter, resolveCliModel, typ
 import { type Component, type Focusable, fuzzyFilter, Input, type KeybindingsManager, SelectList, truncateToWidth, type TUI, type TuiMouseEvent, type TuiMouseEventResult, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { packageRoot, roleRegistryViolation } from "./agents.ts";
+import { entryFormat, packageRoot, roleRegistryViolation } from "./agents.ts";
 import { parseFallbackModels } from "./model-routing.ts";
 import { frameWindow, SUBAGENT_WINDOW_OPTIONS } from "./monitor.ts";
 
@@ -91,6 +91,10 @@ export interface RoleSnapshot {
 	agentPath: string | null;
 	agentBytes: Buffer | null;
 	agentText: string | null;
+	/** True when the definition carries pi.* metadata lines (tier-era shared definitions); only those lines are rewritten. */
+	agentAnnotated: boolean;
+	/** Packaged default entry for the name, or null; merged under the user entry when present. */
+	packaged: RegistryEntry | null;
 	current: RoleSettings;
 }
 
@@ -113,6 +117,14 @@ export interface CommitResult {
 
 const DEFINITION_KEYS = ["model", "fallbackModel", "thinking"] as const;
 const FALLBACK_SEPARATOR = " || ";
+/** Tier fallbacks use the canonical unpadded ||-separated form of roles.json. */
+const TIER_FALLBACK_SEPARATOR = "||";
+const TIER_ORDER = ["economy", "capable"] as const;
+interface TierSlot {
+	model: string;
+	fallbackModel: string;
+	thinking: string;
+}
 
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -216,11 +228,14 @@ function readRegistry(dir: string): RegistryFile {
 		throw new RoleEditError(`roles.json is not valid JSON: ${errorText(error)}`);
 	}
 	if (!Array.isArray(parsed)) throw new RoleEditError("roles.json must be a JSON array of roles");
-	// Shared contract with agents.ts (keys, types, duplicate names); the editor adds only its write requirements below.
-	const violation = roleRegistryViolation(parsed, true);
+	// Shared contract with agents.ts (keys, types, duplicate names, tier shape). Legacy rows are complete here; tier rows are checked once merged with their packaged default.
+	const violation = roleRegistryViolation(parsed, false);
 	if (violation) throw new RoleEditError(`roles.json ${violation}`);
 	const entries = (parsed as Record<string, unknown>[]).map((entry, index) => {
 		const row = entry as RegistryEntry;
+		if (entryFormat(entry) !== "legacy") return row;
+		const legacy = roleRegistryViolation([entry], true)?.replace(/^entry 0\b/, `entry ${index}`);
+		if (legacy) throw new RoleEditError(`roles.json ${legacy}`);
 		if (!row.name || !row.model || !row.provider || row.provider.includes("/")) {
 			throw new RoleEditError(`roles.json entry ${index} needs a name, a model and a provider without "/"`);
 		}
@@ -261,8 +276,71 @@ function rewriteDefinition(text: string, values: Record<(typeof DEFINITION_KEYS)
 	return lines.join("\n");
 }
 
+/** Annotated definitions carry pi.* metadata; the native root model, tools and body are never edited. */
+function isAnnotated(text: string): boolean {
+	const metadata = parseFrontmatter<Record<string, unknown>>(text).frontmatter.metadata;
+	return typeof metadata === "object" && metadata !== null && DEFINITION_KEYS.some((key) => `pi.${key}` in metadata);
+}
+
+/** Rewrites only the three pi.* metadata lines (each exactly once); values are JSON-quoted, indentation and CRLF kept. */
+function rewriteAnnotated(text: string, values: Record<(typeof DEFINITION_KEYS)[number], string>): string {
+	const lines = text.split("\n");
+	const clean = (line: string) => line.replace(/\r$/, "");
+	const close = lines.findIndex((line, i) => i > 0 && clean(line) === "---");
+	if (close < 0) throw new RoleEditError("definition frontmatter is not closed");
+	const found: Record<string, Array<{ index: number; indent: string }>> = { model: [], fallbackModel: [], thinking: [] };
+	for (let i = 1; i < close; i++) {
+		const hit = /^(\s+)pi\.(model|fallbackModel|thinking):/.exec(clean(lines[i]));
+		if (hit) found[hit[2]].push({ index: i, indent: hit[1] });
+	}
+	for (const key of DEFINITION_KEYS) if (found[key].length !== 1) throw new RoleEditError(`definition needs exactly one pi.${key} metadata line (found ${found[key].length})`);
+	for (const key of DEFINITION_KEYS) {
+		const { index, indent } = found[key][0];
+		const cr = lines[index].endsWith("\r") ? "\r" : "";
+		lines[index] = `${indent}pi.${key}: ${JSON.stringify(values[key])}${cr}`;
+	}
+	return lines.join("\n");
+}
+
+/** pi.* metadata must agree with the effective default; a stale definition is refused, never masked by the package. */
+function assertMetadataMatches(file: string, text: string, current: RoleSettings): void {
+	const metadata = parseFrontmatter<Record<string, unknown>>(text).frontmatter.metadata as Record<string, unknown>;
+	const expected: Record<string, string> = { "pi.model": current.primary, "pi.fallbackModel": current.fallbacks.join(FALLBACK_SEPARATOR), "pi.thinking": current.thinking };
+	for (const [key, value] of Object.entries(expected)) {
+		const actual = metadata[key];
+		const same = key === "pi.fallbackModel" ? parseFallbackModels(String(actual ?? "")).join(FALLBACK_SEPARATOR) === value : actual === value;
+		if (!same) throw new RoleEditError(`definition ${file} metadata ${key} ${JSON.stringify(actual ?? null)} disagrees with roles.json (${JSON.stringify(value)}); refusing to edit it`);
+	}
+}
+
+/** A user entry is merged over its packaged default field by field (a user modelTiers replaces the packaged map whole); a legacy user entry stands alone. */
+function effectiveEntry(user: RegistryEntry | undefined, packaged: RegistryEntry | undefined): RegistryEntry | undefined {
+	if (!user) return packaged;
+	if (!packaged || entryFormat(user) === "legacy") return user;
+	return { ...packaged, ...user };
+}
+
+/** Settings a role starts from: the default tier of a tier entry (absent tier fails closed), else the legacy flat fields. */
+function currentSettings(entry: RegistryEntry): RoleSettings {
+	if (entryFormat(entry) !== "tier") return { primary: effectiveModelRef(entry), fallbacks: parseFallbackModels(entry.fallbackModel), thinking: entry.thinking };
+	const tier = entry.defaultModelTier as string;
+	const slot = (entry.modelTiers as Record<string, TierSlot> | undefined)?.[tier];
+	if (!slot) throw new RoleEditError(`role ${entry.name} defaultModelTier "${tier}" is not configured in modelTiers`);
+	return { primary: slot.model, fallbacks: parseFallbackModels(slot.fallbackModel), thinking: slot.thinking };
+}
+
+/** Writes the complete effective modelTiers map with the default tier replaced; other tiers and the user's own tools keep their values. */
+function tierEntries(snap: RoleSnapshot, slot: TierSlot): Array<Record<string, unknown>> {
+	const defaultTier = snap.base.defaultModelTier as string;
+	const map: Record<string, unknown> = { ...(snap.base.modelTiers as Record<string, unknown>), [defaultTier]: slot };
+	const modelTiers = Object.fromEntries(TIER_ORDER.filter((tier) => tier in map).map((tier) => [tier, map[tier]]));
+	const user = snap.entries.find((e) => e.name === snap.name);
+	const row = { name: snap.name, defaultModelTier: defaultTier, modelTiers, ...(user?.tools !== undefined ? { tools: user.tools } : {}) };
+	return user ? snap.entries.map((e) => (e === user ? row : e)) : [...snap.entries, row];
+}
+
 /** Exactly one definition must carry this role name; links, malformed and duplicate matches are refused. A packaged role may have none (null). */
-function findDefinition(dir: string, name: string, packaged: boolean): { path: string; bytes: Buffer; text: string } | null {
+function findDefinition(dir: string, name: string, packaged: boolean): { path: string; bytes: Buffer; text: string; annotated: boolean } | null {
 	const agentsDir = path.join(dir, "agents");
 	let agentsStat: fs.Stats | undefined;
 	try {
@@ -310,8 +388,9 @@ function findDefinition(dir: string, name: string, packaged: boolean): { path: s
 	assertContained(dir, file);
 	const bytes = fs.readFileSync(file);
 	const text = decodeUtf8(bytes, file);
-	definitionLines(text);
-	return { path: file, bytes, text };
+	const annotated = isAnnotated(text);
+	if (!annotated) definitionLines(text);
+	return { path: file, bytes, text, annotated };
 }
 
 /** Bundled registry (roles.json plus agents/ under the native package root); empty when no package root is given. */
@@ -323,14 +402,18 @@ export function readPackageEntries(pkgRoot: string | null): RegistryEntry[] {
 	return readRegistry(pkgRoot).entries;
 }
 
-/** Reads the user roles.json (absent = fresh profile) and the packaged default for the name; a user entry wins as the base. */
+/** Reads the user roles.json (absent = fresh profile) and the packaged default for the name; a user entry is merged over the packaged default. */
 export function readRoleSnapshot(dir: string, name: string, pkgRoot: string | null = null): RoleSnapshot {
 	const registry = readRegistry(dir);
 	const userEntry = registry.entries.find((e) => e.name === name);
 	const packagedEntry = readPackageEntries(pkgRoot).find((e) => e.name === name);
-	const base = userEntry ?? packagedEntry;
-	if (!base) throw new RoleEditError(`role ${name} is not in roles.json`);
+	if (!userEntry && !packagedEntry) throw new RoleEditError(`role ${name} is not in roles.json`);
+	const base = effectiveEntry(userEntry, packagedEntry) as RegistryEntry;
+	const violation = roleRegistryViolation([base], true);
+	if (violation) throw new RoleEditError(`roles.json role ${name} (merged with its packaged default): ${violation}`);
+	const current = currentSettings(base);
 	const definition = findDefinition(dir, name, packagedEntry !== undefined);
+	if (definition?.annotated) assertMetadataMatches(definition.path, definition.text, current);
 	return {
 		name,
 		registryPath: registry.path,
@@ -339,10 +422,12 @@ export function readRoleSnapshot(dir: string, name: string, pkgRoot: string | nu
 		eol: registry.eol,
 		entries: registry.entries,
 		base,
+		packaged: packagedEntry ?? null,
 		agentPath: definition?.path ?? null,
 		agentBytes: definition?.bytes ?? null,
 		agentText: definition?.text ?? null,
-		current: { primary: effectiveModelRef(base), fallbacks: parseFallbackModels(base.fallbackModel), thinking: base.thinking },
+		agentAnnotated: definition?.annotated ?? false,
+		current,
 	};
 }
 
@@ -392,8 +477,9 @@ export function planRoleChange(snap: RoleSnapshot, proposed: RoleSettings, catal
 	const current = snap.current;
 	const primaryChanged = primary !== current.primary;
 	const thinkingChanged = thinking !== current.thinking;
-	const fallbackText = fallbacks.join(FALLBACK_SEPARATOR);
-	const changed = primaryChanged || thinkingChanged || fallbackText !== current.fallbacks.join(FALLBACK_SEPARATOR);
+	const tier = entryFormat(snap.base) === "tier";
+	const fallbackText = fallbacks.join(tier ? TIER_FALLBACK_SEPARATOR : FALLBACK_SEPARATOR);
+	const changed = primaryChanged || thinkingChanged || fallbacks.join(FALLBACK_SEPARATOR) !== current.fallbacks.join(FALLBACK_SEPARATOR);
 
 	const model = catalog.find(primary);
 	if (primaryChanged && !model) throw new RoleEditError(`primary ${primary} is not in the installed catalog`);
@@ -420,22 +506,32 @@ export function planRoleChange(snap: RoleSnapshot, proposed: RoleSettings, catal
 	if (changed) {
 		const id = primary.slice(slash + 1);
 		const provider = primary.slice(0, slash);
-		const change = { ...(primaryChanged ? { provider, model: roleModelField(provider, id) } : {}), fallbackModel: fallbackText, thinking };
-		// A user entry is edited in place; a packaged-only role gets a new override entry with the editor's five fields (no tools copy).
-		const entries = snap.entries.some((e) => e.name === snap.name)
-			? snap.entries.map((e) => (e.name === snap.name ? { ...e, ...change } : e))
-			: [...snap.entries, { name: snap.name, provider: snap.base.provider, model: snap.base.model, ...change }];
+		let entries: Array<Record<string, unknown>>;
+		if (tier) {
+			entries = tierEntries(snap, { model: primary, fallbackModel: fallbackText, thinking });
+		} else {
+			const change = { ...(primaryChanged ? { provider, model: roleModelField(provider, id) } : {}), fallbackModel: fallbackText, thinking };
+			// A user entry is edited in place (its own keys win, so a tools-only overlay keeps its tools); a packaged-only role gets an override entry with no tools copy.
+			entries = snap.entries.some((e) => e.name === snap.name)
+				? snap.entries.map((e) => (e.name === snap.name ? { name: snap.name, provider: snap.base.provider, model: snap.base.model, ...e, ...change } : e))
+				: [...snap.entries, { name: snap.name, provider: snap.base.provider, model: snap.base.model, ...change }];
+		}
 		registryText = formatJson(entries, snap.eol);
 		if (snap.agentPath !== null && snap.agentText !== null) {
-			agentText = rewriteDefinition(snap.agentText, { model: primary, fallbackModel: fallbackText, thinking });
+			const values = { model: primary, fallbackModel: fallbackText, thinking };
+			agentText = snap.agentAnnotated ? rewriteAnnotated(snap.agentText, values) : rewriteDefinition(snap.agentText, values);
 			// Validate what will be written with the real parsers before any file is touched.
 			const md = parseFrontmatter<Record<string, unknown>>(agentText).frontmatter;
-			if (md.model !== primary || md.fallbackModel !== fallbackText || md.thinking !== thinking) {
+			const written = snap.agentAnnotated ? (md.metadata as Record<string, unknown>) : md;
+			const field = (key: string) => (snap.agentAnnotated ? `pi.${key}` : key);
+			if (written[field("model")] !== primary || written[field("fallbackModel")] !== fallbackText || written[field("thinking")] !== thinking) {
 				throw new RoleEditError(`definition ${snap.agentPath} does not round-trip the proposed values`);
 			}
 		}
+		// Re-read the new registry through the same merge the reader uses; the settings must come back exactly.
 		const row = (JSON.parse(registryText) as RegistryEntry[]).find((e) => e.name === snap.name);
-		if (!row || row.fallbackModel !== fallbackText || row.thinking !== thinking || effectiveModelRef(row) !== primary) {
+		const back = row ? currentSettings(effectiveEntry(row, snap.packaged ?? undefined) as RegistryEntry) : null;
+		if (!back || back.primary !== primary || back.fallbacks.join(FALLBACK_SEPARATOR) !== fallbacks.join(FALLBACK_SEPARATOR) || back.thinking !== thinking) {
 			throw new RoleEditError("roles.json does not round-trip the proposed values");
 		}
 	}
@@ -447,7 +543,7 @@ export function planRoleChange(snap: RoleSnapshot, proposed: RoleSettings, catal
 		`After:  ${fmt({ primary, fallbacks, thinking })}`,
 		snap.agentPath === null
 			? `Writes: roles.json override entry ${snap.name}; packaged definition unchanged, not copied`
-			: `Writes: roles.json entry ${snap.name}; agents/${path.basename(snap.agentPath)} model, fallbackModel, thinking lines`,
+			: `Writes: roles.json entry ${snap.name}; agents/${path.basename(snap.agentPath)} ${snap.agentAnnotated ? "pi.model, pi.fallbackModel, pi.thinking metadata lines" : "model, fallbackModel, thinking lines"}`,
 		...warnings.map((w) => `Warning: ${w}`),
 	].join("\n");
 	return { changed, warnings, preview, registryPath: snap.registryPath, registryText, agentPath: snap.agentPath, agentText };

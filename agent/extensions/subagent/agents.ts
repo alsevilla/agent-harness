@@ -9,6 +9,12 @@ import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/
 import { parseFallbackModels } from "./model-routing.ts";
 
 export type AgentScope = "user" | "project" | "both";
+export type ModelTier = "economy" | "capable";
+export type TierThinking = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+/** Canonical tier: qualified model, normalized fallback chain ([] for "") and an explicit thinking level. */
+export interface TierModelConfig { model: string; fallbackModel: string[]; thinking: TierThinking; }
+/** Bounded legacy external per-tier view: no effort of its own, so it inherits the flat role thinking. */
+export interface LegacyTierModelConfig { model: string; fallbackModel: string[]; }
 
 export interface AgentConfig {
 	name: string;
@@ -20,6 +26,8 @@ export interface AgentConfig {
 	systemPrompt: string;
 	source: "user" | "project" | "package";
 	filePath: string;
+	defaultModelTier?: ModelTier;
+	modelTiers?: Partial<Record<ModelTier, TierModelConfig | LegacyTierModelConfig>>;
 }
 
 export interface AgentDiscoveryResult {
@@ -44,6 +52,7 @@ type AgentFrontmatter = {
 	model?: unknown;
 	fallbackModel?: unknown;
 	thinking?: unknown;
+	metadata?: unknown;
 };
 
 /**
@@ -67,45 +76,129 @@ function parseToolList(value: unknown): string[] | undefined {
 	return tools.length > 0 ? tools : undefined;
 }
 
-/** Fields roles.json defines for a user role; an omitted field keeps the definition file's frontmatter value. */
+/** Fields roles.json defines for a role; an omitted field keeps the lower-precedence value. */
 interface RoleOverride {
 	model?: string;
 	fallbackModel?: string[];
+	defaultModelTier?: ModelTier;
+	modelTiers?: Partial<Record<ModelTier, TierModelConfig | LegacyTierModelConfig>>;
 	thinking?: string;
 	tools?: string[];
+	/** Legacy scalar or per-tier provider entry: keeps the flat omission projection and no default tier. */
+	legacy?: boolean;
 }
 
-const ROLE_KEYS = ["name", "provider", "model", "fallbackModel", "thinking", "tools"];
+const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools"];
 const ROLE_TEXT_KEYS = ["provider", "model", "fallbackModel", "thinking"];
+const LEGACY_ROLE_KEYS = ["provider", "model", "fallbackModel", "thinking"];
+const TIER_KEYS = ["economy", "capable"];
+const TIER_MODEL_KEYS = ["provider", "model", "fallbackModel"];
+const TIER_CANONICAL_KEYS = ["model", "fallbackModel", "thinking"];
+const TIER_THINKING: readonly TierThinking[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+/** Exact provider/id: nonempty provider, nonempty id, no whitespace; ids may contain further slashes. */
+const QUALIFIED_MODEL = /^[^\s/]+\/\S+$/;
 
 /**
  * Shared roles.json contract for package defaults, package user overrides and the roles editor.
  * Returns the first violation (without a file label) or null. `complete` also requires the four text fields, which the editor writes.
  */
-export function roleRegistryViolation(registry: unknown, complete = false): string | null {
-	if (!Array.isArray(registry)) return "must be a JSON list of roles";
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Canonical tier entries carry no provider. Legacy scalar or per-tier provider fields belong to the bounded compatibility path.
+ * Mixing both in one entry is an error, never a fallthrough to the other shape or to Markdown annotations.
+ */
+export function entryFormat(entry: Record<string, unknown>): "legacy" | "tier" | "neutral" | "mixed" {
+	const values = isPlainObject(entry.modelTiers) ? Object.values(entry.modelTiers) : [];
+	const legacy = LEGACY_ROLE_KEYS.some((key) => key in entry) || values.some((value) => isPlainObject(value) && "provider" in value);
+	const tier = "defaultModelTier" in entry || values.some((value) => !isPlainObject(value) || !("provider" in value) || "thinking" in value);
+	if (legacy && tier) return "mixed";
+	return tier ? "tier" : legacy ? "legacy" : "neutral";
+}
+
+// Shortcut: fallbackModel is "" (no chain) or ||-separated provider/id tokens with no blank tokens; upgrade if tokens may hold spaces.
+function parseQualifiedFallbacks(value: string): string[] | undefined {
+	if (value === "") return [];
+	const tokens = value.split("||").map((token) => token.trim());
+	return tokens.every((token) => QUALIFIED_MODEL.test(token)) ? [...new Set(tokens)] : undefined;
+}
+
+function tierViolation(index: number, tier: string, definition: unknown): string | null {
+	const at = `entry ${index} modelTiers.${tier}`;
+	if (!isPlainObject(definition)) return `${at} must be an object`;
+	const unknown = Object.keys(definition).filter((key) => !TIER_CANONICAL_KEYS.includes(key));
+	if (unknown.length) return `${at} has unknown key ${unknown.join(", ")}`;
+	if (typeof definition.model !== "string" || !QUALIFIED_MODEL.test(definition.model)) return `${at}.model must be a provider/id model`;
+	if (typeof definition.fallbackModel !== "string" || parseQualifiedFallbacks(definition.fallbackModel) === undefined) return `${at}.fallbackModel must be "" or provider/id models separated by ||`;
+	if (typeof definition.thinking !== "string" || !TIER_THINKING.includes(definition.thinking as TierThinking)) return `${at}.thinking must be one of ${TIER_THINKING.join(", ")}`;
+	return null;
+}
+
+function tierEntryViolation(index: number, entry: Record<string, unknown>, complete: boolean): string | null {
+	if (complete && !("defaultModelTier" in entry)) return `entry ${index} needs defaultModelTier`;
+	if ("defaultModelTier" in entry && !TIER_KEYS.includes(entry.defaultModelTier as string)) return `entry ${index} defaultModelTier must be economy or capable`;
+	if (!("modelTiers" in entry)) return null;
+	if (!isPlainObject(entry.modelTiers)) return `entry ${index} has invalid modelTiers`;
+	for (const [tier, definition] of Object.entries(entry.modelTiers)) {
+		if (!TIER_KEYS.includes(tier)) return `entry ${index} has unknown modelTiers key ${tier}`;
+		const violation = tierViolation(index, tier, definition);
+		if (violation) return violation;
+	}
+	return null;
+}
+
+function legacyEntryViolation(index: number, entry: Record<string, unknown>, complete: boolean): string | null {
+	for (const key of ROLE_TEXT_KEYS) {
+		if (entry[key] === undefined && !complete) continue;
+		if (typeof entry[key] !== "string") return `entry ${index} has a ${complete ? "missing or " : ""}non-string ${key}`;
+	}
+	if (entry.modelTiers !== undefined) {
+		if (!isPlainObject(entry.modelTiers)) return `entry ${index} has invalid modelTiers`;
+		for (const [tier, definition] of Object.entries(entry.modelTiers)) {
+			if (!TIER_KEYS.includes(tier)) return `entry ${index} has unknown modelTiers key ${tier}`;
+			if (!isPlainObject(definition)) return `entry ${index} has invalid modelTiers.${tier}`;
+			const unknownModelKeys = Object.keys(definition).filter((key) => !TIER_MODEL_KEYS.includes(key));
+			if (unknownModelKeys.length) return `entry ${index} modelTiers.${tier} has unknown key ${unknownModelKeys.join(", ")}`;
+			if (typeof definition.provider !== "string" || !definition.provider.trim() || typeof definition.model !== "string" || !definition.model.trim() || typeof definition.fallbackModel !== "string" || !parseFallbackModels(definition.fallbackModel).length) return `entry ${index} has invalid modelTiers.${tier} provider, model or fallbackModel`;
+		}
+	}
+	return null;
+}
+
+/**
+ * Shared roles.json contract for package defaults, package user overrides and the roles editor.
+ * Returns the first violation (without a file label) or null. `complete` also requires the four text fields, which the editor writes.
+ * `newFormatOnly` checks only canonical tier entries and mixed shapes (live profile: legacy entries stay silent, as before).
+ */
+export function roleRegistryViolation(registry: unknown, complete = false, newFormatOnly = false): string | null {
+	if (!Array.isArray(registry)) return newFormatOnly ? null : "must be a JSON list of roles";
 	const names = new Set<string>();
 	for (const [index, role] of registry.entries()) {
-		if (typeof role !== "object" || role === null || Array.isArray(role)) return `entry ${index} is not an object`;
-		const entry = role as Record<string, unknown>;
-		const unknown = Object.keys(entry).filter((key) => !ROLE_KEYS.includes(key));
-		if (unknown.length > 0) return `entry ${index} has unknown key ${unknown.join(", ")}`;
-		if (typeof entry.name !== "string" || entry.name.trim() === "") return `entry ${index} needs a non-empty string name`;
-		for (const key of ROLE_TEXT_KEYS) {
-			if (entry[key] === undefined && !complete) continue;
-			if (typeof entry[key] !== "string") return `entry ${index} has a ${complete ? "missing or " : ""}non-string ${key}`;
+		if (!isPlainObject(role)) {
+			if (newFormatOnly) continue;
+			return `entry ${index} is not an object`;
 		}
-		const tools = entry.tools;
+		const format = entryFormat(role);
+		if (format === "mixed") return `entry ${index} mixes defaultModelTier or tier thinking with legacy provider, model, fallbackModel or thinking fields`;
+		if (newFormatOnly && format !== "tier") continue;
+		const unknown = Object.keys(role).filter((key) => !ROLE_KEYS.includes(key));
+		if (unknown.length > 0) return `entry ${index} has unknown key ${unknown.join(", ")}`;
+		if (typeof role.name !== "string" || role.name.trim() === "") return `entry ${index} needs a non-empty string name`;
+		const violation = format === "tier" ? tierEntryViolation(index, role, complete) : legacyEntryViolation(index, role, complete);
+		if (violation) return violation;
+		const tools = role.tools;
 		if (tools !== undefined && typeof tools !== "string" && !(Array.isArray(tools) && tools.every((t) => typeof t === "string"))) return `entry ${index} has invalid tools (a string or a list of strings)`;
-		if (names.has(entry.name)) return `duplicate role name: ${entry.name}`;
-		names.add(entry.name);
+		if (names.has(role.name)) return `duplicate role name: ${role.name}`;
+		names.add(role.name);
 	}
 	return null;
 }
 
 /**
  * roles.json is the canonical registry for user roles: provider + model are joined into one catalog ID.
- * With a label (package mode) a missing-when-required, unreadable, non-list or invalid registry is an error; without one (live layout) it stays silent.
+ * With a label (package mode) a missing-when-required, unreadable, non-list or invalid registry is an error; without one (live layout) only malformed new-format entries are errors.
  */
 function loadRoleRegistry(file: string, label?: string, missingOk = false): { roles: Map<string, RoleOverride>; error?: string } {
 	const roles = new Map<string, RoleOverride>();
@@ -118,24 +211,99 @@ function loadRoleRegistry(file: string, label?: string, missingOk = false): { ro
 		if (missing && missingOk) return { roles };
 		return { roles, error: `${label} is ${missing ? "missing" : "unreadable or not valid JSON"}: ${file}` };
 	}
-	if (label) {
-		const violation = roleRegistryViolation(registry);
-		if (violation) return { roles, error: `${label} ${violation}: ${file}` };
-	}
+	const violation = roleRegistryViolation(registry, false, label === undefined);
+	if (violation) return { roles, error: `${label ?? "user roles.json"} ${violation}: ${file}` };
 	if (!Array.isArray(registry)) return { roles };
 	for (const role of registry) {
-		if (typeof role !== "object" || role === null) continue;
-		const entry = role as { name?: unknown; provider?: unknown; model?: unknown; fallbackModel?: unknown; thinking?: unknown; tools?: unknown };
-		if (typeof entry.name !== "string") continue;
-		const model = typeof entry.model === "string" ? entry.model.trim() : "";
-		roles.set(entry.name, {
-			model: model && typeof entry.provider === "string" && !model.includes("/") ? `${entry.provider}/${model}` : model || undefined,
-			fallbackModel: typeof entry.fallbackModel === "string" ? parseFallbackModels(entry.fallbackModel) : undefined,
-			thinking: typeof entry.thinking === "string" ? entry.thinking : undefined,
-			tools: parseToolList(entry.tools),
-		});
+		if (!isPlainObject(role) || typeof role.name !== "string") continue;
+		roles.set(role.name, normalizeRoleEntry(role));
 	}
 	return { roles };
+}
+
+/** Raw roles.json entry to override shape: tier-format keeps its default and canonical tiers; legacy and neutral keep the flat projection. */
+function normalizeRoleEntry(entry: Record<string, unknown>): RoleOverride {
+	const format = entryFormat(entry);
+	if (format === "tier") {
+		return {
+			defaultModelTier: entry.defaultModelTier as ModelTier | undefined,
+			modelTiers: entry.modelTiers === undefined ? undefined : canonicalTiers(entry.modelTiers),
+			tools: parseToolList(entry.tools),
+			legacy: false,
+		};
+	}
+	const model = typeof entry.model === "string" ? entry.model.trim() : "";
+	const modelTiers: Partial<Record<ModelTier, LegacyTierModelConfig>> = {};
+	if (isPlainObject(entry.modelTiers)) {
+		for (const [tier, definition] of Object.entries(entry.modelTiers)) {
+			if (!TIER_KEYS.includes(tier) || !isPlainObject(definition) || typeof definition.provider !== "string" || typeof definition.model !== "string" || typeof definition.fallbackModel !== "string") continue;
+			const tierModel = definition.model.trim();
+			modelTiers[tier as ModelTier] = {
+				model: tierModel && !tierModel.includes("/") ? `${definition.provider}/${tierModel}` : tierModel,
+				fallbackModel: parseFallbackModels(definition.fallbackModel),
+			};
+		}
+	}
+	return {
+		model: model && typeof entry.provider === "string" && !model.includes("/") ? `${entry.provider}/${model}` : model || undefined,
+		fallbackModel: typeof entry.fallbackModel === "string" ? parseFallbackModels(entry.fallbackModel) : undefined,
+		modelTiers: entry.modelTiers !== undefined ? modelTiers : undefined,
+		thinking: typeof entry.thinking === "string" ? entry.thinking : undefined,
+		tools: parseToolList(entry.tools),
+		legacy: format === "legacy" ? true : undefined,
+	};
+}
+
+/** Validated canonical tiers only (roleRegistryViolation runs first): fallback "" becomes [] and no partner is invented. */
+function canonicalTiers(value: unknown): Partial<Record<ModelTier, TierModelConfig>> {
+	const tiers: Partial<Record<ModelTier, TierModelConfig>> = {};
+	if (!isPlainObject(value)) return tiers;
+	for (const [tier, definition] of Object.entries(value)) {
+		if (!TIER_KEYS.includes(tier) || !isPlainObject(definition)) continue;
+		tiers[tier as ModelTier] = {
+			model: String(definition.model),
+			fallbackModel: parseQualifiedFallbacks(String(definition.fallbackModel)) ?? [],
+			thinking: definition.thinking as TierThinking,
+		};
+	}
+	return tiers;
+}
+
+/**
+ * Effective role: overlay fields replace base fields, and modelTiers replace atomically (explicit {} stays empty, nothing refills).
+ * Tier roles derive model, fallbackModel and thinking from the default tier, which must be a configured slot; errors fail closed before annotations.
+ */
+function resolveRole(name: string, base: RoleOverride | undefined, overlay: RoleOverride = {}): { role: RoleOverride; error?: string } {
+	const legacy = (overlay.legacy ?? base?.legacy) === true;
+	const defaultModelTier = legacy ? undefined : overlay.defaultModelTier ?? base?.defaultModelTier;
+	const modelTiers = overlay.modelTiers ?? base?.modelTiers;
+	const tools = overlay.tools ?? base?.tools;
+	if (!legacy && (defaultModelTier !== undefined || Object.keys(modelTiers ?? {}).length > 0)) {
+		if (defaultModelTier === undefined) return { role: {}, error: `role "${name}" needs defaultModelTier` };
+		const tier = modelTiers?.[defaultModelTier];
+		if (!tier) return { role: {}, error: `role "${name}" defaultModelTier "${defaultModelTier}" is not configured in modelTiers` };
+		return {
+			role: {
+				defaultModelTier,
+				modelTiers,
+				model: tier.model,
+				fallbackModel: tier.fallbackModel,
+				thinking: (tier as Partial<TierModelConfig>).thinking ?? overlay.thinking ?? base?.thinking,
+				tools,
+				legacy: false,
+			},
+		};
+	}
+	return {
+		role: {
+			model: overlay.model ?? base?.model,
+			fallbackModel: overlay.fallbackModel ?? base?.fallbackModel,
+			modelTiers,
+			thinking: overlay.thinking ?? base?.thinking,
+			tools,
+			legacy,
+		},
+	};
 }
 
 function loadAgentsFromDir(
@@ -175,15 +343,35 @@ function loadAgentsFromDir(
 		}
 
 		const role = roles.get(frontmatter.name);
+		const metadata = typeof frontmatter.metadata === "object" && frontmatter.metadata !== null && !Array.isArray(frontmatter.metadata)
+			? frontmatter.metadata as Record<string, unknown>
+			: {};
+		const annotation = (key: string) => metadata[`pi.${key}`];
+		const invalidAnnotation = ["tools", "model", "fallbackModel", "thinking"].find((key) => {
+			if (!("pi." + key in metadata)) return false;
+			const value = annotation(key);
+			if (typeof value !== "string" || (key !== "fallbackModel" && value.trim() === "")) return true;
+			if (key === "tools" && parseToolList(value) === undefined) return true;
+			return key === "thinking" && !["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
+		});
+		if (invalidAnnotation) {
+			console.error(`Skipping agent ${frontmatter.name}: invalid metadata pi.${invalidAnnotation}`);
+			continue;
+		}
+		const annotationText = (key: string) => annotation(key) as string | undefined;
+		const fallbackAnnotation = annotationText("fallbackModel");
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
-			tools: role?.tools ?? parseToolList(frontmatter.tools),
-			model: role?.model ?? (typeof frontmatter.model === "string" ? frontmatter.model : undefined),
+			tools: role?.tools ?? parseToolList(annotationText("tools") ?? frontmatter.tools),
+			model: role?.model ?? annotationText("model") ?? (typeof frontmatter.model === "string" ? frontmatter.model : undefined),
 			fallbackModel:
 				role?.fallbackModel ??
-				(typeof frontmatter.fallbackModel === "string" ? parseFallbackModels(frontmatter.fallbackModel) : undefined),
-			thinking: role?.thinking ?? (typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined),
+				(fallbackAnnotation !== undefined ? parseFallbackModels(fallbackAnnotation) :
+					(typeof frontmatter.fallbackModel === "string" ? parseFallbackModels(frontmatter.fallbackModel) : undefined)),
+			defaultModelTier: role?.defaultModelTier,
+			modelTiers: role?.modelTiers,
+			thinking: role?.thinking ?? annotationText("thinking") ?? (typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined),
 			systemPrompt: body,
 			source,
 			filePath,
@@ -243,24 +431,26 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 	const layout = packageLayout();
 	const pkgRoot = layout.root;
-	const userRegistry = loadRoleRegistry(path.join(getAgentDir(), "roles.json"), pkgRoot || layout.error ? "user roles.json" : undefined, true);
+	const userFile = path.join(getAgentDir(), "roles.json");
+	const userRegistry = loadRoleRegistry(userFile, pkgRoot || layout.error ? "user roles.json" : undefined, true);
 	const roles = userRegistry.roles;
 	let error = layout.error ?? userRegistry.error;
-	// Package tier: the bundled roles.json is the base; user roles.json fields override it field-wise.
+	// Package tier: the bundled roles.json is the base; user roles.json overlays it (see resolveRole).
+	const baseRoles = new Map<string, RoleOverride>();
 	const packageRoles = new Map<string, RoleOverride>();
 	let shipped: AgentConfig[] = [];
 	if (pkgRoot) {
-		const base = loadRoleRegistry(path.join(pkgRoot, "roles.json"), "package roles.json");
+		const basePath = path.join(pkgRoot, "roles.json");
+		const base = loadRoleRegistry(basePath, "package roles.json");
 		error = error ?? base.error;
 		if (!isDirectory(path.join(pkgRoot, "agents"))) error = error ?? `package agents directory is missing: ${pkgRoot}`;
 		for (const [name, baseRole] of base.roles) {
-			const user = roles.get(name);
-			packageRoles.set(name, {
-				model: user?.model ?? baseRole.model,
-				fallbackModel: user?.fallbackModel ?? baseRole.fallbackModel,
-				thinking: user?.thinking ?? baseRole.thinking,
-				tools: user?.tools ?? baseRole.tools,
-			});
+			baseRoles.set(name, baseRole);
+			const shippedOnly = resolveRole(name, undefined, baseRole);
+			if (shippedOnly.error) error = error ?? `package roles.json ${shippedOnly.error}: ${basePath}`;
+			const merged = resolveRole(name, baseRole, roles.get(name));
+			if (merged.error) error = error ?? `user roles.json ${merged.error}: ${userFile}`;
+			packageRoles.set(name, merged.role);
 		}
 		shipped = loadAgentsFromDir(path.join(pkgRoot, "agents"), "package", packageRoles);
 		// Every declared role needs exactly one parsed definition, and no parsed definition may be undeclared (an empty set is never valid).
@@ -270,7 +460,16 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	}
 
 	const packageAgents = scope === "project" ? [] : shipped;
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user", roles);
+	// User-dir overlays keep their raw projection unless they are tier-format or inherit a tier base, so legacy and neutral overlays stay unchanged.
+	const userRoles = new Map<string, RoleOverride>();
+	for (const [name, overlay] of roles) {
+		const baseRole = baseRoles.get(name);
+		const inherit = overlay.legacy === false || (overlay.legacy === undefined && baseRole?.legacy === false);
+		const resolved = resolveRole(name, inherit ? baseRole : undefined, overlay);
+		if (resolved.error) error = error ?? `user roles.json ${resolved.error}: ${userFile}`;
+		userRoles.set(name, resolved.role);
+	}
+	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user", userRoles);
 	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();

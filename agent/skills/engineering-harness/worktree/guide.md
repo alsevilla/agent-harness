@@ -37,18 +37,38 @@ Restart only with a verified executable, environment and DB path (for example
 `DB_PATH`); otherwise leave services stopped and report the required handoff.
 
 ### Completion and cleanup
-As part of an authorized merge/delivery, main checks disposition of every task-owned
-temporary checkout. Normal safe cleanup does not require another user request:
-- confirm the intended PR is merged (including squash/rebase), or prove candidate
-  commits integrated into the intended target; committed-only is not merged;
-- collect terminal worker results; no running/paused owner or server may need it;
-- inspect tracked, untracked and ignored state; preserve unique evidence outside it;
-- retain dirty/unmerged candidates, unique data and unknown/user-owned checkouts;
-- for an idle, integrated, clean task-owned checkout, run `git worktree remove`
-  with its exact absolute path; verify the folder and registration are gone.
+After a verified merge/delivery (including squash/rebase), release engineer owns
+safe cleanup of explicitly named task-owned worktrees. Main retains
+scheduling, exact candidate/target identity, approvals, terminal-owner/quiescence
+evidence and coordination. Main supplies the exact candidate/primary and owned
+checkout list; never sweep all registered worktrees. PR-only delivery does not
+trigger removal of an unmerged candidate.
 
-Never force-remove a dirty implementation candidate, reset/clean it, or delete its
-branch as routine cleanup. Report each checkout as REMOVED or RETAINED with a
-concrete reason. Prune only missing registrations after checking a dry run.
-This is a workflow step, not a watcher; abandoning a task also requires disposition.
+The cleanup release engineer must run outside the target checkout and only after
+its delivery worker is terminal. If delivery ran inside the candidate, return
+MERGED with CLEANUP_PENDING; main schedules a cleanup release engineer from the
+primary/outside target after terminal confirmation. A checkout used by any
+running/paused worker or server must be retained. Missing terminal or quiescence
+evidence means RETAINED / CLEANUP_PENDING, never inferred approval.
+
+Before removal, establish intended merge/integration (committed-only is not
+merged), inspect tracked, untracked and ignored state, and preserve unique
+evidence outside the checkout. Remove only clean, integrated, idle, task-owned
+checkouts with `git worktree remove` using the exact absolute path and no
+`--force`; verify both folder and registration are gone. Report each checkout as
+REMOVED or RETAINED with a concrete reason. Never reset/clean, force-remove,
+delete branches, or delete arbitrary directories. Do not prune missing
+registrations as part of this procedure. This is a workflow step, not a watcher;
+abandoning a task still requires disposition.
+
+After successful merge and task-owned artifact disposition, main evaluates
+verified reusable lessons with bounded dedup. Main selects and coordinates any
+LEARN work; only the release engineer performs authorized persistence to the
+exact named canonical knowledge destination and verifies its content before
+reporting SAVED. The terminal knowledge-disposition checkpoint is SAVED (exact
+path/evidence), NO LESSON (reason), or BLOCKED (specific evidence, destination,
+or authority gap). Archiving a report or fixture is evidence, not learning
+completion. If learning is BLOCKED after merge, report that gap without implying
+rollback of the completed merge.
+
 Load `references/extended.md` only for recovery or multi-worktree complexity.

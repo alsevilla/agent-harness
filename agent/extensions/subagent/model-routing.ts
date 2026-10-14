@@ -1,4 +1,20 @@
 import { classifyProviderError } from "./provider-cooldown.ts";
+import type { AgentConfig, ModelTier } from "./agents.ts";
+export type { ModelTier } from "./agents.ts";
+
+export interface SelectedAgent extends AgentConfig {
+	readonly modelTier?: ModelTier;
+}
+
+// Omitted selection runs the role's own default tier (legacy roles keep their flat projection); explicit tiers are package-only.
+export function resolveModelTier(agent: AgentConfig, requested?: ModelTier): SelectedAgent {
+	if (requested !== undefined && agent.source !== "package") throw new Error(`modelTier is only supported for canonical package roles (\"${agent.name}\")`);
+	const tier = requested ?? agent.defaultModelTier;
+	if (tier === undefined) return { ...agent, fallbackModel: agent.fallbackModel?.slice(), tools: agent.tools?.slice() };
+	const models = agent.modelTiers?.[tier];
+	if (!models) throw new Error(requested === undefined ? `defaultModelTier \"${tier}\" is not configured for role \"${agent.name}\"` : `modelTier \"${tier}\" is not supported for role \"${agent.name}\"`);
+	return { ...agent, model: models.model, fallbackModel: [...models.fallbackModel], tools: agent.tools?.slice(), thinking: "thinking" in models ? models.thinking : agent.thinking, modelTier: tier };
+}
 
 // Model IDs are catalog identifiers: trimmed, otherwise passed through verbatim (no aliasing).
 export function parseFallbackModels(value: string | undefined): string[] {

@@ -5,7 +5,9 @@ description: Main engineering entrypoint. Select the next phase and actual named
 
 # Engineering harness
 Main owns sequencing and launches. Apply the compact AGENTS policy; leaves perform only their assignment.
-Read this entry once per session and reuse it for subsequent tasks. When execution starts, load only missing relevant domain routers/module indexes and referenced sections. Reread changed guidance or content lost from context; a new task alone does not require another read. Each leaf loads its assignment in its own context.
+The shared policy is `../../AGENTS.md` relative to this `SKILL.md`; use that same source rather than a copy. Read this entry and the shared policy when missing or stale from context; reuse already injected context. When execution starts, load only missing relevant domain routers/module indexes and referenced sections. Reread changed guidance or content lost from context; a new task alone does not require another read. Each leaf loads its assignment in its own context.
+
+Pi provides the named subagent, tools, control and model-registry mechanisms described here. Copilot CLI uses only runtime-reported native custom-agent/task dispatch and its question tool when available; never impersonate built-ins, substitute named roles, or invent a schema or job API. Pi-only controls are not prompt-emulated. If a required capability is unavailable, block only that workflow step. Parent packets must carry the verified host-native dispatch contract and absolute installed shared-module, evidence and candidate paths, plus the relevant host boundary for leaves. Resolve resources from the actual installed shared source/advertised skill or an explicitly supplied absolute path; missing paths block the step. Pi-home examples apply only to Pi.
 
 For "queue this", record the request and order, acknowledge briefly, and continue current work. When a durable PLAN or resume queue exists, read `plan/index.md` ("Durable plan state") before resuming or changing it. Select modules/roles when that task is scheduled; do not launch or implement it early. Resolve loading directly without explaining internal deliberations.
 

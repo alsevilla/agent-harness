@@ -175,6 +175,21 @@ async function runNodeSuite() {
 		}
 	});
 
+	test("WorkerStore publishes the accepted tier in its first snapshot and omits it for legacy callers", () => {
+		const store = new monitor.WorkerStore();
+		let snapshot: any;
+		store.listeners.add(() => { snapshot = store.records.values().next().value; });
+		const tagged = store.begin("backend-worker", "tiered", "fixture/model", "high", undefined, "economy");
+		assert.equal(tagged.modelTier, "economy");
+		assert.equal(snapshot.modelTier, "economy");
+		tagged.reportedModel = "partner/observed";
+		const { view } = inspector(store, () => "hidden");
+		const rows = view.render(100).map(plain).join("\n");
+		assert.match(rows, /partner\/observed · tier: economy/);
+		const legacy = store.begin("backend-worker", "legacy", "fixture/model", "high");
+		assert.equal(Object.hasOwn(legacy, "modelTier"), false);
+	});
+
 	test("WorkerMonitor reads the effective fullscreenScrollbar setting on each render", () => {
 		const settings: { fullscreenScrollbar?: string } = { fullscreenScrollbar: "always" };
 		const handlers: Record<string, (event: unknown, ctx: unknown) => void> = {};

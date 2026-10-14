@@ -123,6 +123,13 @@ test("extractFinalText keeps every block and the original spacing of the selecte
 	assert.equal(extractFinalText([assistant(text("first"), text(" "), text("second"))]), "first\n \nsecond");
 });
 
+test("retained diagnostics show tier and actual model while omitted-tier text stays byte-for-byte", () => {
+	const entry = { agent: "backend-worker", modelTier: "economy", model: "partner/model-x", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))] };
+	assert.equal(retainedEntryBlock(entry), "### backend-worker · tier: economy · model: partner/model-x — completed\nreport");
+	assert.equal(retainedEntryBlock({agent: "backend-worker", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))]}), "### backend-worker — completed\nreport");
+	assert.equal(retainedEntryBlock({agent: "blocked", modelTier: "capable", dag: {status: "blocked", blockedBy: ["a"], started: false}, messages: []}), "### blocked · tier: capable — BLOCKED by a\n(not run)");
+});
+
 test("expandRetainedResult returns a long completed child report in full", () => {
 	const report = "detail line\n".repeat(1200) + "CHECKS: npm test PASS";
 	const expanded = expandRetainedResult({ details: { results: [{ agent: "backend-worker", exitCode: 0, stopReason: "stop", messages: [assistant(text(report))] }] } });

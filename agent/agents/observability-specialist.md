@@ -1,10 +1,13 @@
 ---
 name: observability-specialist
 description: Read-only observability specialist for structured logging, metrics, health checks, audit trails, diagnostics, queue visibility, device health, alert signals, and production troubleshooting.
-model: openai-codex/gpt-6-luna
-fallbackModel: github-copilot/gpt-6-luna
-thinking: low
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+model: claude-haiku-5.5
+metadata:
+  pi.model: "anthropic/claude-haiku-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6-luna"
+  pi.thinking: "low"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Leaf boundary

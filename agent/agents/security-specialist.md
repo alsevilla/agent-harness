@@ -1,10 +1,13 @@
 ---
 name: security-specialist
 description: Read-only application security specialist for authentication, authorization, validation, secrets, injection, privilege boundaries, destructive actions, and secure API design.
-model: anthropic/claude-sonnet-5-5
-fallbackModel: openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5
-thinking: medium
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+model: gpt-6.1-sol
+metadata:
+  pi.model: "openai-codex/gpt-6.1-sol"
+  pi.fallbackModel: "anthropic/claude-sonnet-5-5"
+  pi.thinking: "high"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Leaf boundary
