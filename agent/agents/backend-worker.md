@@ -1,10 +1,12 @@
 ---
 name: backend-worker
 description: Implements authorized backend services, APIs, business logic and non-database backend tests in any language; Rust/Axum guidance applies only when that stack applies. Database implementation belongs to database-worker. Not frontend UI or tooling/CLI/extension work.
-model: anthropic/claude-haiku-5-5
-fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
-thinking: low
-tools: read, grep, find, ls, bash, powershell, edit
+tools: read, search, execute, edit
+metadata:
+  pi.model: anthropic/claude-haiku-5-5
+  pi.fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
+  pi.thinking: low
+  pi.tools: read, grep, find, ls, bash, powershell, edit
 ---
 
 ## Scoped editing

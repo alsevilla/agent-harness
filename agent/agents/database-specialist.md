@@ -1,10 +1,12 @@
 ---
 name: database-specialist
 description: Read-only specialist for relational and NoSQL database invariants and semantics,
-model: anthropic/claude-haiku-5-5
-fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
-thinking: medium
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "anthropic/claude-haiku-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"
+  pi.thinking: "medium"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Assigned module

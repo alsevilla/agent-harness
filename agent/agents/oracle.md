@@ -1,10 +1,12 @@
 ---
 name: oracle
 description: Independent high-intelligence second-opinion agent for difficult architecture, correctness, concurrency, database, security, and disputed engineering decisions. Use only for high-risk uncertainty or disagreement.
-model: anthropic/claude-opus-5-5
-fallbackModel: ""
-thinking: high
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "anthropic/claude-opus-5-5"
+  pi.fallbackModel: ""
+  pi.thinking: "high"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Leaf boundary

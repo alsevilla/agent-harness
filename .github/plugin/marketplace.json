@@ -1,0 +1,13 @@
+{
+  "name": "alsevilla",
+  "owner": {
+    "name": "alsevilla"
+  },
+  "plugins": [
+    {
+      "name": "agent-harness",
+      "source": "./",
+      "description": "Engineering workflow for GitHub Copilot CLI"
+    }
+  ]
+}

@@ -170,6 +170,49 @@ test("review M3: explicit new package missing the guard is an ERROR; frozen lega
 	} finally { f.cleanup(); }
 });
 
+test("annotated Pi declarations are authoritative and validated fieldwise", () => {
+	const base = "name: general-worker\ndescription: test\nmodel: anthropic/m\nfallbackModel: \"\"\nthinking: medium\ntools: read, grep, find, ls, bash, edit\n";
+	const annotated = (entries: string, legacy = base) => `---\n${legacy}metadata:\n  ${entries.replaceAll("\n", "\n  ")}\n---\nbody\n`;
+	const good = "pi.model: anthropic/m\npi.fallbackModel: \"\"\npi.thinking: medium\npi.tools: read, grep, find, ls, bash, edit";
+	const cases: Array<{ label: string; text: string; field?: string; invalid?: boolean }> = [
+		{ label: "valid complete annotations", text: annotated(good) },
+		{ label: "partial annotation", text: annotated("pi.model: anthropic/m") },
+		{ label: "explicit empty fallback overrides legacy", text: annotated("pi.fallbackModel: \"\"", base.replace('fallbackModel: ""', "fallbackModel: anthropic/legacy")) },
+		...(["model", "fallbackModel", "thinking", "tools"] as const).map((field) => {
+			const expected = field === "model" ? "anthropic/m" : field === "fallbackModel" ? '\"\"' : field === "thinking" ? "medium" : "read, grep, find, ls, bash, edit";
+			const wrong = field === "model" ? "anthropic/other" : field === "fallbackModel" ? "anthropic/other-fallback" : field === "thinking" ? "high" : "read, grep, find, ls, bash";
+			const entries = good.replace(`pi.${field}: ${field === "fallbackModel" ? '\"\"' : expected}`, `pi.${field}: ${wrong}`);
+			return { label: `wrong annotated ${field} with competing correct legacy`, text: annotated(entries), field };
+		}),
+		...(["null", "42", "[]", "{}", ""] as const).flatMap((value) => (["model", "fallbackModel", "thinking", "tools"] as const).map((field) => ({
+			label: `${field} annotation ${value || "missing"}`, field, invalid: true,
+			text: annotated(`pi.${field}: ${value}${value ? "" : ""}`, base),
+		}))),
+		{ label: "empty model", text: annotated('pi.model: ""'), field: "model", invalid: true },
+		{ label: "empty thinking", text: annotated('pi.thinking: ""'), field: "thinking", invalid: true },
+		{ label: "whitespace thinking", text: annotated('pi.thinking: "  "'), field: "thinking", invalid: true },
+		{ label: "empty tools token", text: annotated('pi.tools: "read,, grep"'), field: "tools", invalid: true },
+		{ label: "wildcard tool", text: annotated('pi.tools: "read, *"'), field: "tools", invalid: true },
+		{ label: "path tool", text: annotated('pi.tools: "read, ../secret"'), field: "tools", invalid: true },
+	];
+	for (const { label, text, field, invalid } of cases) {
+		const f = fixture({ agents: { "general-worker": text } });
+		try {
+			const report = scanHarnessConfig({ root: f.root });
+			const errors = report.findings.filter((x: any) => x.level === "ERROR");
+			if (!field) assert.equal(errors.length, 0, `${label}: ${JSON.stringify(report.findings)}`);
+			else {
+				assert.equal(errors.length, 1, `${label}: ${JSON.stringify(report.findings)}`);
+				assert.equal(errors[0].rule, "PARITY_MISMATCH", label);
+				assert.match(errors[0].message, new RegExp(`pi\\.${field}`), label);
+				assert.match(errors[0].message, invalid ? /invalid/ : /differs from roles\.json/);
+			}
+			assert.ok(!JSON.stringify(report).includes(SENTINEL), `${label}: credential redaction`);
+			assert.ok(!JSON.stringify(report).includes("SENTINEL"), `${label}: value redaction`);
+		} finally { f.cleanup(); }
+	}
+});
+
 test("review M3: frontmatter must match roles.json field by field (names the field, never the value)", () => {
 	const f = fixture({ agents: { "general-worker": "---\nname: general-worker\ndescription: t\nmodel: anthropic/other-model\nfallbackModel: \"\"\nthinking: medium\ntools: read, grep, find, ls, bash, edit\n---\nb" } });
 	try {

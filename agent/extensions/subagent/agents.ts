@@ -44,6 +44,7 @@ type AgentFrontmatter = {
 	model?: unknown;
 	fallbackModel?: unknown;
 	thinking?: unknown;
+	metadata?: unknown;
 };
 
 /**
@@ -175,15 +176,33 @@ function loadAgentsFromDir(
 		}
 
 		const role = roles.get(frontmatter.name);
+		const metadata = typeof frontmatter.metadata === "object" && frontmatter.metadata !== null && !Array.isArray(frontmatter.metadata)
+			? frontmatter.metadata as Record<string, unknown>
+			: {};
+		const annotation = (key: string) => metadata[`pi.${key}`];
+		const invalidAnnotation = ["tools", "model", "fallbackModel", "thinking"].find((key) => {
+			if (!("pi." + key in metadata)) return false;
+			const value = annotation(key);
+			if (typeof value !== "string" || (key !== "fallbackModel" && value.trim() === "")) return true;
+			if (key === "tools" && parseToolList(value) === undefined) return true;
+			return key === "thinking" && !["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
+		});
+		if (invalidAnnotation) {
+			console.error(`Skipping agent ${frontmatter.name}: invalid metadata pi.${invalidAnnotation}`);
+			continue;
+		}
+		const annotationText = (key: string) => annotation(key) as string | undefined;
+		const fallbackAnnotation = annotationText("fallbackModel");
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
-			tools: role?.tools ?? parseToolList(frontmatter.tools),
-			model: role?.model ?? (typeof frontmatter.model === "string" ? frontmatter.model : undefined),
+			tools: role?.tools ?? parseToolList(annotationText("tools") ?? frontmatter.tools),
+			model: role?.model ?? annotationText("model") ?? (typeof frontmatter.model === "string" ? frontmatter.model : undefined),
 			fallbackModel:
 				role?.fallbackModel ??
-				(typeof frontmatter.fallbackModel === "string" ? parseFallbackModels(frontmatter.fallbackModel) : undefined),
-			thinking: role?.thinking ?? (typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined),
+				(fallbackAnnotation !== undefined ? parseFallbackModels(fallbackAnnotation) :
+					(typeof frontmatter.fallbackModel === "string" ? parseFallbackModels(frontmatter.fallbackModel) : undefined)),
+			thinking: role?.thinking ?? annotationText("thinking") ?? (typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined),
 			systemPrompt: body,
 			source,
 			filePath,

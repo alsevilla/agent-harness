@@ -1,10 +1,12 @@
 ---
 name: general-worker
 description: Implements authorized general work outside frontend UI and backend services; covers tooling, CLI, extensions, scripts, automation, documentation and configuration in any language. Not a product, architecture, security, verification or release authority.
-model: anthropic/claude-haiku-5-5
-fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
-thinking: low
-tools: read, grep, find, ls, bash, powershell, edit
+tools: read, search, execute, edit
+metadata:
+  pi.model: "anthropic/claude-haiku-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"
+  pi.thinking: "low"
+  pi.tools: "read, grep, find, ls, bash, powershell, edit"
 ---
 
 ## Scoped editing

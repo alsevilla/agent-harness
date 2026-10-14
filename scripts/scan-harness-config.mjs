@@ -64,13 +64,27 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 	// Names only: the parity message never repeats a value.
 	const checkParity = (role, fm, file) => {
 		const normTools = (v) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean).join(", ") : "");
+		const metadata = fm.metadata && typeof fm.metadata === "object" && !Array.isArray(fm.metadata) ? fm.metadata : {};
 		const fields = [
-			["model", `${role.provider}/${role.model}`, fm.model],
-			["fallbackModel", role.fallbackModel ?? "", fm.fallbackModel ?? ""],
-			["thinking", role.thinking ?? "", fm.thinking ?? ""],
-			["tools", normTools(role.tools), normTools(fm.tools)],
+			["model", `${role.provider}/${role.model}`, "model"],
+			["fallbackModel", role.fallbackModel ?? "", "fallbackModel"],
+			["thinking", role.thinking ?? "", "thinking"],
+			["tools", normTools(role.tools), "tools"],
 		];
-		for (const [label, expected, actual] of fields) if (String(expected) !== String(actual)) add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${label} differs from roles.json`);
+		for (const [label, expected, key] of fields) {
+			const annotation = `pi.${key}`;
+			const annotated = Object.hasOwn(metadata, annotation);
+			const actual = annotated ? metadata[annotation] : fm[key];
+			const validString = typeof actual === "string" && (key === "fallbackModel" || !!actual.trim());
+			const validThinking = key !== "thinking" || ["off", "minimal", "low", "medium", "high", "xhigh"].includes(actual);
+			const validTools = key !== "tools" || (typeof actual === "string" && actual.split(",").every((token) => TOOL_NAME.test(token.trim())));
+			if ((annotated && (!validString || !validThinking || !validTools)) || (!annotated && actual !== undefined && (typeof actual !== "string" || (key !== "fallbackModel" && !actual.trim()) || !validThinking || !validTools))) {
+				add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${annotation} is invalid`);
+				continue;
+			}
+			const normalized = key === "tools" ? normTools(actual) : actual;
+			if (String(expected) !== String(normalized ?? "")) add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${annotation} differs from roles.json`);
+		}
 	};
 	const agentDir = path.join(root, "agent");
 	const readJson = (rel) => {

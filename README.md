@@ -6,8 +6,17 @@ An independent, unofficial harness profile for [Pi](https://github.com/earendil-
 
 - Current support target: the current Pi release on Node.js 22.19.0 or newer. Historical targeted checks used Pi 1.1.0 and Node 24.20.0 on Windows; see [Status and limits](#status-and-limits).
 - Source release: v1.6.0 (GitHub repository: [alsevilla/agent-harness](https://github.com/alsevilla/agent-harness); migrated with preserved history).
-- Copilot CLI harness integration and marketplace packaging are not available yet. This does not remove Pi's built-in GitHub Copilot model provider.
+- A bounded native Copilot CLI preview validated the shared-source inventory, one read-only worker delegation and native choice/freeform questions; see [Copilot CLI preview boundary](#copilot-cli-preview-boundary). This is not a claim of full role, skill, control or Pi-runtime parity, and does not remove Pi's built-in GitHub Copilot model provider.
 - The native Pi package `@alsevilla/pi-engineering-harness` (root `package.json`) is not published to npm. Install it with `pi install git:github.com/alsevilla/agent-harness` as described in [Quickstart](#quickstart) and [Install](#install); a local checkout is an optional development alternative. The retired pi-package build and manual profile copies are no longer the install path.
+
+## Copilot CLI preview boundary
+
+| Asset or capability | Copilot CLI preview status |
+| --- | --- |
+| Agents and skills | The native plugin displayed all 20 canonical agents and six shared skills. One `backend-worker` read-only delegation and an `engineering-harness` skill invocation were observed; this does not establish execution of every role or skill, model inheritance across roles, or every module path. The canonical `agent/AGENTS.md` is shared source, not an automatic Copilot-global policy. |
+| Pi-specific runtime assets | Pi extensions, patches, `agent/roles.json` and `settings.example` remain Pi-specific; no Pi prompt export or Copilot emulation of Pi controls is claimed. The observed `unknown field ignored: metadata` warning reflects Pi-only metadata and was accepted, not suppressed. The observed CLI was Copilot v1.0.97; this is historical evidence, not a pinned minimum or SDK-loader compatibility claim. |
+| Prompts and commands | Shared prompt files are not exported to Copilot; Pi's `/learn` export is unchanged. Native question evidence covered choices and freeform input only, not Pi job/grant/control parity. |
+| Verification and availability | User-terminal evidence confirmed the 20-agent/six-skill inventory, one worker read, and choice/freeform questions. The first relative README read failed; retry with the explicit candidate path succeeded. Preview with the tested local `copilot --plugin-dir .` path; marketplace install commands are unpublished-preview instructions, not verified installation steps. No authentication, global activation, commit, push, merge or release was performed. |
 
 ## What it does
 

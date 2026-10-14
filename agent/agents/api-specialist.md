@@ -1,10 +1,12 @@
 ---
 name: api-specialist
 description: Read-only backend/frontend API contract specialist for REST endpoints, request/response schemas, validation, errors, status codes, compatibility, and typed integration.
-model: anthropic/claude-haiku-5-5
-fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
-thinking: medium
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "anthropic/claude-haiku-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"
+  pi.thinking: "medium"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Leaf boundary

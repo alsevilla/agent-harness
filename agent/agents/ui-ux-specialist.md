@@ -1,10 +1,12 @@
 ---
 name: ui-ux-specialist
 description: Mandatory first-pass read-only UI/UX specialist for any frontend task containing design or UX decisions; produces implementation-ready handoffs before frontend-worker. Also owns UX discovery/research evidence, flows/wireframes, dashboards, interaction design, information hierarchy, accessibility, responsive layouts, forms, motion, design systems, UX copy, and frontend design review.
-model: anthropic/claude-sonnet-5-5
-fallbackModel: github-copilot/claude-sonnet-5
-thinking: medium
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "anthropic/claude-sonnet-5-5"
+  pi.fallbackModel: "github-copilot/claude-sonnet-5"
+  pi.thinking: "medium"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Leaf boundary

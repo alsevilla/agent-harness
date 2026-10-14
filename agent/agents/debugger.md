@@ -1,10 +1,12 @@
 ---
 name: debugger
 description: REQUIRED named role for DEBUG. Diagnose defects and unknown-cause failures in the mandatory read-only debugger agent. Reproduce, establish root cause with evidence, and return a correction contract; the main session does not diagnose or implement this role.
-model: anthropic/claude-sonnet-5-5
-fallbackModel: openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5
-thinking: medium
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "anthropic/claude-sonnet-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"
+  pi.thinking: "medium"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Assigned module

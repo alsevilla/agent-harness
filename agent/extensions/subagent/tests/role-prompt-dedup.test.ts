@@ -32,6 +32,34 @@ const normalize = (text: string) => text.replace(/\r\n/g, "\n").replace(/\\/g, "
 const sentences = (text: string) => normalize(text).split(/\n+|(?<=\.) /).map((s) => s.trim()).filter((s) => s.length >= 20);
 const sentenceHashes = (text: string) => new Set(sentences(text).map((s) => sha(s).slice(0, 8)));
 const frontmatterSha = (text: string) => sha(/^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/\r\n/g, "\n"))?.[1] ?? "");
+const effectiveLegacyHeaderSha = (text: string) => {
+	const normalized = text.replace(/\r\n/g, "\n");
+	const header = /^---\n([\s\S]*?)\n---/.exec(normalized)?.[1];
+	assert.ok(header, "live role must have a YAML header");
+	const lines = header.split("\n");
+	const metadata = new Map<string, string>();
+	let inMetadata = false;
+	for (const line of lines) {
+		if (line === "metadata:") { inMetadata = true; continue; }
+		if (inMetadata && /^  pi\.(model|fallbackModel|thinking|tools): /.test(line)) {
+			const match = /^  pi\.(model|fallbackModel|thinking|tools): (.*)$/.exec(line)!;
+			metadata.set(match[1], match[2].replace(/^['\"]|['\"]$/g, ""));
+		} else if (inMetadata && !line.startsWith("  ")) inMetadata = false;
+	}
+	for (const field of ["model", "fallbackModel", "thinking", "tools"] as const) {
+		assert.ok(metadata.has(field), `live role missing metadata pi.${field}`);
+		const value = metadata.get(field)!;
+		if (field === "fallbackModel") assert.ok(value.length > 0 || /^['\"]{2}$/.test(lines.find((line) => line.startsWith("  pi.fallbackModel: "))!.split(": ")[1]), "pi.fallbackModel must be a string");
+		else assert.ok(value.trim().length > 0, `metadata pi.${field} must be nonempty`);
+	}
+	const identity = lines.filter((line) => /^(name|description): /.test(line));
+	assert.deepEqual(identity.map((line) => line.split(":", 1)[0]), ["name", "description"]);
+	const legacy = [...identity, ...["model", "fallbackModel", "thinking", "tools"].map((field) => {
+		const value = metadata.get(field)!;
+		return `${field}: ${value === "" ? '""' : value}`;
+	})].join("\n");
+	return sha(legacy);
+};
 const bodyOf = (text: string) => text.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n?/, "");
 
 // Redundant restatements removed by the dedup. Each is already stated by the Leaf boundary paragraph of the same prompt.
@@ -165,7 +193,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 		const [shape, role] = key.split("/");
 		if (key === "live/sqlite-specialist") continue; // Historical fixture retained; explicitly retired live role.
 		const { text, sourceText } = assembled(shape, role);
-		assert.equal(frontmatterSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} frontmatter changed`);
+		assert.equal(effectiveLegacyHeaderSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} effective Pi declarations changed`);
 		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
 		for (const h of HEADINGS_ABSENT_HERE) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
 		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), HEADINGS_ABSENT_HERE.slice().sort(), `${key} headings lost`);

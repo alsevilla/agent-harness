@@ -1,10 +1,12 @@
 ---
 name: database-worker
 description: Implements authorized relational and NoSQL database changes in any language and engine, including schema, migrations, transactions, queries, indexes, ORM, repositories, data access and database tests. Not API/service business logic, frontend UI or tooling/CLI/extension work.
-model: anthropic/claude-haiku-5-5
-fallbackModel: openai-codex/gpt-6-luna || github-copilot/gpt-6-luna
-thinking: low
-tools: read, grep, find, ls, bash, powershell, edit
+tools: read, search, execute, edit
+metadata:
+  pi.model: "anthropic/claude-haiku-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"
+  pi.thinking: "low"
+  pi.tools: "read, grep, find, ls, bash, powershell, edit"
 ---
 
 ## Scoped editing

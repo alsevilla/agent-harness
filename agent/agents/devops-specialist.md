@@ -1,10 +1,12 @@
 ---
 name: devops-specialist
 description: Read-only cross-platform deployment and operations specialist for Raspberry Pi/Linux and Windows NUC systems, including systemd, Windows Services, process supervision, configuration, backups, upgrades, rollback, permissions, storage, and production reliability.
-model: openai-codex/gpt-6-luna
-fallbackModel: github-copilot/gpt-6-luna
-thinking: low
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "openai-codex/gpt-6-luna"
+  pi.fallbackModel: "github-copilot/gpt-6-luna"
+  pi.thinking: "low"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Leaf boundary

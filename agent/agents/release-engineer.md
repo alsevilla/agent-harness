@@ -1,10 +1,12 @@
 ---
 name: release-engineer
 description: Named owner for SHIP and LEARN. Validates release readiness and explicitly authorized release operations, then preserves durable release/operational knowledge without changing product source.
-model: openai-codex/gpt-6-luna
-fallbackModel: github-copilot/gpt-6-luna
-thinking: medium
-tools: read, grep, find, ls, bash, powershell, edit
+tools: read, search, execute, edit
+metadata:
+  pi.model: "openai-codex/gpt-6-luna"
+  pi.fallbackModel: "github-copilot/gpt-6-luna"
+  pi.thinking: "medium"
+  pi.tools: "read, grep, find, ls, bash, powershell, edit"
 ---
 
 ## Assigned modules

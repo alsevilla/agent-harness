@@ -1,10 +1,12 @@
 ---
 name: reviewer
 description: REQUIRED named role for REVIEW. Independently review an identified candidate and its evidence in the reviewer agent. Challenge correctness, safety, scope, authority and regressions; return a review disposition without modifying the candidate.
-model: anthropic/claude-sonnet-5-5
-fallbackModel: openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5
-thinking: medium
-tools: read, grep, find, ls, bash, powershell
+tools: read, search, execute
+metadata:
+  pi.model: "anthropic/claude-sonnet-5-5"
+  pi.fallbackModel: "openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"
+  pi.thinking: "medium"
+  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Assigned module
