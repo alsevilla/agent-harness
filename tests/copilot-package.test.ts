@@ -46,24 +46,16 @@ test("README Copilot install commands use the marketplace and plugin names from 
   expect(readme).toContain("copilot --plugin-dir ");
 });
 
-test("backend-worker Copilot metadata matches its declared primary and preserves Pi runtime settings", async () => {
+// Native Copilot headers carry identity and native tools only: no model (Copilot inherits the outer/session model) and no Pi metadata (roles.json is the single Pi source).
+test("backend-worker Copilot header has identity and native tools only; Pi settings live in roles.json", async () => {
   const text = readFileSync(join(nativeAgents, "backend-worker.md"), "utf8");
   const { metadata } = frontmatter(text);
   const sdkMetadata = await sdkFrontmatter(text);
   expect(metadata.name).toBe("backend-worker");
   expect(metadata.description).toMatch(/^Implements authorized backend services/);
-  expect(metadata.model).toBe("claude-sonnet-5.5");
-  expect(metadata.fallbackModel).toBeUndefined();
-  expect(metadata.thinking).toBeUndefined();
-  expect(metadata.metadata).toEqual({
-    "pi.model": "anthropic/claude-sonnet-5-5",
-    "pi.fallbackModel": "openai-codex/gpt-6.1-sol",
-    "pi.thinking": "medium",
-    "pi.tools": "read, grep, find, ls, bash, powershell, edit",
-  });
-  expect(sdkMetadata.metadata).toEqual(metadata.metadata);
+  expect(Object.keys(metadata)).toEqual(["name", "description", "tools"]);
+  expect(Object.keys(sdkMetadata)).toEqual(["name", "description", "tools"]);
   expect(metadata.tools).toBe("read, search, execute, edit");
-  expect(metadata.pi).toBeUndefined();
 });
 
 test("SDK declaration check without NATIVE_PROBE_HOST_MODULES reads the latest complete installed host", async () => {
@@ -73,7 +65,7 @@ test("SDK declaration check without NATIVE_PROBE_HOST_MODULES reads the latest c
     const text = readFileSync(join(nativeAgents, "backend-worker.md"), "utf8");
     const sdk = await sdkFrontmatter(text);
     expect(sdk.name).toBe("backend-worker");
-    expect(sdk.metadata).toEqual(frontmatter(text).metadata.metadata);
+    expect(Object.keys(sdk)).toEqual(["name", "description", "tools"]);
   } finally {
     if (previous === undefined) delete process.env.NATIVE_PROBE_HOST_MODULES;
     else process.env.NATIVE_PROBE_HOST_MODULES = previous;
@@ -99,10 +91,9 @@ const sdkFrontmatter = async (text: string) => {
   const { parseFrontmatter } = await import(pathToFileURL(join(modules, "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
   return parseFrontmatter(text).frontmatter as Record<string, unknown>;
 };
-const copilotModels: Record<string, string> = { "anthropic/claude-haiku-5-5": "claude-haiku-5.5", "anthropic/claude-sonnet-5-5": "claude-sonnet-5.5", "anthropic/claude-opus-5-5": "claude-opus-5.5", "openai-codex/gpt-6-luna": "gpt-6-luna", "openai-codex/gpt-6.1-sol": "gpt-6.1-sol" };
 const agentNames = () => JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")).map((r: { name: string }) => r.name);
 
-test("all profiles expose native Copilot headers and preserve Pi runtime settings", async () => {
+test("all profiles expose native Copilot headers with unchanged native tools and no model or Pi metadata", async () => {
   const aliases: Record<string, string> = { read: "read", grep: "search", find: "search", ls: "search", bash: "execute", powershell: "execute", edit: "edit", write: "edit" };
   const roles = JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")) as Array<{ name: string; defaultModelTier: string; modelTiers: Record<string, { model: string; fallbackModel: string; thinking: string }>; tools: string }>;
   for (const role of roles) {
@@ -110,13 +101,11 @@ test("all profiles expose native Copilot headers and preserve Pi runtime setting
     const text = readFileSync(join(nativeAgents, `${role.name}.md`), "utf8");
     const { metadata } = frontmatter(text);
     const sdk = await sdkFrontmatter(text);
-    const expected = { "pi.model": tier.model, "pi.fallbackModel": tier.fallbackModel, "pi.thinking": tier.thinking, "pi.tools": role.tools };
-    expect(metadata.model).toBe(copilotModels[tier.model]);
-    expect(metadata.fallbackModel).toBeUndefined();
-    expect(metadata.thinking).toBeUndefined();
-    expect(metadata.pi).toBeUndefined();
-    expect(metadata.metadata).toEqual(expected);
-    expect(sdk.metadata).toEqual(expected);
+    expect(tier.model).toBeTruthy();
+    for (const header of [metadata, sdk]) {
+      expect(Object.keys(header)).toEqual(["name", "description", "tools"]);
+      for (const key of ["model", "fallbackModel", "thinking", "metadata", "pi"]) expect(header[key]).toBeUndefined();
+    }
     const expectedTools = [...new Set(role.tools.split(",").map((tool) => aliases[tool.trim()]).filter(Boolean))].join(", ");
     expect(metadata.tools).toBe(expectedTools);
   }

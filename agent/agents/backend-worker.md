@@ -2,12 +2,6 @@
 name: backend-worker
 description: Implements authorized backend services, APIs, business logic and non-database backend tests in any language; Rust/Axum guidance applies only when that stack applies. Database implementation belongs to database-worker. Not frontend UI or tooling/CLI/extension work.
 tools: read, search, execute, edit
-model: claude-sonnet-5.5
-metadata:
-  pi.model: "anthropic/claude-sonnet-5-5"
-  pi.fallbackModel: "openai-codex/gpt-6.1-sol"
-  pi.thinking: "medium"
-  pi.tools: "read, grep, find, ls, bash, powershell, edit"
 ---
 
 ## Scoped editing

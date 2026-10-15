@@ -1,0 +1,327 @@
+{
+  "schema": "header-removal-baseline/v1",
+  "purpose": "Independent proof of the approved single-source header removal: per role, the exact header lines removed (native model + whole pi.* metadata block), the preserved native tools/description lines and body digest. Initial snapshot from git HEAD 4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47 blobs before any header edit. Exception: the release-engineer entry's headLfSha256, bodySha256 and expectedAfterLfSha256 are the explicitly approved digests from PR#4 commit 2b5ade6e523c570696a34b199bff8cc899564370 (its 4ceb blob headLfSha256 was 17d1cf1b0bec122b05a0883db9a17b25ddcf14d8243ec337184c7e40408402b8); the other 19 roles remain from the 4ceb base.",
+  "base": "4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47",
+  "roles": [
+    {
+      "name": "api-specialist",
+      "headLfSha256": "2a1cd5468e0d4a91d2ca05a7466ca858f9539adcff8a12f72d37e072a9aa3c3d",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only backend/frontend API contract specialist for REST endpoints, request/response schemas, validation, errors, status codes, compatibility, and typed integration.",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "e3105c08fe320449eddde7ea32cb5fc838a560eb5a781be6cd2f9fb7d3dd60e1",
+      "expectedAfterLfSha256": "e95b5327d788382f30482097724455d718a7de942695a1e26d3077e54e5e960c"
+    },
+    {
+      "name": "architecture-specialist",
+      "headLfSha256": "8106df81a7aabe10afc04a9775ac0c6f431ac321c524696967d1c4180f410be8",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only software architecture specialist for module boundaries, data flow, component responsibilities, system decomposition, integration patterns, and major technical tradeoffs.",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "5aac700a840a37a24e5a93de693e8088e3aee184c40b43415202a1274aec1928",
+      "expectedAfterLfSha256": "4c066c80de1a15d0afa4137998ceaae6c4751ca6a1a2e3bc9d9b0aaf43722eb1"
+    },
+    {
+      "name": "backend-worker",
+      "headLfSha256": "302848b0fb88377940a683f4a20198d699a1fa91cceee54085821954222c69b2",
+      "nativeToolsLine": "tools: read, search, execute, edit",
+      "descriptionLine": "description: Implements authorized backend services, APIs, business logic and non-database backend tests in any language; Rust/Axum guidance applies only when that stack applies. Database implementation belongs to database-worker. Not frontend UI or tooling/CLI/extension work.",
+      "removed": [
+        "model: claude-sonnet-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.thinking: \"medium\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell, edit\""
+      ],
+      "bodySha256": "5f986e0782821ae199bd4a54a2dc9e3aedd749fdc12db8b2c1d283fcf1353083",
+      "expectedAfterLfSha256": "1daef92fbc22391a221425dcdffd1615a5a692d78e096d24b4f1d1a21d8fc6a0"
+    },
+    {
+      "name": "concurrency-specialist",
+      "headLfSha256": "c0257bb5d0a3c4c554c2c0515cc47b36cc3234b7546f5e0097b1519f040dfcfc",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only Rust/Tokio concurrency specialist for task ownership, channels, shared state, locking, races, backpressure, cancellation, graceful shutdown, retries, duplicate processing, and overload correctness.",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "d7ce4e7827f7d706bf539128b8374ce7d1ddf2c284f3a43379e751267c2dac33",
+      "expectedAfterLfSha256": "5493410eb4862f72e69cb26655248f39bcfd4764bce1e9a9726ea0b7d2786b98"
+    },
+    {
+      "name": "database-specialist",
+      "headLfSha256": "4cb3a4e9d8fad5c940048289502cc5fd5a9f5ba9433710d68f64cf1d8990091a",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only specialist for relational and NoSQL database invariants and semantics,",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "079b0b75209abd8181300828d2d2cd3d403503dbcbf7b67e8fb58f3dcc145d90",
+      "expectedAfterLfSha256": "5b5fb133fe7dc9d9ef5aef77102ed7363a0402decd703ba5f36f8edebc7a9cbf"
+    },
+    {
+      "name": "database-worker",
+      "headLfSha256": "ecac5169a646f2809d311b39cde97a877781ad3cec46249f22abea122abee529",
+      "nativeToolsLine": "tools: read, search, execute, edit",
+      "descriptionLine": "description: Implements authorized relational and NoSQL database changes in any language and engine, including schema, migrations, transactions, queries, indexes, ORM, repositories, data access and database tests. Not API/service business logic, frontend UI or tooling/CLI/extension work.",
+      "removed": [
+        "model: claude-haiku-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-haiku-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6-luna\"",
+        "  pi.thinking: \"low\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell, edit\""
+      ],
+      "bodySha256": "54d904693385b069fa7ae4c371f1d339419b4494a21f636c17f25b9d0687f543",
+      "expectedAfterLfSha256": "c9075465b5215aa9158f9706ed25befd2ccd250c3c2ed51d3099a0eb4470ea87"
+    },
+    {
+      "name": "debugger",
+      "headLfSha256": "075f7d677d115d2ac5ee4496d711239a58182d2e0518c5005d2ee06e6c53424c",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: REQUIRED named role for DEBUG. Diagnose defects and unknown-cause failures in the mandatory read-only debugger agent. Reproduce, establish root cause with evidence, and return a correction contract; the main session does not diagnose or implement this role.",
+      "removed": [
+        "model: claude-sonnet-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "5f8a1e73e47657f12b607e755076bdc6ea5c543420b84541c7bad84b9ee3b396",
+      "expectedAfterLfSha256": "3956786f961e08444f8db64e6247d6160604b1999c02e15ffe2e5268b110e05c"
+    },
+    {
+      "name": "devops-specialist",
+      "headLfSha256": "d298ebdf6261996cac69754b4e186875b177bc509281789a03e4d7b45691ff35",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only cross-platform deployment and operations specialist for Raspberry Pi/Linux and Windows NUC systems, including systemd, Windows Services, process supervision, configuration, backups, upgrades, rollback, permissions, storage, and production reliability.",
+      "removed": [
+        "model: claude-sonnet-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.thinking: \"low\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "3b1d9f305aad02081ed2b71397d58b33eaa8a4be16b139f500e8185b1130a4e4",
+      "expectedAfterLfSha256": "e83905ad817b4b11fd8191847e60b822058d08362a30e1a22f517420ea99dde1"
+    },
+    {
+      "name": "frontend-worker",
+      "headLfSha256": "69959fd558924e6652f850fc47a10d2789b1fc21c7489412d4f5c006399ae839",
+      "nativeToolsLine": "tools: read, search, execute, edit",
+      "descriptionLine": "description: Implements authorized React or SolidJS and TypeScript frontend changes from an accepted design and task contract, with focused behavioral tests.",
+      "removed": [
+        "model: claude-sonnet-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.thinking: \"medium\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell, edit\""
+      ],
+      "bodySha256": "4328980b05230a1f33598329ba3ac4bf2bda180f256d56a780c1f249e953fdc5",
+      "expectedAfterLfSha256": "96afba8d9b40f9308970d128f5b3f3279ff87577fba1f76b755491ac2cec8f07"
+    },
+    {
+      "name": "general-worker",
+      "headLfSha256": "a6736ddf7d437112a2fc5c6cb1af82bf68187ec335297b33d979802ec8946c22",
+      "nativeToolsLine": "tools: read, search, execute, edit",
+      "descriptionLine": "description: Implements authorized general work outside frontend UI and backend services; covers tooling, CLI, extensions, scripts, automation, documentation and configuration in any language. Not a product, architecture, security, verification or release authority.",
+      "removed": [
+        "model: claude-haiku-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-haiku-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6-luna\"",
+        "  pi.thinking: \"medium\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell, edit\""
+      ],
+      "bodySha256": "da36c06ee9676c9afd017f3b6ceb444a74fdec7390190087f3e2e63454970ae5",
+      "expectedAfterLfSha256": "9be905db84a4ab33fcfcb9eb4e10d61107ed69f0026fdd74eab1e4718b008137"
+    },
+    {
+      "name": "observability-specialist",
+      "headLfSha256": "919593d1a33de204261a447f89145c858de7b1c34e562945020b2152f01c9733",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only observability specialist for structured logging, metrics, health checks, audit trails, diagnostics, queue visibility, device health, alert signals, and production troubleshooting.",
+      "removed": [
+        "model: claude-haiku-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-haiku-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6-luna\"",
+        "  pi.thinking: \"low\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "50dd4cbdf18e0504776b5e71194f67e6d88a4b36ec632bc4f741d67e9b0730ee",
+      "expectedAfterLfSha256": "05953740ad3d14e39932a0fb779ec8c354c2206edc7994a1f529236fa103d7d6"
+    },
+    {
+      "name": "oracle",
+      "headLfSha256": "7a0f4b2f6f352badefe704c85130c45ceb1f7fc169cc3c3ec64365b11bcf643a",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Independent high-intelligence second-opinion agent for difficult architecture, correctness, concurrency, database, security, and disputed engineering decisions. Use only for high-risk uncertainty or disagreement.",
+      "removed": [
+        "model: claude-opus-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-opus-5-5\"",
+        "  pi.fallbackModel: \"\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "ac3e09fb4c56a39871868f4388ed3a4202d83457eb1bb133f4215bdc27688d26",
+      "expectedAfterLfSha256": "52f02ce3e1985aba282ba1ac4cdc057658c589164758efb990ff28de2a6c2045"
+    },
+    {
+      "name": "performance-specialist",
+      "headLfSha256": "6b2f515634a9d28eed126d559485e65d951dd7c149a50f6bab171abd9381e982",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only performance specialist for hot paths, database queries, burst traffic, latency, throughput, allocations, blocking operations, contention, and scalability.",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "1341c0ed79ff68c9bc5766f6e1b49f76b22559f2901e69f60ebdd78d25f8ec98",
+      "expectedAfterLfSha256": "b08775725bba8a6f8c1c685e706d0f09f178c9be698be08cf2640de241eec1c5"
+    },
+    {
+      "name": "platform-worker",
+      "headLfSha256": "622a779038cf1772f623cceda07bce73f041060926ccb866b6fda55e6bcf2337",
+      "nativeToolsLine": "tools: read, search, execute, edit",
+      "descriptionLine": "description: Implements accepted Terraform, Kubernetes, kubectl, Azure CLI, Helm, FluxCD GitOps and GitHub Actions workflow file changes with local checks that reach no cluster or network. Applies no live change. Not devops design advice, release delivery or product, security or architecture decisions.",
+      "removed": [
+        "model: claude-haiku-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-haiku-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6-luna\"",
+        "  pi.thinking: \"low\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell, edit\""
+      ],
+      "bodySha256": "1152d6f9ae7f397f4eb7dbf3faa2795b73bc7f8866a1d83bc1b125f189fd684c",
+      "expectedAfterLfSha256": "4ba1b27b99220e9d10a32936b63cd78aac554f3da33deac033ae75be76e8fc03"
+    },
+    {
+      "name": "release-engineer",
+      "headLfSha256": "c47d394b8257c7c10d6dccdf9bd937200a951d202571505db263650af7bc9869",
+      "nativeToolsLine": "tools: read, search, execute, edit",
+      "descriptionLine": "description: Named owner for SHIP and LEARN. Validates release readiness and explicitly authorized release operations, then preserves durable release/operational knowledge without changing product source.",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"medium\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell, edit, write\""
+      ],
+      "bodySha256": "f4d7290379aa5ef8b1b0d42de9b08bc179a152c4f5714ae0a0ac1d3c389c12a6",
+      "expectedAfterLfSha256": "2827e00617b54ba700f738d90372fb05e8812925a84594b20ab9039e2a3b657c"
+    },
+    {
+      "name": "reviewer",
+      "headLfSha256": "2fa4f83c09325a8a5ec7d4974a594ad24d393e64cf91662a1fc9dc2c23ee0dcb",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: REQUIRED named role for REVIEW. Independently review an identified candidate and its evidence in the reviewer agent. Challenge correctness, safety, scope, authority and regressions; return a review disposition without modifying the candidate.",
+      "removed": [
+        "model: claude-sonnet-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "aa2062b69e7f6db55c64998a20ed07883d39e424d841d8c026e26ef3963f48d7",
+      "expectedAfterLfSha256": "313de5afab2fcc0f9791387e80813e723d53d2bba6ef032a225d9a5c1bd196c1"
+    },
+    {
+      "name": "scout",
+      "headLfSha256": "ea3751237a9bc5918f59007e00316f99e7b5c9d46e86485568e1a2fe13eb0f50",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only codebase reconnaissance agent. Use before non-trivial implementation to locate relevant files, trace dependencies and callers, identify existing patterns, tests, contracts, risks, and likely change surface. Does not implement.",
+      "removed": [
+        "model: claude-haiku-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-haiku-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6-luna\"",
+        "  pi.thinking: \"low\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "d2c404b85ed63d40e691aee4a37f080c8b100c5a2bb59f2bf4242c35dbc430de",
+      "expectedAfterLfSha256": "96656a233a53f530b14265589c221cca960ffa6631850c5cdab6a02913116cda"
+    },
+    {
+      "name": "security-specialist",
+      "headLfSha256": "11ba6c3bfcd3e1a24cfb2e029014fa2cfea13b986e150862a2cab30f26c564b0",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Read-only application security specialist for authentication, authorization, validation, secrets, injection, privilege boundaries, destructive actions, and secure API design.",
+      "removed": [
+        "model: gpt-6.1-sol",
+        "metadata:",
+        "  pi.model: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.fallbackModel: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "d3237cdec390ae404a7819c3ed4169722e269bbd90aaec56121849020d883280",
+      "expectedAfterLfSha256": "5c745bdfdeb9b28564b73cda00144c94e1f7f21334db0f8047288d24ddfdfed4"
+    },
+    {
+      "name": "test-engineer",
+      "headLfSha256": "4e4b76045f54123b91ae66792f26b708331a37f320050545be67ea9497f7eb46",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: REQUIRED named role for VERIFY. Independently verify an identified implementation candidate against its approved contract in the test-engineer agent. Return evidence-backed PASS, FAIL, or INCONCLUSIVE; do not modify the active candidate.",
+      "removed": [
+        "model: claude-haiku-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-haiku-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6-luna\"",
+        "  pi.thinking: \"low\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "420d36758d85ab6c896373046d7f7e19d34643f129da373227b5f54bf212fe63",
+      "expectedAfterLfSha256": "eb4c6abe80a33e58b9e2dd48b78bbc87ab9474ce36c0f955adb7cd04dfbb4c16"
+    },
+    {
+      "name": "ui-ux-specialist",
+      "headLfSha256": "eca72528cfb10065d2a0280014ca9c4b39aa903b6713c24386c8b041ca0d2924",
+      "nativeToolsLine": "tools: read, search, execute",
+      "descriptionLine": "description: Mandatory first-pass read-only UI/UX specialist for any frontend task containing design or UX decisions; produces implementation-ready handoffs before frontend-worker. Also owns UX discovery/research evidence, flows/wireframes, dashboards, interaction design, information hierarchy, accessibility, responsive layouts, forms, motion, design systems, UX copy, and frontend design review.",
+      "removed": [
+        "model: claude-sonnet-5.5",
+        "metadata:",
+        "  pi.model: \"anthropic/claude-sonnet-5-5\"",
+        "  pi.fallbackModel: \"openai-codex/gpt-6.1-sol\"",
+        "  pi.thinking: \"high\"",
+        "  pi.tools: \"read, grep, find, ls, bash, powershell\""
+      ],
+      "bodySha256": "3bc0b6ef58d52b9131d818b695f3cd4cdc2301d85698f0f8596b1545c9064624",
+      "expectedAfterLfSha256": "87be13fc9e3e37bf348aa68da5e24bf131f9e2fe58395b6c796d3d943ba5b458"
+    }
+  ]
+}

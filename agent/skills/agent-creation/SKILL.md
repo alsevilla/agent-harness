@@ -24,7 +24,7 @@ Required: `name` (lowercase slug, a-z 0-9 single hyphens, max 64, not a Windows 
 
 Permissions: tools are always `read, grep, find, ls`; `writer:false` (default) gives `source-edit=readonly`; `writer:true` adds `edit` (`source-edit=approved`) and needs `--allow-writers`; without that flag the run is REFUSED (exit 1), it is not downgraded to read-only. The write tool is always disabled (`write-tool=disabled`). A shell (`bash` or `powershell`) needs `--allow-shell` and is explicit shell power, not a sandbox. Flags alone grant nothing.
 
-The model is required and copied as given: the CLI does not read a catalog and does not verify availability. Replace provider/model strings before use if they are not approved for the project. `examples/dotnet-worker.json` copies backend-worker metadata from `roles.json` (read-only) and is a sample, not an availability claim.
+The model is required and copied as given: the CLI does not read a catalog and does not verify availability. Replace provider/model strings before use if they are not approved for the project. `examples/dotnet-worker.json` copies backend-worker settings from `roles.json` (read-only) and is a sample, not an availability claim.
 
 ## Authoring guidance (operator reference)
 

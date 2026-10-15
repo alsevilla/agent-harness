@@ -180,6 +180,8 @@ export function unavailableIntegrationGuidance(agentName: string, qmdExtension =
 }
 
 export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = [], qmdExtension = QMD_EXTENSION): boolean {
+  // Canonical package roles never launch without an explicit allowlist: omitting --tools would grant every host tool.
+  if (agent.source === "package" && !agent.tools?.length) throw new Error(`Package role ${agent.name} has no tools in roles.json; refusing to grant host default tools.`);
   const config = readIntegrationConfig();
   if (!config.roles.includes(agent.name)) {
     // A role without an explicit allowlist means all default tools; a grant cannot be expressed there, so it is skipped.

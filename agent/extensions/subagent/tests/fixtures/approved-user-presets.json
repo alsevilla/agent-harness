@@ -1,0 +1,601 @@
+{
+  "schema": "approved-user-presets/v1",
+  "purpose": "Independent oracle for the user-approved preset update to agent/roles.json (supersedes the tier-only-baseline default tuples ONLY for the listed delta; tier-only-baseline.json stays immutable). Generated from the approved snapshot, never from the candidate file.",
+  "approvedSnapshotSha256": "5e236e57ad816d2c01806510d511cff10a7542b6502b6937e778e32abfb68ef7",
+  "approvedBy": "user request to include their edited ~/.pi/agent/roles.json; architecture-specialist default confirmed economy by the user",
+  "changedFromBaseline": [
+    "api-specialist.default",
+    "api-specialist.economy",
+    "api-specialist.capable",
+    "architecture-specialist.default",
+    "architecture-specialist.economy",
+    "architecture-specialist.capable",
+    "concurrency-specialist.default",
+    "concurrency-specialist.economy",
+    "concurrency-specialist.capable",
+    "debugger.default",
+    "debugger.economy",
+    "debugger.capable",
+    "devops-specialist.default",
+    "devops-specialist.economy",
+    "devops-specialist.capable",
+    "frontend-worker.default",
+    "observability-specialist.economy",
+    "observability-specialist.capable",
+    "oracle.capable",
+    "performance-specialist.default",
+    "performance-specialist.economy",
+    "performance-specialist.capable",
+    "reviewer.default",
+    "reviewer.economy",
+    "reviewer.capable",
+    "backend-worker.default",
+    "security-specialist.default",
+    "security-specialist.economy",
+    "security-specialist.capable",
+    "database-specialist.default",
+    "database-specialist.economy",
+    "database-specialist.capable",
+    "database-worker.economy",
+    "test-engineer.economy",
+    "ui-ux-specialist.default",
+    "ui-ux-specialist.economy",
+    "ui-ux-specialist.capable",
+    "release-engineer.default",
+    "release-engineer.economy",
+    "release-engineer.capable"
+  ],
+  "roles": [
+    {
+      "name": "api-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "high"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "architecture-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "high"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "concurrency-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "high"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "debugger",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "high"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "devops-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "low"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "low"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "frontend-worker",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell",
+        "edit"
+      ]
+    },
+    {
+      "name": "observability-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "low"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "low"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "oracle",
+      "defaultModelTier": "capable",
+      "tiers": {
+        "capable": {
+          "model": "anthropic/claude-opus-5-5",
+          "fallbackModel": [],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "performance-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "high"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "reviewer",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "openai-codex/gpt-6-luna",
+          "fallbackModel": [
+            "anthropic/claude-haiku-5-5"
+          ],
+          "thinking": "high"
+        },
+        "capable": {
+          "model": "openai-codex/gpt-6.1-sol",
+          "fallbackModel": [
+            "anthropic/claude-sonnet-5-5"
+          ],
+          "thinking": "high"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "general-worker",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell",
+        "edit"
+      ]
+    },
+    {
+      "name": "platform-worker",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "low"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "low"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell",
+        "edit"
+      ]
+    },
+    {
+      "name": "backend-worker",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "openai-codex/gpt-6-luna",
+          "fallbackModel": [
+            "anthropic/claude-haiku-5-5"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell",
+        "edit"
+      ]
+    },
+    {
+      "name": "scout",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "low"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "security-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "database-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "openai-codex/gpt-6-luna",
+          "fallbackModel": [
+            "anthropic/claude-haiku-5-5"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "openai-codex/gpt-6.1-sol",
+          "fallbackModel": [
+            "anthropic/claude-sonnet-5-5"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "database-worker",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "low"
+        },
+        "capable": {
+          "model": "openai-codex/gpt-6.1-sol",
+          "fallbackModel": [
+            "anthropic/claude-sonnet-5-5"
+          ],
+          "thinking": "low"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell",
+        "edit"
+      ]
+    },
+    {
+      "name": "test-engineer",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "anthropic/claude-haiku-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6-luna"
+          ],
+          "thinking": "low"
+        },
+        "capable": {
+          "model": "anthropic/claude-sonnet-5-5",
+          "fallbackModel": [
+            "openai-codex/gpt-6.1-sol"
+          ],
+          "thinking": "low"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "ui-ux-specialist",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "openai-codex/gpt-6-luna",
+          "fallbackModel": [
+            "anthropic/claude-haiku-5-5"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "openai-codex/gpt-6.1-sol",
+          "fallbackModel": [
+            "anthropic/claude-sonnet-5-5"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell"
+      ]
+    },
+    {
+      "name": "release-engineer",
+      "defaultModelTier": "economy",
+      "tiers": {
+        "economy": {
+          "model": "openai-codex/gpt-6-luna",
+          "fallbackModel": [
+            "anthropic/claude-haiku-5-5"
+          ],
+          "thinking": "medium"
+        },
+        "capable": {
+          "model": "openai-codex/gpt-6.1-sol",
+          "fallbackModel": [
+            "anthropic/claude-sonnet-5-5"
+          ],
+          "thinking": "medium"
+        }
+      },
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "powershell",
+        "edit",
+        "write"
+      ]
+    }
+  ]
+}

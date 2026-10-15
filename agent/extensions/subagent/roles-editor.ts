@@ -1,7 +1,8 @@
 /**
  * /subagent roles: edit a registry role's model settings through native dialogs.
- * Writes only the roles.json entry (provider, model, fallbackModel, thinking) and the
- * model, fallbackModel and thinking frontmatter lines of agents/<name>.md.
+ * Writes the roles.json entry (provider, model, fallbackModel, thinking). A header-free
+ * agents/<name>.md (single source) is never touched; only an external legacy definition
+ * that still mirrors model, fallbackModel and thinking has those lines rewritten.
  */
 
 import { randomBytes } from "node:crypto";
@@ -93,6 +94,8 @@ export interface RoleSnapshot {
 	agentText: string | null;
 	/** True when the definition carries pi.* metadata lines (tier-era shared definitions); only those lines are rewritten. */
 	agentAnnotated: boolean;
+	/** True when the definition has no model, fallbackModel, thinking or pi.* mirror: roles.json is the only source, so no definition is read for edits or written. */
+	agentHeaderFree: boolean;
 	/** Packaged default entry for the name, or null; merged under the user entry when present. */
 	packaged: RegistryEntry | null;
 	current: RoleSettings;
@@ -340,7 +343,7 @@ function tierEntries(snap: RoleSnapshot, slot: TierSlot): Array<Record<string, u
 }
 
 /** Exactly one definition must carry this role name; links, malformed and duplicate matches are refused. A packaged role may have none (null). */
-function findDefinition(dir: string, name: string, packaged: boolean): { path: string; bytes: Buffer; text: string; annotated: boolean } | null {
+function findDefinition(dir: string, name: string, packaged: boolean): { path: string; bytes: Buffer; text: string; annotated: boolean; headerFree: boolean } | null {
 	const agentsDir = path.join(dir, "agents");
 	let agentsStat: fs.Stats | undefined;
 	try {
@@ -389,8 +392,9 @@ function findDefinition(dir: string, name: string, packaged: boolean): { path: s
 	const bytes = fs.readFileSync(file);
 	const text = decodeUtf8(bytes, file);
 	const annotated = isAnnotated(text);
-	if (!annotated) definitionLines(text);
-	return { path: file, bytes, text, annotated };
+	const headerFree = !annotated && DEFINITION_KEYS.every((key) => !(key in parseFrontmatter<Record<string, unknown>>(text).frontmatter));
+	if (!annotated && !headerFree) definitionLines(text);
+	return { path: file, bytes, text, annotated, headerFree };
 }
 
 /** Bundled registry (roles.json plus agents/ under the native package root); empty when no package root is given. */
@@ -423,10 +427,12 @@ export function readRoleSnapshot(dir: string, name: string, pkgRoot: string | nu
 		entries: registry.entries,
 		base,
 		packaged: packagedEntry ?? null,
-		agentPath: definition?.path ?? null,
-		agentBytes: definition?.bytes ?? null,
-		agentText: definition?.text ?? null,
+		// A header-free definition has nothing to rewrite or validate: it stays out of the plan and the commit.
+		agentPath: definition && !definition.headerFree ? definition.path : null,
+		agentBytes: definition && !definition.headerFree ? definition.bytes : null,
+		agentText: definition && !definition.headerFree ? definition.text : null,
 		agentAnnotated: definition?.annotated ?? false,
+		agentHeaderFree: definition?.headerFree ?? false,
 		current,
 	};
 }
@@ -542,7 +548,9 @@ export function planRoleChange(snap: RoleSnapshot, proposed: RoleSettings, catal
 		`Before: ${fmt(current)}`,
 		`After:  ${fmt({ primary, fallbacks, thinking })}`,
 		snap.agentPath === null
-			? `Writes: roles.json override entry ${snap.name}; packaged definition unchanged, not copied`
+			? snap.agentHeaderFree
+				? `Writes: roles.json entry ${snap.name}; definition carries no Pi settings, unchanged`
+				: `Writes: roles.json override entry ${snap.name}; packaged definition unchanged, not copied`
 			: `Writes: roles.json entry ${snap.name}; agents/${path.basename(snap.agentPath)} ${snap.agentAnnotated ? "pi.model, pi.fallbackModel, pi.thinking metadata lines" : "model, fallbackModel, thinking lines"}`,
 		...warnings.map((w) => `Warning: ${w}`),
 	].join("\n");

@@ -2,12 +2,6 @@
 name: test-engineer
 description: REQUIRED named role for VERIFY. Independently verify an identified implementation candidate against its approved contract in the test-engineer agent. Return evidence-backed PASS, FAIL, or INCONCLUSIVE; do not modify the active candidate.
 tools: read, search, execute
-model: claude-haiku-5.5
-metadata:
-  pi.model: "anthropic/claude-haiku-5-5"
-  pi.fallbackModel: "openai-codex/gpt-6-luna"
-  pi.thinking: "low"
-  pi.tools: "read, grep, find, ls, bash, powershell"
 ---
 
 ## Assigned module

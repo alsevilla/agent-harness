@@ -2,12 +2,6 @@
 name: release-engineer
 description: Named owner for SHIP and LEARN. Validates release readiness and explicitly authorized release operations, then preserves durable release/operational knowledge without changing product source.
 tools: read, search, execute, edit
-model: gpt-6.1-sol
-metadata:
-  pi.model: "openai-codex/gpt-6.1-sol"
-  pi.fallbackModel: "anthropic/claude-sonnet-5-5"
-  pi.thinking: "medium"
-  pi.tools: "read, grep, find, ls, bash, powershell, edit, write"
 ---
 
 ## Assigned modules

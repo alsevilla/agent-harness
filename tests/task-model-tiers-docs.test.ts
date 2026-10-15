@@ -78,7 +78,7 @@ test("high-risk work on economy-default roles requests configured capable; an un
   assert.match(text, /database-worker: consequential migration or persistence change -> explicit `capable`/);
   assert.match(text, /platform-worker: consequential infrastructure change -> explicit `capable`/);
   assert.match(text, /test-engineer: data-integrity verification -> explicit `capable`/);
-  assert.match(text, /scout or observability-specialist \(economy only\): high-risk task -> unresolved, main decides or a specialist route/);
+  assert.match(text, /scout \(economy only\): high-risk task -> unresolved, main decides or a specialist route/);
   assert.match(text, /no automatic escalation or retry upgrade/);
   assert.match(compact(policy), /high-risk work on an economy-default role requests configured `capable`/i);
   assert.match(compact(runtime), /high-risk work on an economy-default role requests configured `capable`/i);

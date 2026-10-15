@@ -272,6 +272,20 @@ async function runAgentAttempt(
 		};
 	}
 
+	// Canonical package roles must carry roles.json model and tools; a gap never inherits the session model or the host's full tool set.
+	if (agent.source === "package" && (!agent.model || !agent.tools?.length)) {
+		return {
+			agent: agentName,
+			agentSource: agent.source,
+			task,
+			exitCode: 1,
+			messages: [],
+			stderr: `Package role "${agentName}" has no model or tools in roles.json; refusing to launch with inherited settings.`,
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+			step,
+		};
+	}
+
 	const args: string[] = ["--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--offline"];
 	const inheritsDispatchConfig = !agent.model;
 	const model = attemptModel ?? agent.model ?? dispatchDefaults.model;

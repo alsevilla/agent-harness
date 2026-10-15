@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, test } from "bun:test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -53,9 +53,9 @@ function listFiles(dir: string): string[] {
 	return fs.readdirSync(dir, { recursive: true, withFileTypes: false }).map(String).sort();
 }
 
-function runProbe(args: string[], profile: string): string {
+function runProbe(args: string[], profile: string, nodeArgs: string[] = []): string {
 	const home = tmp("native-home-");
-	const run = spawnSync("node", ["--experimental-transform-types", PROBE, ...args], {
+	const run = spawnSync("node", ["--experimental-transform-types", ...nodeArgs, PROBE, ...args], {
 		encoding: "utf8",
 		timeout: PROBE_TIMEOUT_MS,
 		windowsHide: true,
@@ -66,8 +66,25 @@ function runProbe(args: string[], profile: string): string {
 }
 
 type Discovery = { packageRoot: string | null; error: string | null; agents: { name: string; source: string; model?: string | null; thinking?: string; fallbackModel?: string[]; tools?: string[]; filePath: string; systemPrompt: string }[] };
-function discover(agentsTs: string, profile: string, cwd: string, scope = "both"): Discovery {
-	return JSON.parse(runProbe(["discover", agentsTs, cwd, scope], profile)) as Discovery;
+function discover(agentsTs: string, profile: string, cwd: string, scope = "both", nodeArgs: string[] = []): Discovery {
+	return JSON.parse(runProbe(["discover", agentsTs, cwd, scope], profile, nodeArgs)) as Discovery;
+}
+
+// Exact-path EACCES on listing `dir` (first call only, or every call) via a probe-scoped preload: no ACL or permission change on the host.
+function listingFault(dir: string, mode: "once" | "always"): string[] {
+	const file = path.join(tmp("native-fault-"), "fault.mjs");
+	fs.writeFileSync(file, [
+		'import fs from "node:fs";',
+		'import path from "node:path";',
+		'import { syncBuiltinESMExports } from "node:module";',
+		`const target = path.resolve(${JSON.stringify(dir)});`,
+		`let left = ${mode === "once" ? 1 : "Infinity"};`,
+		"const original = fs.readdirSync;",
+		'fs.readdirSync = function (p, ...rest) { if (left > 0 && path.resolve(String(p)) === target) { left--; throw Object.assign(new Error("EACCES: permission denied, scandir " + p), { code: "EACCES" }); } return original.call(this, p, ...rest); };',
+		"syncBuiltinESMExports();", // agents.ts imports the `node:fs` namespace
+		"",
+	].join("\n"));
+	return [`--import=${pathToFileURL(file).href}`];
 }
 
 function sourceFiles(dir: string): string[] {
@@ -124,6 +141,32 @@ probeTest("a fresh isolated profile resolves the 20 bundled roles from the nativ
 	assert.ok(fs.existsSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create_agent.py")), "agent-create CLI resolves under the package root");
 	assert.deepEqual(listFiles(profile), [], "fresh profile stays empty: no copy, no settings, no roles");
 });
+
+for (const layout of ["direct", "linked", ...(process.platform === "win32" ? ["case-alias"] : [])]) {
+	probeTest(`a shared package/profile directory keeps package provenance (${layout})`, () => {
+		const root = copyNativeTree();
+		const packageAgentDir = path.join(root, "agent");
+		let profile = packageAgentDir;
+		if (layout === "linked") {
+			profile = path.join(tmp("native-profile-link-"), "agent");
+			fs.symlinkSync(packageAgentDir, profile, process.platform === "win32" ? "junction" : "dir");
+		} else if (layout === "case-alias") {
+			profile = packageAgentDir.toUpperCase();
+		}
+		const agentsTs = path.join(packageAgentDir, "extensions", "subagent", "agents.ts");
+		const cwd = tmp("native-cwd-");
+		for (const scope of ["user", "both"]) {
+			const found = discover(agentsTs, profile, cwd, scope);
+			assert.equal(found.error, null);
+			assert.equal(found.agents.length, 20);
+			for (const agent of found.agents) {
+				assert.equal(agent.source, "package", `${layout}/${scope}/${agent.name}`);
+				assert.equal(agent.filePath, path.join(packageAgentDir, "agents", `${agent.name}.md`));
+			}
+		}
+		assert.deepEqual(discover(agentsTs, profile, cwd, "project").agents, []);
+	});
+}
 
 probeTest("a project-local role overrides the bundled role and private project roles stay project-scoped", () => {
 	const cwd = tmp("native-project-");
@@ -239,6 +282,243 @@ for (const [label, text, expected] of MALFORMED_USER_ROLES) {
 		fs.writeFileSync(path.join(profile, "roles.json"), text);
 		const found = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user");
 		assert.match(found.error ?? "", expected);
+		assert.deepEqual(found.agents, []);
+	});
+}
+
+// Canonical package config is REQUIRED: roles.json is the single source of every Pi setting and tool grant, so an incomplete or invalid
+// package entry fails the whole bundle closed. There is no inherited session model, no native Copilot header tools and no host-wide tool fallback.
+type PackageRole = Record<string, unknown> & { name: string; modelTiers?: Record<string, Record<string, unknown>> };
+const editPackageRoles = (change: (roles: PackageRole[]) => void) => (root: string) => {
+	const file = path.join(root, "agent", "roles.json");
+	const roles = JSON.parse(fs.readFileSync(file, "utf8")) as PackageRole[];
+	change(roles);
+	fs.writeFileSync(file, JSON.stringify(roles, null, 2));
+};
+const roleOf = (roles: PackageRole[], name = "reviewer") => roles.find((role) => role.name === name)!;
+const INVALID_CANONICAL: [string, (root: string) => void][] = [
+	["role without tools", editPackageRoles((roles) => { delete roleOf(roles).tools; })],
+	["role with blank tools", editPackageRoles((roles) => { roleOf(roles).tools = " , "; })],
+	["role with non-string tools", editPackageRoles((roles) => { roleOf(roles).tools = 5; })],
+	["role without defaultModelTier", editPackageRoles((roles) => { delete roleOf(roles).defaultModelTier; })],
+	["default tier not configured", editPackageRoles((roles) => { roleOf(roles).defaultModelTier = roleOf(roles).defaultModelTier === "capable" ? "economy" : "capable"; delete roleOf(roles).modelTiers![roleOf(roles).defaultModelTier as string]; })],
+	["default tier without a model", editPackageRoles((roles) => { const r = roleOf(roles); delete r.modelTiers![r.defaultModelTier as string].model; })],
+	["role without modelTiers", editPackageRoles((roles) => { delete roleOf(roles).modelTiers; })],
+	["legacy flat package entry", editPackageRoles((roles) => { const i = roles.indexOf(roleOf(roles)); roles[i] = { name: "reviewer", provider: "openai-codex", model: "gpt-6-luna", fallbackModel: "", thinking: "low", tools: "read, grep" }; })],
+];
+for (const [label, mutate] of INVALID_CANONICAL) {
+	probeTest(`canonical package config fails closed with no header or host fallback (${label})`, () => {
+		const root = copyNativeTree(mutate);
+		const found = discover(path.join(root, "agent", "extensions", "subagent", "agents.ts"), tmp("native-profile-"), tmp("native-cwd-"));
+		assert.match(found.error ?? "", /package roles\.json/);
+		assert.deepEqual(found.agents, []);
+	});
+}
+
+probeTest("a JSON-only default change reaches discovery with no definition edit; header mirrors cannot override it", () => {
+	const root = copyNativeTree(editPackageRoles((roles) => {
+		const reviewer = roleOf(roles);
+		const tier = reviewer.modelTiers![reviewer.defaultModelTier as string];
+		Object.assign(tier, { model: "fixture-provider/json-only", fallbackModel: "", thinking: "low" });
+		reviewer.tools = "read, grep";
+	}));
+	const before = fs.readFileSync(path.join(root, "agent", "agents", "reviewer.md"), "utf8");
+	const found = discover(path.join(root, "agent", "extensions", "subagent", "agents.ts"), tmp("native-profile-"), tmp("native-cwd-"));
+	assert.equal(found.error, null);
+	const reviewer = found.agents.find((agent) => agent.name === "reviewer");
+	assert.equal(reviewer?.model, "fixture-provider/json-only");
+	assert.equal(reviewer?.thinking, "low");
+	assert.deepEqual(reviewer?.fallbackModel, []);
+	assert.deepEqual(reviewer?.tools, ["read", "grep"], "Pi tools come from roles.json, never from the native Copilot header");
+	assert.equal(fs.readFileSync(path.join(root, "agent", "agents", "reviewer.md"), "utf8"), before);
+});
+
+probeTest("a package definition with legacy header mirrors still takes every Pi setting from roles.json only", () => {
+	const root = copyNativeTree((dir) => {
+		const file = path.join(dir, "agent", "agents", "reviewer.md");
+		fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/\r?\ntools:/, "\nmodel: stale/header-model\nfallbackModel: stale/header-fallback\nthinking: off\nmetadata:\n  pi.model: stale/pi-model\n  pi.tools: write\ntools:"));
+	});
+	const roles = JSON.parse(fs.readFileSync(path.join(root, "agent", "roles.json"), "utf8")) as PackageRole[];
+	const reviewerRole = roleOf(roles);
+	const tier = reviewerRole.modelTiers![reviewerRole.defaultModelTier as string];
+	const reviewer = discover(path.join(root, "agent", "extensions", "subagent", "agents.ts"), tmp("native-profile-"), tmp("native-cwd-")).agents.find((agent) => agent.name === "reviewer");
+	assert.equal(reviewer?.model, tier.model);
+	assert.equal(reviewer?.thinking, tier.thinking);
+	assert.deepEqual(reviewer?.tools, String(reviewerRole.tools).split(",").map((tool) => tool.trim()));
+});
+
+// Physical identity: a user/project definition that IS a package definition (directory junction or hardlink) is never a legacy role.
+// The package-only rule follows the file (dev:ino), not its name or the validity of roles.json; genuine distinct copies stay legacy.
+const packageTuple = (root: string, name: string) => {
+	const role = roleOf(JSON.parse(fs.readFileSync(path.join(root, "agent", "roles.json"), "utf8")) as PackageRole[], name);
+	const tier = role.modelTiers![role.defaultModelTier as string];
+	return { model: tier.model, thinking: tier.thinking, tools: String(role.tools).split(",").map((tool) => tool.trim()) };
+};
+const assertAllCanonical = (found: Discovery, root: string, label: string) => {
+	assert.equal(found.error, null, label);
+	assert.equal(found.agents.length, 20, label);
+	for (const agent of found.agents) {
+		assert.equal(agent.source, "package", `${label}/${agent.name}`);
+		assert.equal(agent.filePath, path.join(root, "agent", "agents", `${agent.name}.md`), `${label}/${agent.name}`);
+	}
+	const reviewer = found.agents.find((agent) => agent.name === "reviewer");
+	assert.deepEqual({ model: reviewer?.model, thinking: reviewer?.thinking, tools: reviewer?.tools }, packageTuple(root, "reviewer"), label);
+};
+const agentsTsOf = (root: string) => path.join(root, "agent", "extensions", "subagent", "agents.ts");
+const projectWithAgentsDir = () => {
+	const cwd = tmp("native-project-");
+	fs.mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+	return cwd;
+};
+const linkAgents = (root: string, dir: string, names: string[], as = (name: string) => name) => {
+	fs.mkdirSync(dir, { recursive: true });
+	for (const name of names) fs.linkSync(path.join(root, "agent", "agents", `${name}.md`), path.join(dir, `${as(name)}.md`));
+};
+
+for (const scope of ["both", "project"]) {
+	probeTest(`a project directory junction onto the package definitions never yields legacy project roles (${scope})`, () => {
+		const root = copyNativeTree();
+		const cwd = projectWithAgentsDir();
+		fs.symlinkSync(path.join(root, "agent", "agents"), path.join(cwd, ".pi", "agents"), process.platform === "win32" ? "junction" : "dir");
+		const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, scope);
+		if (scope === "both") assertAllCanonical(found, root, scope);
+		else assert.deepEqual(found, { packageRoot: path.join(root, "agent"), error: null, agents: [] });
+	});
+
+	probeTest(`project hardlinks of package definitions, under any file name, never yield legacy project roles (${scope})`, () => {
+		const root = copyNativeTree();
+		const cwd = projectWithAgentsDir();
+		linkAgents(root, path.join(cwd, ".pi", "agents"), ["reviewer", "scout"]);
+		linkAgents(root, path.join(cwd, ".pi", "agents"), ["debugger"], () => "renamed-alias");
+		const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, scope);
+		if (scope === "both") assertAllCanonical(found, root, scope);
+		else assert.deepEqual(found.agents, []);
+	});
+}
+
+for (const scope of ["user", "both"]) {
+	probeTest(`user-profile hardlinks of package definitions resolve to the canonical package role (${scope})`, () => {
+		const root = copyNativeTree();
+		const profile = tmp("native-profile-");
+		linkAgents(root, path.join(profile, "agents"), ["reviewer", "scout"]);
+		assertAllCanonical(discover(agentsTsOf(root), profile, tmp("native-cwd-"), scope), root, scope);
+	});
+}
+
+for (const scope of ["both", "project"]) {
+	probeTest(`an invalid user registry behind a project alias still never falls through as a legacy project role (${scope})`, () => {
+		const root = copyNativeTree();
+		const profile = tmp("native-profile-");
+		fs.writeFileSync(path.join(profile, "roles.json"), "{bad");
+		const cwd = projectWithAgentsDir();
+		fs.symlinkSync(path.join(root, "agent", "agents"), path.join(cwd, ".pi", "agents"), process.platform === "win32" ? "junction" : "dir");
+		const found = discover(agentsTsOf(root), profile, cwd, scope);
+		assert.deepEqual(found.agents, []);
+		if (scope === "both") assert.match(found.error ?? "", /user roles\.json/);
+	});
+}
+
+probeTest("distinct external copies and custom definitions stay legacy while a sibling alias is canonical", () => {
+	const root = copyNativeTree();
+	const cwd = projectWithAgentsDir();
+	const dir = path.join(cwd, ".pi", "agents");
+	linkAgents(root, dir, ["scout"]);
+	fs.copyFileSync(path.join(root, "agent", "agents", "reviewer.md"), path.join(dir, "reviewer.md"));
+	fs.writeFileSync(path.join(dir, "custom.md"), "---\nname: custom\ndescription: custom\nmodel: external/custom-model\n---\nCustom body.\n");
+	const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, "both");
+	assert.equal(found.error, null);
+	assert.equal(found.agents.length, 21);
+	assert.equal(found.agents.find((agent) => agent.name === "scout")?.source, "package");
+	const reviewer = found.agents.find((agent) => agent.name === "reviewer");
+	assert.equal(reviewer?.source, "project");
+	assert.equal(reviewer?.model, null, "a genuine distinct copy keeps legacy semantics: no canonical model");
+	assert.equal(found.agents.find((agent) => agent.name === "custom")?.model, "external/custom-model");
+	assert.deepEqual(discover(agentsTsOf(root), tmp("native-profile-"), cwd, "project").agents.map((agent) => agent.name).sort(), ["custom", "reviewer"]);
+});
+
+// A failed package listing is never a proven-empty set: project scope (which drops package errors) must refuse the alias like every other scope.
+const aliasEverywhere = (root: string, profile: string, cwd: string, names = ["reviewer"]) => {
+	linkAgents(root, path.join(profile, "agents"), names);
+	linkAgents(root, path.join(cwd, ".pi", "agents"), names);
+};
+const noAgentsAdmitted = (found: Discovery, label: string) => {
+	assert.ok(found.error, `${label}: error`);
+	assert.deepEqual(found.agents, [], label);
+};
+const PACKAGE_LISTING_BREAKS: [string, (root: string) => void][] = [
+	["agents replaced by a regular file (ENOTDIR)", (root) => { fs.rmSync(path.join(root, "agent", "agents"), { recursive: true }); fs.writeFileSync(path.join(root, "agent", "agents"), "x"); }],
+	["agents directory removed (ENOENT)", (root) => fs.rmSync(path.join(root, "agent", "agents"), { recursive: true })],
+];
+for (const [label, breakListing] of PACKAGE_LISTING_BREAKS) {
+	for (const scope of ["project", "both", "user"]) {
+		probeTest(`a package agents directory that cannot be listed (${label}) refuses a surviving canonical alias (${scope})`, () => {
+			const root = copyNativeTree();
+			const profile = tmp("native-profile-");
+			const cwd = projectWithAgentsDir();
+			aliasEverywhere(root, profile, cwd);
+			breakListing(root);
+			const found = discover(agentsTsOf(root), profile, cwd, scope);
+			noAgentsAdmitted(found, scope);
+			assert.match(found.error ?? "", scope === "project" ? /package agents directory cannot be listed \((ENOTDIR|ENOENT)\)/ : /package agents directory is missing/);
+		});
+	}
+}
+
+for (const scope of ["project", "both", "user"]) {
+	for (const mode of ["always", "once"] as const) {
+		probeTest(`an EACCES package listing (${mode === "once" ? "first listing only" : "persistent"}) never lets a canonical alias become a legacy role (${scope})`, () => {
+			const root = copyNativeTree();
+			const profile = tmp("native-profile-");
+			const cwd = projectWithAgentsDir();
+			aliasEverywhere(root, profile, cwd);
+			fs.writeFileSync(path.join(cwd, ".pi", "agents", "custom.md"), "---\nname: custom\ndescription: custom\n---\nCustom body.\n");
+			const found = discover(agentsTsOf(root), profile, cwd, scope, listingFault(path.join(root, "agent", "agents"), mode));
+			noAgentsAdmitted(found, `${mode}/${scope}`);
+			// Persistent failure in user/both also empties the package tier, so the coverage error wins there; project (and a one-shot failure) reports the listing.
+			assert.match(found.error ?? "", mode === "always" && scope !== "project" ? /disagree on role names/ : /package agents directory cannot be listed \(EACCES\)/);
+		});
+	}
+}
+
+for (const scope of ["project", "both"]) {
+	probeTest(`a corrupt root manifest fails closed even when a canonical project alias exists (${scope})`, () => {
+		const root = copyNativeTree();
+		const cwd = projectWithAgentsDir();
+		linkAgents(root, path.join(cwd, ".pi", "agents"), ["reviewer"]);
+		fs.writeFileSync(path.join(root, "package.json"), "{");
+		fs.writeFileSync(path.join(root, "agent", "package.json"), '{"type":"module"}\n');
+		const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, scope);
+		noAgentsAdmitted(found, scope);
+		assert.match(found.error ?? "", /package manifest is unreadable or not valid JSON/);
+	});
+}
+
+probeTest("without package mode (renamed or absent manifest) and with a readable empty package listing, project aliases stay legacy and error-free", () => {
+	for (const [label, mutate] of [["renamed", (dir: string) => fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "someone-else" }))], ["absent", (dir: string) => fs.rmSync(path.join(dir, "package.json"))]] as const) {
+		const root = copyNativeTree(mutate);
+		const cwd = projectWithAgentsDir();
+		linkAgents(root, path.join(cwd, ".pi", "agents"), ["reviewer"]);
+		const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, "project");
+		assert.equal(found.error, null, label);
+		assert.deepEqual(found.agents.map((agent) => `${agent.name}/${agent.source}`), ["reviewer/project"], label);
+	}
+	// Listing succeeds but is empty: no package file can be aliased, so an ordinary project file is a legacy role (user/both still fail on declared != defined).
+	const root = copyNativeTree();
+	const cwd = projectWithAgentsDir();
+	fs.mkdirSync(path.join(cwd, ".pi", "agents"), { recursive: true });
+	fs.writeFileSync(path.join(cwd, ".pi", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: external\n---\nExternal body.\n");
+	for (const name of fs.readdirSync(path.join(root, "agent", "agents"))) fs.rmSync(path.join(root, "agent", "agents", name));
+	const project = discover(agentsTsOf(root), tmp("native-profile-"), cwd, "project");
+	assert.equal(project.error, null);
+	assert.deepEqual(project.agents.map((agent) => `${agent.name}/${agent.source}`), ["reviewer/project"]);
+	assert.match(discover(agentsTsOf(root), tmp("native-profile-"), cwd, "both").error ?? "", /disagree on role names/);
+});
+
+for (const scope of ["user", "both"]) {
+	probeTest(`a package definition without a roles.json entry is a coverage error, not a silently missing role (${scope})`, () => {
+		const root = copyNativeTree(editPackageRoles((roles) => { roles.splice(roles.indexOf(roleOf(roles)), 1); }));
+		const found = discover(agentsTsOf(root), tmp("native-profile-"), tmp("native-cwd-"), scope);
+		assert.match(found.error ?? "", /package roles\.json and agents disagree on role names.*reviewer/);
 		assert.deepEqual(found.agents, []);
 	});
 }

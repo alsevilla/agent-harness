@@ -85,12 +85,12 @@ Pi-only, main-owned judgment. Set `modelTier: "economy"` on one task only for a 
 Scenarios:
 - backend-worker: add one validated field to an existing endpoint whose schema and focused tests are named in the packet -> explicit economy.
 - frontend-worker: adjust presentational state of an existing component whose design is already approved and whose focused tests are named -> explicit economy.
-- backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; the owning specialist first when a decision is open.
+- backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; explicit `capable` (its default is economy; omission would run economy), the owning specialist first when a decision is open.
 - frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy.
 - database-worker: consequential migration or persistence change -> explicit `capable` (its default is economy; omission would run economy).
 - platform-worker: consequential infrastructure change -> explicit `capable` (its default is economy).
 - test-engineer: data-integrity verification -> explicit `capable` (its default is economy).
-- scout or observability-specialist (economy only): high-risk task -> unresolved, main decides or a specialist route; no capable tier exists and omission runs economy.
+- scout (economy only): high-risk task -> unresolved, main decides or a specialist route; no capable tier exists and omission runs economy.
 
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.

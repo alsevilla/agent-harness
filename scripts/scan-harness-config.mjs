@@ -51,7 +51,6 @@ function loadParser() {
 const isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 // Same grammar as agents.ts parseQualifiedFallbacks: "" means no fallback; otherwise ||-separated tokens (a blank token is invalid).
 const parseFallbacks = (text) => (text === "" ? [] : text.split("||").map((token) => token.trim()));
-const fallbackKey = (text) => [...new Set(parseFallbacks(String(text ?? "")))].join("||");
 
 // agents.ts entryFormat: "tier" (defaultModelTier or tier-only definitions), "legacy" (flat or per-tier provider), "mixed" or "neutral".
 function entryFormat(entry) {
@@ -169,30 +168,15 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 			else if (!TOOL_NAME.test(token)) add("ERROR", "GRANT_SHAPE", file, `${label} contains a token that is not a single tool name`);
 		}
 	};
-	// Names only: the parity message never repeats a value.
-	const checkParity = (slot, fm, file) => {
-		const normTools = (v) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean).join(", ") : "");
+	// roles.json is the only source of Pi settings: a canonical definition keeps identity, native Copilot tools and body, so any mirror is the error.
+	// Names only: the message never repeats a value, and an absent mirror is never a finding.
+	const checkMirrors = (fm, file) => {
 		const metadata = fm.metadata && typeof fm.metadata === "object" && !Array.isArray(fm.metadata) ? fm.metadata : {};
-		const fields = [
-			["model", slot.model, "model"],
-			["fallbackModel", slot.fallbackModel.join("||"), "fallbackModel"],
-			["thinking", slot.thinking, "thinking"],
-			["tools", normTools(slot.tools), "tools"],
+		const present = [
+			...["model", "fallbackModel", "thinking"].filter((key) => Object.hasOwn(fm, key)),
+			...Object.keys(metadata).filter((key) => key.startsWith("pi.")),
 		];
-		for (const [label, expected, key] of fields) {
-			const annotation = `pi.${key}`;
-			const annotated = Object.hasOwn(metadata, annotation);
-			const actual = annotated ? metadata[annotation] : fm[key];
-			const validString = typeof actual === "string" && (key === "fallbackModel" || !!actual.trim());
-			const validThinking = key !== "thinking" || ["off", "minimal", "low", "medium", "high", "xhigh"].includes(actual);
-			const validTools = key !== "tools" || (typeof actual === "string" && actual.split(",").every((token) => TOOL_NAME.test(token.trim())));
-			if ((annotated && (!validString || !validThinking || !validTools)) || (!annotated && actual !== undefined && (typeof actual !== "string" || (key !== "fallbackModel" && !actual.trim()) || !validThinking || !validTools))) {
-				add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${annotation} is invalid`);
-				continue;
-			}
-			const normalized = key === "tools" ? normTools(actual) : key === "fallbackModel" ? fallbackKey(actual) : actual;
-			if (String(expected) !== String(normalized ?? "")) add("ERROR", "PARITY_MISMATCH", file, `frontmatter field ${annotation} differs from roles.json`);
-		}
+		for (const field of present) add("ERROR", "MIRROR_PRESENT", file, `frontmatter field ${field} duplicates roles.json; remove it from the definition`);
 	};
 	const agentDir = path.join(root, "agent");
 	const readJson = (rel) => {
@@ -248,7 +232,7 @@ export function scanHarnessConfig({ root = defaultRoot, fs: fsImpl = realFs, pac
 			}
 			if (fm.name !== base) add("ERROR", "FRONTMATTER_NAME_MISMATCH", rel, `frontmatter name ${fm.name === undefined ? "missing" : "differs from file name"}`);
 			const slot = slotByName.get(base);
-			if (slot) checkParity(slot, fm, rel);
+			if (slot) checkMirrors(fm, rel);
 		}
 	} catch {
 		add("ERROR", "FILE_MISSING", "agent/agents", "agents directory missing");
