@@ -54,7 +54,21 @@ const DECLARATION_CHANGES: Record<string, Partial<Record<string, readonly [strin
 	"ui-ux-specialist": { fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
 	"release-engineer": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], tools: ["read, grep, find, ls, bash, powershell, edit, write","read, grep, find, ls, bash, powershell, edit"] },
 };
-const effectiveLegacyHeaderSha = (text: string) => {
+// Live roles are header-free (single source). The pre-removal Pi declarations are restored from the independent header-removal baseline (captured from git HEAD)
+// so the historical effective-declaration pins below keep proving that no declaration, identity or tool value drifted.
+const headerRemoval = JSON.parse(fs.readFileSync(new URL("./fixtures/header-removal-baseline.json", import.meta.url), "utf8")) as { roles: { name: string; nativeToolsLine: string; removed: string[] }[] };
+const withHistoricalHeader = (text: string) => {
+	const normalized = text.replace(/\r\n/g, "\n");
+	if (/^metadata:/m.test(normalized)) return text;
+	const entry = headerRemoval.roles.find((item) => item.name === /^name: (.+)$/m.exec(normalized)?.[1]);
+	if (!entry) return text;
+	const lines = normalized.split("\n");
+	const at = lines.indexOf(entry.nativeToolsLine);
+	assert.ok(at > 0, `${entry.name}: native tools line missing`);
+	return [...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n");
+};
+const effectiveLegacyHeaderSha = (rawText: string) => {
+	const text = withHistoricalHeader(rawText);
 	const normalized = text.replace(/\r\n/g, "\n");
 	const header = /^---\n([\s\S]*?)\n---/.exec(normalized)?.[1];
 	assert.ok(header, "live role must have a YAML header");
@@ -237,7 +251,7 @@ test("release cleanup policy assigns only safe post-merge task-owned removal to 
 });
 
 test("declaration normalization rejects unapproved identity, tool and approved-field changes", () => {
-	const source = fs.readFileSync(new URL("../../../agents/api-specialist.md", import.meta.url), "utf8");
+	const source = withHistoricalHeader(fs.readFileSync(new URL("../../../agents/api-specialist.md", import.meta.url), "utf8"));
 	const changed = (from: string, to: string) => {
 		const result = source.replace(from, to);
 		assert.notEqual(result, source, "negative control must mutate the current header");

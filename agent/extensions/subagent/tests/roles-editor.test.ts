@@ -1894,4 +1894,22 @@ async function runNodeSuite(): Promise<void> {
 		assert.equal(fs.readFileSync(fx.agentPath("oracle"), "utf8"), tierMd(edited, "claude-opus-5.5"));
 		assert.match(fs.readFileSync(fx.agentPath("oracle"), "utf8"), /^  pi\.fallbackModel: ""$/m);
 	});
+
+	// Single-source: a canonical definition is header-free (identity, native tools, body). roles.json is the only Pi model source, so the editor edits the JSON slot
+	// and neither validates nor recreates mirrored model/fallbackModel/thinking/pi.* fields in the definition.
+	const headerFreeMd = (role: any) => ["---", `name: ${role.name}`, `description: ${role.name} header-free role`, "tools: read, search, execute", "---", `Body for ${role.name}`, ""].join("\n");
+	test("header-free definitions: a default-tier save edits only roles.json and never reinserts model or metadata mirrors", async () => {
+		const fx = tierFixture(TIER_ROLES, Object.fromEntries(TIER_ROLES.map((r) => [r.name, headerFreeMd(r)])));
+		const definitionsBefore = Object.fromEntries(TIER_ROLES.map((r) => [r.name, fs.readFileSync(fx.agentPath(r.name), "utf8")]));
+		const snap = editor.readRoleSnapshot(fx.dir, "alpha", null);
+		assert.equal(snap.agentPath, null, "a header-free definition has no mirror to rewrite");
+		const run = fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true });
+		await editor.editRoleConfig(run.ctx, { packageRoot: null });
+		const expected = TIER_ROLES.map((r) => (r.name !== "alpha" ? r : { ...r, modelTiers: { economy: r.modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } } }));
+		assert.equal(fs.readFileSync(fx.registryPath, "utf8"), formatJson(expected, "\n"));
+		for (const r of TIER_ROLES) assert.equal(fs.readFileSync(fx.agentPath(r.name), "utf8"), definitionsBefore[r.name], `${r.name}: definition bytes unchanged`);
+		assert.doesNotMatch(fs.readFileSync(fx.agentPath("alpha"), "utf8"), /^(model|fallbackModel|thinking|metadata):|pi\./m);
+		const found = agents.discoverAgents(fx.dir, "user").agents.find((a: any) => a.name === "alpha");
+		assert.equal(found?.model, SLASH_REF, "header-free external definition still resolves its model from the roles.json entry");
+	});
 }

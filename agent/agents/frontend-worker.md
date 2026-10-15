@@ -2,12 +2,6 @@
 name: frontend-worker
 description: Implements authorized React or SolidJS and TypeScript frontend changes from an accepted design and task contract, with focused behavioral tests.
 tools: read, search, execute, edit
-model: claude-sonnet-5.5
-metadata:
-  pi.model: "anthropic/claude-sonnet-5-5"
-  pi.fallbackModel: "openai-codex/gpt-6.1-sol"
-  pi.thinking: "medium"
-  pi.tools: "read, grep, find, ls, bash, powershell, edit"
 ---
 
 ## Scoped editing

@@ -310,6 +310,7 @@ function loadAgentsFromDir(
 	dir: string,
 	source: "user" | "project" | "package",
 	roles: ReadonlyMap<string, RoleOverride> = new Map(),
+	excludeIdentities?: ReadonlySet<string>,
 ): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
@@ -329,6 +330,11 @@ function loadAgentsFromDir(
 		if (!entry.isFile() && !entry.isSymbolicLink()) continue;
 
 		const filePath = path.join(dir, entry.name);
+		// A physical package definition is package-only whatever its name or location; an unprovable identity is refused, never admitted as a legacy role.
+		if (excludeIdentities) {
+			const id = fileIdentity(filePath);
+			if (id === null || excludeIdentities.has(id)) continue;
+		}
 		let content: string;
 		try {
 			content = fs.readFileSync(filePath, "utf-8");
@@ -343,6 +349,25 @@ function loadAgentsFromDir(
 		}
 
 		const role = roles.get(frontmatter.name);
+		if (source === "package") {
+			// Single source: a canonical package definition contributes identity, body and native Copilot tools only.
+			// Every Pi setting comes from the validated roles.json role; no header model, metadata or native tools can fill a gap.
+			// An undeclared definition is still emitted (settings undefined) so the declared-vs-defined coverage check reports it; discovery then returns no agents.
+			agents.push({
+				name: frontmatter.name,
+				description: frontmatter.description,
+				tools: role?.tools,
+				model: role?.model,
+				fallbackModel: role?.fallbackModel,
+				defaultModelTier: role?.defaultModelTier,
+				modelTiers: role?.modelTiers,
+				thinking: role?.thinking,
+				systemPrompt: body,
+				source,
+				filePath,
+			});
+			continue;
+		}
 		const metadata = typeof frontmatter.metadata === "object" && frontmatter.metadata !== null && !Array.isArray(frontmatter.metadata)
 			? frontmatter.metadata as Record<string, unknown>
 			: {};
@@ -386,6 +411,55 @@ function isDirectory(p: string): boolean {
 		return fs.statSync(p).isDirectory();
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Physical file identity: dev:ino when the filesystem reports a nonzero inode (catches hardlinks, junctions and symlinks), otherwise the resolved path
+ * (junctions/symlinks only; hardlinks are invisible without an inode, so a multi-link file with no inode is unprovable). Null when it cannot be proven.
+ */
+function fileIdentity(p: string): string | null {
+	try {
+		const stat = fs.statSync(p, { bigint: true });
+		if (stat.ino !== 0n) return `${stat.dev}:${stat.ino}`;
+		return stat.nlink > 1n ? null : fs.realpathSync(p);
+	} catch {
+		return null;
+	}
+}
+
+/** Identities of every *.md in the package agents directory, independent of roles.json validity, role names and discovery scope. */
+function packageDefinitionIdentities(dir: string): { ids: Set<string>; unprovable: string[]; listError?: string } {
+	const ids = new Set<string>();
+	const unprovable: string[] = [];
+	let entries: fs.Dirent[] = [];
+	try {
+		entries = fs.readdirSync(dir, { withFileTypes: true });
+	} catch (error) {
+		// A failed listing is not a proven-empty set: report it (project scope drops the package coverage errors).
+		return { ids, unprovable, listError: `package agents directory cannot be listed (${(error as { code?: unknown }).code ?? "unknown"}): ${dir}` };
+	}
+	for (const entry of entries) {
+		if (!entry.name.endsWith(".md") || (!entry.isFile() && !entry.isSymbolicLink())) continue;
+		const id = fileIdentity(path.join(dir, entry.name));
+		if (id === null) unprovable.push(entry.name);
+		else ids.add(id);
+	}
+	return { ids, unprovable };
+}
+
+function sameDirectory(first: string, second: string): boolean {
+	try {
+		const a = fs.realpathSync(first);
+		const b = fs.realpathSync(second);
+		if (a === b) return true;
+		// Case aliases can retain different spelling on Windows. Compare actual
+		// directory identities rather than lowercasing distinct case-sensitive paths.
+		const left = fs.statSync(a, { bigint: true });
+		const right = fs.statSync(b, { bigint: true });
+		return left.isDirectory() && right.isDirectory() && left.ino !== 0n && left.dev === right.dev && left.ino === right.ino;
+	} catch {
+		return false; // An unproven identity must not suppress a user override.
 	}
 }
 
@@ -439,6 +513,9 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const baseRoles = new Map<string, RoleOverride>();
 	const packageRoles = new Map<string, RoleOverride>();
 	let shipped: AgentConfig[] = [];
+	const packageIdentities = pkgRoot ? packageDefinitionIdentities(path.join(pkgRoot, "agents")) : undefined;
+	// Unlike registry errors this is reported in every scope: project scope must not admit an alias it cannot identify.
+	const identityError = packageIdentities?.listError ?? layout.error ?? (packageIdentities?.unprovable.length ? `package definition file identity cannot be proven (${packageIdentities.unprovable.join(", ")}): ${pkgRoot}` : undefined);
 	if (pkgRoot) {
 		const basePath = path.join(pkgRoot, "roles.json");
 		const base = loadRoleRegistry(basePath, "package roles.json");
@@ -448,15 +525,31 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 			baseRoles.set(name, baseRole);
 			const shippedOnly = resolveRole(name, undefined, baseRole);
 			if (shippedOnly.error) error = error ?? `package roles.json ${shippedOnly.error}: ${basePath}`;
+			// Canonical config is required: tier format with a configured default tier model and nonempty tools. Nothing is inherited from a header or the host.
+			if (!shippedOnly.error && (baseRole.legacy !== false || !shippedOnly.role.model || !shippedOnly.role.tools?.length)) {
+				error = error ?? `package roles.json role "${name}" needs tier-format model settings and nonempty tools: ${basePath}`;
+			}
 			const merged = resolveRole(name, baseRole, roles.get(name));
 			if (merged.error) error = error ?? `user roles.json ${merged.error}: ${userFile}`;
-			packageRoles.set(name, merged.role);
+			// A legacy scalar overlay replaces the tier projection field-wise; unset fields keep the shipped default-tier values.
+			const role = merged.role;
+			if (!merged.error && !shippedOnly.error && role.legacy === true) {
+				role.model ??= shippedOnly.role.model;
+				role.fallbackModel ??= shippedOnly.role.fallbackModel;
+				role.thinking ??= shippedOnly.role.thinking;
+				role.tools ??= shippedOnly.role.tools;
+			}
+			packageRoles.set(name, role);
 		}
 		shipped = loadAgentsFromDir(path.join(pkgRoot, "agents"), "package", packageRoles);
 		// Every declared role needs exactly one parsed definition, and no parsed definition may be undeclared (an empty set is never valid).
 		const declared = [...base.roles.keys()].sort();
 		const defined = shipped.map((a) => a.name).sort();
-		if (!error && (declared.length === 0 || JSON.stringify(declared) !== JSON.stringify(defined))) error = `package roles.json and agents disagree on role names: ${pkgRoot}`;
+		if (!error && (declared.length === 0 || JSON.stringify(declared) !== JSON.stringify(defined))) {
+			const detail = ([["missing definition", declared.filter((n) => !defined.includes(n))], ["undeclared definition", defined.filter((n) => !declared.includes(n))]] as const)
+				.filter(([, names]) => names.length).map(([label, names]) => `${label}: ${names.join(", ")}`).join("; ");
+			error = `package roles.json and agents disagree on role names${detail ? ` (${detail})` : ""}: ${pkgRoot}`;
+		}
 	}
 
 	const packageAgents = scope === "project" ? [] : shipped;
@@ -469,8 +562,10 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 		if (resolved.error) error = error ?? `user roles.json ${resolved.error}: ${userFile}`;
 		userRoles.set(name, resolved.role);
 	}
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user", userRoles);
-	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+	// A package installed in the profile already loaded these exact files above.
+	const sharedPackageDir = pkgRoot !== null && sameDirectory(userDir, path.join(pkgRoot, "agents"));
+	const userAgents = scope === "project" || sharedPackageDir ? [] : loadAgentsFromDir(userDir, "user", userRoles, packageIdentities?.ids);
+	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project", undefined, packageIdentities?.ids);
 
 	const agentMap = new Map<string, AgentConfig>();
 
@@ -485,6 +580,7 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 
 	// Project scope never reads the package or user registries, so their failures are not reported there.
 	if (error && scope !== "project") return { agents: [], projectAgentsDir, error };
+	if (identityError) return { agents: [], projectAgentsDir, error: identityError };
 	return { agents: Array.from(agentMap.values()), projectAgentsDir };
 }
 

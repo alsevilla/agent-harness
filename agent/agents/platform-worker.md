@@ -2,12 +2,6 @@
 name: platform-worker
 description: Implements accepted Terraform, Kubernetes, kubectl, Azure CLI, Helm, FluxCD GitOps and GitHub Actions workflow file changes with local checks that reach no cluster or network. Applies no live change. Not devops design advice, release delivery or product, security or architecture decisions.
 tools: read, search, execute, edit
-model: claude-haiku-5.5
-metadata:
-  pi.model: "anthropic/claude-haiku-5-5"
-  pi.fallbackModel: "openai-codex/gpt-6-luna"
-  pi.thinking: "low"
-  pi.tools: "read, grep, find, ls, bash, powershell, edit"
 ---
 
 ## Role and authority

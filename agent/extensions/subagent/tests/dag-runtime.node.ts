@@ -313,7 +313,7 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	finish(children()[0], "legacy single result");
 	const singleResult = await single;
 	assert.notEqual(singleResult.isError, true);
-	assert.equal(singleResult.details.results[0].modelTier, "capable"); // omitted new-format role labels its resolved default tier
+	assert.equal(singleResult.details.results[0].modelTier, "economy"); // omitted new-format role labels its resolved default tier (economy after the approved preset update)
 	const batch = tool.execute("omitted-tier-batch", { background: false, agentScope: "both", tasks: [
 		{ agent: "backend-worker", task: "batch one", cwd: makeRepo("omitted-tier-batch-one") },
 		{ agent: "backend-worker", task: "batch two", cwd: makeRepo("omitted-tier-batch-two") },
@@ -324,14 +324,14 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	finish(children()[1], "batch one result"); finish(children()[2], "batch two result");
 	const batchResult = await batch;
 	assert.notEqual(batchResult.isError, true);
-	assert.deepEqual(batchResult.details.results.map((row: any) => row.modelTier), ["capable", "capable"]);
+	assert.deepEqual(batchResult.details.results.map((row: any) => row.modelTier), ["economy", "economy"]);
 	children().length = 0;
 	const launch = tool.execute("omitted-tier", { background: false, agentScope: "both", chain: [
 		{ agent: "backend-worker", task: "legacy omitted" },
-		{ agent: "backend-worker", task: "explicit", modelTier: "economy" },
+		{ agent: "backend-worker", task: "explicit", modelTier: "capable" },
 		{ agent: "backend-worker", task: "legacy again" },
 	] }, undefined, undefined, dagCtx(makeRepo("omitted-tier")));
-	for (const expected of [baseline.model, baseline.modelTiers!.economy.model, baseline.model]) {
+	for (const expected of [baseline.model, baseline.modelTiers!.capable.model, baseline.model]) {
 		await waitFor(() => children().length > 0 && !children().at(-1)!.exited, "chain child");
 		const child = children().at(-1)!;
 		assert.equal(child.model, expected);
@@ -377,23 +377,29 @@ for (const { roleName, tier } of [
 	}
 });
 
-// Shipped api-specialist is capable-only: the shipped or neutral overlay keeps capable launchable, a missing economy tier is refused, and an empty modelTiers overlay fails discovery for every tier.
-check("api-specialist tiers follow shipped and overlaid roles.json: missing economy is refused and an empty modelTiers overlay refuses every tier before any child spawns", async () => {
+// The approved api-specialist preset configures both Anthropic tiers: the shipped or neutral overlay launches each configured tier with its own model and thinking
+// (the Claude subscription guard is installed for these launches), and an empty modelTiers overlay fails discovery for every tier.
+const API_TIERS = { economy: "anthropic/claude-haiku-5-5", capable: "anthropic/claude-sonnet-5-5" } as const;
+check("api-specialist tiers follow shipped and overlaid roles.json: both configured tiers launch and an empty modelTiers overlay refuses every tier before any child spawns", async () => {
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
 	const cases: Array<[unknown, "economy" | "capable", RegExp | "launch"]> = [
-		[undefined, "economy", /not supported for role "api-specialist"/],
+		[undefined, "economy", "launch"],
 		[undefined, "capable", "launch"],
-		[[{ name: "api-specialist" }], "economy", /not supported for role "api-specialist"/],
+		[[{ name: "api-specialist" }], "economy", "launch"],
 		[[{ name: "api-specialist" }], "capable", "launch"],
 		[[{ name: "api-specialist", modelTiers: {} }], "economy", /Subagent roles unavailable/],
 		[[{ name: "api-specialist", modelTiers: {} }], "capable", /Subagent roles unavailable/],
 	];
+	try {
 	for (const [overlay, tier, expected] of cases) await withUserRoles(overlay, async () => {
 		const pi = fakePi(); subagentExtension(pi);
 		const base = children().length;
 		const launch = pi.tools.get("subagent")!.execute(`specialist-${tier}`, { background: false, agentScope: "both", agent: "api-specialist", task: "tier probe", modelTier: tier }, undefined, undefined, dagCtx(makeRepo(`specialist-${tier}`)));
 		if (expected === "launch") {
-			await waitFor(() => children().length === base + 1, `${JSON.stringify(overlay)} capable launches`);
-			assert.equal(flagValue(children()[base], "--model"), "openai-codex/gpt-6.1-sol");
+			await waitFor(() => children().length === base + 1, `${JSON.stringify(overlay)} ${tier} launches`);
+			assert.equal(flagValue(children()[base], "--model"), API_TIERS[tier]);
 			assert.equal(flagValue(children()[base], "--thinking"), "high");
 			finish(children()[base], "ok");
 			assert.notEqual((await launch).isError, true);
@@ -405,6 +411,9 @@ check("api-specialist tiers follow shipped and overlaid roles.json: missing econ
 			assert.equal(pi.sent.length, 0);
 		}
 	});
+	} finally {
+		fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true });
+	}
 });
 
 check("explicit package role tier selects configured model without changing role", async () => {
