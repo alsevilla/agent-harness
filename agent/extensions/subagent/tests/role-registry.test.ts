@@ -599,6 +599,12 @@ const PROFILE_LF_SHA256: Record<string, string> = {
 };
 // Approved post-change LF digest of the one profile whose pi.tools/body changed for the write grant; replaces its pre-change PROFILE_LF_SHA256 pin for the byte check.
 const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "c47d394b8257c7c10d6dccdf9bd937200a951d202571505db263650af7bc9869" };
+// Approved policy exception (authorized-retirement-policy): release-engineer's body gained the separate Authorized retirement mode and qualified its routine-mode ban.
+// P2 (cleanup-routing-followups) added one release-engineer sentence stating that named write paths are instruction-enforced, not hard isolation; only these current pins moved.
+// These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
+const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
+  "release-engineer": { afterLfSha256: "ca8c4a06fdc32ebdc75e3ec5654aa2c867ed4963f831b21bc1c6d364ceed1f98", bodySha256: "6798d969032898afdb30038f653ca93fa1d149276875af19f78800fce605fb6c", reinsertedLfSha256: "16446a855cd9acf98e4f401832fa3bb28a956e683fe847d09059aa6de36609f1" },
+};
 type RawTier = { model: string; fallbackModel: string; thinking: string };
 type RawRole = { name: string; defaultModelTier: "economy" | "capable"; modelTiers: Partial<Record<"economy" | "capable", RawTier>>; tools: string };
 const RAW_ROLES = () => JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8")) as RawRole[];
@@ -618,16 +624,16 @@ test("tier-only baseline pins the 20 shipped roles; header removal removed only 
     const entry = headerRemoval.roles.find((item) => item.name === name)!;
     assert.equal(entry.headLfSha256, APPROVED_PROFILE_DIGESTS[name] ?? digest, `${name}: historical pin and header-removal baseline agree`);
     const text = lfText(new URL(`../../../agents/${name}.md`, import.meta.url));
-    assert.equal(sha256Latin1(text), entry.expectedAfterLfSha256, `${name}: post-change profile bytes`);
+    assert.equal(sha256Latin1(text), POLICY_EXCEPTION_PINS[name]?.afterLfSha256 ?? entry.expectedAfterLfSha256, `${name}: post-change profile bytes`);
     assert.equal(entry.removed.length, 6, `${name}: exactly model + metadata block removed`);
     assert.deepEqual(entry.removed.map((line) => line.split(":")[0].trim()), ["model", "metadata", "pi.model", "pi.fallbackModel", "pi.thinking", "pi.tools"], `${name}: removed field names`);
     const lines = text.split("\n");
     const at = lines.indexOf(entry.nativeToolsLine);
     assert.ok(at > 0, `${name}: native tools line preserved`);
     assert.equal(lines[at - 1], entry.descriptionLine, `${name}: description line preserved`);
-    assert.equal(sha256Latin1([...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n")), entry.headLfSha256, `${name}: reinserting the removed lines reproduces the historical bytes`);
+    assert.equal(sha256Latin1([...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n")), POLICY_EXCEPTION_PINS[name]?.reinsertedLfSha256 ?? entry.headLfSha256, `${name}: reinserting the removed lines reproduces the historical bytes`);
     const body = text.slice(text.indexOf("\n---", 4) + 5);
-    assert.equal(sha256Latin1(body), entry.bodySha256, `${name}: body unchanged`);
+    assert.equal(sha256Latin1(body), POLICY_EXCEPTION_PINS[name]?.bodySha256 ?? entry.bodySha256, `${name}: body unchanged`);
   }
 });
 
