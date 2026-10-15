@@ -147,7 +147,7 @@ const NEW_AFTER = ["c708d8e8", "33322dbf"];
 // REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
 const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5", "live/backend-worker": "413f9b80a968b35c772de6e61e90677566c5adcc82a53fd7483d51cfefa2b0b8" };
 const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["f699bace", "2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b", "24903de1"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
-const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "d186309c", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "b12fc73f", "3071e855", "9c5c7203", "4e315760", "9056f070", "6eae5fa7", "14027cde", "05c854d6", "333f18d0", "4902dcff", "e44b5f82", "edac9437"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
+const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "3f459c5e", "5b9429cd", "5bd5093c", "76d48a37"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {
@@ -233,6 +233,85 @@ test("release cleanup policy assigns only safe post-merge task-owned removal to 
 		assert.match(text, /(?:without|no)\s+`?--force`?/);
 		assert.match(text, /CLEANUP_PENDING/);
 		assert.match(text, /(?:missing terminal or quiescence|quiescence evidence)/i);
+	}
+});
+
+const skillText = (rel: string) => fs.readFileSync(new URL(`../../../skills/engineering-harness/${rel}`, import.meta.url), "utf8");
+
+test("post-merge cleanup removes exactly three named targets and never bulk-copies, archives, sweeps or forces", () => {
+	const worktree = skillText("worktree/index.md");
+	assert.ok(worktree.includes("The cleanup set is exactly three targets"), "exactly three targets");
+	assert.match(worktree, /`git worktree remove <exact absolute path>`[^\n]{0,40}no `--force`/);
+	assert.ok(worktree.includes("exact `_evidence/<task>` directory"), "exact evidence target");
+	assert.ok(worktree.includes("exact `_scratch/<task>` directory"), "exact scratch target");
+	assert.ok(worktree.includes("host-appropriate removal operation"), "packet supplies exact removal operation per target");
+	assert.ok(worktree.includes("one exact path at a time"), "artifact directories removed one exact path at a time");
+	assert.ok(!worktree.includes("The cleanup set is exactly three paths"), "old three-paths wording removed");
+	assert.ok(!worktree.includes("unique evidence is preserved outside every deletion target"), "contradictory unique-evidence wording removed");
+	for (const term of ["no archive-by-default", "no bulk copy", "no sweep", "no wildcard", "no parent-directory removal", "no prune", "no branch deletion"]) assert.ok(worktree.includes(term), term);
+});
+
+test("post-merge cleanup waits for the knowledge checkpoint; a BLOCKED checkpoint retains the target and never rolls back the merge", () => {
+	assert.ok(skillText("worktree/index.md").includes("runs once the knowledge checkpoint is SAVED"), "worktree: canonical knowledge gate before cleanup");
+	assert.ok(skillText("worktree/index.md").includes("or after a NO LESSON checkpoint"), "worktree: NO LESSON alternative");
+	assert.ok(skillText("ship/index.md").includes("worktree/index.md"), "ship points to the canonical knowledge gate");
+	assert.ok(!skillText("ship/index.md").includes("merged state includes"), "ship does not duplicate the gate paragraph");
+	const worktree = skillText("worktree/index.md");
+	assert.ok(worktree.includes("BLOCKED knowledge checkpoint"), "BLOCKED retention");
+	assert.ok(worktree.includes("never rolls back the merge"), "no rollback of merge");
+	assert.ok(worktree.includes("may be saved locally outside the deletion targets"), "late local lesson stays outside targets");
+	assert.ok(worktree.includes("cannot be claimed as already published"), "shared copy is not claimed as published");
+});
+
+test("shared publication is verified from a freshly fetched base by blob id, never by squash-prone commit ancestry; a destination inside a deletion target is never durable", () => {
+	const worktree = skillText("worktree/index.md");
+	for (const term of ["freshly fetched remote base", "git fetch", "git rev-parse", "git -C <exact checkout path> hash-object", "not commit ancestry", "A destination inside any of the three deletion targets is not durable"]) assert.ok(worktree.includes(term), term);
+	const release = fs.readFileSync(new URL("../../../agents/release-engineer.md", import.meta.url), "utf8");
+	assert.match(release, /worktree\/index\.md/, "release-engineer points to the canonical cleanup gate");
+	assert.match(release, /local SAVED[\s\S]{0,160}outside every cleanup target/);
+});
+
+test("cleanup retains a target with unique or unreproduced required evidence or user data; no default archive or bulk copy", () => {
+	assert.match(skillText("worktree/index.md"), /unique or unreproduced[^.]{0,120}RETAINED/);
+	assert.ok(skillText("worktree/index.md").includes("not copied or archived by default"), "no default archive or bulk copy");
+});
+
+test("release-engineer body mirrors the exact three-target cleanup and keeps arbitrary directory deletion forbidden", () => {
+	const release = fs.readFileSync(new URL("../../../agents/release-engineer.md", import.meta.url), "utf8");
+	assert.match(release, /exact `_evidence\/<task>` and `_scratch\/<task>` directories the packet names/);
+	assert.match(release, /arbitrary directory deletion/);
+	assert.match(release, /wildcard, sweep/);
+});
+
+test("public README cleanup section distinguishes authorized exact task artifact deletion from arbitrary directories", () => {
+	const readme = fs.readFileSync(new URL("../../../../README.md", import.meta.url), "utf8");
+	const section = /## Worktree placement and disposition\r?\n([\s\S]*?)\r?\n## /.exec(readme)?.[1] ?? "";
+	assert.ok(section.length > 0, "cleanup section present");
+	assert.ok(section.includes("exact `_evidence/<task>` and `_scratch/<task>` directories"), "exact artifact targets");
+	assert.ok(section.includes("arbitrary directories are never deleted"), "arbitrary directories forbidden");
+	assert.ok(!section.includes("Main performs disposition"), "release engineer performs; main schedules");
+});
+
+test("post-merge cleanup retains active, paused, service, database, shared, unique, unauthorized and unmerged targets with a concrete reason", () => {
+	const worktree = skillText("worktree/index.md");
+	for (const term of ["active or paused job", "-wal", "-shm", "explicit retention", "missing authority", "shared or uniquely owned data", "user data", "Unmerged or PR-only candidates are retained"]) assert.ok(worktree.includes(term), term);
+});
+
+test("post-merge cleanup keeps temp, log and report destinations outside every deletion target; no file is recreated after delete", () => {
+	const worktree = skillText("worktree/index.md");
+	for (const term of ["temp, log and report destinations lie outside all three deletion targets", "inline or approved external report", "no file is recreated in a removed target"]) assert.ok(worktree.includes(term), term);
+});
+
+test("legacy worktree, ship and learn guide.md files are tiny pointers to the same-folder canonical index.md, not independent procedures", () => {
+	for (const mod of ["worktree", "ship", "learn"]) {
+		const guide = skillText(`${mod}/guide.md`);
+		const lines = guide.split(/\r?\n/).filter((line) => line.trim() !== "");
+		assert.ok(guide.length <= 500 && lines.length <= 4, `${mod}/guide.md: pointer-only, got ${guide.length} chars / ${lines.length} lines`);
+		assert.equal(lines.filter((line) => /^#{1,6} /.test(line)).length, 1, `${mod}/guide.md: at most one heading`);
+		assert.match(guide, /`index\.md`/, `${mod}/guide.md: names the same-folder canonical index.md`);
+		assert.match(guide, /canonical/i, `${mod}/guide.md: states canonical authority`);
+		for (const old of [/Before mutation|Before an authorized commit|Confirm:|Placement|relocation|Completion and cleanup|Optional retrospective|Three-incident|git worktree remove|CLEANUP_PENDING|Do not run SHIP|Capture only stable|\bLEARN\b|\bSHIP\b/]) assert.doesNotMatch(guide, old, `${mod}/guide.md: restates the old procedure`);
+		assert.ok(skillText(`${mod}/index.md`).includes("## "), `${mod}/index.md: canonical procedure exists`);
 	}
 });
 
