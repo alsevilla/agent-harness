@@ -308,6 +308,9 @@ def parse_calls(value, where):
             _text(call["task"], f"{at}.task")
             tier = _tier(call["modelTier"], at) if "modelTier" in call else None
             dispatches.append({"agent": _choice(call["agent"], ROLES, f"{at}.agent"), "tier": tier, "before": frozenset()})
+        if call.get("agentScope") == "project" and any(d["tier"] is not None for d in dispatches[base:]):
+            raise RoutingEvalError(f"{at}.agentScope: project scope cannot take an explicit modelTier; "
+                                   "canonical package roles are not in project-only discovery")
     return dispatches
 
 

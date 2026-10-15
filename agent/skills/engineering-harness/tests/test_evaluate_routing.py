@@ -741,6 +741,75 @@ class NativeCallValidationTests(unittest.TestCase):
         self.assertNotIn("Traceback", r.stderr)
 
 
+def scoped(mode, tiers, scope="project"):
+    """One native call in `mode` with one entry per item of `tiers` (None = modelTier absent)."""
+    def item(i, tier):
+        extra = {"modelTier": tier} if tier is not None else {}
+        return node(f"n{i}", **extra) if mode == "dag" else entry(**extra)
+    if mode == "single":
+        call = {"agent": "security-specialist", "task": "t", **({"modelTier": tiers[0]} if tiers[0] else {})}
+    else:
+        call = {mode: [item(i, t) for i, t in enumerate(tiers)]}
+    return {**call, "agentScope": scope}
+
+
+class ProjectScopeTierTests(unittest.TestCase):
+    """Project-only discovery has no canonical package roles (agents.ts: packageAgents = [] for project),
+    so an explicit modelTier under agentScope project cannot resolve: input error, exit 2, never a dispatch."""
+
+    def assertRefused(self, call, label=""):
+        with self.assertRaisesRegex(ev.RoutingEvalError, r"calls\[0\]\.agentScope", msg=f"{label} {call!r}"):
+            ev.parse_calls([call], "calls")
+
+    def test_project_scope_refuses_explicit_tier_in_every_mode(self):
+        for mode in ("single", "tasks", "chain", "dag"):
+            for tier in ("economy", "capable"):
+                self.assertRefused(scoped(mode, [tier]), f"{mode} {tier}")
+
+    def test_project_scope_refuses_tier_on_any_later_batch_entry(self):
+        for mode in ("tasks", "chain", "dag"):
+            self.assertRefused(scoped(mode, [None, "capable"]), f"{mode} second")
+            self.assertRefused(scoped(mode, [None, None, "economy"]), f"{mode} third")
+
+    def test_refusal_applies_to_each_call_in_a_list(self):
+        with self.assertRaisesRegex(ev.RoutingEvalError, r"calls\[1\]\.agentScope"):
+            ev.parse_calls([scoped("single", [None]), scoped("chain", [None, "capable"])], "calls")
+
+    def test_project_scope_without_explicit_tier_still_parses(self):
+        for mode in ("single", "tasks", "chain", "dag"):
+            found = ev.parse_calls([scoped(mode, [None])], "calls")
+            self.assertEqual([d["tier"] for d in found], [None], mode)
+
+    def test_user_and_both_scope_with_explicit_tier_unchanged(self):
+        for scope in ("user", "both"):
+            found = ev.parse_calls([scoped("chain", ["economy", "capable"], scope)], "calls")
+            self.assertEqual([d["tier"] for d in found], ["economy", "capable"], scope)
+
+    def test_default_scope_with_explicit_tier_unchanged(self):
+        found = ev.parse_calls([entry(modelTier="capable")], "calls")
+        self.assertEqual([d["tier"] for d in found], ["capable"])
+
+    def test_evaluate_scores_nothing_for_project_tier(self):
+        rows = perfect_predictions(load_fixture())
+        case_row(rows, "R18")["calls"] = [scoped("single", ["capable"])]
+        with self.assertRaises(ev.RoutingEvalError):
+            evaluate_rows(rows)
+
+    def test_cli_refuses_project_tier_without_result(self):
+        for mode, tiers in (("single", ["capable"]), ("chain", [None, "economy"]), ("dag", ["capable"])):
+            rows = perfect_predictions(load_fixture())
+            case_row(rows, "R18")["calls"] = [scoped(mode, tiers)]
+            with tempfile.TemporaryDirectory() as tmp:
+                p = Path(tmp) / "p.jsonl"
+                p.write_text(to_jsonl(rows), encoding="utf-8")
+                r = run_cli("--cases", str(CASES), "--predictions", str(p))
+            self.assertEqual(r.returncode, 2, f"{mode}: {r.stdout}{r.stderr}")
+            self.assertIn("calls[0].agentScope", r.stderr, mode)
+            self.assertNotIn("RESULT:", r.stdout, mode)
+            self.assertNotIn("matched:", r.stdout, mode)
+            self.assertNotIn("Traceback", r.stderr, mode)
+
+
 class CallOrderTests(unittest.TestCase):
     """Precedence comes from chain order or dependency ancestry, never from array position or call order."""
     DBG = node("d", "debugger", modelTier="capable")
