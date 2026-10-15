@@ -9,7 +9,7 @@ const root = join(import.meta.dir, "..");
 test("Copilot plugin manifest has supported metadata and contained shared paths", () => {
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
   expect(manifest.name).toBe("agent-harness");
-  expect(manifest.version).toBe("1.7.0");
+  expect(manifest.version).toBe("1.8.0");
   expect(manifest.agents).toBe("./agent/agents");
   expect(manifest.skills).toBe("./agent/skills");
   for (const [path, sentinel] of [[manifest.agents, "general-worker.md"], [manifest.skills, "engineering-harness/SKILL.md"]]) {

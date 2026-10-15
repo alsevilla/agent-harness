@@ -58,6 +58,7 @@ agent/extensions/refresh/config.json
 # Knowledge library: private and local notes stay unversioned and unindexed
 docs/knowledge/private/
 docs/knowledge/local/
+docs/plans/
 # Provider cooldown shared store (machine-local run state; never commit)
 agent/run-state/
 
