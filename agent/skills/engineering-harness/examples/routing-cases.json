@@ -13,7 +13,8 @@
         "roles_required": ["backend-worker"],
         "roles_allowed": ["backend-worker"],
         "skills_required": ["backend"],
-        "skills_forbidden": ["backend/rust-axum-engineering"]
+        "skills_forbidden": ["backend/rust-axum-engineering"],
+        "model_tiers": {"backend-worker": ["economy", "omitted"]}
       }
     },
     {
@@ -41,7 +42,8 @@
         "roles_required": ["frontend-worker"],
         "roles_allowed": ["frontend-worker"],
         "skills_required": ["frontend/solidjs-engineering"],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"frontend-worker": ["economy", "omitted"]}
       }
     },
     {
@@ -69,7 +71,8 @@
         "roles_required": ["debugger", "backend-worker"],
         "roles_allowed": ["debugger", "backend-worker"],
         "skills_required": [],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"debugger": ["capable"]}
       }
     },
     {
@@ -111,7 +114,8 @@
         "roles_required": ["general-worker"],
         "roles_allowed": ["general-worker"],
         "skills_required": [],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"general-worker": ["economy", "omitted"]}
       }
     },
     {
@@ -139,7 +143,8 @@
         "roles_required": ["reviewer"],
         "roles_allowed": ["reviewer"],
         "skills_required": [],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"reviewer": ["capable"]}
       }
     },
     {
@@ -209,7 +214,8 @@
         "roles_required": ["backend-worker"],
         "roles_allowed": ["backend-worker"],
         "skills_required": [],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"backend-worker": ["economy", "omitted"]}
       }
     },
     {
@@ -237,7 +243,8 @@
         "roles_required": ["concurrency-specialist"],
         "roles_allowed": ["concurrency-specialist"],
         "skills_required": [],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"concurrency-specialist": ["capable"]}
       }
     },
     {
@@ -251,7 +258,8 @@
         "roles_required": ["security-specialist"],
         "roles_allowed": ["security-specialist"],
         "skills_required": [],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "model_tiers": {"security-specialist": ["capable"]}
       }
     },
     {

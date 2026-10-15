@@ -161,7 +161,7 @@ const NEW_AFTER = ["c708d8e8", "33322dbf"];
 // REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
 const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5", "live/backend-worker": "413f9b80a968b35c772de6e61e90677566c5adcc82a53fd7483d51cfefa2b0b8" };
 const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["f699bace", "2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b", "24903de1"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
-const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "3f459c5e", "5b9429cd", "5bd5093c", "76d48a37"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
+const REPAIR_ADDED: Record<string, string[]> = { "release-engineer": ["b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "837d4d6e", "640c0eec", "ef50b27a", "eece1ded", "01c6f29a", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "5b9429cd", "76d48a37", "d03ad015", "fb177cbb", "75070b2d", "98045f96", "f5869bdd", "845fda3d", "e7d3b119", "95ca1463", "cef6155c", "778dfea8", "495aa565"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {
@@ -314,6 +314,62 @@ test("post-merge cleanup retains active, paused, service, database, shared, uniq
 test("post-merge cleanup keeps temp, log and report destinations outside every deletion target; no file is recreated after delete", () => {
 	const worktree = skillText("worktree/index.md");
 	for (const term of ["temp, log and report destinations lie outside all three deletion targets", "inline or approved external report", "no file is recreated in a removed target"]) assert.ok(worktree.includes(term), term);
+});
+
+// Authorized retirement: a separate, narrow, user-authorized mode. Routine post-merge cleanup keeps its unconditional no-force/no-parent ban.
+const retirementSection = () => /### Authorized retirement[^\n]*\r?\n([\s\S]*?)(?:\r?\n### |\r?\nLoad `references\/extended\.md`|$)/.exec(skillText("worktree/index.md"))?.[1] ?? "";
+const releaseText = () => fs.readFileSync(new URL("../../../agents/release-engineer.md", import.meta.url), "utf8");
+test("retirement: routine post-merge cleanup keeps its ordinary ban and is explicitly separate from the retirement mode", () => {
+	const worktree = skillText("worktree/index.md");
+	assert.ok(retirementSection().length > 200, "worktree has a distinct Authorized retirement section");
+	for (const term of ["The cleanup set is exactly three targets", "no shared-parent removal", "no parent-directory removal", "Routine cleanup never resets/cleans, force-removes, deletes branches or deletes arbitrary directories", "Two distinct modes"]) assert.ok(worktree.includes(term), term);
+	assert.match(releaseText(), /In routine mode[^\n]{0,40}no reset, clean, force-removal, branch deletion, wildcard, sweep/);
+	assert.match(releaseText(), /In routine mode the only removals are the exact checkout/);
+	assert.ok(releaseText().includes("`git worktree remove` using the exact absolute path, without `--force`"), "routine no-force sentence unchanged");
+});
+
+test("retirement: requires user-disposition authority naming each exact path and operation; dirty discard needs explicit discard consent that merge or general cleanup never implies", () => {
+	const section = retirementSection();
+	for (const term of ["user-disposition authority", "names each exact absolute path or data item and the exact operation", "explicit discard consent", "consent to merge or to general cleanup is not discard consent", "parent approval is never implied", "readiness or role guidance grants nothing"]) assert.ok(section.includes(term), term);
+	const release = releaseText();
+	for (const term of ["Authorized retirement", "explicit discard consent", "worktree/index.md"]) assert.ok(release.includes(term), `release-engineer: ${term}`);
+});
+
+test("retirement: force-removes only listed discarded checkouts, then the exact approved parent; rejects active, primary, live-database and unknown-owner targets", () => {
+	const section = retirementSection();
+	for (const term of ["git worktree remove --force <exact absolute path>", "only the listed discarded checkouts", "exact approved retired parent", "primary checkout", "active or paused worker", "running service", "live database", "unknown actual ownership", "new ongoing data", "own cwd", "terminal known owners", "fresh process, lock and link checks", "explicit user statement that nothing ongoing", "no global handle proof is required", "no sweep, wildcard or arbitrary parent"]) assert.ok(section.includes(term), term);
+	for (const term of ["no branch deletion", "no reset", "no clean", "no prune", "no history rewrite"]) assert.ok(section.includes(term), term);
+	assert.doesNotMatch(section, /[A-Za-z]:[\\/]+Users[\\/]|worktrees[\\/]+[A-Za-z0-9_.-]+[\\/]/, "the current retirement case is an example, never hardcoded paths");
+});
+
+test("retirement: guard refusal and operator grants stay required; artifacts and reports stay outside targets; order is preflight, knowledge, checkouts, registrations, parent, verification", () => {
+	const section = retirementSection();
+	for (const term of ["guard refusal", "exact operator grant", "no guard bypass", "no ungated Node deletion", "SAVED or NO LESSON checkpoint", "outside every target", "no fabricated lesson", "no automatic archive", "without following links", "proven link behavior", "stop all remaining operations", "partial report"]) assert.ok(section.includes(term), term);
+	const orderBullet = section.slice(section.indexOf("- Order:"));
+	assert.ok(orderBullet.startsWith("- Order:"), "explicit Order bullet");
+	const order = ["preflight every target", "SAVED or NO LESSON checkpoint", "force-remove each listed discarded checkout", "all nested registrations are removed and confirmed", "remove the exact approved retired parent", "verify exact target absence", "registration absence", "protected data readback"].map((term) => orderBullet.indexOf(term));
+	assert.ok(order.every((at) => at >= 0), `ordering terms present: ${order}`);
+	assert.deepEqual([...order].sort((a, b) => a - b), order, "operation order");
+});
+
+test("retirement: SHIP, AGENTS and README point to the worktree retirement mode without granting authority", () => {
+	assert.match(skillText("ship/index.md"), /Authorized retirement[^\n]{0,200}worktree\/index\.md|worktree\/index\.md[^\n]{0,200}Authorized retirement/);
+	const agents = fs.readFileSync(new URL("../../../AGENTS.md", import.meta.url), "utf8");
+	assert.match(agents, /Keep active\/dirty worktrees[^.]{0,160}(?:explicit user-authorized retirement|Authorized retirement)/);
+	const readme = fs.readFileSync(new URL("../../../../README.md", import.meta.url), "utf8");
+	const section = /## Worktree placement and disposition\r?\n([\s\S]*?)\r?\n## /.exec(readme)?.[1] ?? "";
+	assert.ok(section.includes("Authorized retirement"), "README names the retirement mode");
+	assert.ok(section.includes("arbitrary directories are never deleted"), "README keeps the ordinary ban");
+});
+
+test("release-engineer states that named write paths are instruction-enforced, not hard destination or filesystem isolation, and does not claim guard confinement", () => {
+	const release = releaseText();
+	const boundary = /## Mutation boundary\r?\n([\s\S]*?)\r?\n## /.exec(release)?.[1] ?? "";
+	const writeParagraph = boundary.split(/\r?\n\r?\n/).find((p) => p.startsWith("Native `write`")) ?? "";
+	assert.ok(writeParagraph.includes("instruction-enforced"), "named paths are instruction-enforced");
+	assert.ok(writeParagraph.includes("not hard destination or filesystem isolation"), "native write guard is not isolation");
+	assert.ok(writeParagraph.includes("shell and `edit` remain powerful"), "shell and edit remain powerful");
+	assert.doesNotMatch(boundary, /guard (?:confines|restricts|limits|enforces|prevents)|hard (?:destination|filesystem) (?:enforcement|confinement) (?:is|by)|confined by the (?:native )?write guard/i, "no runtime-confinement claim");
 });
 
 test("legacy worktree, ship and learn guide.md files are tiny pointers to the same-folder canonical index.md, not independent procedures", () => {
