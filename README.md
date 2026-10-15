@@ -104,7 +104,7 @@ Prompt templates: `/learn` is exported by the native package; the other workflow
 | `/verify <request>` | Dispatches the `test-engineer` subagent for independent verification. | [prompt](agent/prompts/verify.md) |
 | `/review <request>` | Dispatches the `reviewer` subagent for review. | [prompt](agent/prompts/review.md) |
 | `/ship <packet>` | Applies the ship module. The task packet must explicitly authorize the delivery stage and scope; normal delivery does not require a separate runtime grant or lease. | [prompt](agent/prompts/ship.md) |
-| `/learn <packet>` | Applies the learn module: dedupes, then dispatches `release-engineer` to save one verified lesson only with explicit destination authority. | [prompt](agent/prompts/learn.md) |
+| `/learn <packet>` | Applies the learn module: dedupes, then dispatches `release-engineer` to save one verified lesson only with explicit destination authority; the default LOCAL-ONLY destination is the ignored `docs/knowledge/local/` store, with no commit, push or publication. | [prompt](agent/prompts/learn.md) |
 | `/worktree <packet>` | Applies the worktree module for checkout placement and disposition. | [prompt](agent/prompts/worktree.md) |
 | `/integrate <packet>` | Applies the integrate module. | [prompt](agent/prompts/integrate.md) |
 | `/knowledge <packet>` | Applies the knowledge module. | [prompt](agent/prompts/knowledge.md) |
@@ -414,7 +414,7 @@ These commands refresh data or runtime state, not npm or Python packages. Use th
 
 ## Worktree placement and disposition
 
-New task checkouts use `<primary-parent>/worktrees/<repo>/<task>` unless the user or project explicitly chooses another location. Task scratch copies, fixtures and logs go in `_scratch/<task>` under that repo folder; durable evidence and backups go in `_evidence/<task>`. For artifact-producing assignments, main supplies exact absolute scratch and evidence directories in the task packet, and code leaves return missing paths instead of choosing sibling folders. Main performs disposition after confirmed merge or delivery: it removes idle, integrated, clean task-owned checkouts and reports why others remain. Dirty, unmerged, paused or active and user-owned environments are retained; no watcher deletes them automatically.
+New task checkouts use `<primary-parent>/worktrees/<repo>/<task>` unless the user or project explicitly chooses another location. Task scratch copies, fixtures and logs go in `_scratch/<task>` under that repo folder; durable evidence and backups go in `_evidence/<task>`. For artifact-producing assignments, main supplies exact absolute scratch and evidence directories in the task packet, and code leaves return missing paths instead of choosing sibling folders. After a confirmed merge, the release engineer removes only the exact three targets the task packet names, while main schedules the cleanup: the idle, integrated, clean task-owned checkout (`git worktree remove`, no `--force`) and the exact `_evidence/<task>` and `_scratch/<task>` directories, each by the packet's exact removal operation; arbitrary directories are never deleted. Dirty, unmerged, paused, active, user-owned or unique-evidence targets are retained and reported; no watcher deletes them automatically.
 
 Moving live SQLite or build-output directories requires authorized downtime, stopped owners and intact sidecars (`-wal`, `-shm`). Unknown restart configuration does not block authorized relocation; leave services stopped until the executable, environment and DB path are verified. See the [worktree procedure](agent/skills/engineering-harness/worktree/index.md).
 
@@ -444,7 +444,7 @@ Current behavior: code roles are listed in `agent/extensions/subagent/integratio
 
 ## Privacy and local files
 
-Authentication (`auth.json`), sessions, installed packages, caches, search indexes, generated graphs, binaries and machine-local settings are ignored by Git. Commit configuration examples only. Do not put credentials, tokens or machine-specific paths in shared files. Existing graphs and indexed notes are reference material; candidate source reads, edits and tests target the assigned checkout.
+Authentication (`auth.json`), sessions, installed packages, caches, search indexes, generated graphs, binaries and machine-local settings are ignored by Git. Commit configuration examples only. Local learn notes stay in the ignored `docs/knowledge/local/` store and are not published or indexed unless shared publication is separately authorized. Do not put credentials, tokens or machine-specific paths in shared files. Existing graphs and indexed notes are reference material; candidate source reads, edits and tests target the assigned checkout.
 
 ## Contributing
 

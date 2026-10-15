@@ -1,6 +1,6 @@
 {
   "schema": "header-removal-baseline/v1",
-  "purpose": "Independent proof of the approved single-source header removal: per role, the exact header lines removed (native model + whole pi.* metadata block), the preserved native tools/description lines and body digest. Captured from git HEAD 4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47 blobs before any header edit.",
+  "purpose": "Independent proof of the approved single-source header removal: per role, the exact header lines removed (native model + whole pi.* metadata block), the preserved native tools/description lines and body digest. Initial snapshot from git HEAD 4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47 blobs before any header edit. Exception: the release-engineer entry's headLfSha256, bodySha256 and expectedAfterLfSha256 are the explicitly approved digests from PR#4 commit 2b5ade6e523c570696a34b199bff8cc899564370 (its 4ceb blob headLfSha256 was 17d1cf1b0bec122b05a0883db9a17b25ddcf14d8243ec337184c7e40408402b8); the other 19 roles remain from the 4ceb base.",
   "base": "4ceb4d4dbf7cc35ab0130133413919c0ef9ffd47",
   "roles": [
     {
@@ -229,7 +229,7 @@
     },
     {
       "name": "release-engineer",
-      "headLfSha256": "17d1cf1b0bec122b05a0883db9a17b25ddcf14d8243ec337184c7e40408402b8",
+      "headLfSha256": "c47d394b8257c7c10d6dccdf9bd937200a951d202571505db263650af7bc9869",
       "nativeToolsLine": "tools: read, search, execute, edit",
       "descriptionLine": "description: Named owner for SHIP and LEARN. Validates release readiness and explicitly authorized release operations, then preserves durable release/operational knowledge without changing product source.",
       "removed": [
@@ -240,8 +240,8 @@
         "  pi.thinking: \"medium\"",
         "  pi.tools: \"read, grep, find, ls, bash, powershell, edit, write\""
       ],
-      "bodySha256": "f299f9ad9d66acfd7b48d1bae58790374d3acd2c131e2c7cada9024125f6116f",
-      "expectedAfterLfSha256": "e3502b0299718150be3bbaf1f431b25f9ea171ff7bf08897704258b7e8c8ae42"
+      "bodySha256": "f4d7290379aa5ef8b1b0d42de9b08bc179a152c4f5714ae0a0ac1d3c389c12a6",
+      "expectedAfterLfSha256": "2827e00617b54ba700f738d90372fb05e8812925a84594b20ab9039e2a3b657c"
     },
     {
       "name": "reviewer",
