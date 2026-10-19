@@ -51,8 +51,11 @@ async function runNodeSuite(): Promise<void> {
 	// Built-in catalog through the approved public compat factories (1563 distinct provider/id pairs at this install).
 	const compat: any = await import(installedUrl("pi-ai/dist/compat.js"));
 	const CATALOG: any[] = compat.getProviders().flatMap((p: string) => compat.getModels(p));
-	// Offline resolver proof (probe 2026-07): exactly this offered ref resolves to a different id, so the picker must exclude it.
-	const UNRESOLVABLE = new Set(["openrouter/openrouter/auto"]);
+	// Deliberately nonexistent fixture ref (absent from the catalog): the resolver must flag it as not found and never map it onto a catalog model.
+	const UNRESOLVABLE = new Set(["openrouter/__pi_nonexistent_fixture_model__"]);
+	// Offered-but-mismatched picker fixture: its ref equals baseten's raw slash-ID model, so the resolver maps it to baseten and the picker must omit it.
+	const MISMATCH_FIXTURE = { ...CATALOG.find((m) => m.provider === "anthropic"), provider: "deepseek-ai", id: "DeepSeek-V4-Pro" };
+	const MISMATCH_REF = `${MISMATCH_FIXTURE.provider}/${MISMATCH_FIXTURE.id}`;
 	const AUTHED = new Set(["anthropic", "openai-codex", "baseten", "amazon-bedrock"]);
 	const registry = () => ({
 		getAll: () => CATALOG,
@@ -185,7 +188,13 @@ async function runNodeSuite(): Promise<void> {
 			const resolved = piAgent.resolveCliModel({ cliModel: ref, modelRuntime: stub }).model;
 			if (!resolved || resolved.provider !== m.provider || resolved.id !== m.id) mismatched.push(ref);
 		}
-		assert.deepEqual(mismatched, [...UNRESOLVABLE]);
+		assert.deepEqual(mismatched, []);
+		for (const ref of UNRESOLVABLE) {
+			assert.ok(!CATALOG.some((m) => `${m.provider}/${m.id}` === ref), `fixture ref must be absent from the catalog: ${ref}`);
+			const probe = piAgent.resolveCliModel({ cliModel: ref, modelRuntime: stub });
+			assert.match(probe.warning ?? "", /not found/, `resolver must reject ${ref}`);
+			assert.ok(!CATALOG.some((m) => m.provider === probe.model?.provider && m.id === probe.model?.id), `resolver mapped ${ref} onto a catalog model`);
+		}
 		assert.ok(slashRefs > 800, `expected the built-in slash-ID set, got ${slashRefs}`);
 	});
 
@@ -197,6 +206,13 @@ async function runNodeSuite(): Promise<void> {
 		assert.ok(!refs.some((r: string) => UNRESOLVABLE.has(r)), "unresolvable ref must not be offered");
 		assert.ok(refs.every((r: string) => AUTHED.has(r.split("/")[0])), "disconnected provider offered");
 		assert.ok(!refs.includes(DISCONNECTED_REF), "disconnected ref offered as a choice");
+
+		const fixtureRegistry = { ...registry(), getAll: () => [...CATALOG, MISMATCH_FIXTURE], getAvailable: () => [...CATALOG.filter((m) => AUTHED.has(m.provider)), MISMATCH_FIXTURE] };
+		assert.ok(fixtureRegistry.getAll().some((m) => `${m.provider}/${m.id}` === MISMATCH_REF), "fixture must be in the offered input");
+		assert.ok(fixtureRegistry.getAvailable().some((m) => `${m.provider}/${m.id}` === MISMATCH_REF), "fixture must be connected, so only verification can exclude it");
+		const fixtureRefs = editor.catalogFromRegistry(fixtureRegistry).models().map((m: any) => `${m.provider}/${m.id}`);
+		assert.ok(!fixtureRefs.includes(MISMATCH_REF), "resolver-mismatched ref offered as a choice");
+		assert.ok(fixtureRefs.includes("baseten/deepseek-ai/DeepSeek-V4-Pro"), "the real baseten slash-ID choice must stay offered");
 	});
 
 	test("loader formula keeps short model fields for plain IDs and full refs for slash IDs", () => {

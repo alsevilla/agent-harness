@@ -73,7 +73,6 @@ let runSingleAgent: (...args: unknown[]) => Promise<RunResult>;
 // Usage ledger helpers from the production background module (same module instance index.ts imports).
 let bg: any;
 let attempts: string[] = [];
-let guardArgs: boolean[] = []; // per spawn: whether the child received the external-compaction guard entry
 let spawnPlan: (model: string) => SpawnPlan = () => success();
 // Launch state per declared model; the default launches everything (provider cooldown entry stub).
 let launchPlan: (model: string) => { state: string; replayable?: boolean } = () => ({ state: "launch" });
@@ -86,7 +85,6 @@ let guardPlan: (model: string, message?: string) => boolean = () => false;
 (globalThis as { __piSubagentFakeSpawn?: (args: string[]) => SpawnPlan }).__piSubagentFakeSpawn = (args) => {
 	const model = args[args.indexOf("--model") + 1];
 	attempts.push(model);
-	guardArgs.push(args.some((arg) => arg.endsWith("external-compaction-entry.ts")));
 	return spawnPlan(model);
 };
 
@@ -119,7 +117,6 @@ before(async () => {
 
 beforeEach(() => {
 	attempts = [];
-	guardArgs = [];
 	spawnPlan = () => success();
 	launchPlan = () => ({ state: "launch" });
 	guardPlan = () => false;
@@ -196,28 +193,6 @@ test("ordered availability failures advance one fallback at a time and stop at e
 	assert.equal(result.exitCode, 1);
 	assert.equal(result.model, COPILOT_SOL);
 	assert.equal(result.stderr.split("retried with").length - 1, 3);
-});
-
-test("external compaction guard reaches every fallback spawn only when PI_EXTERNAL_COMPACTION=1", async () => {
-	const fx = setupRoots();
-	writeRole(fx.userAgents, "guarded", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA} || ${COPILOT_SOL}"` });
-	spawnPlan = () => unavailable("429 rate limit");
-	const saved = process.env.PI_EXTERNAL_COMPACTION;
-	try {
-		process.env.PI_EXTERNAL_COMPACTION = "1";
-		await run(fx.nested, discover(fx.nested), "guarded");
-		assert.deepEqual(attempts, [PRIMARY, LUNA, COPILOT_LUNA, COPILOT_SOL]);
-		assert.deepEqual(guardArgs, [true, true, true, true]);
-		attempts = [];
-		guardArgs = [];
-		delete process.env.PI_EXTERNAL_COMPACTION;
-		await run(fx.nested, discover(fx.nested), "guarded");
-		assert.deepEqual(attempts, [PRIMARY, LUNA, COPILOT_LUNA, COPILOT_SOL]);
-		assert.deepEqual(guardArgs, [false, false, false, false]);
-	} finally {
-		if (saved === undefined) delete process.env.PI_EXTERNAL_COMPACTION;
-		else process.env.PI_EXTERNAL_COMPACTION = saved;
-	}
 });
 
 test("a later fallback can succeed after earlier availability failures", async () => {

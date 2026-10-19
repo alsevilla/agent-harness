@@ -100,8 +100,6 @@ const extSrc = path.join(repo, "agent", "extensions", "subagent");
 for (const file of fs.readdirSync(extSrc).filter((f) => f.endsWith(".ts") && !/\.(test|node)\.ts$/.test(f))) copy(path.join(extSrc, file), path.join(pkg, "extensions", "subagent", file));
 // ask_user: only the runtime pair (MIT, no deps); its tests and README stay in the profile.
 for (const file of ["index.ts", "core.ts"]) copy(path.join(repo, "agent", "extensions", "ask-user", file), path.join(pkg, "extensions", "ask-user", file));
-// Parent external-compaction guard (opt-in PI_EXTERNAL_COMPACTION=1): the profile wrapper copied byte-for-byte; it imports the copied subagent/external-compaction-entry.ts above.
-copy(path.join(repo, "agent", "extensions", "external-compaction", "index.ts"), path.join(pkg, "extensions", "external-compaction", "index.ts"));
 fs.writeFileSync(path.join(pkg, "extensions", "subagent", "integrations.json"), JSON.stringify({ roles: [], readOnlyTools: [], workerTools: [] }, null, 2) + "\n");
 
 // Skills: agent-creation CLI and harness modules (dev-only examples, scripts, tests and unaudited catalogs excluded).

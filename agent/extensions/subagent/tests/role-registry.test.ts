@@ -625,6 +625,7 @@ test("tier-only baseline pins the 20 shipped roles; header removal removed only 
     assert.equal(entry.headLfSha256, APPROVED_PROFILE_DIGESTS[name] ?? digest, `${name}: historical pin and header-removal baseline agree`);
     const text = lfText(new URL(`../../../agents/${name}.md`, import.meta.url));
     assert.equal(sha256Latin1(text), POLICY_EXCEPTION_PINS[name]?.afterLfSha256 ?? entry.expectedAfterLfSha256, `${name}: post-change profile bytes`);
+    assert.equal(sha256Latin1(text), POLICY_EXCEPTION_PINS[name]?.afterLfSha256 ?? entry.expectedAfterLfSha256, `${name}: post-change profile bytes`);
     assert.equal(entry.removed.length, 6, `${name}: exactly model + metadata block removed`);
     assert.deepEqual(entry.removed.map((line) => line.split(":")[0].trim()), ["model", "metadata", "pi.model", "pi.fallbackModel", "pi.thinking", "pi.tools"], `${name}: removed field names`);
     const lines = text.split("\n");
@@ -632,7 +633,9 @@ test("tier-only baseline pins the 20 shipped roles; header removal removed only 
     assert.ok(at > 0, `${name}: native tools line preserved`);
     assert.equal(lines[at - 1], entry.descriptionLine, `${name}: description line preserved`);
     assert.equal(sha256Latin1([...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n")), POLICY_EXCEPTION_PINS[name]?.reinsertedLfSha256 ?? entry.headLfSha256, `${name}: reinserting the removed lines reproduces the historical bytes`);
+    assert.equal(sha256Latin1([...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n")), POLICY_EXCEPTION_PINS[name]?.reinsertedLfSha256 ?? entry.headLfSha256, `${name}: reinserting the removed lines reproduces the historical bytes`);
     const body = text.slice(text.indexOf("\n---", 4) + 5);
+    assert.equal(sha256Latin1(body), POLICY_EXCEPTION_PINS[name]?.bodySha256 ?? entry.bodySha256, `${name}: body unchanged`);
     assert.equal(sha256Latin1(body), POLICY_EXCEPTION_PINS[name]?.bodySha256 ?? entry.bodySha256, `${name}: body unchanged`);
   }
 });

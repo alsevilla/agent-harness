@@ -590,7 +590,16 @@ test("the README's primary install, update and remove commands use the Git sourc
 	assert.doesNotMatch(readme, /git:github\.com\/alsevilla\/pi-agent-harness-pi-package|x-access-token|ghp_|github_pat_/);
 });
 
-test("the README states the two default native extensions, opt-in external compaction, two native skills, manual prompts and optional components", () => {
+test("the external compaction guard is removed: no extension files, no child injection, no packaging or docs", () => {
+	const ext = path.join(REPO, "agent", "extensions");
+	assert.ok(!fs.existsSync(path.join(ext, "external-compaction")));
+	assert.ok(!fs.existsSync(path.join(ext, "subagent", "external-compaction-entry.ts")));
+	for (const rel of [["agent", "extensions", "subagent", "index.ts"], ["agent", "extensions", "subagent", "README.md"], ["scripts", "build-pi-package.mjs"], ["README.md"], ["package.json"]]) {
+		assert.doesNotMatch(fs.readFileSync(path.join(REPO, ...rel), "utf8"), /external[- ]compaction|PI_EXTERNAL_COMPACTION/i, rel.join("/"));
+	}
+});
+
+test("the README states the two default native extensions, two native skills, manual prompts and optional components", () => {
 	const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
 	for (const rel of [...NATIVE_EXTENSIONS.map((r) => path.posix.dirname(r.slice(2))), ...NATIVE_SKILLS.map((r) => r.slice(2))]) assert.ok(readme.includes(rel), rel);
 	assert.doesNotMatch(readme, /Five profile skills|registers one browser skill/);

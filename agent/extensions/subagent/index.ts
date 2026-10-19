@@ -335,7 +335,6 @@ async function runAgentAttempt(
 		args.push("--extension", guardPath);
 	}
 	args.push("--extension", path.join(extensionDir, "provider-cooldown-entry.ts")); // child guard, explicit despite --no-extensions
-	if (process.env.PI_EXTERNAL_COMPACTION === "1") args.push("--extension", path.join(extensionDir, "external-compaction-entry.ts")); // opt-in; same spawn path so every fallback gets it
 	if (agent.thinking) args.push("--thinking", agent.thinking);
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
