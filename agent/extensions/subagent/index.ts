@@ -33,6 +33,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
+import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
@@ -77,7 +78,11 @@ interface SingleResult {
 	messages: Message[];
 	stderr: string;
 	usage: UsageStats;
-	model?: string;
+	model?: string; // effective route-provider/(responseModel ?? model) once a complete identity was reported (served is verified only by responseModel); otherwise the launch request (see modelSource)
+	modelSource?: "observed" | "requested";
+	requestedModel?: string; // this attempt's --model argument, never evidence of what ran
+	observed?: ObservedModel[]; // distinct identities this attempt's assistant messages reported, in first-seen order
+	attempts?: AttemptProvenance[]; // only after an availability fallback: every launched attempt, earliest first
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
@@ -325,7 +330,7 @@ async function runAgentAttempt(
                 fallback.stderr = `Model ${model} skipped (provider cooldown ${launch.state}); retried with ${remaining[0]}.\n${fallback.stderr}`;
                 return fallback;
             }
-            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, ...tierFields(agent) };
+            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, modelSource: "requested", requestedModel: model, observed: [], step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, attempts: [], ...tierFields(agent) }; // attempts: [] = no child launched, so a caller's `?? [attemptOf(..)]` cannot invent one
         }
     }
     const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier, agent.modelSlot);
@@ -368,6 +373,9 @@ async function runAgentAttempt(
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 		model,
+		modelSource: "requested",
+		...(model !== undefined ? { requestedModel: model } : {}),
+		observed: [],
 		step,
 	};
 
@@ -466,7 +474,9 @@ async function runAgentAttempt(
 							currentResult.usage.cost += usage.cost?.total || 0;
 							currentResult.usage.contextTokens = usage.totalTokens || 0;
 						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.model;
+						observeAssistant(currentResult.observed!, msg);
+						const reported = observedId(identityOf(msg)); // complete provider/model only; a partial report never replaces the request
+						if (reported) { currentResult.model = reported; currentResult.modelSource = "observed"; }
 						currentResult.stopReason = msg.stopReason; // the latest assistant decides; a missing reason must clear an earlier stop
 						currentResult.errorMessage = msg.errorMessage; // latest assistant decides, like stopReason
 					}
@@ -553,6 +563,7 @@ async function runAgentAttempt(
 				remainingFallbacks.slice(1),
 				logical,
 			);
+			fallbackResult.attempts = [attemptOf(currentResult), ...(fallbackResult.attempts ?? [attemptOf(fallbackResult)])];
 			fallbackResult.stderr = `Model ${model ?? "(inherited)"} failed; retried with ${nextModel}. ${primaryError}\n${fallbackResult.stderr}`;
 			for (const key of ["input", "output", "cacheRead", "cacheWrite", "cost", "turns"] as const) {
 				fallbackResult.usage[key] += currentResult.usage[key];

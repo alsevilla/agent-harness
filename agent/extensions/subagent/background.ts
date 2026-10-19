@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
+import { servedReported } from "./provenance.ts";
 import { boundBackgroundCompletion, expandRetainedResult } from "./compact-handoff.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
@@ -329,7 +330,7 @@ export class BackgroundWorkers {
   list() {
     return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
       const r = this.monitor.store.records.get(id);
-      return {id, node: j.nodes.get(id), name: r?.name, model: r?.reportedModel ?? r?.model, ...(r?.modelTier !== undefined ? { modelTier: r.modelTier } : {}), ...(r?.modelSlot !== undefined ? { modelSlot: r.modelSlot } : {}), state: r?.state ?? "history expired", activity: r?.activity};
+      return {id, node: j.nodes.get(id), name: r?.name, model: r?.reportedModel ?? r?.model, modelSource: r?.reportedModel ? "observed" : "requested", requestedModel: r?.model, observedModels: r?.observed ?? [], servedReported: servedReported(r?.observed), ...(r?.modelTier !== undefined ? { modelTier: r.modelTier } : {}), ...(r?.modelSlot !== undefined ? { modelSlot: r.modelSlot } : {}), state: r?.state ?? "history expired", activity: r?.activity};
     })}));
   }
   result(target: string) {

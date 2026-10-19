@@ -182,16 +182,77 @@ async function runNodeSuite() {
 		const tagged = store.begin("backend-worker", "tiered", "fixture/model", "high", undefined, "economy");
 		assert.equal(tagged.modelTier, "economy");
 		assert.equal(snapshot.modelTier, "economy");
-		tagged.reportedModel = "partner/observed";
+		store.event(tagged.id, { type: "message_end", message: { role: "assistant", content: [], usage: {}, provider: "partner", model: "observed" } }); // via the event path: only a reported identity is observed
 		const { view } = inspector(store, () => "hidden");
-		const rows = view.render(100).map(plain).join("\n");
-		assert.match(rows, /partner\/observed · tier: economy/);
+		const rows = view.render(140).map(plain).join("\n");
+		assert.match(rows, /Model: partner\/observed \(observed; MISMATCH, requested fixture\/model; served UNVERIFIED\) · tier: economy/);
 		const legacy = store.begin("backend-worker", "legacy", "fixture/model", "high");
 		assert.equal(Object.hasOwn(legacy, "modelTier"), false);
 		assert.equal(Object.hasOwn(legacy, "modelSlot"), false);
 		const slotted = store.begin("backend-worker", "slotted", "fixture/fallback", "high", undefined, "capable", "fallback");
 		assert.equal(slotted.modelSlot, "fallback");
 		assert.match(view.render(100).map(plain).join("\n"), /fallback · tier: capable · slot: fallback/);
+	});
+
+	test("WorkerStore keeps the requested model apart from every observed identity and labels the inspector", () => {
+		const detail = (store: any) => inspector(store, () => "hidden").view.render(140).map(plain).join("\n");
+		const store = new monitor.WorkerStore();
+		const record = store.begin("worker", "t", "req/model", "high");
+		assert.match(detail(store), /Model: req\/model \(requested-only, unobserved\)/);
+		const end = (message: object) => store.event(record.id, { type: "message_end", message: { role: "assistant", content: [], usage: {}, ...message } });
+		end({ provider: "obs", model: "other" });
+		assert.equal(record.reportedModel, "obs/other");
+		assert.deepEqual(record.observed, [{ provider: "obs", model: "other" }]);
+		assert.match(detail(store), /Model: obs\/other \(observed; MISMATCH, requested req\/model; served UNVERIFIED\)/);
+		end({ provider: "obs", model: "other" });
+		end({ provider: "obs2", model: "later" });
+		assert.equal(record.observed.length, 2, "distinct identities only, in order");
+		assert.match(detail(store), /MIXED/);
+		const partial = new monitor.WorkerStore();
+		const p = partial.begin("worker", "t", "req/model", "high");
+		partial.event(p.id, { type: "message_end", message: { role: "assistant", content: [], usage: {}, model: "bare" } });
+		assert.equal(p.reportedModel, undefined, "a provider-less report is not an observed identity");
+		assert.deepEqual(p.observed, [{ model: "bare" }]);
+		assert.match(detail(partial), /UNVERIFIED/);
+	});
+
+	test("WorkerStore observes identities only from message_end; real RPC deltas add none, a response id is the effective served id", () => {
+		const detail = (store: any) => inspector(store, () => "hidden").view.render(140).map(plain).join("\n");
+		const final = { role: "assistant", content: [], usage: {}, provider: "p", model: "req", responseModel: "snap" };
+		const wire = new monitor.WorkerStore();
+		const w = wire.begin("worker", "t", "p/req", "high");
+		wire.event(w.id, { type: "message_start", message: { role: "assistant", content: [], stopReason: "pending", provider: "p", model: "req" } });
+		wire.event(w.id, { type: "message_update", usage: {}, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" } });
+		wire.event(w.id, { type: "message_end", message: final });
+		assert.deepEqual(w.observed, [{ provider: "p", model: "req", responseModel: "snap" }], "one identity, wire sequence");
+		assert.equal(w.reportedModel, "p/snap");
+		assert.match(detail(wire), /Model: p\/snap \[response id; sent req\] \(observed; MISMATCH, requested p\/req\)/);
+		// hypothetical shape (not the Pi 1.3 wire): an update carrying a message without assistantMessageEvent is not a completed message
+		const odd = new monitor.WorkerStore();
+		const o = odd.begin("worker", "t", "p/req", "high");
+		odd.event(o.id, { type: "message_update", message: { ...final, responseModel: undefined } });
+		assert.deepEqual(o.observed, []);
+		odd.event(o.id, { type: "message_end", message: final });
+		assert.equal(o.observed.length, 1);
+		assert.doesNotMatch(detail(odd), /MIXED/);
+	});
+
+	test("WorkerStore keeps an identity-free completed message as an unknown marker beside a served one; deltas add none", () => {
+		const detail = (store: any) => inspector(store, () => "hidden").view.render(300).map(plain).join("\n");
+		const served = { role: "assistant", content: [], usage: {}, provider: "p", model: "req", responseModel: "snap" };
+		const none = { role: "assistant", content: [], usage: {} };
+		for (const order of [[served, none], [none, served]]) {
+			const store = new monitor.WorkerStore();
+			const r = store.begin("worker", "t", "p/req", "high");
+			for (const m of order) store.event(r.id, { type: "message_end", message: m });
+			assert.equal(r.observed.length, 2);
+			assert.equal(r.reportedModel, "p/snap", "an identity-free message never overwrites the effective model");
+			assert.match(detail(store), /UNVERIFIED/);
+		}
+		const delta = new monitor.WorkerStore();
+		const d = delta.begin("worker", "t", "p/req", "high");
+		delta.event(d.id, { type: "message_update", message: none, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" } });
+		assert.deepEqual(d.observed, [], "a delta is not a completed message");
 	});
 
 	test("WorkerMonitor reads the effective fullscreenScrollbar setting on each render", () => {

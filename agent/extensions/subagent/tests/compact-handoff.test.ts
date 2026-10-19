@@ -118,16 +118,30 @@ test("extractFinalText skips an empty or whitespace-only latest assistant block 
 	assert.equal(extractFinalText([assistant(text("part A"), text("part B")), assistant(text(""), call)]), "part A\npart B");
 });
 
+test("retained diagnostics never present a request as the observed identity and keep partial, mixed and per-attempt provenance", () => {
+	const base = { agent: "reviewer", modelTier: "capable", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))] };
+	const heading = (entry: object) => retainedEntryBlock({ ...base, ...entry }).split("\n")[0];
+	assert.equal(heading({ model: "partner/observed", requestedModel: "anthropic/asked", modelSource: "observed", observed: [{ provider: "partner", model: "observed" }] }), "### reviewer · tier: capable · model: partner/observed (observed; MISMATCH, requested anthropic/asked; served UNVERIFIED) — completed");
+	assert.equal(heading({ model: "p/m", requestedModel: "p/m", modelSource: "observed", observed: [{ provider: "p", model: "m" }] }), "### reviewer · tier: capable · model: p/m (observed; served UNVERIFIED) — completed");
+	assert.equal(heading({ model: "p/m", requestedModel: "p/m", modelSource: "requested", observed: [{ model: "m" }] }), '### reviewer · tier: capable · model: p/m (requested-only; partial report "m" UNVERIFIED) — completed');
+	assert.equal(heading({ model: "b/2", requestedModel: "a/1", modelSource: "observed", observed: [{ provider: "a", model: "1" }, { provider: "b", model: "2" }] }), "### reviewer · tier: capable · model: a/1 + b/2 (observed, MIXED; MISMATCH, requested a/1; served UNVERIFIED) — completed");
+	assert.match(heading({ model: "p/m", requestedModel: "p/m", modelSource: "requested", observed: [], attempts: [{ requestedModel: "x/1", observed: [{ provider: "y", model: "2" }] }, { requestedModel: "p/m", observed: [] }] }), /attempts: x\/1 -> y\/2 \(served UNVERIFIED\); p\/m -> unobserved/);
+	const earlier = heading({ model: "b/s", requestedModel: "b/y", modelSource: "observed", observed: [{ provider: "b", model: "y", responseModel: "s" }], attempts: [{ requestedModel: "a/x", observed: [{ provider: "a", model: "x" }, { model: "p" }] }, { requestedModel: "b/y", observed: [{ provider: "b", model: "y", responseModel: "s" }] }] });
+	assert.match(earlier, /a\/x -> a\/x \(partial UNVERIFIED; served UNVERIFIED\); b\/y -> b\/s/, "a verified final attempt must not hide an earlier unverified one");
+	assert.equal(retainedEntryBlock({ agent: "w", exitCode: 0, stopReason: "stop", messages: [assistant(text("r"))], observed: [{ provider: "p", model: "m" }], model: "p/m", requestedModel: "p/m", modelSource: "observed" }).split("\n")[0], "### w · model: p/m (observed; served UNVERIFIED) — completed");
+	assert.equal(heading({ model: "p/snap", requestedModel: "p/m", modelSource: "observed", observed: [{ provider: "p", model: "m", responseModel: "snap" }] }), "### reviewer · tier: capable · model: p/snap [response id; sent m] (observed; MISMATCH, requested p/m) — completed");
+});
+
 test("extractFinalText keeps every block and the original spacing of the selected meaningful message", () => {
 	assert.equal(extractFinalText([assistant(text("older")), assistant(text("  padded  "))]), "  padded  ");
 	assert.equal(extractFinalText([assistant(text("first"), text(" "), text("second"))]), "first\n \nsecond");
 });
 
-test("retained diagnostics show tier and actual model while omitted-tier text stays byte-for-byte", () => {
+test("retained diagnostics show tier and requested/observed model while omitted-tier text stays byte-for-byte", () => {
 	const entry = { agent: "backend-worker", modelTier: "economy", model: "partner/model-x", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))] };
-	assert.equal(retainedEntryBlock(entry), "### backend-worker · tier: economy · model: partner/model-x — completed\nreport");
+	assert.equal(retainedEntryBlock(entry), "### backend-worker · tier: economy · model: partner/model-x (requested-only, unobserved) — completed\nreport");
 	assert.equal(retainedEntryBlock({agent: "backend-worker", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))]}), "### backend-worker — completed\nreport");
-	assert.equal(retainedEntryBlock({...entry, modelTier: "capable", modelSlot: "fallback"}), "### backend-worker · tier: capable · slot: fallback · model: partner/model-x — completed\nreport");
+	assert.equal(retainedEntryBlock({...entry, modelTier: "capable", modelSlot: "fallback"}), "### backend-worker · tier: capable · slot: fallback · model: partner/model-x (requested-only, unobserved) — completed\nreport");
 	assert.equal(retainedEntryBlock({agent: "blocked", modelTier: "capable", dag: {status: "blocked", blockedBy: ["a"], started: false}, messages: []}), "### blocked · tier: capable — BLOCKED by a\n(not run)");
 });
 

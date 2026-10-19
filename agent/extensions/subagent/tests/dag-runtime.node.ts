@@ -1132,7 +1132,7 @@ check("dag acceptance: printed invoke markup (exit 0, stop) is not accepted and 
 	assert.equal(result.isError, true);
 	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["failed", "blocked"]);
 	assert.deepEqual(result.details.results[1].dag.blockedBy, ["a"]);
-	assert.match(result.content[0].text, /### node "a" \(writer\) \u2014 INCOMPLETE\/UNVERIFIED \(tool-call markup as text\)/);
+	assert.match(result.content[0].text, /### node "a" \(writer\) \u00b7 model: unknown \(requested-only; partial report unknown message UNVERIFIED\) \u2014 INCOMPLETE\/UNVERIFIED \(tool-call markup as text\)/);
 });
 
 check("dag acceptance: two-space indented invoke markup (exit 0, stop) is not accepted and blocks its dependents", async () => {

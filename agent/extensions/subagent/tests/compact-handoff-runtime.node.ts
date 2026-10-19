@@ -395,7 +395,7 @@ test("background tool -> real BackgroundWorkers job fails on INCOMPLETE; explici
 	assert.match(sentIntegration[0].content, /INCOMPLETE HANDOFF/);
 	const recovered = await capturedTools.get("subagent_control").execute("bg-diagnostic-result", { action: "result", target: launch.details.jobId }, undefined, undefined, context(root));
 	assert.equal(recovered.isError, true);
-	assert.equal(recovered.content[0].text, `### rpc-cut \u2014 INCOMPLETE (length)\n${partial}\nlast block\n\nERROR: terminal diagnostic`);
+	assert.equal(recovered.content[0].text, `### rpc-cut \u00b7 model: ${MODEL} (requested-only; partial report unknown message UNVERIFIED) \u2014 INCOMPLETE (length)\n${partial}\nlast block\n\nERROR: terminal diagnostic`);
 });
 
 test("background parallel2: one job sends exactly one completion, with no late per-child duplicate", async () => {
@@ -496,7 +496,7 @@ test("background failed child: explicit result keeps errorMessage, distinct stde
 	await waitFor(() => sentIntegration.length === 1);
 	const recovered = await capturedTools.get("subagent_control").execute("bg-fail-result", { action: "result", target: launch.details.jobId }, undefined, undefined, context(root));
 	assert.equal(recovered.isError, true);
-	assert.equal(recovered.content[0].text, "### rpc-fail \u2014 FAILED/STOPPED\nERROR: 503 unavailable\nSTDERR: stderr-detail-XYZ\npartial report FINAL-TEXT");
+	assert.equal(recovered.content[0].text, `### rpc-fail \u00b7 model: ${MODEL} (requested-only; partial report unknown message UNVERIFIED) \u2014 FAILED/STOPPED\nERROR: 503 unavailable\nSTDERR: stderr-detail-XYZ\npartial report FINAL-TEXT`);
 });
 
 const MARKUP_HEAD = "INCOMPLETE/UNVERIFIED (tool-call markup as text)\nWARNING: This printed markup was not executed as tool calls; other recorded tool activity/partial writes may exist.\n\n";
@@ -525,4 +525,57 @@ test("foreground single: a normal report that quotes invoke markup in a fence is
 	spawnPlan = () => ({ events: [reply([report])], exitCode: 0 });
 	const result = await tool!.execute("call-quoter", { agent: "quoter", task: "report", background: false }, undefined, undefined, context(root));
 	assert.equal(result.content[0].text, report);
+});
+
+test("background list labels a requested-only worker and never presents the request as the observed model", async () => {
+	const host = fakePi();
+	const records = new Map<string, any>([
+		["1:1", { id: "1:1", name: "reviewer", model: "anthropic/asked", state: "running", activity: "x" }],
+		["1:2", { id: "1:2", name: "reviewer", model: "anthropic/asked", reportedModel: "partner/seen", observed: [{ provider: "partner", model: "seen" }], state: "running", activity: "x" }],
+	]);
+	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
+	const job = runtime.start(() => new Promise(() => {}));
+	runtime.note(job.id, "1:1");
+	runtime.note(job.id, "1:2");
+	const [silent, seen] = runtime.list().find((entry) => entry.jobId === job.id)!.workers as any[];
+	assert.equal(silent.requestedModel, "anthropic/asked");
+	assert.equal(silent.modelSource, "requested");
+	assert.deepEqual(silent.observedModels, []);
+	assert.equal(seen.requestedModel, "anthropic/asked");
+	assert.equal(seen.model, "partner/seen");
+	assert.equal(seen.modelSource, "observed");
+	assert.deepEqual(seen.observedModels, [{ provider: "partner", model: "seen" }]);
+	assert.equal(silent.servedReported, false);
+	assert.equal(seen.servedReported, false, "no responseModel: the request echo is not a served-model report");
+});
+
+test("background list: a served row beside an unknown or partial row is never served-reported, in either order", async () => {
+	const host = fakePi();
+	const served = { provider: "p", model: "asked", responseModel: "snap" };
+	const records = new Map<string, any>([
+		["1:1", { id: "1:1", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [served, {}], state: "running", activity: "x" }],
+		["1:2", { id: "1:2", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ model: "bare" }, served], state: "running", activity: "x" }],
+	]);
+	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
+	const job = runtime.start(() => new Promise(() => {}));
+	runtime.note(job.id, "1:1");
+	runtime.note(job.id, "1:2");
+	const rows = runtime.list().find((entry) => entry.jobId === job.id)!.workers as any[];
+	assert.deepEqual(rows.map((row) => row.servedReported), [false, false]);
+	assert.deepEqual(rows[0].observedModels, [served, {}]);
+});
+
+test("background list model is the effective served id and only a responseModel report counts as served-reported", async () => {
+	const host = fakePi();
+	const records = new Map<string, any>([
+		["1:1", { id: "1:1", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ provider: "p", model: "asked", responseModel: "snap" }], state: "running", activity: "x" }],
+	]);
+	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
+	const job = runtime.start(() => new Promise(() => {}));
+	runtime.note(job.id, "1:1");
+	const [row] = runtime.list().find((entry) => entry.jobId === job.id)!.workers as any[];
+	assert.equal(row.model, "p/snap");
+	assert.equal(row.requestedModel, "p/asked");
+	assert.equal(row.servedReported, true);
+	assert.deepEqual(row.observedModels, [{ provider: "p", model: "asked", responseModel: "snap" }]);
 });

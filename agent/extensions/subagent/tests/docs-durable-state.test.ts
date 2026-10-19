@@ -197,6 +197,14 @@ test("policy and runtime docs describe the explicit modelSlot fallback selector 
 	expect(readme).toMatch(/Copilot[^\n]*(unsupported|no `?modelSlot`?)/i);
 	expect(readme).toMatch(/Reload|new session/);
 	expect(routing).toMatch(/not automatically cross-provider|diversity is required only when/i);
+	expect(routing).toMatch(/observed provider\/model[^\n]*never the launch request/i);
+	expect(routing).toMatch(/missing or partial observation as unverified/i);
+	expect(readme).toMatch(/`requestedModel`[^\n]*`observed`/);
+	expect(readme).toMatch(/No runtime checker enforces provider diversity/);
+	expect(readme).toMatch(/served UNVERIFIED/);
+	expect(readme).toMatch(/`responseModel`[^\n]*(anthropic-messages|openai-completions)/);
+	expect(readme).toMatch(/never infer[^\n]*upstream provider|upstream provider[^\n]*never inferred/i);
+	expect(routing).toMatch(/served UNVERIFIED/);
 	expect(runtime).toMatch(/Copilot[^\n]*modelSlot|modelSlot[^\n]*Copilot/);
 });
 
