@@ -1,5 +1,5 @@
 import { matchesKey, Key, getKeybindings, isKeyRelease, truncateToWidth, wrapTextWithAnsi, visibleWidth, ScrollView, MouseRegion, type Component, type ScrollViewScrollbar, type TuiMouseEvent, type TuiMouseEventResult, type TUI } from "@earendil-works/pi-tui";
-import type { ModelTier } from "./model-routing.ts";
+import type { ModelSlot, ModelTier } from "./model-routing.ts";
 import { AssistantMessageComponent, ToolExecutionComponent, createReadToolDefinition, createBashToolDefinition, createPowerShellToolDefinition, createEditToolDefinition, createWriteToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, type ExtensionAPI, type ExtensionContext, type ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 export type WorkerState = "initializing" | "running" | "pausing" | "paused" | "completed" | "failed" | "aborted";
@@ -9,7 +9,7 @@ export interface ToolActivity {
 }
 export type TranscriptEntry = {type: "tool"; id: string} | {type: "assistant"; id: string; text: string; partial: boolean};
 export interface WorkerRecord {
-  id: string; name: string; task: string; model: string; reportedModel?: string; readonly modelTier?: ModelTier;
+  id: string; name: string; task: string; model: string; reportedModel?: string; readonly modelTier?: ModelTier; readonly modelSlot?: ModelSlot;
   effort: string; state: WorkerState; activity: string; context?: number; contextLimit?: number;
   startedAt: number; endedAt?: number; spawned: boolean; output: string; events: string[];
   textBlocks?: Record<number, string>;
@@ -88,7 +88,7 @@ function statusLabel(r: WorkerRecord): string {
   return ({initializing: 'Initializing', running: 'Ongoing', pausing: 'Pausing', paused: 'Paused', completed: 'Completed', failed: 'Failed', aborted: 'Stopped'} as const)[r.state];
 }
 function workerRow(r: WorkerRecord, showStatus = false): string {
-  return "#" + r.id.split(":")[1] + " " + r.name + " · " + (r.reportedModel ?? r.model).split("/").at(-1) + (r.modelTier !== undefined ? ` · tier: ${r.modelTier}` : "") + " · " + r.effort + " · " + (showStatus ? statusLabel(r) + " · " : "") + taskLabel(r.task);
+  return "#" + r.id.split(":")[1] + " " + r.name + " · " + (r.reportedModel ?? r.model).split("/").at(-1) + (r.modelTier !== undefined ? ` · tier: ${r.modelTier}` : "") + (r.modelSlot !== undefined ? ` · slot: ${r.modelSlot}` : "") + " · " + r.effort + " · " + (showStatus ? statusLabel(r) + " · " : "") + taskLabel(r.task);
 }
 function nativeRenderers(name: string, cwd: string): ToolRenderers | undefined {
   const factories: Record<string, (cwd: string) => ToolRenderers> = {
@@ -115,9 +115,9 @@ export class WorkerStore {
   listeners = new Set<() => void>();
   reset() { this.generation++; this.records.clear(); this.sequence = 0; this.totalSpawned = this.totalCompleted = this.totalFailed = 0; this.changed(); }
   changed() { for (const fn of this.listeners) fn(); }
-  begin(name: string, task: string, model: string, effort: string, contextLimit?: number, modelTier?: ModelTier): WorkerRecord {
+  begin(name: string, task: string, model: string, effort: string, contextLimit?: number, modelTier?: ModelTier, modelSlot?: ModelSlot): WorkerRecord {
     const r: WorkerRecord = { id: `${this.generation}:${++this.sequence}`, name: oneLine(name), task: clean(task), model: oneLine(model), effort: oneLine(effort),
-      state: "initializing", activity: "Preparing worker", startedAt: Date.now(), spawned: false, output: "", events: [], tools: [], graphReferences: 0, integrations: {}, transcript: [], assistantSequence: 0, contextLimit, ...(modelTier !== undefined ? { modelTier } : {}) };
+      state: "initializing", activity: "Preparing worker", startedAt: Date.now(), spawned: false, output: "", events: [], tools: [], graphReferences: 0, integrations: {}, transcript: [], assistantSequence: 0, contextLimit, ...(modelTier !== undefined ? { modelTier } : {}), ...(modelSlot !== undefined ? { modelSlot } : {}) };
     this.records.set(r.id, r);
     // Retain active workers and the latest 64 finished attempts. Counters retain the whole session.
     const finished = [...this.records.values()].filter(x => x.endedAt !== undefined);
@@ -283,7 +283,7 @@ export class WorkerInspector implements Component {
     if (selected) {
       if (this.cacheWorker !== selected.id) { this.dispose(); this.cacheWorker = selected.id; this.pendingPosition = this.positions.get(selected.id); this.viewport.scrollToEnd(); }
       this.regions = [];
-      rows.push(" Status: " + statusLabel(selected) + " · Model: " + (selected.reportedModel ?? selected.model) + (selected.modelTier !== undefined ? ` · tier: ${selected.modelTier}` : "") + " · Effort: " + selected.effort + " (requested)");
+      rows.push(" Status: " + statusLabel(selected) + " · Model: " + (selected.reportedModel ?? selected.model) + (selected.modelTier !== undefined ? ` · tier: ${selected.modelTier}` : "") + (selected.modelSlot !== undefined ? ` · slot: ${selected.modelSlot}` : "") + " · Effort: " + selected.effort + " (requested)");
       rows.push(" Context: " + contextLabel(selected) + " · Time: " + elapsed(selected) + (selected.state === "paused" || selected.state === "pausing" ? " · " + selected.activity : ""));
       if (height >= 15) {
         rows.push(" " + integrationLabel(selected));

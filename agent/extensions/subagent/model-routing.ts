@@ -2,18 +2,29 @@ import { classifyProviderError } from "./provider-cooldown.ts";
 import type { AgentConfig, ModelTier } from "./agents.ts";
 export type { ModelTier } from "./agents.ts";
 
+export type ModelSlot = "fallback";
+
 export interface SelectedAgent extends AgentConfig {
 	readonly modelTier?: ModelTier;
+	readonly modelSlot?: ModelSlot; // provenance only: this run started on the tier's first usable configured fallback
 }
 
 // Omitted selection runs the role's own default tier (legacy roles keep their flat projection); explicit tiers are package-only.
-export function resolveModelTier(agent: AgentConfig, requested?: ModelTier): SelectedAgent {
+// modelSlot "fallback" is an explicit opt-in: same package role and validated tier, but the run starts on the tier's first configured fallback
+// (the exact primary is excluded) with an empty replay chain, so nothing ever returns to the primary. It never accepts a model ID.
+export function resolveModelTier(agent: AgentConfig, requested?: ModelTier, slot?: ModelSlot): SelectedAgent {
+	if (slot !== undefined && slot !== "fallback") throw new Error(`modelSlot must be "fallback" when present (\"${agent.name}\")`);
+	if (slot !== undefined && requested === undefined) throw new Error(`modelSlot "fallback" requires an explicit modelTier (\"${agent.name}\")`);
 	if (requested !== undefined && agent.source !== "package") throw new Error(`modelTier is only supported for canonical package roles (\"${agent.name}\")`);
 	const tier = requested ?? agent.defaultModelTier;
 	if (tier === undefined) return { ...agent, fallbackModel: agent.fallbackModel?.slice(), tools: agent.tools?.slice() };
 	const models = agent.modelTiers?.[tier];
 	if (!models) throw new Error(requested === undefined ? `defaultModelTier \"${tier}\" is not configured for role \"${agent.name}\"` : `modelTier \"${tier}\" is not supported for role \"${agent.name}\"`);
-	return { ...agent, model: models.model, fallbackModel: [...models.fallbackModel], tools: agent.tools?.slice(), thinking: "thinking" in models ? models.thinking : agent.thinking, modelTier: tier };
+	const thinking = "thinking" in models ? models.thinking : agent.thinking;
+	if (slot === undefined) return { ...agent, model: models.model, fallbackModel: [...models.fallbackModel], tools: agent.tools?.slice(), thinking, modelTier: tier };
+	const [fallback] = getFallbackSequence(models.model, models.fallbackModel);
+	if (fallback === undefined) throw new Error(`modelSlot "fallback" has no usable fallback in the ${tier} tier of role "${agent.name}"`);
+	return { ...agent, model: fallback, fallbackModel: [], tools: agent.tools?.slice(), thinking, modelTier: tier, modelSlot: slot };
 }
 
 // Model IDs are catalog identifiers: trimmed, otherwise passed through verbatim (no aliasing).

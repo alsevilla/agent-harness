@@ -158,7 +158,7 @@ export function retainedEntryBlock(entry: any): string {
 	const label = dag?.status === "blocked" ? `BLOCKED by ${(dag.blockedBy ?? []).join(", ")}` : notRun ? "ABORTED before start" : failed ? "FAILED/STOPPED" : markup ? PRINTED_MARKUP_LABEL : incomplete ? incompleteLabel(entry.stopReason) : "completed";
 	const agent = String(entry?.agent ?? "unknown agent");
 	const name = entry?.nodeId !== undefined ? `node "${entry.nodeId}" (${agent})` : agent;
-	const diagnostics = entry?.modelTier !== undefined ? [`tier: ${entry.modelTier}`, ...(entry.model ? [`model: ${entry.model}`] : [])] : [];
+	const diagnostics = entry?.modelTier !== undefined ? [`tier: ${entry.modelTier}`, ...(entry.modelSlot !== undefined ? [`slot: ${entry.modelSlot}`] : []), ...(entry.model ? [`model: ${entry.model}`] : [])] : [];
 	const heading = `${name}${diagnostics.length ? ` · ${diagnostics.join(" · ")}` : ""}`;
 	const text = extractFinalText(Array.isArray(entry?.messages) ? entry.messages : []);
 	const issue = failed ? failureDiagnostics(entry).map((d) => `${d.label}: ${d.value}`).join("\n") : "";

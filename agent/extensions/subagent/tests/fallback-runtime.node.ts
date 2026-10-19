@@ -69,6 +69,7 @@ interface RunResult {
 }
 
 let discoverAgents: typeof import("../agents.ts").discoverAgents;
+let resolveModelTier: typeof import("../model-routing.ts").resolveModelTier;
 let runSingleAgent: (...args: unknown[]) => Promise<RunResult>;
 // Usage ledger helpers from the production background module (same module instance index.ts imports).
 let bg: any;
@@ -111,6 +112,7 @@ const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 before(async () => {
 	({ discoverAgents } = await import(agentsUrl));
+	({ resolveModelTier } = await import(new URL("../model-routing.ts", import.meta.url).href));
 	({ runSingleAgent } = await import(indexUrl));
 	bg = await import(backgroundUrl);
 });
@@ -272,6 +274,81 @@ test("an anthropic fallback without the subscription guard fails loudly instead 
 	spawnPlan = () => unavailable();
 	await assert.rejects(run(fx.nested, discover(fx.nested), "guardMissing"), /subscription guard missing/);
 	assert.deepEqual(attempts, [PRIMARY]);
+});
+
+// ---- Explicit modelSlot fallback: the run STARTS on the selected fallback with an empty replay chain ----------------------------
+
+function slotRole(tierFallbacks: string[] = [LUNA, COPILOT_LUNA]): AgentConfig {
+	return {
+		name: "slot-role", description: "slot", source: "package", filePath: "slot-role.md", systemPrompt: "", model: PRIMARY, fallbackModel: tierFallbacks.slice(), tools: ["read"], thinking: "high", defaultModelTier: "capable",
+		modelTiers: { capable: { model: PRIMARY, fallbackModel: tierFallbacks.slice(), thinking: "high" } },
+	} as unknown as AgentConfig;
+}
+const slotted = (fallbacks?: string[]) => [resolveModelTier(slotRole(fallbacks), "capable", "fallback")] as unknown as AgentConfig[];
+
+test("modelSlot fallback launches exactly one child on the selected fallback, never the primary, with honest provenance", async () => {
+	const fx = setupRoots();
+	const result = await run(fx.nested, slotted(), "slot-role") as RunResult & { modelTier?: string; modelSlot?: string };
+	assert.deepEqual(attempts, [LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.model, LUNA);
+	assert.equal(result.modelTier, "capable");
+	assert.equal(result.modelSlot, "fallback");
+	assert.doesNotMatch(result.stderr, /retried|skipped|failed/i);
+	// Control: the same role without the slot still starts on the primary and replays the chain.
+	attempts = [];
+	spawnPlan = (model) => (model === PRIMARY ? unavailable() : success());
+	const normal = await run(fx.nested, [resolveModelTier(slotRole(), "capable")] as unknown as AgentConfig[], "slot-role") as RunResult & { modelSlot?: string };
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(Object.hasOwn(normal, "modelSlot"), false);
+});
+
+test("modelSlot fallback: quota, task, tool-activity and abort outcomes never replay to the primary or a later fallback", async () => {
+	const fx = setupRoots();
+	spawnPlan = () => unavailable("429 rate limit");
+	const quota = await run(fx.nested, slotted(), "slot-role");
+	assert.deepEqual(attempts, [LUNA]);
+	assert.equal(quota.exitCode, 1);
+	assert.doesNotMatch(quota.stderr, /retried/);
+	for (const plan of [
+		{ events: [assistant("error", "", "test failed")], exitCode: 1 },
+		{ events: [{ type: "tool_execution_start" }, assistant("error", "", "503 unavailable")], exitCode: 1 },
+		{ events: [assistant("aborted", "", "503 unavailable")], exitCode: 1 },
+	] as SpawnPlan[]) {
+		attempts = [];
+		spawnPlan = () => plan;
+		await run(fx.nested, slotted(), "slot-role");
+		assert.deepEqual(attempts, [LUNA]);
+	}
+	attempts = [];
+	const controller = new AbortController();
+	spawnPlan = () => ({ events: [], hang: true, afterSpawn: () => controller.abort() });
+	await assert.rejects(run(fx.nested, slotted(), "slot-role", controller.signal), /Subagent was aborted/);
+	assert.deepEqual(attempts, [LUNA]);
+});
+
+test("modelSlot fallback: a cooling, blocked or guard-refused fallback never spawns or returns to the primary", async () => {
+	const fx = setupRoots();
+	for (const state of ["cooling", "probe-busy", "blocked", "unavailable"]) {
+		attempts = [];
+		launchPlan = (model) => (model === LUNA ? { state, replayable: true } : { state: "launch" });
+		const result = await run(fx.nested, slotted(), "slot-role");
+		assert.deepEqual(attempts, [], state);
+		assert.equal(result.exitCode, 1);
+		assert.match(result.stderr, new RegExp(`Model ${LUNA.replace(/[.]/g, "\\.")} not launched: provider cooldown ${state}`));
+	}
+	launchPlan = () => ({ state: "launch" });
+	attempts = [];
+	guardPlan = () => true;
+	spawnPlan = () => ({ events: [assistant("error", "", "provider cooldown cooling")], exitCode: 1 });
+	await run(fx.nested, slotted(), "slot-role");
+	assert.deepEqual(attempts, [LUNA]);
+});
+
+test("modelSlot fallback keeps the Anthropic subscription guard requirement", async () => {
+	const fx = setupRoots();
+	await assert.rejects(run(fx.nested, slotted(["anthropic/claude-haiku-5-5"]), "slot-role"), /subscription guard missing/);
+	assert.deepEqual(attempts, []);
 });
 
 test("usage sums every attempt while contextTokens reports only the final attempt", async () => {

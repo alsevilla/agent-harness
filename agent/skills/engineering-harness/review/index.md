@@ -21,8 +21,11 @@ security, and contract compatibility.
 
 Return:
 - APPROVE, APPROVE WITH NOTES, REQUEST CHANGES, or ESCALATE;
+- a coverage receipt of a few lines, not a file-by-file transcript: candidate identity (plus the fingerprint reference when the review is snapshot-bound); Inspected scope; Not inspected important scope; actual checks run versus reused evidence;
 - only material findings, with evidence/location;
 - residual risks and any verification needed.
+
+APPROVE WITH NOTES cannot carry unresolved material findings: those need REQUEST CHANGES or ESCALATE, or main's recorded accepted disposition; otherwise the affected work stays blocked.
 
 Check supplied RED/GREEN evidence or justified exceptions for behavioral changes; final passing tests alone do not establish test-first order. Report missing evidence rather than inventing it. Do not implement fixes.
 Do not restate the whole diff.

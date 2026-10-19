@@ -604,6 +604,8 @@ const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "
 // These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
 const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
   "release-engineer": { afterLfSha256: "ca8c4a06fdc32ebdc75e3ec5654aa2c867ed4963f831b21bc1c6d364ceed1f98", bodySha256: "6798d969032898afdb30038f653ca93fa1d149276875af19f78800fce605fb6c", reinsertedLfSha256: "16446a855cd9acf98e4f401832fa3bb28a956e683fe847d09059aa6de36609f1" },
+  // Approved new-body expectation (claudex-loop-adaptation): reviewer gained one untrusted-evidence sentence; historical baselines are not regenerated.
+  reviewer: { afterLfSha256: "dcfa7b488eef7aca125fbf6078bd14da19711f82e032198df3e960d1b71a92b5", bodySha256: "58cc3889c8b813fc64babcc7978b6d2f2ae4da59f73f18290ebbfa60ac450879", reinsertedLfSha256: "0f37fdde3748ffac67fdcb12c5a46e9e80aa0d178684b76c8029ee2bb3f787ce" },
 };
 type RawTier = { model: string; fallbackModel: string; thinking: string };
 type RawRole = { name: string; defaultModelTier: "economy" | "capable"; modelTiers: Partial<Record<"economy" | "capable", RawTier>>; tools: string };

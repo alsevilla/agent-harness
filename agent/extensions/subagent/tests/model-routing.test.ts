@@ -120,6 +120,42 @@ test("tier resolution uses only the validated selection and preserves an immutab
   assert.deepEqual(resolved.fallbackModel, ["fixture-fallback"]);
 });
 
+// Explicit fallback slot: same package role and validated tier, first usable configured fallback, empty replay chain.
+test("modelSlot fallback selects the first usable configured fallback of the same tier with no replay chain", () => {
+  const role = {
+    ...tiered("backend-worker"),
+    modelTiers: {
+      economy: { model: "fixture-economy/model", fallbackModel: ["fixture-economy/model", "fixture-economy/second", "fixture-economy/third"], thinking: "low" },
+      capable: { model: "fixture-capable/model", fallbackModel: ["fixture-capable/fallback"], thinking: "high" },
+    },
+  } as unknown as AgentConfig;
+  const normal = resolveModelTier(role, "economy");
+  const slotted = resolveModelTier(role, "economy", "fallback");
+  assert.equal(slotted.model, "fixture-economy/second"); // exact primary is excluded, never silently relabelled
+  assert.deepEqual(slotted.fallbackModel, []);
+  assert.equal(slotted.modelTier, "economy");
+  assert.equal(slotted.modelSlot, "fallback");
+  assert.equal(slotted.thinking, normal.thinking);
+  assert.deepEqual(slotted.tools, normal.tools);
+  assert.notEqual(slotted.tools, role.tools);
+  assert.equal(resolveModelTier(role, "capable", "fallback").model, "fixture-capable/fallback"); // never the other tier's model
+  assert.equal(Object.hasOwn(normal, "modelSlot"), false);
+  assert.equal(Object.hasOwn(resolveModelTier(role, "economy", undefined), "modelSlot"), false);
+  assert.equal(role.modelTiers!.economy!.fallbackModel.length, 3); // configured role is not mutated
+});
+
+test("modelSlot fallback refuses before any selection when it cannot be honoured", () => {
+  const role = tiered("backend-worker");
+  assert.throws(() => resolveModelTier(role, undefined, "fallback"), /requires an explicit modelTier/);
+  for (const bad of ["primary", "Fallback", "", null, 1, true, ["fallback"], {}, "anthropic/claude-sonnet-5-5"]) assert.throws(() => resolveModelTier(role, "capable", bad as never), /modelSlot/, JSON.stringify(bad));
+  for (const source of ["user", "project"] as const) assert.throws(() => resolveModelTier(tiered("backend-worker", source), "capable", "fallback"), /canonical package roles/);
+  const noFallback = { ...tiered("oracle"), modelTiers: { capable: { model: "fixture/primary", fallbackModel: [], thinking: "high" } } } as unknown as AgentConfig;
+  assert.throws(() => resolveModelTier(noFallback, "capable", "fallback"), /no usable fallback/);
+  const onlyPrimary = { ...tiered("oracle"), modelTiers: { capable: { model: "fixture/primary", fallbackModel: ["fixture/primary"], thinking: "high" } } } as unknown as AgentConfig;
+  assert.throws(() => resolveModelTier(onlyPrimary, "capable", "fallback"), /no usable fallback/);
+  assert.throws(() => resolveModelTier({ ...tiered("scout"), modelTiers: { economy: { model: "fixture/e", fallbackModel: ["fixture/f"], thinking: "low" } } } as unknown as AgentConfig, "capable", "fallback"), /not supported/);
+});
+
 test("fallback strings parse as ordered normalized model sequences", () => {
   assert.deepEqual(parseFallbackModels(" openai-codex/gpt-6-luna || || github-copilot/gpt-6-luna || openai-codex/gpt-6-luna "), [
     "openai-codex/gpt-6-luna",

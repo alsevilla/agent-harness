@@ -127,6 +127,7 @@ test("retained diagnostics show tier and actual model while omitted-tier text st
 	const entry = { agent: "backend-worker", modelTier: "economy", model: "partner/model-x", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))] };
 	assert.equal(retainedEntryBlock(entry), "### backend-worker · tier: economy · model: partner/model-x — completed\nreport");
 	assert.equal(retainedEntryBlock({agent: "backend-worker", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))]}), "### backend-worker — completed\nreport");
+	assert.equal(retainedEntryBlock({...entry, modelTier: "capable", modelSlot: "fallback"}), "### backend-worker · tier: capable · slot: fallback · model: partner/model-x — completed\nreport");
 	assert.equal(retainedEntryBlock({agent: "blocked", modelTier: "capable", dag: {status: "blocked", blockedBy: ["a"], started: false}, messages: []}), "### blocked · tier: capable — BLOCKED by a\n(not run)");
 });
 

@@ -188,6 +188,10 @@ async function runNodeSuite() {
 		assert.match(rows, /partner\/observed · tier: economy/);
 		const legacy = store.begin("backend-worker", "legacy", "fixture/model", "high");
 		assert.equal(Object.hasOwn(legacy, "modelTier"), false);
+		assert.equal(Object.hasOwn(legacy, "modelSlot"), false);
+		const slotted = store.begin("backend-worker", "slotted", "fixture/fallback", "high", undefined, "capable", "fallback");
+		assert.equal(slotted.modelSlot, "fallback");
+		assert.match(view.render(100).map(plain).join("\n"), /fallback · tier: capable · slot: fallback/);
 	});
 
 	test("WorkerMonitor reads the effective fullscreenScrollbar setting on each render", () => {
