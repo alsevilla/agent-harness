@@ -34,6 +34,6 @@ test("ordered fallback runtime regression passes under installed Node", { timeou
 	const output = result.output.trim();
 	assert.equal(result.error, undefined, `failed to launch "node --test ${runner}" (cwd ${testsDir}): ${result.error?.message}\n${output}`);
 	assert.equal(result.status, 0, `"node --test ${runner}" exited with ${result.status ?? result.signal}\n${output}`);
-	// Pass count guards against a runner that loads cleanly but silently loses discovery/guard coverage (36 tests today: 21 prior (11 fallback-chain/abort/usage-chain, 4 discovery, 5 provider-cooldown, 1 external-compaction guard), 7 guard-refusal, probe-busy, unavailable and pre-spawn-abort proofs, plus 8 all-job usage ledger proofs).
-	assert.match(output, /(?:\u2139|#) pass 36\b/, `expected 36 passing runtime tests\n${output}`);
+	// Pass count guards against a runner that loads cleanly but silently loses discovery/guard coverage (35 tests today: 20 prior (11 fallback-chain/abort/usage-chain, 4 discovery, 5 provider-cooldown), 7 guard-refusal, probe-busy, unavailable and pre-spawn-abort proofs, plus 8 all-job usage ledger proofs, plus 4 explicit modelSlot fallback proofs, plus 13 requested-vs-observed provenance and launched-attempt proofs).
+	assert.match(output, /(?:\u2139|#) pass 52\b/, `expected 52 passing runtime tests\n${output}`);
 });

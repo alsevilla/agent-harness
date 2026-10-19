@@ -39,9 +39,10 @@ PRED_OPTIONAL = frozenset({"calls", "calls_provenance"})
 # Native `subagent` tool contract; tests compare these with agent/extensions/subagent/index.ts and dag.ts.
 TIERS = frozenset({"economy", "capable"})
 TIER_CHOICES = frozenset({"economy", "capable", "omitted"})  # omitted: modelTier absent, role default runs
-NATIVE_ENTRY_KEYS = frozenset({"agent", "task", "cwd", "readOnly", "modelTier"})
+SLOTS = frozenset({"fallback"})  # optional per-entry modelSlot; requires an explicit modelTier
+NATIVE_ENTRY_KEYS = frozenset({"agent", "task", "cwd", "readOnly", "modelTier", "modelSlot"})
 NATIVE_DAG_KEYS = NATIVE_ENTRY_KEYS | {"id", "dependsOn"}
-NATIVE_ROOT_KEYS = frozenset({"background", "modelTier", "agent", "task", "tasks", "chain", "agentScope", "dag",
+NATIVE_ROOT_KEYS = frozenset({"background", "modelTier", "modelSlot", "agent", "task", "tasks", "chain", "agentScope", "dag",
                               "readOnly", "confirmProjectAgents", "cwd"})
 BATCH_MODES = ("tasks", "chain", "dag")
 NATIVE_MAX_TASKS = 8  # MAX_PARALLEL_TASKS in index.ts; the native chain schema has no item limit
@@ -176,6 +177,17 @@ def _tier(value, where):
     return value
 
 
+def _slot(entry, where):
+    """modelSlot is only the string "fallback" and needs an explicit modelTier beside it (null is refused by the runtime)."""
+    if "modelSlot" not in entry:
+        return
+    value = entry["modelSlot"]
+    if not isinstance(value, str) or value not in SLOTS:
+        raise RoutingEvalError(f"{where}.modelSlot: expected fallback when present, got {value!r}")
+    if "modelTier" not in entry:
+        raise RoutingEvalError(f"{where}.modelSlot: requires an explicit modelTier")
+
+
 def _flag(value, where):
     if not isinstance(value, bool):
         raise RoutingEvalError(f"{where}: expected boolean, got {value!r}")
@@ -192,6 +204,7 @@ def _entry(item, keys, where, dag):
     if "readOnly" in entry:
         _flag(entry["readOnly"], f"{where}.readOnly")
     tier = _tier(entry["modelTier"], where) if "modelTier" in entry else None
+    _slot(entry, where)
     return {"agent": _choice(entry["agent"], ROLES, f"{where}.agent"), "tier": tier}
 
 
@@ -278,7 +291,7 @@ def parse_calls(value, where):
         base = len(dispatches)
         if batch:
             mode = batch[0]
-            for key in ("modelTier", "agent", "task"):
+            for key in ("modelTier", "modelSlot", "agent", "task"):
                 if key in call:
                     raise RoutingEvalError(f"{at}.{key}: single-mode field; batch modes set it per entry")
             for key in ("cwd", "readOnly"):
@@ -307,6 +320,7 @@ def parse_calls(value, where):
                 _flag(call["readOnly"], f"{at}.readOnly")
             _text(call["task"], f"{at}.task")
             tier = _tier(call["modelTier"], at) if "modelTier" in call else None
+            _slot(call, at)
             dispatches.append({"agent": _choice(call["agent"], ROLES, f"{at}.agent"), "tier": tier, "before": frozenset()})
         if call.get("agentScope") == "project" and any(d["tier"] is not None for d in dispatches[base:]):
             raise RoutingEvalError(f"{at}.agentScope: project scope cannot take an explicit modelTier; "

@@ -153,6 +153,14 @@ class FixtureSpecimenTests(unittest.TestCase):
         self.assertEqual(c["R28"]["expect"]["roles_required"], ["release-engineer"])
         self.assertNotIn("platform-worker", c["R28"]["expect"]["roles_allowed"])
 
+    def test_r20_requests_code_preparation_only_and_keeps_publication_blocked(self):
+        r20 = by_id(load_fixture())["R20"]
+        question = r20["question"].lower()
+        self.assertNotIn("push", question)
+        self.assertNotIn("pull request", question)
+        self.assertIn("authority", r20["context"].lower())
+        self.assertEqual(r20["expect"]["routes"], ["BLOCKED_NO_AUTHORITY"])
+
     def test_roles_match_current_agent_directory(self):
         self.assertTrue(AGENTS_DIR.is_dir(), f"role registry missing: {AGENTS_DIR}")
         stems = {p.stem for p in AGENTS_DIR.glob("*.md")}
@@ -432,13 +440,14 @@ class ModelTierTests(unittest.TestCase):
     def run_rows(self, rows):
         return evaluate_rows(rows, self.fx)
 
-    def test_four_difficult_roles_require_explicit_capable_and_controls_allow_economy(self):
+    def test_six_difficult_roles_require_explicit_capable_and_controls_allow_economy(self):
         c = by_id(self.fx)
-        for cid, role in (("R18", "security-specialist"), ("R17", "concurrency-specialist"), ("R05", "debugger"), ("R10", "reviewer")):
+        for cid, role in (("R18", "security-specialist"), ("R17", "concurrency-specialist"), ("R05", "debugger"), ("R10", "reviewer"), ("R02", "database-specialist"), ("R09", "test-engineer")):
             self.assertEqual(c[cid]["expect"]["model_tiers"][role], ["capable"], cid)
             self.assertTrue(c[cid]["critical"], cid)
+        self.assertEqual(sum(1 for x in c.values() if "model_tiers" in x["expect"]), 10)
         controls = [cid for cid, x in c.items() if any("capable" not in v for v in x["expect"].get("model_tiers", {}).values())]
-        self.assertGreaterEqual(len(controls), 3)
+        self.assertEqual(sorted(controls), ["R01", "R03", "R08", "R15"])
         for cid in controls:
             for allowed in c[cid]["expect"]["model_tiers"].values():
                 self.assertEqual(sorted(allowed), ["economy", "omitted"])
@@ -575,6 +584,7 @@ class ModelTierTests(unittest.TestCase):
             ("NATIVE_DAG_ID", re.compile("x")),
             ("NATIVE_SCOPES", frozenset({"user"})),
             ("TIERS", frozenset({"economy"})),
+            ("SLOTS", frozenset()),
         )
         for name, bad in drifted:
             with mock.patch.object(ev, name, bad):
@@ -610,7 +620,12 @@ def native_drift():
     check("DagNode keys", dag, set(ev.NATIVE_DAG_KEYS))
     check("SubagentParams keys", root, set(ev.NATIVE_ROOT_KEYS))
     check("DagNode additionalProperties false", "additionalProperties: false" in dag_tail, True)
-    check("modelTier literals", set(re.findall(r'Type\.Literal\("(\w+)"\)', task_body)), set(ev.TIERS))
+    literals = lambda text: set(re.findall(r'Type\.Literal\("(\w+)"\)', text))
+    check("modelTier literals", literals(re.search(r"^\s*modelTier:.*$", task_body, re.M).group(0)), set(ev.TIERS))
+    check("modelSlot literals", literals(re.search(r"^const MODEL_SLOT = .*$", src, re.M).group(0)), set(ev.SLOTS))
+    check("root modelSlot literals", literals(re.search(r"^\s*modelSlot: Type\.Optional\(Type\.Union.*$", src, re.M).group(0)), set(ev.SLOTS))
+    for name, body in (("TaskItem", task_body), ("ChainItem", ts_block(src, "ChainItem")[2]), ("DagNode", ts_block(src, "DagNode")[2])):
+        check(f"{name} modelSlot schema", re.search(r"^\s*modelSlot:.*$", body, re.M).group(0).strip(), "modelSlot: Type.Optional(MODEL_SLOT),")
     node_keys = re.search(r"const NODE_KEYS = new Set\(\[(.*?)\]\)", dag_src, re.S).group(1)
     check("dag.ts NODE_KEYS", set(re.findall(r'"(\w+)"', node_keys)), set(ev.NATIVE_DAG_KEYS))
     check("MAX_PARALLEL_TASKS", int(re.search(r"const MAX_PARALLEL_TASKS = (\d+);", src).group(1)), ev.NATIVE_MAX_TASKS)
@@ -690,6 +705,22 @@ class NativeCallValidationTests(unittest.TestCase):
             self.rejected({mode: [entry(dependsOn=["a"])]}, mode)
             self.rejected({mode: [entry(id="a")]}, mode)
             self.rejected({mode: {"a": entry()}}, mode)
+
+    def test_model_slot_matches_native_contract(self):
+        # Optional per-entry string "fallback" that requires an explicit modelTier; root slot is single-mode only.
+        slotted = {"modelTier": "capable", "modelSlot": "fallback"}
+        self.assertEqual(ev.parse_calls([entry(**slotted)], "calls")[0]["tier"], "capable")
+        for mode, make in (("tasks", entry), ("chain", entry), ("dag", lambda **kw: node("a", **kw))):
+            self.assertEqual(len(ev.parse_calls([{mode: [make(**slotted)]}], "calls")), 1, mode)
+            for label, extra in (("no tier", {"modelSlot": "fallback"}), ("primary", {**slotted, "modelSlot": "primary"}),
+                                 ("null", {**slotted, "modelSlot": None}), ("number", {**slotted, "modelSlot": 1}),
+                                 ("list", {**slotted, "modelSlot": ["fallback"]}), ("case", {**slotted, "modelSlot": "Fallback"})):
+                self.rejected({mode: [make(**extra)]}, f"{mode} {label}")
+            self.rejected({mode: [make(**slotted)], "modelSlot": "fallback"}, f"{mode} root slot")
+        for bad in ("primary", None, 1, "anthropic/claude-sonnet-5-5"):
+            self.rejected(entry(**{**slotted, "modelSlot": bad}), f"single {bad!r}")
+        self.rejected(entry(modelSlot="fallback"), "single without tier")
+        self.rejected({**entry(**slotted), "agentScope": "project"}, "project scope")
 
     def test_root_option_types(self):
         base = entry(modelTier="capable")

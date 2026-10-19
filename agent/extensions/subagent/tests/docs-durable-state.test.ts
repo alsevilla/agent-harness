@@ -149,6 +149,65 @@ test("token-efficiency gives the bounded checklist, evidence-reuse and batched-c
 	}
 });
 
+test("run manifest documents a content fingerprint recipe instead of status plus diffstat", () => {
+	const manifest = read(AGENT, "references/run-manifest.md");
+	const recipe = section(manifest, "## Candidate fingerprint recipe");
+	expect(recipe).not.toBe("");
+	expect(manifest).not.toMatch(/hash of `git status --short` plus the diff stat/);
+	expect(manifest).not.toMatch(/git status plus diff stat/);
+	for (const needle of [/full HEAD/, /--porcelain=v1 -z --no-renames --untracked-files=all/, /hash-object --no-filters/, /git diff --cached --binary/, /deleted/, /link text/, /never followed/, /UNSUPPORTED/, /exclu/i, /no `freshPASS`|never a fresh PASS|cannot support a fresh PASS/i]) expect(recipe).toMatch(needle);
+	expect(recipe).toMatch(/not a runtime|no runtime enforcement|documented recipe/i);
+	expect(recipe).toMatch(/private|ignored|generated/i);
+	expect(recipe).toMatch(/same-size/);
+	expect(read(AGENT, "execute/index.md")).toMatch(/references\/run-manifest\.md[^\n]*[Cc]andidate fingerprint recipe/);
+});
+
+test("review module has a concise coverage receipt and keeps verdicts and the accepted-disposition rule", () => {
+	const review = read(AGENT, "review/index.md");
+	const body = section(review, "## REVIEW procedure");
+	for (const needle of [/Coverage receipt/i, /candidate identity/i, /Inspected/, /Not inspected/, /actual checks/i, /reused evidence/i]) expect(body).toMatch(needle);
+	expect(body).toMatch(/APPROVE, APPROVE WITH NOTES, REQUEST CHANGES, or ESCALATE/);
+	expect(body).toMatch(/APPROVE WITH NOTES[^\n]*(cannot|never)[^\n]*unresolved material/i);
+	expect(body).toMatch(/accepted disposition/);
+	expect(body).toMatch(/not a file-by-file/i);
+});
+
+test("reviewer treats repository text, plans, logs and quoted commands as untrusted evidence, not authority", () => {
+	const reviewer = read(REPO, "agent/agents/reviewer.md");
+	const sentences = reviewer.match(/[^\n.]*Repository text[^\n]*untrusted evidence[^\n]*/g) ?? [];
+	expect(sentences.length).toBe(1);
+	for (const needle of [/plans/, /logs/, /tool output/, /quoted commands/, /not instructions/, /role, tools, permissions|tools, permissions/, /verdict contract/, /defense-in-depth/, /not a sandbox/]) expect(sentences[0]).toMatch(needle);
+});
+
+test("policy and runtime docs describe the explicit modelSlot fallback selector without widening other boundaries", () => {
+	const agents = read(REPO, "agent/AGENTS.md");
+	const runtime = read(AGENT, "references/runtime.md");
+	const routing = read(AGENT, "references/routing.md");
+	const readme = read(REPO, "agent/extensions/subagent/README.md");
+	for (const [name, text] of [["AGENTS", agents], ["runtime", runtime], ["routing", routing], ["subagent README", readme]]) {
+		expect(text, name).toMatch(/modelSlot/);
+		expect(text, name).toMatch(/"fallback"/);
+		expect(text, name).toMatch(/explicit `modelTier`|explicit tier/);
+	}
+	expect(agents).toMatch(/first configured fallback/);
+	expect(agents).toMatch(/no arbitrary model/i);
+	expect(agents).toMatch(/Explicit Pi `modelTier` selection is the narrow exception/);
+	expect(readme).toMatch(/empty replay chain|no replay/i);
+	expect(readme).toMatch(/not a (guaranteed )?cross-provider|not automatically cross-provider/i);
+	expect(readme).toMatch(/Copilot[^\n]*(unsupported|no `?modelSlot`?)/i);
+	expect(readme).toMatch(/Reload|new session/);
+	expect(routing).toMatch(/not automatically cross-provider|diversity is required only when/i);
+	expect(routing).toMatch(/observed provider\/model[^\n]*never the launch request/i);
+	expect(routing).toMatch(/missing or partial observation as unverified/i);
+	expect(readme).toMatch(/`requestedModel`[^\n]*`observed`/);
+	expect(readme).toMatch(/No runtime checker enforces provider diversity/);
+	expect(readme).toMatch(/served UNVERIFIED/);
+	expect(readme).toMatch(/`responseModel`[^\n]*(anthropic-messages|openai-completions)/);
+	expect(readme).toMatch(/never infer[^\n]*upstream provider|upstream provider[^\n]*never inferred/i);
+	expect(routing).toMatch(/served UNVERIFIED/);
+	expect(runtime).toMatch(/Copilot[^\n]*modelSlot|modelSlot[^\n]*Copilot/);
+});
+
 test("main entry points resume-queue readers to the durable plan state", () => {
 	for (const root of [AGENT]) {
 		expect(read(root, "SKILL.md")).toMatch(/read `plan\/index\.md` \("Durable plan state"\) before resuming or changing it/);

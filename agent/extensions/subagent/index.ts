@@ -33,7 +33,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
-import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelTier, type SelectedAgent } from "./model-routing.ts";
+import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
+import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
@@ -60,9 +61,13 @@ interface UsageStats {
 	turns: number;
 }
 
+// Tier and explicit-slot provenance carried on results; the slot key is absent for every ordinary run.
+const tierFields = (agent: SelectedAgent | undefined) => ({ ...(agent?.modelTier !== undefined ? { modelTier: agent.modelTier } : {}), ...(agent?.modelSlot !== undefined ? { modelSlot: agent.modelSlot } : {}) });
+
 interface SingleResult {
 	workerId?: string;
 	modelTier?: ModelTier;
+	modelSlot?: ModelSlot; // present only when the run was explicitly started on the tier fallback
 	nodeId?: string; // DAG mode: node identity, stable even when agents repeat
 	dag?: { status: DagStatus; blockedBy?: string[]; started: boolean }; // DAG mode: node outcome
     toolActivity?: boolean;
@@ -73,7 +78,11 @@ interface SingleResult {
 	messages: Message[];
 	stderr: string;
 	usage: UsageStats;
-	model?: string;
+	model?: string; // effective route-provider/(responseModel ?? model) once a complete identity was reported (served is verified only by responseModel); otherwise the launch request (see modelSource)
+	modelSource?: "observed" | "requested";
+	requestedModel?: string; // this attempt's --model argument, never evidence of what ran
+	observed?: ObservedModel[]; // distinct identities this attempt's assistant messages reported, in first-seen order
+	attempts?: AttemptProvenance[]; // only after an availability fallback: every launched attempt, earliest first
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
@@ -221,13 +230,13 @@ async function runSingleAgentJob(
 			signal,
 			onQueued: () => {
 				setWaiting(WORKSPACE_WAITING);
-				if (!jobId) onUpdate?.({ content: [{ type: "text", text: WORKSPACE_WAITING }], details: makeDetails([{ agent: agentName, agentSource: agent.source, task, exitCode: -1, messages: [], stderr: "", usage, step, ...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}) }]) });
+				if (!jobId) onUpdate?.({ content: [{ type: "text", text: WORKSPACE_WAITING }], details: makeDetails([{ agent: agentName, agentSource: agent.source, task, exitCode: -1, messages: [], stderr: "", usage, step, ...tierFields(agent) }]) });
 			},
 		});
 	} catch (error) {
 		setWaiting(undefined);
 		if (signal?.aborted) throw new Error("Subagent was aborted");
-		if (error instanceof WorkspaceAdmissionError) return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: error.message, usage, step, stopReason: "error", errorMessage: error.message, ...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}) };
+		if (error instanceof WorkspaceAdmissionError) return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: error.message, usage, step, stopReason: "error", errorMessage: error.message, ...tierFields(agent) };
 		throw error;
 	}
 	setWaiting(undefined);
@@ -321,10 +330,10 @@ async function runAgentAttempt(
                 fallback.stderr = `Model ${model} skipped (provider cooldown ${launch.state}); retried with ${remaining[0]}.\n${fallback.stderr}`;
                 return fallback;
             }
-            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, ...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}) };
+            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, modelSource: "requested", requestedModel: model, observed: [], step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, attempts: [], ...tierFields(agent) }; // attempts: [] = no child launched, so a caller's `?? [attemptOf(..)]` cannot invent one
         }
     }
-    const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier);
+    const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier, agent.modelSlot);
     if (worker && dispatchDefaults.jobId) dispatchDefaults.runtime?.note(dispatchDefaults.jobId, worker.id, dispatchDefaults.waitKey);
     let codeIntegrationsEnabled = false;
     try {
@@ -335,7 +344,6 @@ async function runAgentAttempt(
 		args.push("--extension", guardPath);
 	}
 	args.push("--extension", path.join(extensionDir, "provider-cooldown-entry.ts")); // child guard, explicit despite --no-extensions
-	if (process.env.PI_EXTERNAL_COMPACTION === "1") args.push("--extension", path.join(extensionDir, "external-compaction-entry.ts")); // opt-in; same spawn path so every fallback gets it
 	if (agent.thinking) args.push("--thinking", agent.thinking);
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
@@ -356,7 +364,7 @@ async function runAgentAttempt(
 
     const currentResult: SingleResult = {
         workerId: worker?.id,
-		...(agent.modelTier !== undefined ? { modelTier: agent.modelTier } : {}),
+		...tierFields(agent),
 		agent: agentName,
 		agentSource: agent.source,
 		task,
@@ -365,6 +373,9 @@ async function runAgentAttempt(
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 		model,
+		modelSource: "requested",
+		...(model !== undefined ? { requestedModel: model } : {}),
+		observed: [],
 		step,
 	};
 
@@ -463,7 +474,9 @@ async function runAgentAttempt(
 							currentResult.usage.cost += usage.cost?.total || 0;
 							currentResult.usage.contextTokens = usage.totalTokens || 0;
 						}
-						if (!currentResult.model && msg.model) currentResult.model = msg.model;
+						observeAssistant(currentResult.observed!, msg);
+						const reported = observedId(identityOf(msg)); // complete provider/model only; a partial report never replaces the request
+						if (reported) { currentResult.model = reported; currentResult.modelSource = "observed"; }
 						currentResult.stopReason = msg.stopReason; // the latest assistant decides; a missing reason must clear an earlier stop
 						currentResult.errorMessage = msg.errorMessage; // latest assistant decides, like stopReason
 					}
@@ -550,6 +563,7 @@ async function runAgentAttempt(
 				remainingFallbacks.slice(1),
 				logical,
 			);
+			fallbackResult.attempts = [attemptOf(currentResult), ...(fallbackResult.attempts ?? [attemptOf(fallbackResult)])];
 			fallbackResult.stderr = `Model ${model ?? "(inherited)"} failed; retried with ${nextModel}. ${primaryError}\n${fallbackResult.stderr}`;
 			for (const key of ["input", "output", "cacheRead", "cacheWrite", "cost", "turns"] as const) {
 				fallbackResult.usage[key] += currentResult.usage[key];
@@ -578,12 +592,16 @@ async function runAgentAttempt(
 	}
 }
 
+// Null is listed (like modelTier) so the SDK keeps it for runtime refusal instead of dropping it into the ordinary primary run.
+const MODEL_SLOT = Type.Union([Type.Literal("fallback"), Type.Null()]);
+
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration: this task only reads its checkout (default write). Not an OS sandbox." })),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
+	modelSlot: Type.Optional(MODEL_SLOT),
 });
 
 const ChainItem = Type.Object({
@@ -592,6 +610,7 @@ const ChainItem = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration: this step only reads its checkout (default write). Not an OS sandbox." })),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
+	modelSlot: Type.Optional(MODEL_SLOT),
 });
 
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
@@ -608,11 +627,13 @@ const DagNode = Type.Object({
 	dependsOn: Type.Optional(Type.Union([Type.Array(Type.String(), { description: "IDs of direct parent nodes" }), Type.Null()])),
 	readOnly: Type.Optional(Type.Union([Type.Boolean({ description: "Trusted declaration: this node only reads its checkout (default write). Not an OS sandbox." }), Type.Null()])),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
+	modelSlot: Type.Optional(MODEL_SLOT),
 }, { additionalProperties: false });
 
 const SubagentParams = Type.Object({
     background: Type.Optional(Type.Boolean({description: "Default true: return a job ID immediately; completion arrives automatically. Set false to explicitly wait for the entire task.", default: true})),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()], { description: "Optional Pi model tier for a single task; select per entry in batch modes." })),
+	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -869,20 +890,20 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const batchMode = hasChain || hasTasks || hasDag;
-			if (batchMode && params.modelTier !== undefined) return { content: [{ type: "text", text: "Invalid modelTier: root selection is only valid for a single task." }], details: makeDetails(mode)([]), isError: true };
-			const tierRequests = hasDag ? dagNodes! : hasChain ? params.chain! : hasTasks ? params.tasks! : hasSingle ? [{ agent: params.agent!, modelTier: params.modelTier }] : [];
+			if (batchMode && (params.modelTier !== undefined || params.modelSlot !== undefined)) return { content: [{ type: "text", text: `Invalid ${params.modelTier !== undefined ? "modelTier" : "modelSlot"}: root selection is only valid for a single task.` }], details: makeDetails(mode)([]), isError: true };
+			const tierRequests = hasDag ? dagNodes! : hasChain ? params.chain! : hasTasks ? params.tasks! : hasSingle ? [{ agent: params.agent!, modelTier: params.modelTier, modelSlot: params.modelSlot }] : [];
 			const selected = preparedDispatch?.selected ?? new Map<number, SelectedAgent>();
 			if (!preparedDispatch) {
 				for (let i = 0; i < tierRequests.length; i++) {
-					const request = tierRequests[i] as { agent: string; modelTier?: unknown; id?: string };
+					const request = tierRequests[i] as { agent: string; modelTier?: unknown; modelSlot?: unknown; id?: string };
 					const location = hasDag ? `dag node "${request.id}"` : hasChain ? `chain[${i}]` : hasTasks ? `tasks[${i}]` : "single";
 					if (request.modelTier !== undefined && request.modelTier !== "economy" && request.modelTier !== "capable") return { content: [{ type: "text", text: `Invalid modelTier: ${location}: expected economy or capable.` }], details: makeDetails(mode)([]), isError: true };
 					const agent = agents.find((entry) => entry.name === request.agent);
 					if (!agent) {
-						if (request.modelTier === undefined) continue; // unknown omitted role keeps the existing unknown-agent path
+						if (request.modelTier === undefined && request.modelSlot === undefined) continue; // unknown omitted role keeps the existing unknown-agent path
 						return { content: [{ type: "text", text: `Invalid modelTier: ${location}: unknown agent "${request.agent}".` }], details: makeDetails(mode)([]), isError: true };
 					}
-					try { selected.set(i, resolveModelTier(agent, request.modelTier as ModelTier | undefined)); }
+					try { selected.set(i, resolveModelTier(agent, request.modelTier as ModelTier | undefined, request.modelSlot as ModelSlot | undefined)); }
 					catch (error) { return { content: [{ type: "text", text: `Invalid modelTier: ${location}: ${error instanceof Error ? error.message : String(error)}` }], details: makeDetails(mode)([]), isError: true }; }
 				}
 			}
@@ -951,7 +972,7 @@ export default function (pi: ExtensionAPI) {
 					const cause = row.cause === undefined ? undefined : row.cause instanceof Error ? row.cause.message : String(row.cause);
 					const base: SingleResult = row.result ?? { agent: node.agent, agentSource: "unknown", task: node.task, exitCode: 1, messages: [], stderr: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: cause === undefined ? undefined : "error", errorMessage: cause };
 					const selectedAgent = selected.get(dagNodes!.indexOf(node));
-					return { ...base, ...(selectedAgent?.modelTier !== undefined ? { modelTier: selectedAgent.modelTier } : {}), nodeId: node.id, dag: { status: row.status, blockedBy: row.blockedBy, started: launched.has(node.id) } };
+					return { ...base, ...tierFields(selectedAgent), nodeId: node.id, dag: { status: row.status, blockedBy: row.blockedBy, started: launched.has(node.id) } };
 				});
 				const accepted = results.filter((r) => r.dag?.status === "accepted").length;
 				return {
@@ -1042,7 +1063,7 @@ export default function (pi: ExtensionAPI) {
 						messages: [],
 						stderr: "",
 						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-						...(selected.get(i)?.modelTier !== undefined ? { modelTier: selected.get(i)!.modelTier } : {}),
+						...tierFields(selected.get(i)),
 					};
 				}
 
@@ -1082,7 +1103,7 @@ export default function (pi: ExtensionAPI) {
 						// Per-task fail closed: a launch that throws (e.g. missing Claude subscription guard) is one failed task; siblings keep their evidence. Abort still rejects.
 						if (signal?.aborted) throw error;
 						const message = error instanceof Error ? error.message : String(error);
-						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: "error", errorMessage: message, ...(selected.get(index)?.modelTier !== undefined ? { modelTier: selected.get(index)!.modelTier } : {}) };
+						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: "error", errorMessage: message, ...tierFields(selected.get(index)) };
 					});
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -1161,7 +1182,7 @@ export default function (pi: ExtensionAPI) {
             const failed = results.filter(r => r.exitCode !== -1 && isFailedResult(r)).length;
             const done = results.filter(r => r.exitCode === 0 && !isFailedResult(r)).length;
             const status = isPartial ? `Working · ${done} done · ${failed} failed` : result.isError || failed ? `Finished with errors · ${failed} failed` : `Finished · ${done} done`;
-            const names = results.map(r => `${r.agent}${r.modelTier !== undefined ? ` [tier: ${r.modelTier}]` : ""}`).join(", ").replace(/[\r\n\x1b]/g, " ").slice(0, 120);
+            const names = results.map(r => `${r.agent}${r.modelTier !== undefined ? ` [tier: ${r.modelTier}${r.modelSlot !== undefined ? `, slot: ${r.modelSlot}` : ""}]` : ""}`).join(", ").replace(/[\r\n\x1b]/g, " ").slice(0, 120);
             const hint = results.length ? "Click to inspect · /subagent" : (result.content.find(c => c.type === "text")?.text ?? "No workers launched").replace(/\s+/g, " ").slice(0, 180);
             return monitor.compact(theme.fg(failed || result.isError ? "error" : "muted", `${status} · ${names}`) + "\n" + hint, results[0]?.workerId);
         },

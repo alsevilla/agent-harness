@@ -26,7 +26,8 @@
    criteria; worker confidence is not independent verification. For a dirty candidate,
    cite HEAD plus a scoped diff hash or changed-file content hashes identifying the
    tested bytes (including relevant untracked source); a changed-path list alone is
-   not byte identity. Later relevant changes invalidate that evidence. The reply follows the canonical four-line handoff (`references/token-efficiency.md`, "Child final report").
+   not byte identity. Later relevant changes invalidate that evidence.
+   `references/run-manifest.md` (Candidate fingerprint recipe) gives the content-hash recipe; it is guidance, not enforcement. The reply follows the canonical four-line handoff (`references/token-efficiency.md`, "Child final report").
 
 ## Dispatch and completion checklist
 - Use one implementation worker per candidate; it owns the writes. Add independent Verify/Review or a specialist only for a justified risk under `references/routing.md`, and name that risk in the packet.

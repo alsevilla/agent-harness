@@ -192,6 +192,85 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 	} finally { fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true }); }
 });
 
+// Explicit native modelSlot: "fallback" on a package role with an explicit tier starts on that tier's first usable fallback.
+check("modelSlot fallback runs in single, parallel, chain and dag, foreground and background, with per-entry provenance", async () => {
+	const sdk = await import(piAiUrl);
+	const call = (arguments_: any) => ({ type: "toolCall" as const, id: "slot", name: "subagent", arguments: arguments_ });
+	let dispatches = 0;
+	for (const mode of ["single", "parallel", "chain", "dag"] as const) for (const backgroundMode of [false, true]) {
+		const pi = fakePi(); subagentExtension(pi);
+		const tool = pi.tools.get("subagent")!, control = pi.tools.get("subagent_control")!;
+		const ctx = dagCtx(makeRepo(`slot-${mode}-${backgroundMode}`));
+		const items: any[] = [{ agent: "backend-worker", task: "slot-0", modelTier: "capable", modelSlot: "fallback" }, { agent: "backend-worker", task: "plain-1", modelTier: "economy" }];
+		const expected = [PRIMARY, LUNA]; // capable fallback (not the capable primary) and an ordinary economy primary
+		const used = mode === "single" ? items.slice(0, 1) : items;
+		const args: any = { background: backgroundMode, agentScope: "both" };
+		if (mode === "single") Object.assign(args, used[0]);
+		else if (mode === "dag") args.dag = used.map((item, i) => ({ ...item, id: `p${i}`, ...(i ? { dependsOn: ["p0"] } : {}) }));
+		else args[mode === "parallel" ? "tasks" : "chain"] = used;
+		const valid = sdk.validateToolArguments(tool, call(args));
+		const offset = children().length;
+		const launch = tool.execute("slot", valid, undefined, undefined, ctx);
+		const acknowledgement = backgroundMode ? await launch : undefined;
+		if (backgroundMode) { assert.notEqual(acknowledgement!.isError, true); assert.ok(acknowledgement!.details.jobId); }
+		for (let i = 0; i < used.length; i++) {
+			await waitFor(() => children().length === offset + i + 1, `${mode} ${backgroundMode} slot position-${i} spawn`);
+			const child = children()[offset + i];
+			await waitFor(() => child.received.some(m => m.type === "prompt"), `slot position-${i} prompt`);
+			assert.equal(child.model, expected[i], `${mode} ${backgroundMode} position-${i} model`);
+			finish(child, `slot-${i} result`);
+		}
+		assert.equal(children().length, offset + used.length, "one child per entry: no primary launch for the slotted entry");
+		let result: any;
+		if (backgroundMode) {
+			const jobId = acknowledgement!.details.jobId;
+			await waitFor(() => pi.sent.some((m: any) => m.details?.jobId === jobId && m.details.state === "completed"), "slot completed receipt");
+			result = await control.execute("result", { action: "result", target: jobId }, undefined, undefined, ctx);
+		} else result = await launch;
+		assert.notEqual(result.isError, true);
+		const rows = result.details.results;
+		assert.equal(rows.length, used.length);
+		assert.equal(rows[0].model, PRIMARY); assert.equal(rows[0].modelTier, "capable"); assert.equal(rows[0].modelSlot, "fallback");
+		assert.doesNotMatch(rows[0].stderr, /retried|skipped/);
+		if (used.length > 1) { assert.equal(rows[1].model, LUNA); assert.equal(rows[1].modelTier, "economy"); assert.equal(Object.hasOwn(rows[1], "modelSlot"), false); }
+		dispatches++;
+	}
+	assert.equal(dispatches, 8);
+});
+
+check("modelSlot refusals happen before any spawn: schema, runtime, root batch, non-package, tierless and no-fallback", async () => {
+	const sdk = await import(piAiUrl);
+	const pi = fakePi(); subagentExtension(pi);
+	const tool = pi.tools.get("subagent")!;
+	const call = (arguments_: any) => ({ type: "toolCall" as const, id: "slot", name: "subagent", arguments: arguments_ });
+	const slotted = (extra: Record<string, unknown> = {}) => ({ agent: "backend-worker", task: "t", modelTier: "capable", modelSlot: "fallback", ...extra });
+	for (const bad of ["primary", "Fallback", "anthropic/claude-sonnet-5-5", 1, true, ["fallback"]]) {
+		assert.throws(() => sdk.validateToolArguments(tool, call({ background: false, ...slotted({ modelSlot: bad }) })), /Validation failed/, `schema ${JSON.stringify(bad)}`);
+		assert.throws(() => sdk.validateToolArguments(tool, call({ background: false, dag: [{ id: "a", ...slotted({ modelSlot: bad }) }] })), /Validation failed/, `dag schema ${JSON.stringify(bad)}`);
+	}
+	const ctx = dagCtx(makeRepo("slot-refusals"));
+	const refused: Array<[string, any]> = [
+		["slot without tier", { agent: "backend-worker", task: "t", modelSlot: "fallback" }],
+		["null slot", slotted({ modelSlot: null })],
+		["unsupported slot", slotted({ modelSlot: "primary" })],
+		["user role", { agent: "writer", task: "t", modelTier: "capable", modelSlot: "fallback" }],
+		["no usable fallback (oracle)", { agent: "oracle", task: "t", modelTier: "capable", modelSlot: "fallback" }],
+		["unconfigured tier (scout capable)", { agent: "scout", task: "t", modelTier: "capable", modelSlot: "fallback" }],
+		["root slot on tasks", { tasks: [{ agent: "backend-worker", task: "t" }], modelSlot: "fallback" }],
+		["root slot on chain", { chain: [{ agent: "backend-worker", task: "t", modelTier: "capable" }], modelSlot: "fallback" }],
+		["root slot on dag", { dag: [{ id: "a", agent: "backend-worker", task: "t", modelTier: "capable" }], modelSlot: "fallback" }],
+		["tasks entry without tier", { tasks: [{ agent: "backend-worker", task: "t", modelSlot: "fallback" }] }],
+		["chain later entry null", { chain: [{ agent: "backend-worker", task: "t" }, slotted({ modelSlot: null })] }],
+		["dag entry no fallback", { dag: [{ id: "a", agent: "oracle", task: "t", modelTier: "capable", modelSlot: "fallback" }] }],
+	];
+	for (const backgroundMode of [false, true]) for (const [label, args] of refused) {
+		const result = await tool.execute("slot-refusal", { background: backgroundMode, agentScope: "both", ...args }, undefined, undefined, ctx);
+		assert.equal(result.isError, true, `${label} background=${backgroundMode}`);
+		assert.equal(children().length, 0, `${label} spawned a child`);
+		assert.equal(pi.sent.length, 0, `${label} started a job`);
+	}
+});
+
 check("inactive empty arrays cannot bypass single or parallel tier preflight", async () => {
 	for (const background of [false, true]) for (const args of [
 		{ background, agent: "writer", task: "bounded", modelTier: "economy", chain: [] },
@@ -1053,7 +1132,7 @@ check("dag acceptance: printed invoke markup (exit 0, stop) is not accepted and 
 	assert.equal(result.isError, true);
 	assert.deepEqual(result.details.results.map((r: any) => r.dag.status), ["failed", "blocked"]);
 	assert.deepEqual(result.details.results[1].dag.blockedBy, ["a"]);
-	assert.match(result.content[0].text, /### node "a" \(writer\) \u2014 INCOMPLETE\/UNVERIFIED \(tool-call markup as text\)/);
+	assert.match(result.content[0].text, /### node "a" \(writer\) \u00b7 model: unknown \(requested-only; partial report unknown message UNVERIFIED\) \u2014 INCOMPLETE\/UNVERIFIED \(tool-call markup as text\)/);
 });
 
 check("dag acceptance: two-space indented invoke markup (exit 0, stop) is not accepted and blocks its dependents", async () => {

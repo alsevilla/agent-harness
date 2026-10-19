@@ -69,11 +69,11 @@ interface RunResult {
 }
 
 let discoverAgents: typeof import("../agents.ts").discoverAgents;
+let resolveModelTier: typeof import("../model-routing.ts").resolveModelTier;
 let runSingleAgent: (...args: unknown[]) => Promise<RunResult>;
 // Usage ledger helpers from the production background module (same module instance index.ts imports).
 let bg: any;
 let attempts: string[] = [];
-let guardArgs: boolean[] = []; // per spawn: whether the child received the external-compaction guard entry
 let spawnPlan: (model: string) => SpawnPlan = () => success();
 // Launch state per declared model; the default launches everything (provider cooldown entry stub).
 let launchPlan: (model: string) => { state: string; replayable?: boolean } = () => ({ state: "launch" });
@@ -86,7 +86,6 @@ let guardPlan: (model: string, message?: string) => boolean = () => false;
 (globalThis as { __piSubagentFakeSpawn?: (args: string[]) => SpawnPlan }).__piSubagentFakeSpawn = (args) => {
 	const model = args[args.indexOf("--model") + 1];
 	attempts.push(model);
-	guardArgs.push(args.some((arg) => arg.endsWith("external-compaction-entry.ts")));
 	return spawnPlan(model);
 };
 
@@ -113,13 +112,13 @@ const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 before(async () => {
 	({ discoverAgents } = await import(agentsUrl));
+	({ resolveModelTier } = await import(new URL("../model-routing.ts", import.meta.url).href));
 	({ runSingleAgent } = await import(indexUrl));
 	bg = await import(backgroundUrl);
 });
 
 beforeEach(() => {
 	attempts = [];
-	guardArgs = [];
 	spawnPlan = () => success();
 	launchPlan = () => ({ state: "launch" });
 	guardPlan = () => false;
@@ -196,28 +195,6 @@ test("ordered availability failures advance one fallback at a time and stop at e
 	assert.equal(result.exitCode, 1);
 	assert.equal(result.model, COPILOT_SOL);
 	assert.equal(result.stderr.split("retried with").length - 1, 3);
-});
-
-test("external compaction guard reaches every fallback spawn only when PI_EXTERNAL_COMPACTION=1", async () => {
-	const fx = setupRoots();
-	writeRole(fx.userAgents, "guarded", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA} || ${COPILOT_SOL}"` });
-	spawnPlan = () => unavailable("429 rate limit");
-	const saved = process.env.PI_EXTERNAL_COMPACTION;
-	try {
-		process.env.PI_EXTERNAL_COMPACTION = "1";
-		await run(fx.nested, discover(fx.nested), "guarded");
-		assert.deepEqual(attempts, [PRIMARY, LUNA, COPILOT_LUNA, COPILOT_SOL]);
-		assert.deepEqual(guardArgs, [true, true, true, true]);
-		attempts = [];
-		guardArgs = [];
-		delete process.env.PI_EXTERNAL_COMPACTION;
-		await run(fx.nested, discover(fx.nested), "guarded");
-		assert.deepEqual(attempts, [PRIMARY, LUNA, COPILOT_LUNA, COPILOT_SOL]);
-		assert.deepEqual(guardArgs, [false, false, false, false]);
-	} finally {
-		if (saved === undefined) delete process.env.PI_EXTERNAL_COMPACTION;
-		else process.env.PI_EXTERNAL_COMPACTION = saved;
-	}
 });
 
 test("a later fallback can succeed after earlier availability failures", async () => {
@@ -297,6 +274,81 @@ test("an anthropic fallback without the subscription guard fails loudly instead 
 	spawnPlan = () => unavailable();
 	await assert.rejects(run(fx.nested, discover(fx.nested), "guardMissing"), /subscription guard missing/);
 	assert.deepEqual(attempts, [PRIMARY]);
+});
+
+// ---- Explicit modelSlot fallback: the run STARTS on the selected fallback with an empty replay chain ----------------------------
+
+function slotRole(tierFallbacks: string[] = [LUNA, COPILOT_LUNA]): AgentConfig {
+	return {
+		name: "slot-role", description: "slot", source: "package", filePath: "slot-role.md", systemPrompt: "", model: PRIMARY, fallbackModel: tierFallbacks.slice(), tools: ["read"], thinking: "high", defaultModelTier: "capable",
+		modelTiers: { capable: { model: PRIMARY, fallbackModel: tierFallbacks.slice(), thinking: "high" } },
+	} as unknown as AgentConfig;
+}
+const slotted = (fallbacks?: string[]) => [resolveModelTier(slotRole(fallbacks), "capable", "fallback")] as unknown as AgentConfig[];
+
+test("modelSlot fallback launches exactly one child on the selected fallback, never the primary, with honest provenance", async () => {
+	const fx = setupRoots();
+	const result = await run(fx.nested, slotted(), "slot-role") as RunResult & { modelTier?: string; modelSlot?: string };
+	assert.deepEqual(attempts, [LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.model, LUNA);
+	assert.equal(result.modelTier, "capable");
+	assert.equal(result.modelSlot, "fallback");
+	assert.doesNotMatch(result.stderr, /retried|skipped|failed/i);
+	// Control: the same role without the slot still starts on the primary and replays the chain.
+	attempts = [];
+	spawnPlan = (model) => (model === PRIMARY ? unavailable() : success());
+	const normal = await run(fx.nested, [resolveModelTier(slotRole(), "capable")] as unknown as AgentConfig[], "slot-role") as RunResult & { modelSlot?: string };
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(Object.hasOwn(normal, "modelSlot"), false);
+});
+
+test("modelSlot fallback: quota, task, tool-activity and abort outcomes never replay to the primary or a later fallback", async () => {
+	const fx = setupRoots();
+	spawnPlan = () => unavailable("429 rate limit");
+	const quota = await run(fx.nested, slotted(), "slot-role");
+	assert.deepEqual(attempts, [LUNA]);
+	assert.equal(quota.exitCode, 1);
+	assert.doesNotMatch(quota.stderr, /retried/);
+	for (const plan of [
+		{ events: [assistant("error", "", "test failed")], exitCode: 1 },
+		{ events: [{ type: "tool_execution_start" }, assistant("error", "", "503 unavailable")], exitCode: 1 },
+		{ events: [assistant("aborted", "", "503 unavailable")], exitCode: 1 },
+	] as SpawnPlan[]) {
+		attempts = [];
+		spawnPlan = () => plan;
+		await run(fx.nested, slotted(), "slot-role");
+		assert.deepEqual(attempts, [LUNA]);
+	}
+	attempts = [];
+	const controller = new AbortController();
+	spawnPlan = () => ({ events: [], hang: true, afterSpawn: () => controller.abort() });
+	await assert.rejects(run(fx.nested, slotted(), "slot-role", controller.signal), /Subagent was aborted/);
+	assert.deepEqual(attempts, [LUNA]);
+});
+
+test("modelSlot fallback: a cooling, blocked or guard-refused fallback never spawns or returns to the primary", async () => {
+	const fx = setupRoots();
+	for (const state of ["cooling", "probe-busy", "blocked", "unavailable"]) {
+		attempts = [];
+		launchPlan = (model) => (model === LUNA ? { state, replayable: true } : { state: "launch" });
+		const result = await run(fx.nested, slotted(), "slot-role");
+		assert.deepEqual(attempts, [], state);
+		assert.equal(result.exitCode, 1);
+		assert.match(result.stderr, new RegExp(`Model ${LUNA.replace(/[.]/g, "\\.")} not launched: provider cooldown ${state}`));
+	}
+	launchPlan = () => ({ state: "launch" });
+	attempts = [];
+	guardPlan = () => true;
+	spawnPlan = () => ({ events: [assistant("error", "", "provider cooldown cooling")], exitCode: 1 });
+	await run(fx.nested, slotted(), "slot-role");
+	assert.deepEqual(attempts, [LUNA]);
+});
+
+test("modelSlot fallback keeps the Anthropic subscription guard requirement", async () => {
+	const fx = setupRoots();
+	await assert.rejects(run(fx.nested, slotted(["anthropic/claude-haiku-5-5"]), "slot-role"), /subscription guard missing/);
+	assert.deepEqual(attempts, []);
 });
 
 test("usage sums every attempt while contextTokens reports only the final attempt", async () => {
@@ -650,4 +702,172 @@ test("usage: the summary is plain, deterministic and separates settled, running 
 	assert.doesNotMatch(text, /NaN|free/);
 	assert.equal(bg.formatUsageSummary(bg.newUsageScope()).includes("No delegated agent tasks yet this run"), true);
 	assert.match(bg.formatUsageSummary({ ...bg.newUsageScope(), running: 1 }), /Pending: 1 agent task incl\. queued, excluded until settled/);
+});
+
+// ---- Observed vs requested model provenance: the launch request is never reported as the child's actual identity ----------------
+type Provenance = RunResult & {
+	requestedModel?: string;
+	modelSource?: string;
+	observed?: { provider?: string; model?: string; responseModel?: string }[];
+	attempts?: { requestedModel?: string; observed: { provider?: string; model?: string }[] }[];
+};
+function reporting(identity: { provider?: string; model?: string; responseModel?: string }, stopReason = "stop", text = "done", errorMessage?: string): Event {
+	const event = assistant(stopReason, text, errorMessage) as { message: Record<string, unknown> };
+	return { type: "message_end", message: { ...event.message, ...identity } };
+}
+
+test("provenance: a child reporting a different provider/model than requested is not hidden by the launch request", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "mismatch", { model: PRIMARY });
+	spawnPlan = () => ({ events: [reporting({ provider: "github-copilot", model: "gpt-6-luna" })], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "mismatch")) as Provenance;
+	assert.equal(result.requestedModel, PRIMARY);
+	assert.deepEqual(result.observed, [{ provider: "github-copilot", model: "gpt-6-luna" }]);
+	assert.equal(result.modelSource, "observed");
+	assert.equal(result.model, COPILOT_LUNA);
+});
+
+test("provenance: no reported identity stays requested-only; a provider-less report is partial, never observed", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "silent", { model: PRIMARY });
+	const agents = discover(fx.nested);
+	const none = (await run(fx.nested, agents, "silent")) as Provenance;
+	assert.equal(none.model, PRIMARY);
+	assert.equal(none.requestedModel, PRIMARY);
+	assert.equal(none.modelSource, "requested");
+	assert.deepEqual(none.observed, [{}], "an identity-free completed message stays a visible unknown marker; the request is still not an observation");
+	spawnPlan = () => ({ events: [reporting({ model: "gpt-6-luna" })], exitCode: 0 });
+	const partial = (await run(fx.nested, agents, "silent")) as Provenance;
+	assert.equal(partial.model, PRIMARY, "a partial report never replaces the request as an observed identity");
+	assert.equal(partial.modelSource, "requested");
+	assert.deepEqual(partial.observed, [{ model: "gpt-6-luna" }]);
+});
+
+test("provenance: every distinct identity across several assistant messages is kept, not only the last", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "mixed", { model: PRIMARY });
+	spawnPlan = () => ({ events: [reporting({ provider: "openai-codex", model: "gpt-6.1-sol" }, "toolUse", ""), reporting({ provider: "openai-codex", model: "gpt-6.1-sol" }, "toolUse", ""), reporting({ provider: "anthropic", model: "claude-x" })], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "mixed")) as Provenance;
+	assert.deepEqual(result.observed, [{ provider: "openai-codex", model: "gpt-6.1-sol" }, { provider: "anthropic", model: "claude-x" }]);
+	assert.equal(result.model, "anthropic/claude-x");
+	assert.equal(result.modelSource, "observed");
+});
+
+test("provenance: fallback keeps each attempt's own request and observation; the final request is not the original", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "attempts", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	spawnPlan = (model) => (model === PRIMARY ? { events: [reporting({ provider: "openai-codex", model: "gpt-6.1-sol" }, "error", "", "503 unavailable")], exitCode: 1 } : { events: [reporting({ provider: "github-copilot", model: "gpt-6-luna" })], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "attempts")) as Provenance;
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(result.requestedModel, LUNA);
+	assert.deepEqual(result.observed, [{ provider: "github-copilot", model: "gpt-6-luna" }]);
+	assert.deepEqual(result.attempts, [
+		{ requestedModel: PRIMARY, observed: [{ provider: "openai-codex", model: "gpt-6.1-sol" }] },
+		{ requestedModel: LUNA, observed: [{ provider: "github-copilot", model: "gpt-6-luna" }] },
+	]);
+});
+
+// Pi 1.3 AssistantMessage.provider/model echo the child's REQUEST; only responseModel can evidence a differing served id (two SDK producers).
+test("provenance: assistant.model equal to the request but a different responseModel is the effective identity; route provider is kept", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "served", { model: PRIMARY });
+	spawnPlan = () => ({ events: [reporting({ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "gpt-6.1-sol-served" })], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "served")) as Provenance;
+	assert.equal(result.model, "openai-codex/gpt-6.1-sol-served", "effective id = route provider + responseModel");
+	assert.equal(result.requestedModel, PRIMARY);
+	assert.equal(result.modelSource, "observed");
+	assert.deepEqual(result.observed, [{ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "gpt-6.1-sol-served" }]);
+	// a router route provider is never replaced by a vendor prefix inside responseModel; a redundant responseModel is not a second identity
+	spawnPlan = () => ({ events: [reporting({ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "anthropic/x" }, "toolUse", ""), reporting({ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "gpt-6.1-sol" })], exitCode: 0 });
+	const routed = (await run(fx.nested, discover(fx.nested), "served")) as Provenance;
+	assert.equal(routed.model, "openai-codex/gpt-6.1-sol", "latest message reported no differing response id");
+	assert.deepEqual(routed.observed, [{ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "anthropic/x" }, { provider: "openai-codex", model: "gpt-6.1-sol" }]);
+});
+
+test("provenance: each availability attempt keeps its own effective served id; the final request is not the original", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "served-attempts", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	spawnPlan = (model) => (model === PRIMARY ? { events: [reporting({ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "gpt-6.1-sol-served" }, "error", "", "503 unavailable")], exitCode: 1 } : { events: [reporting({ provider: "openai-codex", model: "gpt-6-luna" })], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "served-attempts")) as Provenance;
+	assert.equal(result.requestedModel, LUNA);
+	assert.equal(result.model, LUNA);
+	assert.deepEqual(result.attempts, [
+		{ requestedModel: PRIMARY, observed: [{ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "gpt-6.1-sol-served" }] },
+		{ requestedModel: LUNA, observed: [{ provider: "openai-codex", model: "gpt-6-luna" }] },
+	]);
+});
+
+// ---- Review-fix regressions: identity-free completed messages stay visible; no-spawn refusals are never launched attempts ----
+const provenanceModule = await import(new URL("../provenance.ts", import.meta.url).href);
+for (const unknownLast of [false, true]) {
+	test(`provenance: an identity-free completed message beside a served one stays UNVERIFIED (${unknownLast ? "unknown last" : "unknown first"})`, async () => {
+		const fx = setupRoots();
+		writeRole(fx.userAgents, "unknown-mixed", { model: PRIMARY });
+		const known = reporting({ provider: "openai-codex", model: "gpt-6.1-sol", responseModel: "served-snapshot" }, "toolUse", "");
+		const missing = reporting({}, "toolUse", "");
+		spawnPlan = () => ({ events: unknownLast ? [known, missing] : [missing, known], exitCode: 0 });
+		const result = (await run(fx.nested, discover(fx.nested), "unknown-mixed")) as Provenance;
+		assert.equal(result.observed?.length, 2, "the unknown completed message is a retained marker, not dropped");
+		assert.ok(result.observed?.some((o) => Object.keys(o).length === 0), "marker is an empty observation: no identity is invented");
+		assert.equal(provenanceModule.servedReported(result.observed), false);
+		assert.match(provenanceModule.modelProvenance(result), /UNVERIFIED/);
+		assert.equal(result.model, "openai-codex/served-snapshot", "an identity-free message never overwrites the effective model");
+		assert.equal(result.modelSource, "observed");
+	});
+}
+
+test("provenance: only identity-free completed messages stay requested-only with a visible unknown marker", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "unknown-only", { model: PRIMARY });
+	spawnPlan = () => ({ events: [reporting({})], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "unknown-only")) as Provenance;
+	assert.deepEqual(result.observed, [{}]);
+	assert.equal(result.model, PRIMARY);
+	assert.equal(result.modelSource, "requested");
+	assert.match(provenanceModule.modelProvenance(result), /requested-only; .*UNVERIFIED/);
+});
+
+test("provenance: an earlier unknown message in a failed attempt is retained in that attempt's history", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "unknown-attempt", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	spawnPlan = (model) => (model === PRIMARY ? { events: [reporting({}, "error", "", "503 unavailable")], exitCode: 1 } : { events: [reporting({ provider: "openai-codex", model: "gpt-6-luna", responseModel: "luna-snap" })], exitCode: 0 });
+	const result = (await run(fx.nested, discover(fx.nested), "unknown-attempt")) as Provenance;
+	assert.deepEqual(result.attempts, [{ requestedModel: PRIMARY, observed: [{}] }, { requestedModel: LUNA, observed: [{ provider: "openai-codex", model: "gpt-6-luna", responseModel: "luna-snap" }] }]);
+});
+
+test("attempts: a terminal cooldown refusal after a real failed launch never becomes a launched attempt", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "refused-after-launch", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	launchPlan = (model) => (model === LUNA ? { state: "blocked", replayable: false } : { state: "launch" });
+	spawnPlan = () => unavailable("503 provider unavailable", usage(10, 4, 14, 0.5));
+	const scope = bg.newUsageScope();
+	const result = (await scoped(fx.nested, discover(fx.nested), "refused-after-launch", { usageScope: scope })) as Provenance;
+	assert.deepEqual(attempts, [PRIMARY]);
+	assert.deepEqual(result.attempts?.map((a) => a.requestedModel), [PRIMARY]);
+	assert.match(result.stderr, /not launched: provider cooldown blocked/);
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 1, turns: 1, input: 10, output: 4, cost: 0.5, failed: 1 });
+});
+
+test("attempts: an exhausted chain of replayable-blocked fallbacks keeps only the real launched attempt", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "exhausted-blocked", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	launchPlan = (model) => (model === PRIMARY ? { state: "launch" } : { state: "cooling", replayable: true });
+	spawnPlan = () => unavailable("503 provider unavailable", usage(10, 4, 14, 0.5));
+	const scope = bg.newUsageScope();
+	const result = (await scoped(fx.nested, discover(fx.nested), "exhausted-blocked", { usageScope: scope })) as Provenance;
+	assert.deepEqual(attempts, [PRIMARY]);
+	assert.deepEqual(result.attempts?.map((a) => a.requestedModel), [PRIMARY]);
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 1, turns: 1, input: 10, output: 4, cost: 0.5, failed: 1 });
+});
+
+test("attempts: a replayable-blocked fallback is skipped and the eventual real launch is the second attempt", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "blocked-then-spawn", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
+	launchPlan = (model) => (model === LUNA ? { state: "cooling", replayable: true } : { state: "launch" });
+	spawnPlan = (model) => (model === PRIMARY ? unavailable("503 provider unavailable", usage(10, 4, 14, 0.5)) : success(usage(7, 2, 9, 0.25)));
+	const scope = bg.newUsageScope();
+	const result = (await scoped(fx.nested, discover(fx.nested), "blocked-then-spawn", { usageScope: scope })) as Provenance;
+	assert.deepEqual(attempts, [PRIMARY, COPILOT_LUNA]);
+	assert.deepEqual(result.attempts?.map((a) => a.requestedModel), [PRIMARY, COPILOT_LUNA]);
+	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 2, turns: 2, input: 17, output: 6, cost: 0.75, completed: 1 });
 });

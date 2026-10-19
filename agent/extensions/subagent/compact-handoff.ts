@@ -19,6 +19,8 @@ Only claim PASS when the assigned scope and its required checks passed; an exit 
 The main orchestrator owns delegations, approvals, and phase routing.
 `;
 
+import { attemptsNote, modelProvenance } from "./provenance.ts";
+
 export const BACKGROUND_COMPLETION_LIMIT = 4000;
 
 const VERDICT_LINE = /^\s*(?:STATUS|VERDICT|RISKS?|BLOCKERS?)\s*:|\bpending decisions?\b/i; // ranked before other priority lines
@@ -158,7 +160,10 @@ export function retainedEntryBlock(entry: any): string {
 	const label = dag?.status === "blocked" ? `BLOCKED by ${(dag.blockedBy ?? []).join(", ")}` : notRun ? "ABORTED before start" : failed ? "FAILED/STOPPED" : markup ? PRINTED_MARKUP_LABEL : incomplete ? incompleteLabel(entry.stopReason) : "completed";
 	const agent = String(entry?.agent ?? "unknown agent");
 	const name = entry?.nodeId !== undefined ? `node "${entry.nodeId}" (${agent})` : agent;
-	const diagnostics = entry?.modelTier !== undefined ? [`tier: ${entry.modelTier}`, ...(entry.model ? [`model: ${entry.model}`] : [])] : [];
+	// Provenance shows for tiered runs and whenever the child reported any identity; the request alone is labelled requested-only.
+	const provenance = entry?.modelTier !== undefined || entry?.observed?.length ? modelProvenance(entry) : undefined;
+	const trail = attemptsNote(entry?.attempts);
+	const diagnostics = [...(entry?.modelTier !== undefined ? [`tier: ${entry.modelTier}`, ...(entry.modelSlot !== undefined ? [`slot: ${entry.modelSlot}`] : [])] : []), ...(provenance ? [`model: ${provenance}`] : []), ...(trail ? [trail] : [])];
 	const heading = `${name}${diagnostics.length ? ` · ${diagnostics.join(" · ")}` : ""}`;
 	const text = extractFinalText(Array.isArray(entry?.messages) ? entry.messages : []);
 	const issue = failed ? failureDiagnostics(entry).map((d) => `${d.label}: ${d.value}`).join("\n") : "";

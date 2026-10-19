@@ -10,7 +10,7 @@ Read only when a complex multi-stage run needs a durable record. Optional: simpl
 
 ## Required content
 1. Goal: the user's acceptance criteria in one or two sentences.
-2. Candidate: absolute path, branch, full HEAD SHA and a fingerprint recorded at write time (for example a hash of `git status --short` plus the diff stat).
+2. Candidate: absolute path, branch, full HEAD SHA and a content fingerprint recorded at write time, following the recipe below (method, exclusions and value).
 3. Authority boundaries: what is authorized, what is not, and the message reference or decision record that grants each item.
 4. Accepted plan: plan path or `none (localized change)`, with acceptance date and version.
 5. Current phase: DISCOVER, PLAN, EXECUTE, DEBUG, VERIFY, REVIEW, INTEGRATE, SHIP or LEARN, plus any hold (PAUSED or BLOCKED, with reason).
@@ -18,6 +18,17 @@ Read only when a complex multi-stage run needs a durable record. Optional: simpl
 7. Open items: every FAILED, BLOCKED, PAUSED or UNKNOWN stage, and every pending decision with owner and the decision needed.
 8. Next authorized action: one action, its owner and the authority it relies on.
 9. Change log: dated entries; any write marks affected checks STALE.
+
+## Candidate fingerprint recipe
+A documented recipe, not a runtime subsystem: no script or hook enforces it, and recording one proves no consumer checks freshness. Keep the detailed records in MANIFEST/REPORT evidence, not the compact PLAN, and reuse them for unchanged inputs instead of rehashing the repository for every task.
+1. Bind the record to the candidate path and the full HEAD SHA.
+2. List relevant paths with `git status --porcelain=v1 -z --no-renames --untracked-files=all`. It is NUL-safe, covers staged, unstaged and untracked paths, and `--no-renames` records a rename as a delete plus an add.
+3. Write one sorted record per path from the actual working bytes: a regular file as `file <path> <digest>` using `git hash-object --no-filters` (raw bytes, no EOL normalization); a symlink as `link <path> <digest of the link text>`, never followed; a path whose absence is confirmed (ENOENT/ENOTDIR) as `deleted <path>`. Any other inspection failure (EACCES, EIO, unknown) is not absence: record it `UNSUPPORTED`, never `deleted`.
+   Encoding: the digest input is a JSON array of typed arrays of strings (`["HEAD",sha]`, `["file",path,digest]`, `["deleted",path]`, `["UNSUPPORTED",path,reason]`, `["staged",digest]`, `["exclude",prefix]`), never newline- or space-joined text, so a pathname (even one containing a newline) cannot impersonate a record or field boundary. Pathnames are kept verbatim; a pathname that is not valid UTF-8 cannot be represented without folding, so record it `UNSUPPORTED` (by raw-byte hex) rather than altering it.
+4. Also record a digest of `git diff --cached --binary --no-renames`: staged content can differ from the working bytes while `git status --short` and the diff stat stay identical.
+5. A directory, submodule, unreadable entry or anything else not listed above is recorded as `UNSUPPORTED <path>`. Unsupported input cannot support a fresh PASS: treat the affected evidence as unknown until it is inspected explicitly.
+6. Name excluded artifact paths (evidence, scratch, build output) in the record and include that list in the digest input. Do not read private, ignored or generated inputs, or symlink targets, merely to build a fingerprint.
+Two same-size edits to one file keep status and the diff stat identical but produce different digests under this recipe. `agent/extensions/subagent/tests/candidate-fingerprint.test.ts` demonstrates same-size, staged-only, index-only, untracked, deleted, renamed, exclusion, unsupported, inspection-failure (fault-injected), newline-pathname boundary and link cases on a disposable repository (the link case is skipped where symlink creation is not permitted). A later relevant change invalidates the affected evidence.
 
 ## Status vocabulary
 - `PLANNED`: not launched.
@@ -55,7 +66,7 @@ Read only when a complex multi-stage run needs a durable record. Optional: simpl
 - Path: <absolute candidate path>
 - Branch: <branch>
 - HEAD: <full SHA at record time>
-- Fingerprint: <method and value>
+- Fingerprint: <recipe, exclusions, UNSUPPORTED paths and value>
 - Recorded: <YYYY-MM-DD HH:MM>
 
 ## Authority boundaries
@@ -102,7 +113,7 @@ Reject CSV exports whose header row is missing the `record_id` column. Acceptanc
 - Path: C:/synthetic/worktrees/sample-app
 - Branch: feat/sample-exporter-header
 - HEAD: 0123456789abcdef0123456789abcdef01234567
-- Fingerprint: sha256 of git status plus diff stat = 9f2c...e1 (synthetic)
+- Fingerprint: sha256 over HEAD, per-path content digests and the staged-patch digest = 9f2c...e1 (synthetic); exclusions: _evidence/, _scratch/
 - Recorded: 2026-01-10 09:00
 
 ## Authority boundaries
