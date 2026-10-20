@@ -618,7 +618,7 @@ test("trusted release-engineer launch admits feature push without grant, lease o
 	assert.equal(guardToolCall({ ...childGuard(childStore), pushTarget }, "bash", { command: "git push origin feat/x" }, repo), undefined);
 });
 
-test("trusted release-engineer launch admits inline-notes release for its uniquely merged target without approval", () => {
+test("trusted release-engineer launch never auto-creates a release: inline notes block without an explicit grant", () => {
 	const repo = repoFixture();
 	git(repo, "remote", "set-url", "origin", "https://github.com/example/repo.git");
 	git(repo, "checkout", "-q", "feat/x");
@@ -634,9 +634,7 @@ test("trusted release-engineer launch admits inline-notes release for its unique
 	const live = { env: () => ({}), pushUrl: () => PUSH_URL, tagStatus: () => 2, ghJson: () => [{ number: 7, state: "MERGED", isCrossRepository: false, headRefName: "feat/x", headRefOid: "1".repeat(40), baseRefName: "main", mergeCommit: { oid: "2".repeat(40) } }] };
 	const trusted = { ...childGuard(childStore), gateCommits: true, pushTarget, live };
 	const command = 'gh release create v1.2.3 --repo example/repo --target ' + "2".repeat(40) + ' --title "v1.2.3" --notes "Inline notes"';
-	assert.equal(store.size(), 0);
-	assert.equal(store.leaseCount(), 0);
-	assert.equal(guardToolCall(trusted, "bash", { command }, repo, () => PUSH_URL), undefined);
+	assert.ok(guardToolCall(trusted, "bash", { command }, repo, () => PUSH_URL), "release create has no automatic path");
 });
 
 test("trusted release-engineer launch admits anchored file-based normal delivery without grants", () => {
@@ -658,7 +656,7 @@ test("trusted release-engineer launch admits anchored file-based normal delivery
 	assert.deepEqual(core.parseNormalCommit(commit), { file });
 	assert.equal(core.parseDeliveryCommand(pr)?.kind, "create");
 	assert.equal(core.parseDeliveryCommand(release)?.kind, "release");
-	for (const command of [commit, pr, release, `git commit -F "${textFile}"`]) assert.equal(guardToolCall(trusted, "bash", { command }, repo, () => PUSH_URL), undefined, command);
+	for (const command of [commit, pr, `git commit -F "${textFile}"`]) assert.equal(guardToolCall(trusted, "bash", { command }, repo, () => PUSH_URL), undefined, command);
 	const otherGroup = path.join(path.dirname(repo), "worktrees", "other", "_scratch", "file-delivery");
 	fs.mkdirSync(otherGroup, { recursive: true });
 	const outside = path.join(otherGroup, "outside.txt").replace(/\\/g, "/");
@@ -669,7 +667,7 @@ test("trusted release-engineer launch admits anchored file-based normal delivery
 	fs.writeFileSync(credential, "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n");
 	assert.ok(guardToolCall(trusted, "bash", { command: `git commit -F "${credential}"` }, repo, () => PUSH_URL), "credential-like contents block");
 	assert.ok(guardToolCall(trusted, "bash", { command: pr.replace(file, credential) }, repo, () => PUSH_URL), "PR credential-like contents block");
-	assert.ok(guardToolCall(trusted, "bash", { command: release.replace(file, credential) }, repo, () => PUSH_URL), "release credential-like contents block");
+	assert.ok(guardToolCall(trusted, "bash", { command: release }, repo, () => PUSH_URL), "release with an approved-group notes file still has no automatic path");
 	const oversized = path.join(taskDir, "large.txt").replace(/\\/g, "/");
 	fs.writeFileSync(oversized, "x".repeat(65_537));
 	assert.ok(guardToolCall(trusted, "bash", { command: `git commit -F "${oversized}"` }, repo, () => PUSH_URL), "oversized files block");

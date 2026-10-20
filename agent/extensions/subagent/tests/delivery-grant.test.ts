@@ -189,7 +189,7 @@ test("delivery positives: five stages in bash and powershell with real forms; th
 	assert.equal(store.copyDelivery(CAND).length, 1, "delivery is non-consuming");
 });
 
-test("trusted normal PR merge requires exact grammar and a matching live same-repo open PR", () => {
+test("structural trusted context never merges: standard merge blocks without an explicit grant", () => {
     resetState();
     const repo = makeRepo("trusted-merge");
     git(repo, "checkout", "-q", "feat/x");
@@ -202,7 +202,7 @@ test("trusted normal PR merge requires exact grammar and a matching live same-re
     const target = { candidate: repo, pushUrl: GH_URL, branch: "feat/x" };
     const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: target, gateCommits: true, live: liveReaders() };
     const runTrusted = (cmd = command) => C.guardToolCall(trusted, "bash", { command: cmd }, repo);
-    assert.equal(runTrusted(), undefined, "matching live PR is allowed without grants");
+    assert.ok(blocked(runTrusted()), "matching live PR still blocks: merge has no automatic path");
     for (const [name, view, cmd] of [
         ["stale SHA", { ...state.views[12], headRefOid: HEAD }, command],
         ["wrong repo", state.views[12], command.replace("acme/widgets", "other/repo")],
@@ -218,7 +218,7 @@ test("trusted normal PR merge requires exact grammar and a matching live same-re
     assert.ok(runTrusted(), "missing live PR read blocks");
 });
 
-test("trusted normal PR merge admits an approved-group body file", () => {
+test("structural trusted context does not merge even with an approved-group body file", () => {
     resetState();
     const repo = makeRepo("feat");
     git(repo, "checkout", "-q", "feat/x");
@@ -234,10 +234,10 @@ test("trusted normal PR merge admits an approved-group body file", () => {
     assert.equal(C.parseDeliveryCommand(command)?.kind, "merge", "test command must parse before behavior assertion");
     const target = { candidate: repo, pushUrl: GH_URL, branch: "feat/x" };
     const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: target, gateCommits: true, live: liveReaders() };
-    assert.equal(C.guardToolCall(trusted, "bash", { command }, repo), undefined, "approved-group merge body file is allowed without grants");
+    assert.ok(blocked(C.guardToolCall(trusted, "bash", { command }, repo)), "approved-group merge body file still blocks without an explicit grant");
 });
 
-test("trusted normal PR merge refuses an outside-group credential body file", () => {
+test("structural trusted context refuses a merge with an outside-group credential body file", () => {
     resetState();
     const repo = makeRepo("trusted-merge-body-file");
     git(repo, "checkout", "-q", "feat/x");
