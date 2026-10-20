@@ -1317,7 +1317,9 @@ function commitTargetLive(target: { candidate: string; pushUrl: string; branch: 
 	return branch;
 }
 
-function automaticArtifactAllowed(file: string, candidate: string): boolean {
+// Artifact groups accepted without a lease: worktrees/<primary checkout basename> (legacy) or worktrees/<repo name of the live-verified origin>.
+function automaticArtifactAllowed(file: string, target: { candidate: string; pushUrl: string }): boolean {
+	const candidate = target.candidate;
 	try {
 		if (!path.isAbsolute(file) || file.includes("\\") || !/^[\x20-\x7e]+$/.test(file)) return false;
 		const common = gitRead(candidate, ["rev-parse", "--git-common-dir"]);
@@ -1325,10 +1327,13 @@ function automaticArtifactAllowed(file: string, candidate: string): boolean {
 		const commonDir = canonicalCwd(path.resolve(candidate, common[0]));
 		if (path.basename(commonDir).toLowerCase() !== ".git") return false;
 		const primary = path.dirname(commonDir);
-		const group = path.join(path.dirname(primary), "worktrees", path.basename(primary));
+		const repoName = parseRepoFromPushUrl(target.pushUrl)?.split("/")[1];
+		const names = [path.basename(primary), ...(repoName !== undefined && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(repoName) && !repoName.endsWith(".") ? [repoName] : [])];
 		const normalizedFile = normPath(file);
+		const base = path.join(path.dirname(primary), "worktrees");
+		const group = names.map((name) => path.join(base, name)).find((g) => normalizedFile.startsWith(`${normPath(g)}/`));
+		if (group === undefined) return false;
 		const normalizedGroup = normPath(group);
-		if (!normalizedFile.startsWith(`${normalizedGroup}/`)) return false;
 		const parts = normalizedFile.slice(normalizedGroup.length + 1).split("/");
 		if (parts.length < 3 || !["_scratch", "_evidence"].includes(parts[0])) return false;
 		const taskDir = path.join(group, parts[0], parts[1]);
@@ -1341,7 +1346,7 @@ function normalTrustedCommit(target: { candidate: string; pushUrl: string; branc
 	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_COMMIT") return false;
 	const normal = parseNormalCommit(decision.op.command);
 	if (!normal) return false;
-	try { return commitTargetLive(target, decision.op.cwd, liveUrl) !== undefined && (normal.file === undefined || automaticArtifactAllowed(normal.file, target.candidate)); } catch { return false; }
+	try { return commitTargetLive(target, decision.op.cwd, liveUrl) !== undefined && (normal.file === undefined || automaticArtifactAllowed(normal.file, target)); } catch { return false; }
 }
 
 // A child release-engineer normal commit that matches a live commit lease: exact normal commit form, only GIT_COMMIT, cwd is the leased candidate root on the leased branch with the live origin binding, no merge-like state, no redirect env. Non-consuming; any throw or mismatch refuses.
@@ -1384,36 +1389,6 @@ function normalTrustedPush(target: { candidate: string; pushUrl: string; branch:
 	try { return trustedTargetLive(target, decision.op.cwd, liveUrl); } catch { return false; }
 }
 
-function normalTrustedPrMerge(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
-	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
-	const command = parseDeliveryCommand(decision.op.command);
-	if (!command || command.kind !== "merge" || !BARE_SHA.test(command.sha)) return false;
-	try {
-		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
-		const repo = parseRepoFromPushUrl(target.pushUrl);
-		if (!repo || command.repo !== repo || typeof live.env === "function" && (live.env().GH_HOST !== undefined || live.env().GH_REPO !== undefined)) return false;
-		const view = live.ghJson(["pr", "view", String(command.pr), "--repo", repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository"]);
-		if (!view || typeof view !== "object") return false;
-		const pr = view as Record<string, unknown>;
-		return (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target.candidate)) && pr.state === "OPEN" && pr.isCrossRepository === false && pr.headRefName === target.branch && pr.headRefOid === command.sha && typeof pr.baseRefName === "string" && pr.baseRefName !== target.branch && baseBranchOk(pr.baseRefName);
-	} catch { return false; }
-}
-
-function normalTrustedRelease(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
-	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
-	const command = parseDeliveryCommand(decision.op.command);
-	if (!command || command.kind !== "release" || (command.notes === undefined) === (command.notesFile === undefined) || command.generate || !BARE_SHA.test(command.target)) return false;
-	try {
-		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
-		const repo = parseRepoFromPushUrl(target.pushUrl);
-		if (!repo || command.repo !== repo || typeof live.env === "function" && (live.env().GH_HOST !== undefined || live.env().GH_REPO !== undefined) || live.tagStatus(target.pushUrl, command.tag) !== 2 || command.notesFile !== undefined && !automaticArtifactAllowed(command.notesFile, target.candidate)) return false;
-		const merged = live.ghJson(["pr", "list", "--repo", repo, "--head", target.branch, "--state", "merged", "--json", "number,mergeCommit,mergedAt,isCrossRepository,headRefName,baseRefName", "--limit", "20"]);
-		if (!Array.isArray(merged) || merged.some((pr) => !pr || typeof pr !== "object")) return false;
-		const matches = (merged as Record<string, any>[]).filter((pr) => pr.mergeCommit?.oid === command.target && pr.isCrossRepository === false && pr.headRefName === target.branch && typeof pr.baseRefName === "string" && pr.baseRefName !== target.branch && baseBranchOk(pr.baseRefName));
-		return matches.length === 1;
-	} catch { return false; }
-}
-
 function normalTrustedPrCreate(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
 	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
 	const command = parseDeliveryCommand(decision.op.command);
@@ -1421,7 +1396,7 @@ function normalTrustedPrCreate(target: { candidate: string; pushUrl: string; bra
 	try {
 		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
 		const repo = parseRepoFromPushUrl(target.pushUrl);
-		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target.candidate));
+		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target));
 	} catch { return false; }
 }
 
@@ -1437,6 +1412,13 @@ function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "bl
 	}
 }
 
+// Fixed hint (no command or path echo) only when the sole refused argument is one -m/-F value that is not in the strict quoted grammar; amend, --no-verify, -a and other flags get none.
+function unsupportedCommitHint(decision: Extract<Decision, { action: "block" }>): string {
+	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_COMMIT" || parseNormalCommit(decision.op.command) !== undefined) return "";
+	const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
+	return /^git commit -[mF] \S+$/.test(bare) ? '; not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root)' : "";
+}
+
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
 export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: { candidate: string; pushUrl: string; branch: string } }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
@@ -1445,14 +1427,12 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (decision.grantable && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
 	if (guard.scope === "child" && normalTrustedPush(guard.pushTarget, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && (guard.gateCommits === true || guard.pushTarget !== undefined) && normalTrustedPrCreate(guard.pushTarget, decision, liveUrl)) return undefined;
-	if (guard.scope === "child" && guard.pushTarget !== undefined && normalTrustedRelease(guard.pushTarget, decision, guard.live ?? defaultDeliveryLive(liveUrl), liveUrl)) return undefined;
-	if (guard.scope === "child" && guard.pushTarget !== undefined && normalTrustedPrMerge(guard.pushTarget, decision, guard.live ?? defaultDeliveryLive(liveUrl), liveUrl)) return undefined;
 	if (guard.scope === "child" && leasedPush(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && guard.gateCommits === true && normalTrustedCommit(guard.pushTarget, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, guard.live ?? defaultDeliveryLive(liveUrl))) return undefined;
-	const how = decision.grantable ? "needs exact operator authorization via request_authorization" : "not grantable to a model: use the operator out-of-band";
-	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}.` };
+	const how = decision.grantable ? "needs an explicit operator grant (request_authorization is for a genuinely blocked risky command such as merge or release, not ordinary commit, feature push or PR create)" : "not grantable to a model: use the operator out-of-band";
+	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}${unsupportedCommitHint(decision)}.` };
 }
 
 // Authorization requests are accepted only for operations the guard would actually block and that are grantable.

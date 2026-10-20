@@ -601,9 +601,10 @@ const PROFILE_LF_SHA256: Record<string, string> = {
 const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "c47d394b8257c7c10d6dccdf9bd937200a951d202571505db263650af7bc9869" };
 // Approved policy exception (authorized-retirement-policy): release-engineer's body gained the separate Authorized retirement mode and qualified its routine-mode ban.
 // P2 (cleanup-routing-followups) added one release-engineer sentence stating that named write paths are instruction-enforced, not hard isolation; only these current pins moved.
+// PR workflow authorization fix: release-engineer Delivery grant paragraph rewritten (ordinary delivery needs no request_authorization; merge/release separate); pins re-derived from the on-disk profile.
 // These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
 const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
-  "release-engineer": { afterLfSha256: "ca8c4a06fdc32ebdc75e3ec5654aa2c867ed4963f831b21bc1c6d364ceed1f98", bodySha256: "6798d969032898afdb30038f653ca93fa1d149276875af19f78800fce605fb6c", reinsertedLfSha256: "16446a855cd9acf98e4f401832fa3bb28a956e683fe847d09059aa6de36609f1" },
+  "release-engineer": { afterLfSha256: "ad4f89dd983fda456d8780fcdb5c45f2ac4d583869d0e4cd62a01dda071d5f0a", bodySha256: "6473421b035ca3e76cc92bb155f69376d2c41634afe7bdcb18845a42df225cf9", reinsertedLfSha256: "2e2e50cf79cdda95d9eb177f16ec9ff2408d6d0925573dcd9c68c425b29efb7f" },
   // Approved new-body expectation (claudex-loop-adaptation): reviewer gained one untrusted-evidence sentence; historical baselines are not regenerated.
   reviewer: { afterLfSha256: "dcfa7b488eef7aca125fbf6078bd14da19711f82e032198df3e960d1b71a92b5", bodySha256: "58cc3889c8b813fc64babcc7978b6d2f2ae4da59f73f18290ebbfa60ac450879", reinsertedLfSha256: "0f37fdde3748ffac67fdcb12c5a46e9e80aa0d178684b76c8029ee2bb3f787ce" },
 };
