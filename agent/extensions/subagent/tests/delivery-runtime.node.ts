@@ -493,3 +493,59 @@ test("child delivery envelope (runtime): a legacy 30-minute record carrying expi
 	for (const e of ends) { assert.equal(e.isError, true); assert.match(e.text, /invalid child grant envelope/); }
 	assertNoTripwire("legacy envelope echo");
 });
+
+// Opt-in fingerprint binding through the real request_authorization tool: dialog content, reuse only on an equal live state, change-during-dialog refusal.
+function boundRepo(): { dir: string; repoDir: string } {
+	const dir = fs.mkdtempSync(path.join(scratchBase, "delivery-bound-"));
+	const repoDir = path.join(dir, "project");
+	makeRepo(repoDir, GITHUB_ORIGIN);
+	const run = spawnSync("git", ["checkout", "-q", "feat/x"], { cwd: repoDir, windowsHide: true });
+	assert.equal(run.status, 0, String(run.stderr));
+	return { dir, repoDir };
+}
+const BOUND_REQ = { tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main", bind: {} } }, id: "b1" };
+
+test("delivery bind (simulated TUI): the dialog shows the bound state and limits; reuse only while the live state equals it; a changed state asks again", { timeout: 240_000 }, async () => {
+	const { dir, repoDir } = boundRepo();
+	const s = await openMain([BOUND_REQ, { ...BOUND_REQ, id: "b2" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	try {
+		const first = (await s.session.prompt("probe"), s.results());
+		assert.equal(s.confirms.length, 1);
+		assert.match(String(s.confirms[0][1]), /Bound state: HEAD [0-9a-f]{40} on refs\/heads\/feat\/x; fingerprint [0-9a-f]{12}; excluded paths: none/);
+		assert.match(String(s.confirms[0][1]), /Binding constrains only this grant: push leases, unbound delivery grants and trusted-context allowances/);
+		assert.match(String(s.confirms[0][1]), /not race-free/);
+		assert.equal(first[0].isError, false, first[0].text);
+		assert.match(first[0].text, /release delivery bound to HEAD [0-9a-f]{7} for example-owner\/example-repo/);
+		assert.match(first[1].text, /^Already authorized/);
+		assert.equal(s.confirms.length, 1);
+		assertNoTripwire("delivery bind");
+	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
+	// State changed between two requests: the stored bound record is not "Already authorized"; a new confirm supersedes it.
+	const other = boundRepo();
+	let calls = 0;
+	const ui = { confirm: async () => { calls += 1; if (calls === 1) fs.writeFileSync(path.join(other.repoDir, "late.txt"), "x\n"); return true; } };
+	const t = await openMain([BOUND_REQ, BOUND_REQ, { ...BOUND_REQ, id: "b3" }, { text: "done" }], { ui, origin: GITHUB_ORIGIN, dir: other.dir });
+	try {
+		const r = (await t.session.prompt("probe"), t.results());
+		assert.equal(r[0].isError, true);
+		assert.match(r[0].text, /candidate changed during approval; no delivery grant minted\./);
+		assert.equal(r[1].isError, false, r[1].text);
+		assert.match(r[1].text, /bound to HEAD/);
+		assert.match(r[2].text, /^Already authorized/);
+		assert.equal(calls, 2);
+	} finally { t.cleanup(); fs.rmSync(other.dir, { recursive: true, force: true }); }
+});
+
+test("delivery bind (simulated TUI): a detached or other-branch candidate and a bad expect are refused with no dialog", { timeout: 240_000 }, async () => {
+	const { dir, repoDir } = boundRepo();
+	spawnSync("git", ["checkout", "-q", "--detach"], { cwd: repoDir, windowsHide: true });
+	const bad = { tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main", bind: { expect: "0".repeat(64) } } }, id: "b4" };
+	const s = await openMain([BOUND_REQ, bad, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	try {
+		const r = (await s.session.prompt("probe"), s.results());
+		assert.equal(r[0].isError, true);
+		assert.match(r[0].text, /no delivery grant minted/);
+		assert.equal(r[1].isError, true);
+		assert.equal(s.confirms.length, 0);
+	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

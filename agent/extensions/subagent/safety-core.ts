@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertExcludeUntracked, candidateFingerprint, validateExclude } from "./candidate-fingerprint.ts";
 
 export type RiskRule =
 	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
@@ -501,6 +502,7 @@ export interface GrantStore {
 	leaseCount(): number;
 	addDeliveryGrant(binding: DeliveryBinding): DeliveryGrant;
 	findDelivery(binding: DeliveryBinding): DeliveryGrant | undefined;
+	findSuperseded(binding: DeliveryBinding): DeliveryGrant | undefined;
 	copyDelivery(candidate: string): DeliveryGrant[];
 	importDelivery(incoming: DeliveryGrant[]): void;
 	deliveryCount(): number;
@@ -601,10 +603,23 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			const next = normalizeBinding(binding);
 			const existing = delivery.find((d) => sameBinding(d, next));
 			if (existing) return { ...existing };
+			// A new bound state for the same scope replaces the older bound record only (the caller confirmed it); unbound records are never touched.
+			const stale = next.bound ? delivery.findIndex((d) => d.bound && sameScope(d, next)) : -1;
+			if (stale >= 0) {
+				const replaced = { ...next, issuedAt: t };
+				delivery[stale] = replaced;
+				return { ...replaced };
+			}
 			if (delivery.length >= MAX_DELIVERY_GRANTS) throw new RangeError(`at most ${MAX_DELIVERY_GRANTS} live delivery grants`);
 			const record = { ...next, issuedAt: t };
 			delivery.push(record);
 			return { ...record };
+		},
+		findSuperseded(binding) {
+			live();
+			const next = normalizeBinding(binding);
+			const found = next.bound ? delivery.find((d) => d.bound && sameScope(d, next) && !sameBinding(d, next)) : undefined;
+			return found ? { ...found } : undefined;
 		},
 		findDelivery(binding) {
 			live();
@@ -617,7 +632,7 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			return delivery.filter((d) => normPath(d.candidate) === normPath(candidate) && artifactStillLive(d)).map((d) => ({ ...d }));
 		},
 		importDelivery(incoming) {
-			delivery.push(...incoming.map(validateDelivery));
+			delivery.push(...incoming.map((d) => validateDelivery(d, "any")));
 		},
 		deliveryCount() {
 			live();
@@ -651,7 +666,10 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
 export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: { candidate: string; pushUrl: string; branch: string }): string {
-	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? { pushTarget } : {}) });
+	// Bound records travel under their own key: an older loader ignores unknown keys, so an in-record field would silently turn a bound grant into an unbound one.
+	const plain = delivery.filter((d) => !d.bound);
+	const bound = delivery.filter((d) => d.bound);
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(plain.length ? { delivery: plain } : {}), ...(bound.length ? { deliveryBound: bound } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? { pushTarget } : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -771,7 +789,7 @@ export function livePushUrl(candidate: string, branch: string): string | undefin
 export function planPushRequest(store: GrantStore, target: { candidate: string; pushUrl: string; branch: string }, request: { commits: boolean; artifactDir?: string }): { action: "covered" | "covered-by-delivery" | "ask" } {
 	const lease = store.findLease(target.candidate, target.branch, target.pushUrl);
 	if (lease) return { action: !request.commits || (lease.commits === true && lease.artifactDir === request.artifactDir) ? "covered" : "ask" };
-	if (!request.commits && store.copyDelivery(target.candidate).some((d) => d.branch === target.branch && d.pushUrl === target.pushUrl)) return { action: "covered-by-delivery" };
+	if (!request.commits && store.copyDelivery(target.candidate).some((d) => !d.bound && d.branch === target.branch && d.pushUrl === target.pushUrl)) return { action: "covered-by-delivery" };
 	return { action: "ask" };
 }
 
@@ -811,7 +829,8 @@ export function authorizationStatus(store: GrantStore, now: number): string {
 	for (const lease of leases) lines.push(`- ${lease.commits ? "push+commit" : "push"}: repo ${repoLabel(lease.pushUrl)}, branch ${lease.branch}, candidate ${lease.candidate}, artifact dir ${lease.artifactDir ?? "none"}, ${validityOf(lease.candidate, lease.branch, lease.pushUrl)}`);
 	const deliveries = store.listDelivery();
 	lines.push(deliveries.length ? `delivery grants: ${deliveries.length} (approved scope, session only)` : "delivery grants: none");
-	for (const d of deliveries) lines.push(`- delivery: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr ?? "none"}, version ${d.version ?? "none"}, latest ${d.latest ? "yes" : "no"}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}`);
+	for (const d of deliveries) lines.push(`- delivery: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr ?? "none"}, version ${d.version ?? "none"}, latest ${d.latest ? "yes" : "no"}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}${d.bound ? `, bound: HEAD ${d.bound.head.slice(0, 7)}, fp ${d.bound.fingerprint.slice(0, 12)}, excl ${d.bound.exclude.length} (not rechecked in status)` : ""}`);
+	if (deliveries.some((d) => d.bound)) lines.push("bound delivery: binding constrains only this grant; push leases, unbound delivery for the same scope and trusted-context allowances still permit delivery without a fingerprint check");
 	return lines.join("\n");
 }
 
@@ -885,10 +904,12 @@ const BARE_SHA = /^[0-9a-f]{40}$/;
 const BARE_VERSION = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const TEXT_LIMIT = { title: 120, subject: 120, body: 500 } as const;
 
-export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; pr?: number; version?: string; latest?: boolean; artifactDir?: string }
+// Optional fingerprint binding (opt-in): HEAD attached to ref, the candidate fingerprint and the exclusions it was computed with.
+export interface BoundState { head: string; ref: string; fingerprint: string; exclude: string[] }
+export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; pr?: number; version?: string; latest?: boolean; artifactDir?: string; bound?: BoundState }
 export interface DeliveryGrant extends DeliveryBinding { issuedAt: number }
 // Live readers, injectable for offline tests. Production uses the real git/gh calls below.
-export interface DeliveryLive { env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number }
+export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number }
 
 // A record whose artifact directory vanished stays stored but is not copied to a child (the envelope would otherwise fail closed as a whole).
 function artifactStillLive(d: DeliveryGrant): boolean {
@@ -973,28 +994,72 @@ function normalizeBinding(input: unknown): DeliveryBinding {
 		out.latest = true;
 	}
 	if (b.artifactDir !== undefined) out.artifactDir = validateArtifactDir(b.artifactDir as string, candidate);
+	if (b.bound !== undefined) out.bound = normalizeBound(b.bound, branch);
 	return out;
 }
 
+// Strict bound shape: exactly head, ref, fingerprint, exclude; the ref must be the approved branch and the exclusions already normalized. Frozen so copies cannot mutate a stored record.
+function normalizeBound(input: unknown, branch: string): BoundState {
+	const v = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+	if (Object.keys(v).sort().join() !== "exclude,fingerprint,head,ref") throw new TypeError("invalid bound state");
+	if (typeof v.head !== "string" || !BARE_SHA.test(v.head) || typeof v.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(v.fingerprint) || v.ref !== `refs/heads/${branch}`) throw new TypeError("invalid bound state");
+	const exclude = validateExclude(v.exclude);
+	if (exclude.join("\n") !== (v.exclude as string[]).join("\n")) throw new TypeError("invalid bound state");
+	return Object.freeze({ head: v.head, ref: v.ref, fingerprint: v.fingerprint, exclude: Object.freeze(exclude) as string[] });
+}
+
 // An old 30-minute record (expiresAt or TTL present) is refused, never reread as forever; the feature was not activated, so no such record exists in practice.
-function validateDelivery(value: unknown): DeliveryGrant {
+function validateDelivery(value: unknown, mode: "delivery" | "bound" | "any"): DeliveryGrant {
 	const d = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+	if (mode === "delivery" && "bound" in d) throw new TypeError("bound delivery belongs under deliveryBound");
+	if (mode === "bound" && !d.bound) throw new TypeError("deliveryBound record has no bound state");
 	if ("expiresAt" in d || "ttl" in d || "ttlMs" in d) throw new RangeError("delivery records are session-scoped; expiresAt or TTL is unsupported");
 	const binding = normalizeBinding(value);
 	if (typeof d.issuedAt !== "number" || !Number.isFinite(d.issuedAt)) throw new RangeError("delivery issuedAt must be a finite session time");
 	return { ...binding, issuedAt: d.issuedAt };
 }
 
+function sameBound(a?: BoundState, b?: BoundState): boolean {
+	return a === undefined ? b === undefined : b !== undefined && a.head === b.head && a.ref === b.ref && a.fingerprint === b.fingerprint && a.exclude.join("\n") === b.exclude.join("\n");
+}
+
 function sameBinding(a: DeliveryBinding, b: DeliveryBinding): boolean {
+	return sameScope(a, b) && sameBound(a.bound, b.bound);
+}
+
+// Scope: everything except the bound state.
+export function sameScope(a: DeliveryBinding, b: DeliveryBinding): boolean {
 	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.pr === b.pr && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
 }
 
 export function loadChildDelivery(text: string): DeliveryGrant[] {
-	const parsed = JSON.parse(text) as { v?: number; delivery?: unknown };
+	const parsed = JSON.parse(text) as { v?: number; delivery?: unknown; deliveryBound?: unknown };
 	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
-	if (parsed.delivery === undefined) return [];
-	if (!Array.isArray(parsed.delivery)) throw new TypeError("invalid delivery list");
-	return parsed.delivery.map(validateDelivery);
+	if ((parsed.delivery !== undefined && !Array.isArray(parsed.delivery)) || (parsed.deliveryBound !== undefined && !Array.isArray(parsed.deliveryBound))) throw new TypeError("invalid delivery list");
+	return [...(parsed.delivery ?? []).map((d: unknown) => validateDelivery(d, "delivery")), ...(parsed.deliveryBound ?? []).map((d: unknown) => validateDelivery(d, "bound"))];
+}
+
+// Live candidate state for a bound grant. Fail closed: redirected git environment, a non-root candidate, a detached HEAD, UNSUPPORTED entries, limits or any git error throw.
+export function readBoundState(candidate: string, exclude: string[]): BoundState {
+	if (redirectedGitEnvironment()) throw new Error("git environment is redirected");
+	const top = gitRead(candidate, ["rev-parse", "--show-toplevel"]);
+	if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(canonicalCwd(candidate))) throw new Error("not the repository root of the candidate");
+	const ref = gitRead(candidate, ["symbolic-ref", "-q", "HEAD"]);
+	if (ref?.length !== 1) throw new Error("HEAD is not attached to a branch");
+	const f = candidateFingerprint(candidate, exclude);
+	if (f.unsupported.length > 0) throw new Error("candidate has unsupported entries");
+	return { head: f.head, ref: ref[0], fingerprint: f.value, exclude: [...exclude] };
+}
+
+// Mint-time binding: the branch must be checked out (what a push sends is then the bound commit); optional expect ties the grant to a fingerprint the operator already verified.
+export function bindDelivery(candidate: string, branch: string, opts: { exclude?: unknown; expect?: unknown } = {}): BoundState {
+	const exclude = validateExclude(opts.exclude ?? []);
+	if (opts.expect !== undefined && !(typeof opts.expect === "string" && /^[0-9a-f]{64}$/.test(opts.expect))) throw new RangeError("expect must be a 64-hex fingerprint");
+	assertExcludeUntracked(candidate, exclude);
+	const state = readBoundState(candidate, exclude);
+	if (state.ref !== `refs/heads/${branch}`) throw new RangeError("branch is not checked out (HEAD must be attached to it)");
+	if (opts.expect !== undefined && opts.expect !== state.fingerprint) throw new RangeError("live candidate differs from the expected fingerprint");
+	return state;
 }
 
 interface Tok { text: string; quoted: string }
@@ -1113,10 +1178,23 @@ function openOwned(view: Record<string, unknown> | undefined, g: DeliveryGrant):
 	return view !== undefined && view.state === "OPEN" && view.baseRefName === g.base && view.headRefName === g.branch && view.isCrossRepository === false;
 }
 
+// Bound grants only: push, merge and release need the live candidate to equal the approved state (PR create/edit publish no local state and are not checked). Any throw refuses this grant.
+function boundHolds(g: DeliveryGrant, c: DeliveryCommand | undefined, live: DeliveryLive): boolean {
+	const b = g.bound;
+	if (!b) return true;
+	if (c?.kind === "merge" && c.sha !== b.head) return false;
+	try {
+		const now = (live.bound ?? readBoundState)(g.candidate, [...b.exclude]);
+		return now.ref === b.ref && now.head === b.head && now.fingerprint === b.fingerprint;
+	} catch {
+		return false;
+	}
+}
+
 // One grant against one command. Any mismatch or read problem is false; the caller treats false as refusal.
 function matchDelivery(g: DeliveryGrant, push: { branch: string } | undefined, c: DeliveryCommand | undefined, live: DeliveryLive): boolean {
 	if (live.pushUrl(g.candidate, g.branch) !== g.pushUrl) return false;
-	if (push) return push.branch === g.branch;
+	if (push) return push.branch === g.branch && boundHolds(g, undefined, live);
 	if (!c || c.repo !== g.repo) return false;
 	const fileOk = (file?: string) => file === undefined || (g.artifactDir !== undefined && checkArtifactFile(file, g.artifactDir) === undefined);
 	switch (c.kind) {
@@ -1126,10 +1204,10 @@ function matchDelivery(g: DeliveryGrant, push: { branch: string } | undefined, c
 			return (g.pr === undefined || c.pr === g.pr) && openOwned(prView(c.pr, g, live), g) && fileOk(c.bodyFile);
 		case "merge": {
 			const view = (g.pr === undefined || c.pr === g.pr) ? prView(c.pr, g, live) : undefined;
-			return openOwned(view, g) && view?.headRefOid === c.sha && fileOk(c.bodyFile);
+			return openOwned(view, g) && view?.headRefOid === c.sha && fileOk(c.bodyFile) && boundHolds(g, c, live);
 		}
 		case "release": {
-			if (g.version !== c.tag || (c.latest && g.latest !== true) || !fileOk(c.notesFile)) return false;
+			if (g.version !== c.tag || (c.latest && g.latest !== true) || !fileOk(c.notesFile) || !boundHolds(g, c, live)) return false;
 			if (live.tagStatus(g.pushUrl, c.tag) !== 2) return false;
 			const merged = live.ghJson(["pr", "list", "--repo", g.repo, "--head", g.branch, "--base", g.base, "--state", "merged", "--json", "number,mergeCommit,mergedAt,isCrossRepository,headRefName,baseRefName", "--limit", "20"]);
 			if (!Array.isArray(merged) || merged.some((m) => !m || typeof m !== "object")) return false;

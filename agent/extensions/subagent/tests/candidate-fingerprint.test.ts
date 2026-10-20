@@ -1,6 +1,5 @@
-// Illustrative regression for the documented candidate-fingerprint recipe in references/run-manifest.md.
-// The recipe below is test-local over a disposable temp repository: it is a demonstration, not a runtime
-// fingerprint subsystem, and it proves no consumer enforces freshness.
+// Regression for the production candidate fingerprint (candidate-fingerprint.ts), the recipe in references/run-manifest.md, over disposable temp repositories.
+// Enforcement by a consumer (opt-in bound delivery grants) is covered by delivery-bound.test.ts.
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -9,54 +8,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "buffer", maxBuffer: 1 << 26 });
+import { candidateFingerprint } from "../candidate-fingerprint.ts";
 const sha256 = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
 
-interface Fingerprint { value: string; unsupported: string[]; records: string[] }
-
-/** Test seams for deterministic fault/boundary injection; production default is the real lstat and git status. */
-interface Io { lstat?: (p: string) => fs.Stats; status?: Buffer }
-
-/**
- * HEAD + sorted typed records for every status path (staged, unstaged, untracked) + the staged patch digest + the explicit exclusion list.
- * The digest input is a JSON array of typed arrays (every field is a JSON string, so no pathname can impersonate a record or field boundary).
- * `records` are display strings only and are never the digest input. Only ENOENT/ENOTDIR is confirmed absence; any other inspection error,
- * and any pathname that is not valid UTF-8 (JSON would fold it), is UNSUPPORTED and cannot support a fresh PASS.
- */
-function fingerprint(repo: string, exclude: string[] = [], io: Io = {}): Fingerprint {
-	const head = git(repo, "rev-parse", "HEAD").toString().trim();
-	const raw = io.status ?? git(repo, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all");
-	const lstat = io.lstat ?? fs.lstatSync;
-	const unsupported: string[] = [];
-	const records: string[] = [];
-	const typed: string[][] = [];
-	const add = (display: string, tuple: string[]) => { records.push(display); typed.push(tuple); };
-	let offset = 0;
-	while (offset < raw.length) {
-		let end = raw.indexOf(0, offset);
-		if (end < 0) end = raw.length;
-		const bytes = raw.subarray(offset + 3, end);
-		offset = end + 1;
-		if (bytes.length === 0) continue;
-		const file = bytes.toString("utf8");
-		if (!Buffer.from(file, "utf8").equals(bytes)) { add(`UNSUPPORTED hex:${bytes.toString("hex")}`, ["UNSUPPORTED", "hex", bytes.toString("hex")]); unsupported.push(`hex:${bytes.toString("hex")}`); continue; }
-		if (exclude.some((prefix) => file === prefix || file.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`))) continue;
-		const full = path.join(repo, file);
-		let stat: fs.Stats | undefined;
-		try { stat = lstat(full); } catch (error) {
-			const code = (error as NodeJS.ErrnoException).code;
-			if (code !== "ENOENT" && code !== "ENOTDIR") { add(`UNSUPPORTED ${file}`, ["UNSUPPORTED", file, `inspect:${String(code)}`]); unsupported.push(file); continue; } // EACCES/EIO/unknown is not absence
-		}
-		if (!stat) add(`deleted ${file}`, ["deleted", file]);
-		else if (stat.isSymbolicLink()) add(`link ${file} ${sha256(fs.readlinkSync(full))}`, ["link", file, sha256(fs.readlinkSync(full))]); // link text only, never followed
-		else if (stat.isFile()) { const digest = sha256(fs.readFileSync(full)); add(`file ${file} ${digest}`, ["file", file, digest]); } // raw working bytes, no EOL filter
-		else { add(`UNSUPPORTED ${file}`, ["UNSUPPORTED", file, "kind"]); unsupported.push(file); } // directory, submodule or other
-	}
-	records.sort();
-	const staged = sha256(git(repo, "diff", "--cached", "--binary", "--no-renames")); // index state that working bytes alone cannot show
-	const sortedTyped = typed.map((tuple) => JSON.stringify(tuple)).sort().map((text) => JSON.parse(text));
-	const body = JSON.stringify([["HEAD", head], ...sortedTyped, ["staged", staged], ...exclude.slice().sort().map((prefix) => ["exclude", prefix])]);
-	return { value: sha256(body), unsupported, records };
-}
+const fingerprint = candidateFingerprint;
 
 function makeRepo(label: string): string {
 	const repo = fs.mkdtempSync(path.join(os.tmpdir(), `fingerprint-${label}-`));
