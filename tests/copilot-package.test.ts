@@ -9,7 +9,7 @@ const root = join(import.meta.dir, "..");
 test("Copilot plugin manifest has supported metadata and contained shared paths", () => {
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
   expect(manifest.name).toBe("agent-harness");
-  expect(manifest.version).toBe("1.9.0");
+  expect(manifest.version).toBe("1.9.1");
   expect(manifest.agents).toBe("./agent/agents");
   expect(manifest.skills).toBe("./agent/skills");
   for (const [path, sentinel] of [[manifest.agents, "general-worker.md"], [manifest.skills, "engineering-harness/SKILL.md"]]) {
@@ -27,7 +27,7 @@ test("Pi package, Copilot manifest and README Source release name the same curre
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
   const row = readFileSync(join(root, "README.md"), "utf8").match(/^\| Source release \| v(\d+\.\d+\.\d+) /m);
-  expect(row?.[1]).toBe("1.9.0");
+  expect(row?.[1]).toBe("1.9.1");
   expect(pkg.version).toBe(row?.[1]);
   expect(manifest.version).toBe(row?.[1]);
 });
