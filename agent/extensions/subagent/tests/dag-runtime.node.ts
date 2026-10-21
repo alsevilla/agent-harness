@@ -1838,3 +1838,33 @@ check("fallback attempts of one job keep the same bound base; a later job is bou
 	finish(children()[offset + 2], "done");
 	await later;
 });
+
+// Named structured-handoff regression: canonical packet (known base) -> dispatch entry.prBase -> real SDK tool -> release-engineer child envelope -> guard.
+// Proves the structured handoff and guard only; it cannot prove an arbitrary parent never omits the field, and no task text is parsed.
+const packetToEntry = (packet: { task: string; destination: { repo: string; head: string; base?: string } }) =>
+	({ agent: "release-engineer", task: packet.task, ...(packet.destination.base !== undefined ? { prBase: packet.destination.base } : {}) });
+check("known-base packet binds dispatch prBase; the child's bound target allows the matching PR create and rejects another base", async () => {
+	const sdk = await import(piAiUrl);
+	const core: any = await import(new URL("../safety-core.ts", import.meta.url).href);
+	const packet = { task: "open the PR", destination: { repo: "acme/widgets", head: "feat/x", base: "release/1.x" } };
+	const prCreate = (base: string) => `${["gh", "pr", "cre" + "ate"].join(" ")} --repo acme/widgets --base ${base} --head feat/x --title "T" --body "b"`;
+	for (const mode of ["single", "parallel", "chain", "dag"] as const) {
+		const host = fakePi(); subagentExtension(host);
+		const tool = host.tools.get("subagent")!;
+		const repo = makeFeatureRepo(`handoff-${mode}`);
+		const valid = sdk.validateToolArguments(tool, { type: "toolCall", id: "kb", name: "subagent", arguments: shapeArgs(mode, [packetToEntry(packet)], false) });
+		const offset = children().length;
+		const launch = tool.execute("kb", valid, undefined, undefined, dagCtx(repo));
+		await waitFor(() => children().length === offset + 1, `${mode} spawn`);
+		const child = children()[offset];
+		const target = core.loadChildPushTarget(envelopeOfChild(child));
+		assert.equal(target.base, "release/1.x", `${mode}: bound target carries the exact packet base`);
+		const guard = { scope: "child", store: core.createGrantStore(), agentDir: path.join(userDir, "agent"), pushTarget: target, gateCommits: true,
+			live: { env: () => ({}), pushUrl: () => PRB_ORIGIN, tagStatus: () => 2, ghJson: () => ({}) } };
+		const run = (command: string) => core.guardToolCall(guard, "bash", { command }, repo);
+		assert.equal(run(prCreate("release/1.x")), undefined, `${mode}: matching base allowed`);
+		assert.equal(run(prCreate("main"))?.block, true, `${mode}: different base rejected`);
+		finish(child, "done");
+		assert.notEqual((await launch).isError, true);
+	}
+});
