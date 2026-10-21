@@ -22,7 +22,7 @@ export const GRANT_TTL_MAX_MS = 60 * 60_000;
 const MAX_NESTING = 4;
 
 const NOT_GRANTABLE = new Set<RiskRule>(["OPAQUE_UNPARSEABLE", "SECRET", "PATH_AMBIGUOUS"]);
-const SHELLS = new Set(["sh", "bash", "zsh", "dash"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ash", "ksh", "csh", "tcsh", "fish"]);
 const POWERSHELLS = new Set(["powershell", "pwsh"]);
 const WRAPPERS = new Set(["env", "command", "nohup", "time", "timeout", "exec", "call", "start", "nice", "xargs"]);
 const DELETE_CMDS = new Set(["rm", "rmdir", "rd", "unlink", "shred", "del", "erase", "rimraf", "remove-item", "ri"]);
@@ -37,6 +37,13 @@ const CREDENTIAL_TEXT = /(token|password|secret|api[_-]?key|authorization)\s*[=:
 
 type Token = { text: string; op: boolean };
 
+// Escape character of the lexical reading being classified (null raw, backslash POSIX, backtick PowerShell); set by classifyVariants, synchronous, always reset.
+let esc: string | null = null;
+// Outside quotes the escape character takes the next character literally; inside double quotes POSIX shells unescape only " \ $ and backtick, PowerShell any character; single quotes never.
+function escapes(quote: string | null, next: string): boolean {
+	return quote === "'" ? false : quote === "\"" && esc === "\\" ? "\"\\$`".includes(next) : true;
+}
+
 // Unquoted < and > end the word before them; an unquoted run (<, >, >>, &>) is one op token, and a digit-only word before it is an fd number. Quoted text is never an operator.
 function tokenize(segment: string): Token[] {
 	const out: Token[] = [];
@@ -50,8 +57,14 @@ function tokenize(segment: string): Token[] {
 		started = false;
 		redirect = false;
 	};
-	for (const ch of segment) {
-		if (quote) {
+	const chars = Array.from(segment);
+	for (let i = 0; i < chars.length; i++) {
+		const ch = chars[i];
+		if (esc && ch === esc && i + 1 < chars.length && escapes(quote, chars[i + 1])) {
+			if (redirect) flush();
+			current += chars[++i];
+			started = true;
+		} else if (quote) {
 			if (ch === quote) quote = null;
 			else current += ch;
 		} else if (ch === "<" || ch === ">") {
@@ -103,7 +116,6 @@ const GIT_VALUE = new Set(["-c", "--git-dir", "--work-tree", "--namespace", "--e
 const NPM_VALUE = new Set(["--registry", "--userconfig", "--globalconfig", "--prefix", "--cache", "-w", "--workspace", "--loglevel", "--otp", "--tag"]);
 const GH_VALUE = new Set(["-r", "--repo", "--hostname"]);
 const PS_VALUE = new Set(["-executionpolicy", "-ep", "-windowstyle", "-w", "-workingdirectory", "-wd", "-inputformat", "-if", "-outputformat", "-of", "-configurationname", "-settingsfile"]);
-const ENV_VALUE = new Set(["-u", "--unset", "-c", "--chdir"]);
 const TIMEOUT_VALUE = new Set(["-s", "-k", "--signal", "--kill-after"]);
 const NICE_VALUE = new Set(["-n", "--adjustment"]);
 const XARGS_VALUE = new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s", "--arg-file", "--delimiter", "--max-args", "--max-lines", "--max-procs", "--max-chars", "--replace"]);
@@ -126,7 +138,10 @@ function splitSegments(text: string): string[] {
 	for (let i = 0; i < text.length; i++) {
 		const ch = text[i];
 		const next = text[i + 1] ?? "";
-		if (quote === "'") {
+		if (esc && ch === esc && i + 1 < text.length && escapes(quote, next)) {
+			current += ch + next; // an escaped pair neither toggles quotes nor splits
+			i++;
+		} else if (quote === "'") {
 			if (ch === "'") quote = null;
 			current += ch;
 		} else if (quote === "\"" && ch !== "`" && !(ch === "$" && next === "(")) {
@@ -141,7 +156,7 @@ function splitSegments(text: string): string[] {
 			i++;
 		} else if ((ch === "|" || ch === "&") && isRedirectAt(text, i)) {
 			current += ch; // >| and >& are redirections whose target stays in this segment, not pipes or background separators
-		} else if (";&|()`{}\n\r".includes(ch)) {
+		} else if ((esc === "`" ? ";&|(){}\n\r" : ";&|()`{}\n\r").includes(ch)) {
 			segments.push(current);
 			current = "";
 		} else current += ch;
@@ -169,20 +184,12 @@ function positionals(lower: string[], valueOpts: Set<string>): string[] {
 	return found;
 }
 
-// Index of the wrapped command, or the text an env -S string carries (classified as a command line).
-function wrappedStart(name: string, args: string[]): number | string {
+// Index of the wrapped command. env: skips GNU-style assignments (any word with '=' not starting '-'); an option there is rejected by the caller (never modelled).
+function wrappedStart(name: string, args: string[]): number {
 	const lower = args.map((a) => a.toLowerCase());
 	let i = 0;
 	if (name === "env") {
-		while (i < args.length) {
-			const a = lower[i];
-			if (a === "-s" || a === "--split-string") return args[i + 1] ?? "";
-			if (a.startsWith("-s") && !a.startsWith("--")) return args[i].slice(2);
-			if (a.startsWith("--split-string=")) return args[i].slice(15);
-			if (ENV_VALUE.has(a)) i += 2;
-			else if (a.startsWith("-") || /^[a-z_][a-z0-9_]*=/i.test(args[i])) i++;
-			else break;
-		}
+		while (i < args.length && args[i].includes("=") && !args[i].startsWith("-")) i++;
 		return i;
 	}
 	if (name === "timeout") {
@@ -249,6 +256,37 @@ function add(out: Set<RiskRule>, ...rules: RiskRule[]): void {
 	for (const rule of rules) out.add(rule);
 }
 
+// Set by the gh branch of classifySegment while isMergeOrRelease classifies (synchronous, reset every call).
+let mergeReleaseSeen = false;
+
+// Classifier-level recognition of `gh pr merge` / `gh release create` in any spelling the shell tokenizer reads the same way (quoted words, wrappers, nested shells, compound segments).
+function isMergeOrRelease(command: string): boolean {
+	const text = String(command ?? "");
+	mergeReleaseSeen = false;
+	let seen = false;
+	try {
+		classifyVariants(text, new Set()); // the flag accumulates across every reading
+	} finally {
+		seen = mergeReleaseSeen;
+		mergeReleaseSeen = false;
+	}
+	return seen || MERGE_OR_RELEASE.test(text);
+}
+
+// Every lexical reading of the same text: raw and Git Bash backslash-pair collapse, each with no escape, POSIX backslash and PowerShell backtick escapes. A conservative union (over-blocks exotic benign text), shared by classifyShell and merge/release recognition.
+function classifyVariants(text: string, out: Set<RiskRule>): void {
+	for (const t of [text, text.replace(/\\\\/g, "\\")]) {
+		for (const e of [null, "\\", "`"]) {
+			esc = e;
+			try {
+				classifyText(t, out, 0);
+			} finally {
+				esc = null;
+			}
+		}
+	}
+}
+
 // Classifies one command segment (already split on separators). Wrappers and nested shells recurse with a depth bound.
 function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number): void {
 	const tokens = stripPrefix(rawTokens);
@@ -265,13 +303,14 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 	if (name === "sudo" || name === "runas") add(out, "PRIVILEGE_PERSIST");
 	if (WRAPPERS.has(name) || name === "sudo") {
 		const start = wrappedStart(name, args);
-		if (typeof start === "string") return classifyText(start, out, depth + 1);
+		// shortcut: every env option (-i, -u, -S, --, -, long forms) is unsupported and non-grantable, so no env grammar is modelled; benign `env -i node` is over-blocked.
+		if (name === "env" && args[start]?.startsWith("-")) return add(out, "OPAQUE_UNPARSEABLE");
 		return classifySegment(args.slice(start), out, depth + 1);
 	}
 	if (name === "eval") return add(out, "OPAQUE_UNPARSEABLE");
 	if (SHELLS.has(name)) {
-		const inner = after(["-c", "-lc", "-ic"]);
-		if (inner !== undefined) classifyText(inner, out, depth + 1);
+		const at = lower.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a)); // -c inside any short flag cluster (-xc, -ec, -lc)
+		if (at >= 0) classifyText(args.slice(at + 1).join(" "), out, depth + 1);
 		return;
 	}
 	if (POWERSHELLS.has(name)) {
@@ -305,6 +344,7 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 	}
 	if (name === "gh") {
 		const [sub1 = "", sub2 = ""] = positionals(lower, GH_VALUE);
+		if ((sub1 === "pr" && sub2 === "merge") || (sub1 === "release" && sub2 === "create")) mergeReleaseSeen = true;
 		if ((sub1 === "pr" && ["create", "merge", "close", "edit", "ready", "review"].includes(sub2)) || sub1 === "release" || (sub1 === "repo" && ["create", "delete", "rename", "edit"].includes(sub2))) add(out, "GIT_PUBLISH");
 		if (sub1 === "api" && lower.some((a) => ["post", "put", "patch", "delete"].includes(a))) add(out, "GIT_PUBLISH");
 		if (sub1 === "auth") add(out, "PKG_PUBLISH_AUTH");
@@ -350,8 +390,7 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 export function classifyShell(command: string, gateCommits = false): ShellClassification {
 	const text = String(command ?? "");
 	const out = new Set<RiskRule>();
-	classifyText(text, out, 0);
-	classifyText(text.replace(/\\\\/g, "\\"), out, 0);
+	classifyVariants(text, out);
 	// Commits are gated only in the trusted release-engineer child; elsewhere git commit stays unclassified as before.
 	if (!gateCommits) out.delete("GIT_COMMIT");
 	const rules = [...out];
@@ -632,7 +671,7 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			return delivery.filter((d) => normPath(d.candidate) === normPath(candidate) && artifactStillLive(d)).map((d) => ({ ...d }));
 		},
 		importDelivery(incoming) {
-			delivery.push(...incoming.map((d) => validateDelivery(d, "any")));
+			delivery.push(...incoming.map((d) => validateDelivery(d)));
 		},
 		deliveryCount() {
 			live();
@@ -665,11 +704,13 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
-export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: { candidate: string; pushUrl: string; branch: string }): string {
-	// Bound records travel under their own key: an older loader ignores unknown keys, so an in-record field would silently turn a bound grant into an unbound one.
-	const plain = delivery.filter((d) => !d.bound);
-	const bound = delivery.filter((d) => d.bound);
-	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(plain.length ? { delivery: plain } : {}), ...(bound.length ? { deliveryBound: bound } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? { pushTarget } : {}) });
+// Push target of the trusted release-engineer launch. `base` is the optional parent-supplied PR base: when present, PR create/edit must match it exactly; when absent the legacy syntactic-only base check applies.
+export interface PushTarget { candidate: string; pushUrl: string; branch: string; base?: string }
+
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: PushTarget): string {
+	// A known PR base travels under its own key (pushTargetBound), never inside pushTarget: a loader that predates it ignores the unknown key and sees no push target (every automatic PR/push path stays blocked) instead of rebuilding a legacy target that drops the base.
+	// Action grants (merge/release) travel under their own key: an older loader ignores unknown keys and so sees no grant, never a broader one. The legacy delivery/deliveryBound keys are never written.
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { deliveryActions: delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? (pushTarget.base !== undefined ? { pushTargetBound: pushTarget } : { pushTarget }) : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -785,11 +826,10 @@ export function livePushUrl(candidate: string, branch: string): string | undefin
 	return "pushUrl" in diagnosis ? diagnosis.pushUrl : undefined;
 }
 
-// Planner for a push or push+commit request: covered (no dialog), covered-by-delivery (push-only that an existing delivery already approves; mints no lease) or ask (new confirm). A delivery never covers a commit.
-export function planPushRequest(store: GrantStore, target: { candidate: string; pushUrl: string; branch: string }, request: { commits: boolean; artifactDir?: string }): { action: "covered" | "covered-by-delivery" | "ask" } {
+// Planner for a push or push+commit request: covered (no dialog) or ask (new confirm). Merge and release action grants never cover a push or commit.
+export function planPushRequest(store: GrantStore, target: { candidate: string; pushUrl: string; branch: string }, request: { commits: boolean; artifactDir?: string }): { action: "covered" | "ask" } {
 	const lease = store.findLease(target.candidate, target.branch, target.pushUrl);
 	if (lease) return { action: !request.commits || (lease.commits === true && lease.artifactDir === request.artifactDir) ? "covered" : "ask" };
-	if (!request.commits && store.copyDelivery(target.candidate).some((d) => !d.bound && d.branch === target.branch && d.pushUrl === target.pushUrl)) return { action: "covered-by-delivery" };
 	return { action: "ask" };
 }
 
@@ -828,9 +868,8 @@ export function authorizationStatus(store: GrantStore, now: number): string {
 	lines.push(leases.length ? `push leases: ${leases.length} (session only, no expiry)` : "push leases: none");
 	for (const lease of leases) lines.push(`- ${lease.commits ? "push+commit" : "push"}: repo ${repoLabel(lease.pushUrl)}, branch ${lease.branch}, candidate ${lease.candidate}, artifact dir ${lease.artifactDir ?? "none"}, ${validityOf(lease.candidate, lease.branch, lease.pushUrl)}`);
 	const deliveries = store.listDelivery();
-	lines.push(deliveries.length ? `delivery grants: ${deliveries.length} (approved scope, session only)` : "delivery grants: none");
-	for (const d of deliveries) lines.push(`- delivery: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr ?? "none"}, version ${d.version ?? "none"}, latest ${d.latest ? "yes" : "no"}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}${d.bound ? `, bound: HEAD ${d.bound.head.slice(0, 7)}, fp ${d.bound.fingerprint.slice(0, 12)}, excl ${d.bound.exclude.length} (not rechecked in status)` : ""}`);
-	if (deliveries.some((d) => d.bound)) lines.push("bound delivery: binding constrains only this grant; push leases, unbound delivery for the same scope and trusted-context allowances still permit delivery without a fingerprint check");
+	lines.push(deliveries.length ? `merge/release grants: ${deliveries.length} (approved scope, session only)` : "merge/release grants: none");
+	for (const d of deliveries) lines.push(`- ${d.action}: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr}, SHA ${d.sha.slice(0, 7)}${d.action === "release" ? `, version ${d.version}, latest ${d.latest ? "yes" : "no"}` : ""}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}${d.bound ? `, fp ${d.bound.fingerprint.slice(0, 12)}, excl ${d.bound.exclude.length} (not rechecked in status)` : ""}`);
 	return lines.join("\n");
 }
 
@@ -879,16 +918,24 @@ export function loadChildGate(text: string): boolean {
 	return true;
 }
 
-export function loadChildPushTarget(text: string): { candidate: string; pushUrl: string; branch: string } | undefined {
+export function loadChildPushTarget(text: string): PushTarget | undefined {
 	if (redirectedGitEnvironment()) return undefined;
-	const parsed = JSON.parse(text) as { v?: number; pushTarget?: unknown };
+	const parsed = JSON.parse(text) as { v?: number; pushTarget?: unknown; pushTargetBound?: unknown };
 	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
-	if (parsed.pushTarget === undefined) return undefined;
-	const value = parsed.pushTarget as Record<string, unknown>;
-	if (!value || typeof value.candidate !== "string" || !path.isAbsolute(value.candidate) || typeof value.pushUrl !== "string") throw new TypeError("invalid push target");
+	// Both keys together are ambiguous (a bound context must never coexist with a legacy one); either alone is the whole context.
+	if (parsed.pushTarget !== undefined && parsed.pushTargetBound !== undefined) throw new TypeError("ambiguous push target");
+	const bound = parsed.pushTargetBound !== undefined;
+	const raw = bound ? parsed.pushTargetBound : parsed.pushTarget;
+	if (raw === undefined) return undefined;
+	const value = raw as Record<string, unknown>;
+	if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.candidate !== "string" || !path.isAbsolute(value.candidate) || typeof value.pushUrl !== "string") throw new TypeError("invalid push target");
+	// The legacy key never carries a base and the bound key always does (exact key set): a stripped, extra or mistyped field is refused, not normalized away.
+	const keys = Object.keys(value).sort().join(",");
+	if (keys !== (bound ? "base,branch,candidate,pushUrl" : "branch,candidate,pushUrl")) throw new TypeError("invalid push target");
+	if (bound && (!baseBranchOk(value.base) || value.base === value.branch)) throw new TypeError("invalid push target base");
 	const target = pushBranchTarget(value.candidate, String(value.branch));
 	if (!target || target.pushUrl !== value.pushUrl) throw new TypeError("invalid push target");
-	return target;
+	return bound ? { ...target, base: value.base as string } : target;
 }
 
 export const MAX_DELIVERY_GRANTS = 4;
@@ -904,9 +951,11 @@ const BARE_SHA = /^[0-9a-f]{40}$/;
 const BARE_VERSION = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const TEXT_LIMIT = { title: 120, subject: 120, body: 500 } as const;
 
-// Optional fingerprint binding (opt-in): HEAD attached to ref, the candidate fingerprint and the exclusions it was computed with.
+// Fingerprint binding (mandatory for a merge grant): HEAD attached to ref, the candidate fingerprint and the exclusions it was computed with.
 export interface BoundState { head: string; ref: string; fingerprint: string; exclude: string[] }
-export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; pr?: number; version?: string; latest?: boolean; artifactDir?: string; bound?: BoundState }
+// Separate approvals, one action each. merge: PR + reviewed HEAD sha + mandatory bound (bound.head === sha). release: PR + version + target sha (the merge commit), never bound. Push, PR create and PR edit are automatic and no grant carries them.
+export type DeliveryAction = "merge" | "release";
+export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; action: DeliveryAction; pr: number; sha: string; version?: string; latest?: boolean; artifactDir?: string; bound?: BoundState }
 export interface DeliveryGrant extends DeliveryBinding { issuedAt: number }
 // Live readers, injectable for offline tests. Production uses the real git/gh calls below.
 export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number }
@@ -930,6 +979,14 @@ export function parseRepoFromPushUrl(url: unknown): string | undefined {
 
 function baseBranchOk(name: unknown): name is string {
 	return typeof name === "string" && BARE_BRANCH.test(name) && !/\.\.|\/\/|[./]$|\/\.|\.lock(\/|$)/.test(name);
+}
+
+// Pre-launch check of a supplied PR base against the candidate's live feature branch (the claim re-checks it): valid branch name, not the feature branch itself. Throws RangeError.
+export function checkPrBase(base: unknown, cwd: string): string {
+	if (!baseBranchOk(base)) throw new RangeError("prBase must be a valid branch name");
+	const live = redirectedGitEnvironment() ? undefined : gitRead(canonicalCwd(cwd), ["symbolic-ref", "--short", "HEAD"])?.[0];
+	if (!live || live === base) throw new RangeError("prBase needs a verifiable feature branch different from it");
+	return base;
 }
 
 // Segments after the drive: no empty, dot, dot-dot, or trailing dot/space segment.
@@ -980,21 +1037,26 @@ function normalizeBinding(input: unknown): DeliveryBinding {
 	if (repo === undefined || b.repo !== repo) throw new RangeError("repo must derive from the github.com origin push URL");
 	const branch = validatePushBranch(b.branch as string);
 	if (!baseBranchOk(b.base) || b.base === branch) throw new RangeError("base must be a branch name different from the feature branch");
-	const out: DeliveryBinding = { role: LEASE_ROLE, candidate, pushUrl: b.pushUrl as string, repo, branch, base: b.base };
-	if (b.pr !== undefined) {
-		if (!Number.isSafeInteger(b.pr) || (b.pr as number) < 1 || (b.pr as number) > 999999999) throw new RangeError("PR number is invalid");
-		out.pr = b.pr as number;
-	}
-	if (b.version !== undefined) {
+	// Legacy combined or unbound shapes (no action, or PR/SHA missing) are refused outright: there is no compatibility path for merge or release.
+	if (b.action !== "merge" && b.action !== "release") throw new RangeError("delivery action must be merge or release (legacy combined delivery grants are not accepted)");
+	if (typeof b.pr !== "number" || !Number.isSafeInteger(b.pr) || b.pr < 1 || b.pr > 999999999) throw new RangeError("PR number is required");
+	if (typeof b.sha !== "string" || !BARE_SHA.test(b.sha)) throw new RangeError("a 40-hex SHA is required");
+	const out: DeliveryBinding = { role: LEASE_ROLE, candidate, pushUrl: b.pushUrl as string, repo, branch, base: b.base, action: b.action, pr: b.pr, sha: b.sha };
+	if (b.action === "merge") {
+		if (b.version !== undefined || b.latest !== undefined) throw new RangeError("a merge grant carries no release fields");
+		if (b.bound === undefined) throw new RangeError("a merge grant needs the verified candidate fingerprint binding");
+		out.bound = normalizeBound(b.bound, branch);
+		if (out.bound.head !== out.sha) throw new RangeError("merge SHA must equal the bound candidate HEAD");
+	} else {
 		if (typeof b.version !== "string" || !BARE_VERSION.test(b.version)) throw new RangeError("version must be a release tag such as v1.2.3");
 		out.version = b.version;
-	}
-	if (b.latest !== undefined && b.latest !== false) {
-		if (b.latest !== true || out.version === undefined) throw new RangeError("latest requires an approved version");
-		out.latest = true;
+		if (b.latest !== undefined && b.latest !== false) {
+			if (b.latest !== true) throw new RangeError("latest must be a boolean");
+			out.latest = true;
+		}
+		if (b.bound !== undefined) throw new RangeError("a release grant is not fingerprint-bound");
 	}
 	if (b.artifactDir !== undefined) out.artifactDir = validateArtifactDir(b.artifactDir as string, candidate);
-	if (b.bound !== undefined) out.bound = normalizeBound(b.bound, branch);
 	return out;
 }
 
@@ -1009,10 +1071,8 @@ function normalizeBound(input: unknown, branch: string): BoundState {
 }
 
 // An old 30-minute record (expiresAt or TTL present) is refused, never reread as forever; the feature was not activated, so no such record exists in practice.
-function validateDelivery(value: unknown, mode: "delivery" | "bound" | "any"): DeliveryGrant {
+function validateDelivery(value: unknown): DeliveryGrant {
 	const d = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-	if (mode === "delivery" && "bound" in d) throw new TypeError("bound delivery belongs under deliveryBound");
-	if (mode === "bound" && !d.bound) throw new TypeError("deliveryBound record has no bound state");
 	if ("expiresAt" in d || "ttl" in d || "ttlMs" in d) throw new RangeError("delivery records are session-scoped; expiresAt or TTL is unsupported");
 	const binding = normalizeBinding(value);
 	if (typeof d.issuedAt !== "number" || !Number.isFinite(d.issuedAt)) throw new RangeError("delivery issuedAt must be a finite session time");
@@ -1029,14 +1089,16 @@ function sameBinding(a: DeliveryBinding, b: DeliveryBinding): boolean {
 
 // Scope: everything except the bound state.
 export function sameScope(a: DeliveryBinding, b: DeliveryBinding): boolean {
-	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.pr === b.pr && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
+	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.action === b.action && a.pr === b.pr && a.sha === b.sha && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
 }
 
 export function loadChildDelivery(text: string): DeliveryGrant[] {
-	const parsed = JSON.parse(text) as { v?: number; delivery?: unknown; deliveryBound?: unknown };
+	const parsed = JSON.parse(text) as { v?: number; delivery?: unknown; deliveryBound?: unknown; deliveryActions?: unknown };
 	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
-	if ((parsed.delivery !== undefined && !Array.isArray(parsed.delivery)) || (parsed.deliveryBound !== undefined && !Array.isArray(parsed.deliveryBound))) throw new TypeError("invalid delivery list");
-	return [...(parsed.delivery ?? []).map((d: unknown) => validateDelivery(d, "delivery")), ...(parsed.deliveryBound ?? []).map((d: unknown) => validateDelivery(d, "bound"))];
+	// Legacy combined delivery keys are never honored: fail closed rather than reinterpret them.
+	if (parsed.delivery !== undefined || parsed.deliveryBound !== undefined) throw new TypeError("legacy delivery grants are not supported");
+	if (parsed.deliveryActions !== undefined && !Array.isArray(parsed.deliveryActions)) throw new TypeError("invalid delivery list");
+	return (parsed.deliveryActions ?? []).map((d: unknown) => validateDelivery(d));
 }
 
 // Live candidate state for a bound grant. Fail closed: redirected git environment, a non-root candidate, a detached HEAD, UNSUPPORTED entries, limits or any git error throw.
@@ -1169,20 +1231,20 @@ export function parseDeliveryCommand(command: string): DeliveryCommand | undefin
 	return undefined;
 }
 
-function prView(pr: number, g: DeliveryGrant, live: DeliveryLive): Record<string, unknown> | undefined {
-	const view = live.ghJson(["pr", "view", String(pr), "--repo", g.repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository"]);
+function prView(pr: number, repo: string, live: DeliveryLive): Record<string, unknown> | undefined {
+	const view = live.ghJson(["pr", "view", String(pr), "--repo", repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository"]);
 	return view && typeof view === "object" ? (view as Record<string, unknown>) : undefined;
 }
 
-function openOwned(view: Record<string, unknown> | undefined, g: DeliveryGrant): boolean {
-	return view !== undefined && view.state === "OPEN" && view.baseRefName === g.base && view.headRefName === g.branch && view.isCrossRepository === false;
+// Structural ownership: open, same-repo (strictly isCrossRepository === false; missing or null refuses) and head is the expected feature branch. The base is checked by the caller.
+function openSameRepo(view: Record<string, unknown> | undefined, branch: string): view is Record<string, unknown> {
+	return view !== undefined && view.state === "OPEN" && view.headRefName === branch && view.isCrossRepository === false;
 }
 
-// Bound grants only: push, merge and release need the live candidate to equal the approved state (PR create/edit publish no local state and are not checked). Any throw refuses this grant.
-function boundHolds(g: DeliveryGrant, c: DeliveryCommand | undefined, live: DeliveryLive): boolean {
+// A merge grant is always bound: the live candidate must equal the approved HEAD, branch and fingerprint. Any throw refuses.
+function boundHolds(g: DeliveryGrant, live: DeliveryLive): boolean {
 	const b = g.bound;
-	if (!b) return true;
-	if (c?.kind === "merge" && c.sha !== b.head) return false;
+	if (!b || b.head !== g.sha) return false;
 	try {
 		const now = (live.bound ?? readBoundState)(g.candidate, [...b.exclude]);
 		return now.ref === b.ref && now.head === b.head && now.fingerprint === b.fingerprint;
@@ -1191,32 +1253,49 @@ function boundHolds(g: DeliveryGrant, c: DeliveryCommand | undefined, live: Deli
 	}
 }
 
-// One grant against one command. Any mismatch or read problem is false; the caller treats false as refusal.
-function matchDelivery(g: DeliveryGrant, push: { branch: string } | undefined, c: DeliveryCommand | undefined, live: DeliveryLive): boolean {
+// The approved PR fetched by exact number from the grant's repo: merged, same-repo, approved head/base and merge commit. No list, history or time fallback; any other answer is false.
+const MERGED_VIEW_FIELDS = "number,state,baseRefName,headRefName,isCrossRepository,mergeCommit";
+function mergedMatches(g: { repo: string; branch: string; base: string; pr: number }, target: string, live: DeliveryLive): boolean {
+	const v = live.ghJson(["pr", "view", String(g.pr), "--repo", g.repo, "--json", MERGED_VIEW_FIELDS]);
+	if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+	const pr = v as Record<string, any>;
+	return pr.number === g.pr && pr.state === "MERGED" && pr.isCrossRepository === false && pr.headRefName === g.branch && pr.baseRefName === g.base && typeof pr.mergeCommit?.oid === "string" && BARE_SHA.test(target) && pr.mergeCommit.oid === target;
+}
+
+// One grant against one command. The grant's action must equal the command's kind; any mismatch or read problem is false (refusal).
+function matchDelivery(g: DeliveryGrant, c: DeliveryCommand | undefined, live: DeliveryLive): boolean {
 	if (live.pushUrl(g.candidate, g.branch) !== g.pushUrl) return false;
-	if (push) return push.branch === g.branch && boundHolds(g, undefined, live);
-	if (!c || c.repo !== g.repo) return false;
+	if (!c || c.repo !== g.repo || c.kind !== g.action) return false;
 	const fileOk = (file?: string) => file === undefined || (g.artifactDir !== undefined && checkArtifactFile(file, g.artifactDir) === undefined);
 	switch (c.kind) {
-		case "create":
-			return g.pr === undefined && c.base === g.base && c.head === g.branch && fileOk(c.bodyFile);
-		case "edit":
-			return (g.pr === undefined || c.pr === g.pr) && openOwned(prView(c.pr, g, live), g) && fileOk(c.bodyFile);
 		case "merge": {
-			const view = (g.pr === undefined || c.pr === g.pr) ? prView(c.pr, g, live) : undefined;
-			return openOwned(view, g) && view?.headRefOid === c.sha && fileOk(c.bodyFile) && boundHolds(g, c, live);
+			if (c.pr !== g.pr || c.sha !== g.sha || !fileOk(c.bodyFile)) return false;
+			const view = prView(c.pr, g.repo, live);
+			return openSameRepo(view, g.branch) && view.baseRefName === g.base && view.headRefOid === c.sha && boundHolds(g, live);
 		}
 		case "release": {
-			if (g.version !== c.tag || (c.latest && g.latest !== true) || !fileOk(c.notesFile) || !boundHolds(g, c, live)) return false;
+			// A tag that already exists (status 0) or an unreadable remote refuses: --target is never trusted on an existing tag. No time-based fallback.
+			if (g.version !== c.tag || c.target !== g.sha || (c.latest && g.latest !== true) || !fileOk(c.notesFile)) return false;
 			if (live.tagStatus(g.pushUrl, c.tag) !== 2) return false;
-			const merged = live.ghJson(["pr", "list", "--repo", g.repo, "--head", g.branch, "--base", g.base, "--state", "merged", "--json", "number,mergeCommit,mergedAt,isCrossRepository,headRefName,baseRefName", "--limit", "20"]);
-			if (!Array.isArray(merged) || merged.some((m) => !m || typeof m !== "object")) return false;
-			// Exactly one live merged PR that matches this approved target, head, base and non-fork; unrelated older entries do not count.
-			const matches = (merged as Record<string, any>[]).filter((pr) => pr.mergeCommit?.oid === c.target && pr.isCrossRepository === false && pr.headRefName === g.branch && pr.baseRefName === g.base);
-			if (matches.length !== 1) return false;
-			const pr = matches[0];
-			return g.pr !== undefined ? pr.number === g.pr : Date.parse(String(pr.mergedAt)) >= g.issuedAt;
+			return mergedMatches(g, c.target, live);
 		}
+		default:
+			return false;
+	}
+}
+
+// Mint-time live verification of an action grant (the operator confirms only facts the guard will also check). Returns a refusal reason or undefined.
+export function verifyDeliveryTarget(g: DeliveryBinding, live: DeliveryLive = defaultDeliveryLive(livePushUrl)): string | undefined {
+	try {
+		if (g.action === "merge") {
+			const view = prView(g.pr, g.repo, live);
+			if (!openSameRepo(view, g.branch) || view.baseRefName !== g.base) return "PR is not open, same-repo, on this branch and base";
+			return view.headRefOid === g.sha ? undefined : "PR head does not equal the approved SHA";
+		}
+		if (live.tagStatus(g.pushUrl, g.version as string) !== 2) return "release tag already exists or cannot be checked";
+		return mergedMatches(g, g.sha, live) ? undefined : "approved PR is not merged with the approved target SHA";
+	} catch {
+		return "live GitHub state could not be read";
 	}
 }
 
@@ -1232,17 +1311,16 @@ function defaultDeliveryLive(liveUrl: (candidate: string, branch: string) => str
 	};
 }
 
-// Child release-engineer delivery: exact push or gh form, only GIT_PUBLISH, no GH_HOST/GH_REPO. Non-consuming; each grant re-checked live.
+// Child release-engineer merge/release: exact gh form, only GIT_PUBLISH, no GH_HOST/GH_REPO. Non-consuming; each grant re-checked live. Push, PR create and PR edit are never matched here.
 function deliveryAllows(store: GrantStore, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive): boolean {
 	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
-	const push = parseNormalPush(decision.op.command);
-	const cmd = push ? undefined : parseDeliveryCommand(decision.op.command);
-	if (!push && !cmd) return false;
+	const cmd = parseDeliveryCommand(decision.op.command);
+	if (!cmd || (cmd.kind !== "merge" && cmd.kind !== "release")) return false;
 	try {
 		const env = live.env();
 		if (env.GH_HOST !== undefined || env.GH_REPO !== undefined) return false;
 		for (const grant of store.copyDelivery(decision.op.cwd)) {
-			try { if (matchDelivery(grant, push, cmd, live)) return true; } catch { /* a read problem refuses this grant only */ }
+			try { if (matchDelivery(grant, cmd, live)) return true; } catch { /* a read problem refuses this grant only */ }
 		}
 	} catch {
 		return false;
@@ -1263,21 +1341,29 @@ export interface ChildGuardLaunch {
 export interface ClaimWindow { open: boolean }
 
 // Claims this role's grants for one child spawn (single use) and returns the guard entry plus the child's environment.
-export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false): ChildGuardLaunch {
+export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false, prBase?: string): ChildGuardLaunch {
 	if (!fs.existsSync(guardFile)) throw new Error("Safety guard missing: child launch refused (fail closed).");
-	const mayClaim = window.open;
-	window.open = false;
-	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
+	// A supplied PR base narrows the trusted release-engineer context only. Refuse before any grant is claimed or the window closes.
+	if (prBase !== undefined && (!(withLeases && role === LEASE_ROLE) || !baseBranchOk(prBase))) throw new RangeError("prBase needs a trusted release-engineer launch and a valid branch name");
 	// Lease copies are non-consuming: every legitimate release-engineer spawn of this candidate gets them, including fallback and later spawns.
 	const leases = withLeases && role === LEASE_ROLE ? store.copyLeases(canonicalCwd(candidate)) : [];
 	// Delivery copies follow the lease rule: non-consuming, release-engineer only, same absolute expiry for every spawn of this candidate.
 	const delivery = withLeases && role === LEASE_ROLE ? store.copyDelivery(canonicalCwd(candidate)) : [];
 	// Normal commits are gated only in the trusted release-engineer launch (same trust signal as the lease copies).
 	const gateCommits = withLeases && role === LEASE_ROLE;
-	let pushTarget: { candidate: string; pushUrl: string; branch: string } | undefined;
+	let pushTarget: PushTarget | undefined;
 	if (gateCommits && !redirectedGitEnvironment()) {
 		try { const branch = gitRead(canonicalCwd(candidate), ["symbolic-ref", "--short", "HEAD"])?.[0]; if (branch) pushTarget = pushBranchTarget(canonicalCwd(candidate), branch); } catch { /* no automatic push context */ }
 	}
+	if (prBase !== undefined) {
+		// Known base never degrades to legacy: no verified target or a base equal to the feature branch refuses the launch.
+		if (!pushTarget || pushTarget.branch === prBase) throw new RangeError("prBase needs a verified push target different from the base");
+		pushTarget = { ...pushTarget, base: prBase };
+	}
+	// Every refusal above precedes the claim: a refused launch neither closes the window nor consumes a single-use grant.
+	const mayClaim = window.open;
+	window.open = false;
+	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
 	const value = claimed.length || leases.length || delivery.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget) : undefined;
 	return {
 		entry: guardFile,
@@ -1389,14 +1475,30 @@ function normalTrustedPush(target: { candidate: string; pushUrl: string; branch:
 	try { return trustedTargetLive(target, decision.op.cwd, liveUrl); } catch { return false; }
 }
 
-function normalTrustedPrCreate(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
+// Automatic same-owned PR metadata edit (trusted release-engineer, no grant): exact `gh pr edit` form (parser allowlist: --repo, --title, --body or --body-file only), origin repo, live PR open, same-repo and headed by the task's feature branch. Never base, reviewers, labels, state or cross-repo changes.
+function normalTrustedPrEdit(target: PushTarget | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined, live: DeliveryLive): boolean {
+	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
+	const command = parseDeliveryCommand(decision.op.command);
+	if (!command || command.kind !== "edit") return false;
+	try {
+		const env = live.env();
+		if (env.GH_HOST !== undefined || env.GH_REPO !== undefined || !trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
+		const repo = parseRepoFromPushUrl(target.pushUrl);
+		if (repo === undefined || command.repo !== repo || (command.bodyFile !== undefined && !automaticArtifactAllowed(command.bodyFile, target))) return false;
+		const view = prView(command.pr, repo, live);
+		return openSameRepo(view, target.branch) && baseBranchOk(view.baseRefName) && (target.base === undefined || view.baseRefName === target.base);
+	} catch { return false; }
+}
+
+function normalTrustedPrCreate(target: PushTarget | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined, live: DeliveryLive): boolean {
 	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
 	const command = parseDeliveryCommand(decision.op.command);
 	if (!command || command.kind !== "create" || (command.body === undefined) === (command.bodyFile === undefined)) return false;
 	try {
-		if (!trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
+		const env = live.env();
+		if (env.GH_HOST !== undefined || env.GH_REPO !== undefined || !trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
 		const repo = parseRepoFromPushUrl(target.pushUrl);
-		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target));
+		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (target.base === undefined || command.base === target.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target));
 	} catch { return false; }
 }
 
@@ -1420,25 +1522,31 @@ function unsupportedCommitHint(decision: Extract<Decision, { action: "block" }>)
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: { candidate: string; pushUrl: string; branch: string } }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") return undefined;
-	if (decision.grantable && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
+	// A single-use record never carries PR merge or release create (defense in depth for envelopes or stores that hold one): only the action grants do.
+	if (decision.grantable && !(decision.op.kind === "shell" && isMergeOrRelease(decision.op.command)) && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
 	if (guard.scope === "child" && normalTrustedPush(guard.pushTarget, decision, liveUrl)) return undefined;
-	if (guard.scope === "child" && (guard.gateCommits === true || guard.pushTarget !== undefined) && normalTrustedPrCreate(guard.pushTarget, decision, liveUrl)) return undefined;
+	const live = guard.live ?? defaultDeliveryLive(liveUrl);
+	if (guard.scope === "child" && (guard.gateCommits === true || guard.pushTarget !== undefined) && (normalTrustedPrCreate(guard.pushTarget, decision, liveUrl, live) || normalTrustedPrEdit(guard.pushTarget, decision, liveUrl, live))) return undefined;
 	if (guard.scope === "child" && leasedPush(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && guard.gateCommits === true && normalTrustedCommit(guard.pushTarget, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
-	if (guard.scope === "child" && deliveryAllows(guard.store, decision, guard.live ?? defaultDeliveryLive(liveUrl))) return undefined;
+	if (guard.scope === "child" && deliveryAllows(guard.store, decision, live)) return undefined;
 	const how = decision.grantable ? "needs an explicit operator grant (request_authorization is for a genuinely blocked risky command such as merge or release, not ordinary commit, feature push or PR create)" : "not grantable to a model: use the operator out-of-band";
 	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}${unsupportedCommitHint(decision)}.` };
 }
+
+const MERGE_OR_RELEASE = /\bgh(?:\.exe)?\s+(?:(?:-R|--repo|--hostname)[\s=]\S+\s+)*(?:pr\s+merge|release\s+create)\b/i;
 
 // Authorization requests are accepted only for operations the guard would actually block and that are grantable.
 export function authorizableOp(kind: "shell" | "write", value: string, candidate: string, agentDir: string, gateCommits = false): GuardOp {
 	const decision = kind === "shell" ? decideToolCall("bash", { command: value }, candidate, agentDir, gateCommits) : decideToolCall("write", { path: value }, candidate, agentDir);
 	if (decision.action !== "block" || !decision.grantable) throw new RangeError("operation is not a grantable risky operation");
+	// Merge and release run only through the dedicated action grants (exact PR/version, SHA pins, separate confirmations); a single-use or batched shell grant would bypass those pins.
+	if (kind === "shell" && isMergeOrRelease(value)) throw new RangeError("PR merge and release create need their own delivery action grant (request_authorization delivery), never a single-use operation");
 	validateOp(decision.op);
 	return decision.op;
 }

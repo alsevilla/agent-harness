@@ -1,4 +1,4 @@
-// Session authorization RED: push/commit planner (covered, ask, covered-by-delivery), missing-branch and root diagnosis, and the secret-free /authorization status. Offline: temp git repos only, no push, no network.
+// Session authorization RED: push/commit planner (covered, ask), missing-branch and root diagnosis, and the secret-free /authorization status. Offline: temp git repos only, no push, no network.
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -60,13 +60,13 @@ test("planner: repeats are covered; push-only to commit re-prompts; a commit lea
 	assert.equal(C.planPushRequest(store, target(repo), { commits: true, artifactDir: artifactFixture().dir }).action, "ask", "a different artifact directory re-prompts");
 });
 
-test("planner: an existing delivery covers a push-only request with no lease minted; it never covers a commit request", () => {
+test("planner: a merge/release grant never covers a push or commit request and mints no lease", () => {
 	const repo = commitRepo(GH_URL);
 	const store = C.createGrantStore();
-	store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GH_URL, repo: "owner/repo", branch: "feat/x", base: "main" });
-	assert.equal(C.planPushRequest(store, target(repo, "feat/x", GH_URL), { commits: false }).action, "covered-by-delivery");
-	assert.equal(store.leaseCount(), 0, "delivery covering a push mints no lease");
-	assert.equal(C.planPushRequest(store, target(repo, "feat/x", GH_URL), { commits: true, artifactDir: artifactFixture().dir }).action, "ask", "delivery never authorizes commits");
+	store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GH_URL, repo: "owner/repo", branch: "feat/x", base: "main", action: "release", pr: 12, sha: "f".repeat(40), version: "v1.2.3" });
+	assert.equal(C.planPushRequest(store, target(repo, "feat/x", GH_URL), { commits: false }).action, "ask");
+	assert.equal(store.leaseCount(), 0, "planning mints no lease");
+	assert.equal(C.planPushRequest(store, target(repo, "feat/x", GH_URL), { commits: true, artifactDir: artifactFixture().dir }).action, "ask", "a release grant never authorizes commits");
 });
 
 test("diagnosis: missing branch, wrong root, two push URLs and unsafe push config each give a fixed reason; the live wrapper stays undefined", () => {
@@ -111,7 +111,7 @@ test("status: read-only and secret-free; lease scope, delivery binding and valid
 	const art = artifactFixture();
 	const store = C.createGrantStore();
 	store.mintLease({ candidate: repo, pushUrl: GH_URL, branch: "feat/x", commits: true, artifactDir: art.dir });
-	store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GH_URL, repo: "owner/repo", branch: "feat/x", base: "main" });
+	store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GH_URL, repo: "owner/repo", branch: "feat/x", base: "main", action: "release", pr: 12, sha: "f".repeat(40), version: "v1.2.3" });
 	const command = "git push --force origin feat/x";
 	const [record] = store.mint({ role: null, candidate: repo, ops: [{ kind: "shell", command, cwd: repo }] });
 	const before = store.copyLeases(repo).length;

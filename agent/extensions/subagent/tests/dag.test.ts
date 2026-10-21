@@ -65,6 +65,9 @@ const INVALID_GRAPHS: [string, unknown][] = [
 	["non-boolean readOnly", [{ ...spec("a"), readOnly: "yes" }]],
 	["unknown modelTier", [{ ...spec("a"), modelTier: "fast" }]],
 	["null modelTier", [{ ...spec("a"), modelTier: null }]],
+	["null prBase", [{ ...spec("a"), prBase: null }]],
+	["empty prBase", [{ ...spec("a"), prBase: "" }]],
+	["non-string prBase", [{ ...spec("a"), prBase: 5 }]],
 	["missing dependency", [spec("a", ["zz"])]],
 	["self dependency", [spec("a", ["a"])]],
 	["duplicate parent", [spec("a"), spec("b", ["a", "a"])]],
@@ -83,6 +86,16 @@ for (const [name, input] of INVALID_GRAPHS) {
 		assert.deepEqual(run.launches, []);
 	});
 }
+
+test("preserves optional prBase per node on validated nodes and runner input; omission stays absent", async () => {
+	const seen: Record<string, unknown> = {};
+	const rows = await runDag([{ ...spec("a"), prBase: "main" }, { ...spec("b"), prBase: "release/1.x" }, spec("c")], options((node) => {
+		seen[node.id] = node.prBase;
+		return ok(node.id);
+	}));
+	assert.deepEqual(rows.map((r) => r.status), ["accepted", "accepted", "accepted"]);
+	assert.deepEqual(seen, { a: "main", b: "release/1.x", c: undefined });
+});
 
 test("preserves optional modelTier on validated nodes and runner input", async () => {
 	const run = recorder((id) => ok(id));

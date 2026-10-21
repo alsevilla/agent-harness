@@ -213,3 +213,17 @@ test("main entry points resume-queue readers to the durable plan state", () => {
 		expect(read(root, "SKILL.md")).toMatch(/read `plan\/index\.md` \("Durable plan state"\) before resuming or changing it/);
 	}
 });
+
+// Static instruction-drift guard only: it proves the wording exists, not that any live orchestrator follows it.
+test("ship module and subagent README require a known PR base as a structured prBase binding", () => {
+	const ship = read(AGENT, "ship/index.md");
+	expect(ship).toMatch(/PR create\/edit is authorized, the PR destination repo, head branch and base branch/);
+	expect(ship).toMatch(/known base MUST[^\n]*`prBase`[^\n]*(single|each)[^\n]*(tasks|chain|dag)/);
+	expect(ship).toMatch(/not (only )?(in )?task prose/i);
+	expect(ship).toMatch(/cannot fix a missing binding after spawn/);
+	expect(ship).toMatch(/Commit\/push-only delivery.*and LEARN need no `prBase`/);
+	expect(ship).toMatch(/only[^\n]*runtime-exposed[^\n]*contract/i);
+	const readme = fs.readFileSync(path.join(REPO, "agent", "extensions", "subagent", "README.md"), "utf8");
+	expect(readme).toMatch(/when PR create\/edit is authorized and the base is known, the orchestrator MUST pass `prBase`/);
+	expect(readme).toMatch(/Omitting `prBase` keeps the legacy behavior/);
+});
