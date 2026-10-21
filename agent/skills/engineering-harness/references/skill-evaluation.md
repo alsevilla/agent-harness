@@ -3,7 +3,7 @@
 Read only when measuring or changing routing/skill-selection guidance. This is an optional offline check: it is not a gate, not a runtime hook and not a model caller.
 
 ## Components
-- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 28 synthetic cases, 21 positive and 7 near-miss. Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
+- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 32 synthetic cases, 22 positive and 10 near-miss. Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
 - Evaluator: `scripts/evaluate-routing.py` (Python stdlib only; no network, no model calls).
 - Tests: `tests/test_evaluate_routing.py` (deterministic unit checks).
 
@@ -60,7 +60,7 @@ This guide does not run models. An operator runs the fixture questions manually,
 If an operator wants repeated or paid runs, that is an explicit operator action. The evaluator, the tests and this guide never start them.
 
 ## Relation to the upstream manual check
-The comparison evidence (`_evidence/baryonlabs-harness-comparison/REPORT.md`, row 3) describes an upstream manual skill-trigger guide with 20 queries (10 should-trigger, 10 should-not, near-miss emphasis). That is a human checklist and an optional optimizer concept. Its query set is not this fixture. The 28-case fixture here is derived from this repository's current policy, so the two results are not interchangeable. The upstream optimizer was not adopted, and no upstream text or code was copied.
+The comparison evidence (`_evidence/baryonlabs-harness-comparison/REPORT.md`, row 3) describes an upstream manual skill-trigger guide with 20 queries (10 should-trigger, 10 should-not, near-miss emphasis). That is a human checklist and an optional optimizer concept. Its query set is not this fixture. The 32-case fixture here is derived from this repository's current policy, so the two results are not interchangeable. The upstream optimizer was not adopted, and no upstream text or code was copied.
 
 ## Limits
 - Expected labels are policy expectations, not ground truth from measurement.

@@ -167,7 +167,7 @@ test("shell corpus (review H1): standard shell, wrapper, option and PowerShell f
 		["FOO=1 git push origin x", "GIT_PUBLISH"],
 		["GIT_SSH_COMMAND=ssh git push origin x", "GIT_PUBLISH"],
 		["env FOO=1 rm x", "DESTRUCTIVE_FS"],
-		["env -i FOO=1 rm -rf build", "DESTRUCTIVE_FS"],
+		["env -i FOO=1 rm -rf build", "OPAQUE_UNPARSEABLE"], // any env option is unsupported: fail closed, never modelled
 		["git -C x push origin main", "GIT_PUBLISH"],
 		["git -c a=b push origin main", "GIT_PUBLISH"],
 		["git -C . reset --hard", "GIT_DESTRUCTIVE"],

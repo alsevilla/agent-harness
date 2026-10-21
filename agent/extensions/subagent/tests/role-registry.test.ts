@@ -602,9 +602,10 @@ const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "
 // Approved policy exception (authorized-retirement-policy): release-engineer's body gained the separate Authorized retirement mode and qualified its routine-mode ban.
 // P2 (cleanup-routing-followups) added one release-engineer sentence stating that named write paths are instruction-enforced, not hard isolation; only these current pins moved.
 // PR workflow authorization fix: release-engineer Delivery grant paragraph rewritten (ordinary delivery needs no request_authorization; merge/release separate); pins re-derived from the on-disk profile.
+// Automatic PR delivery: release-engineer Delivery grant paragraph updated (automatic PR edit, separate identity-bound merge/release action grants, no single-use merge/release); pins re-derived from the on-disk profile.
 // These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
 const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
-  "release-engineer": { afterLfSha256: "ad4f89dd983fda456d8780fcdb5c45f2ac4d583869d0e4cd62a01dda071d5f0a", bodySha256: "6473421b035ca3e76cc92bb155f69376d2c41634afe7bdcb18845a42df225cf9", reinsertedLfSha256: "2e2e50cf79cdda95d9eb177f16ec9ff2408d6d0925573dcd9c68c425b29efb7f" },
+  "release-engineer": { afterLfSha256: "6ca0e6d9ed20fb5717ad194707540d9b4f3935999f39ef35a9bd3b3e33af9ffb", bodySha256: "33602009e4ec6681c4243e947da61fe88485960d5be76a85a7a5991f11dcb5c4", reinsertedLfSha256: "b4ab79086320ff5ebad8a6b8b99784feb3669f4f1a435dbf92bda32cb0bef4f4" },
   // Approved new-body expectation (claudex-loop-adaptation): reviewer gained one untrusted-evidence sentence; historical baselines are not regenerated.
   reviewer: { afterLfSha256: "dcfa7b488eef7aca125fbf6078bd14da19711f82e032198df3e960d1b71a92b5", bodySha256: "58cc3889c8b813fc64babcc7978b6d2f2ae4da59f73f18290ebbfa60ac450879", reinsertedLfSha256: "0f37fdde3748ffac67fdcb12c5a46e9e80aa0d178684b76c8029ee2bb3f787ce" },
 };

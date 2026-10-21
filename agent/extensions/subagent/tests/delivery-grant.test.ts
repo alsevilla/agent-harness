@@ -1,4 +1,4 @@
-// Release delivery grant (RED first): strict command grammar, live gates, artifact-file rules, store lifecycle and envelope. Offline: gh and git reads are injected through guard.live; git fixtures are local repos only.
+// Merge and release action grants: strict command grammar, live gates, artifact-file rules, store lifecycle and envelope. Offline: gh and git reads are injected through guard.live; git fixtures are local repos only.
 import assert from "node:assert/strict";
 import cpDefault from "node:child_process";
 import { spawnSync } from "node:child_process";
@@ -18,6 +18,7 @@ const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const MERGED = "fedcba9876543210fedcba9876543210fedcba98";
 const OLD_MERGED = "1111111111111111111111111111111111111111";
 const GH_URL = "https://github.com/acme/widgets.git";
+const BOUND = { head: HEAD, ref: "refs/heads/feat/x", fingerprint: "a".repeat(64), exclude: [] as string[] };
 
 // Scratch root: DELIVERY_TEST_SCRATCH (set to the approved implementation scratch path); artifact fixtures sit under worktrees/pi/_evidence so placement is exercised.
 const SCRATCH = fs.realpathSync.native(process.env.DELIVERY_TEST_SCRATCH ?? os.tmpdir());
@@ -53,7 +54,7 @@ const GUARD_FILE = path.join(import.meta.dirname, "..", "safety-guard-entry.ts")
 const AGENT_DIR = path.join(root, "agent");
 
 // Injected live readers (no network, no real gh). views/merged are keyed like gh JSON; undefined means gh returned nothing usable.
-const state = { clock: T0, env: {} as Record<string, string>, views: {} as Record<string, any>, merged: [] as any[], calls: [] as string[], ghThrow: false, tags: 2, pushUrl: undefined as undefined | ((c: string, b: string) => string | undefined) };
+const state = { clock: T0, env: {} as Record<string, string>, views: {} as Record<string, any>, merged: [] as any[], calls: [] as string[], ghThrow: false, tags: 2, pushUrl: undefined as undefined | ((c: string, b: string) => string | undefined), bound: { ...BOUND } as any };
 function resetState() {
 	state.clock = T0;
 	state.env = {};
@@ -61,6 +62,7 @@ function resetState() {
 	state.tags = 2;
 	state.calls = [];
 	state.pushUrl = undefined;
+	state.bound = { ...BOUND };
 	state.views = { 12: { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: HEAD, isCrossRepository: false } };
 	state.merged = [{ number: 12, mergeCommit: { oid: MERGED }, mergedAt: new Date(T0 + 1000).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }];
 }
@@ -76,14 +78,26 @@ const liveReaders = () => ({
 		throw new Error(`unexpected gh call ${args.join(" ")}`);
 	},
 	tagStatus: () => state.tags,
+	bound: () => state.bound,
 });
 const newStore = () => C.createGrantStore(() => state.clock);
-const bindingOf = (over: Record<string, unknown> = {}) => ({ role: C.LEASE_ROLE, candidate: CAND, pushUrl: GH_URL, repo: "acme/widgets", branch: "feat/x", base: "main", ...over });
+const baseOf = (over: Record<string, unknown> = {}) => ({ role: C.LEASE_ROLE, candidate: CAND, pushUrl: GH_URL, repo: "acme/widgets", branch: "feat/x", base: "main", ...over });
+// Release grant: PR + exact tag + target SHA (the merge commit). Merge grant: PR + reviewed HEAD + mandatory bound state (injected reader supplies the live state).
+const bindingOf = (over: Record<string, unknown> = {}) => baseOf({ action: "release", pr: 12, sha: MERGED, version: "v1.2.3", ...over });
+const mergeOf = (over: Record<string, unknown> = {}) => baseOf({ action: "merge", pr: 12, sha: HEAD, bound: { ...BOUND }, ...over });
 function storeWith(over: Record<string, unknown> = {}) {
 	const store = newStore();
 	store.addDeliveryGrant(bindingOf(over));
 	return store;
 }
+function mergeStore(over: Record<string, unknown> = {}) {
+	const store = newStore();
+	store.addDeliveryGrant(mergeOf(over));
+	return store;
+}
+const MERGE = `gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${HEAD}`;
+const RELEASE = `gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes`;
+const EDIT = `gh pr edit 12 --repo acme/widgets --title "T"`;
 const childGuard = (store: unknown) => ({ scope: "child" as const, store, agentDir: AGENT_DIR, live: liveReaders() });
 const run = (store: unknown, command: string, cwd = CAND, tool = "bash") => C.guardToolCall(childGuard(store), tool, { command }, cwd);
 const blocked = (value: unknown) => (value as { block?: boolean } | undefined)?.block === true;
@@ -173,22 +187,134 @@ test("delivery repo: only github.com origin URL forms derive owner/name", () => 
 	for (const url of ["https://gitlab.com/acme/widgets.git", "https://github.com.evil.test/acme/widgets.git", "https://github.com/acme/widgets/extra", "https://github.com/acme/..", "https://github.com/acme/.git", "https://github.com/-acme/widgets", "https://user:tok@github.com/acme/widgets.git", "git@example.test:acme/widgets.git", "file:///tmp/x"]) assert.equal(C.parseRepoFromPushUrl(url), undefined, url);
 });
 
-test("delivery positives: five stages in bash and powershell with real forms; the record is not consumed", () => {
+test("delivery positives: each action grant allows only its own exact command in bash and powershell; the record is not consumed", () => {
 	resetState();
-	const store = storeWith({ version: "v1.2.3", latest: true, artifactDir: A });
-	const cases = [
-		`gh pr create --repo acme/widgets --base main --head feat/x --title "Add delivery grant" --body "Ships the guard"`,
-		`gh pr create --repo acme/widgets --base main --head feat/x --title "Add delivery grant" --body-file "${A}/pr.md"`,
-		`gh pr edit 12 --repo acme/widgets --title "Add delivery grant" --body-file "${A}/pr.md"`,
-		`gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${HEAD} --subject "Add delivery grant" --body-file "${A}/merge.md"`,
-		`gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "Release 1.2.3" --notes-file "${A}/notes.md" --latest`,
-		`git push origin feat/x`,
-	];
-	for (const tool of ["bash", "powershell"]) for (const command of cases) assert.equal(run(store, command, CAND, tool), undefined, `${tool} ${command}`);
-	assert.ok(state.calls.some((c) => c.startsWith("pr view 12 --repo acme/widgets")), "live PR ownership read used");
-	assert.equal(store.copyDelivery(CAND).length, 1, "delivery is non-consuming");
+	const merge = mergeStore({ artifactDir: A });
+	const release = storeWith({ latest: true, artifactDir: A });
+	const mergeCmd = `gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${HEAD} --subject "Add delivery grant" --body-file "${A}/merge.md"`;
+	const releaseCmd = `gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "Release 1.2.3" --notes-file "${A}/notes.md" --latest`;
+	for (const tool of ["bash", "powershell"]) {
+		assert.equal(run(merge, mergeCmd, CAND, tool), undefined, `${tool} merge`);
+		assert.equal(run(release, releaseCmd, CAND, tool), undefined, `${tool} release`);
+	}
+	assert.ok(state.calls.some((c) => c.startsWith("pr view 12 --repo acme/widgets")), "live PR read used");
+	assert.equal(merge.copyDelivery(CAND).length, 1, "delivery is non-consuming");
 });
 
+test("separate approvals: a merge grant never releases, a release grant never merges, and neither covers push, create or edit", () => {
+	resetState();
+	const m = mergeStore();
+	const r = storeWith();
+	assert.equal(run(m, MERGE), undefined, "merge grant merges");
+	assert.ok(blocked(run(m, RELEASE)), "merge grant cannot release");
+	assert.equal(run(r, RELEASE), undefined, "release grant releases");
+	assert.ok(blocked(run(r, MERGE)), "release grant cannot merge");
+	const both = newStore();
+	both.addDeliveryGrant(mergeOf());
+	both.addDeliveryGrant(bindingOf());
+	assert.equal(run(both, MERGE), undefined);
+	assert.equal(run(both, RELEASE), undefined);
+	for (const store of [m, r, both]) for (const command of [`git push origin feat/x`, `gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body "b"`, EDIT]) assert.ok(blocked(run(store, command)), `no grant carries ${command}`);
+	// A grant minted for merge must not become a release by claiming both approvals.
+	assert.throws(() => newStore().addDeliveryGrant(mergeOf({ version: "v1.2.3" })), RangeError, "merge+version");
+	assert.throws(() => newStore().addDeliveryGrant(bindingOf({ bound: { ...BOUND } })), RangeError, "release+bound");
+	assert.throws(() => newStore().addDeliveryGrant(baseOf({ pr: 12, version: "v1.2.3" })), RangeError, "legacy combined shape");
+});
+
+test("merge approval needs exact PR + reviewed SHA identity: pr-less, unbound, sha-less and wrong-identity shapes never mint or match", () => {
+	resetState();
+	for (const [name, over] of [["no pr", { pr: undefined }], ["no sha", { sha: undefined }], ["short sha", { sha: "abc" }], ["no bound", { bound: undefined }], ["sha differs from bound HEAD", { sha: "1".repeat(40) }]] as Array<[string, any]>) assert.throws(() => newStore().addDeliveryGrant(mergeOf(over)), RangeError, name);
+	const store = mergeStore();
+	assert.equal(run(store, MERGE), undefined, "control");
+	assert.ok(blocked(run(store, MERGE.replace(" 12 ", " 13 "))), "another PR");
+	assert.ok(blocked(run(store, MERGE.replace(HEAD, "2".repeat(40)))), "another SHA");
+	state.views[12] = { ...state.views[12], headRefOid: "2".repeat(40) };
+	assert.ok(blocked(run(store, MERGE)), "live PR head differs from the approved SHA");
+	state.views[12] = { ...state.views[12], headRefOid: HEAD };
+	state.bound = { ...BOUND, fingerprint: "b".repeat(64) };
+	assert.ok(blocked(run(store, MERGE)), "candidate fingerprint drift");
+	state.bound = { ...BOUND, head: "3".repeat(40) };
+	assert.ok(blocked(run(store, MERGE)), "candidate HEAD drift");
+	state.bound = { ...BOUND };
+	assert.equal(run(store, MERGE), undefined, "back on the approved state");
+});
+
+test("release approval needs exact PR, version and target SHA; an existing tag fails closed; no mergedAt fallback", () => {
+	resetState();
+	for (const [name, over] of [["no pr", { pr: undefined }], ["no sha", { sha: undefined }], ["no version", { version: undefined }], ["bad version", { version: "1.2" }]] as Array<[string, any]>) assert.throws(() => newStore().addDeliveryGrant(bindingOf(over)), RangeError, name);
+	const store = storeWith();
+	assert.equal(run(store, RELEASE), undefined, "control");
+	assert.ok(blocked(run(store, RELEASE.replace(MERGED, OLD_MERGED))), "another target SHA");
+	assert.ok(blocked(run(store, RELEASE.replace("v1.2.3", "v9.9.9"))), "another tag");
+	for (const tags of [0, 1, -1]) { state.tags = tags; assert.ok(blocked(run(store, RELEASE)), `tag status ${tags} (exists or unreadable)`); }
+	state.tags = 2;
+	state.merged = [{ ...state.merged[0], number: 99 }];
+	assert.ok(blocked(run(store, RELEASE)), "merged PR number differs from the approved PR (mergedAt is never a substitute)");
+	state.merged = [{ ...state.merged[0], mergedAt: new Date(T0 + 99 * HOUR).toISOString(), number: 98 }];
+	assert.ok(blocked(run(store, RELEASE)), "a later mergedAt does not qualify another PR");
+});
+
+test("exact single-use operation grants cannot carry merge or release (no pin or confirmation bypass), alone or in a mixed batch", () => {
+	const argv = (cmd: string) => cmd;
+	for (const command of [MERGE, argv(`gh pr merge 12 --repo acme/widgets --squash`), argv(`gh pr merge 12 --repo acme/widgets --admin`), RELEASE, argv(`gh release create v1.2.3 --repo acme/widgets`), argv(`bash -c "${MERGE}"`)]) {
+		assert.throws(() => C.authorizableOp("shell", command, CAND, AGENT_DIR, true), /delivery action grant/, command);
+	}
+	assert.throws(() => C.authorizableOp("shell", MERGE, CAND, AGENT_DIR, false), /delivery action grant/, "main scope too");
+	assert.ok(C.authorizableOp("shell", `git push origin master`, CAND, AGENT_DIR, true), "other risky operations stay grantable");
+});
+
+test("delivery live gates: wrong repo, base, head, branch, PR, cwd, closed, cross or missing PR and drift all block", () => {
+	resetState();
+	const store = mergeStore({ artifactDir: A });
+	assert.equal(run(store, MERGE), undefined, "control");
+	const attempts: Array<[string, string]> = [
+		[MERGE.replace("acme/widgets", "acme/other"), CAND],
+		[MERGE, OTHER],
+		[`${MERGE} --body-file "${A}/missing.md"`, CAND],
+	];
+	for (const [command, cwd] of attempts) assert.ok(blocked(run(store, command, cwd)), `${command} in ${cwd}`);
+	const views: Array<[string, any]> = [
+		["closed", { state: "CLOSED" }], ["merged", { state: "MERGED" }], ["cross-repository", { isCrossRepository: true }], ["cross-repository missing", { isCrossRepository: undefined }],
+		["cross-repository null", { isCrossRepository: null }], ["other head", { headRefName: "feat/y" }], ["other base", { baseRefName: "release" }],
+	];
+	for (const [name, patch] of views) {
+		resetState();
+		state.views[12] = { ...state.views[12], ...patch };
+		assert.ok(blocked(run(store, MERGE)), name);
+	}
+	resetState();
+	state.views = {};
+	assert.ok(blocked(run(store, MERGE)), "PR not found");
+	resetState();
+	const drift = { ...childGuard(store), live: { ...liveReaders(), pushUrl: () => "https://github.com/acme/other.git" } };
+	assert.ok(blocked(C.guardToolCall(drift, "bash", { command: MERGE }, CAND)), "live push URL drift");
+});
+
+test("delivery failures: gh throws or returns no JSON, GH_HOST/GH_REPO, compound commands, dot-dot artifacts, main scope and another candidate block; a 3 hour clock advance keeps a live session record", () => {
+	resetState();
+	const store = mergeStore({ artifactDir: A });
+	assert.equal(run(store, MERGE), undefined, "control");
+	state.ghThrow = true;
+	assert.ok(blocked(run(store, MERGE)), "gh throws or times out");
+	state.ghThrow = false;
+	state.views[12] = undefined;
+	assert.ok(blocked(run(store, MERGE)), "gh returns no usable JSON");
+	resetState();
+	state.env = { GH_HOST: "ghe.example.test" };
+	assert.ok(blocked(run(store, MERGE)), "GH_HOST present");
+	state.env = { GH_REPO: "acme/other" };
+	assert.ok(blocked(run(store, MERGE)), "GH_REPO present");
+	resetState();
+	assert.ok(blocked(run(store, `${MERGE} && rm -rf x`)), "compound command");
+	assert.ok(blocked(run(store, `echo x; ${MERGE}`)), "leading compound");
+	assert.ok(blocked(run(store, `${MERGE} --body-file "${A}/../x.md"`)), "dot-dot artifact");
+	assert.ok(blocked(C.guardToolCall({ scope: "main", store, agentDir: AGENT_DIR, live: liveReaders() }, "bash", { command: MERGE }, CAND)), "main scope never uses delivery");
+	assert.ok(blocked(run(newStore(), MERGE)), "no delivery copy in this child");
+	const other = mergeStore({ candidate: OTHER });
+	assert.ok(blocked(run(other, MERGE, CAND)), "record bound to another candidate");
+	state.clock = T0 + 3 * HOUR;
+	assert.equal(run(store, MERGE), undefined, "session delivery stays live after 3 hours (no time expiry)");
+});
 test("structural trusted context never merges: standard merge blocks without an explicit grant", () => {
     resetState();
     const repo = makeRepo("trusted-merge");
@@ -252,71 +378,11 @@ test("structural trusted context refuses a merge with an outside-group credentia
     assert.ok(blocked(C.guardToolCall(trusted, "bash", { command }, repo)), "outside-group credential file must be refused");
 });
 
-test("delivery live gates: wrong repo, base, head, branch, PR, cwd, closed or cross PR, stale head, tag and merged SHA drift all block", () => {
-	resetState();
-	const store = storeWith({ version: "v1.2.3", artifactDir: A });
-	const attempts: Array<[string, string]> = [
-		[`gh pr create --repo acme/other --base main --head feat/x --title "T" --body "b"`, CAND],
-		[`gh pr create --repo acme/widgets --base develop --head feat/x --title "T" --body "b"`, CAND],
-		[`gh pr create --repo acme/widgets --base main --head feat/y --title "T" --body "b"`, CAND],
-		[`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body "b"`, OTHER],
-		[`gh pr edit 13 --repo acme/widgets --title "T"`, CAND],
-		[`gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${MERGED}`, CAND],
-		[`gh release create v1.2.3 --repo acme/widgets --target ${OLD_MERGED} --title "R" --generate-notes`, CAND],
-		[`gh release create v9.9.9 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes`, CAND],
-		[`gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes --latest`, CAND],
-		[`git push origin master`, CAND],
-		[`git push origin feat/y`, CAND],
-	];
-	for (const [command, cwd] of attempts) assert.ok(blocked(run(store, command, cwd)), `${command} in ${cwd}`);
-	state.views[12] = { ...state.views[12], state: "MERGED" };
-	assert.ok(blocked(run(store, `gh pr edit 12 --repo acme/widgets --title "T"`)), "closed PR");
-	state.views[12] = { ...state.views[12], state: "OPEN", isCrossRepository: true };
-	assert.ok(blocked(run(store, `gh pr edit 12 --repo acme/widgets --title "T"`)), "cross-repository PR");
-	state.views[12] = { ...state.views[12], isCrossRepository: false, headRefOid: "2".repeat(40) };
-	assert.ok(blocked(run(store, `gh pr merge 12 --repo acme/widgets --squash --match-head-commit ${HEAD}`)), "stale head: merge bound to the moved head");
-	state.views[12] = { ...state.views[12], headRefOid: HEAD, baseRefName: "release" };
-	assert.ok(blocked(run(store, `gh pr edit 12 --repo acme/widgets --title "T"`)), "PR base differs from the approved base");
-	resetState();
-	state.tags = 0;
-	assert.ok(blocked(run(store, `gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes`)), "tag already exists remotely");
-	resetState();
-	const drift = { ...childGuard(store), live: { ...liveReaders(), pushUrl: () => "https://github.com/acme/other.git" } };
-	assert.ok(blocked(C.guardToolCall(drift, "bash", { command: `gh pr edit 12 --repo acme/widgets --title "T"` }, CAND)), "live push URL drift");
-});
-
-test("delivery failures: gh throws or returns no JSON, GH_HOST/GH_REPO, compound commands, dot-dot artifacts, wrong scope and another candidate block; a 3 hour clock advance keeps a live session record", () => {
-	resetState();
-	const store = storeWith({ version: "v1.2.3", artifactDir: A });
-	const edit = `gh pr edit 12 --repo acme/widgets --title "T"`;
-	assert.equal(run(store, edit), undefined, "control");
-	state.ghThrow = true;
-	assert.ok(blocked(run(store, edit)), "gh throws or times out");
-	state.ghThrow = false;
-	state.views[12] = undefined;
-	assert.ok(blocked(run(store, edit)), "gh returns no usable JSON");
-	resetState();
-	state.env = { GH_HOST: "ghe.example.test" };
-	assert.ok(blocked(run(store, edit)), "GH_HOST present");
-	state.env = { GH_REPO: "acme/other" };
-	assert.ok(blocked(run(store, edit)), "GH_REPO present");
-	resetState();
-	assert.ok(blocked(run(store, `${edit} && rm -rf x`)), "compound command");
-	assert.ok(blocked(run(store, `echo x; ${edit}`)), "leading compound");
-	assert.ok(blocked(run(store, `gh pr edit 12 --repo acme/widgets --title "T" --body-file "${A}/../x.md"`)), "dot-dot artifact");
-	assert.ok(blocked(C.guardToolCall({ scope: "main", store, agentDir: AGENT_DIR, live: liveReaders() }, "bash", { command: edit }, CAND)), "main scope never uses delivery");
-	assert.ok(blocked(run(newStore(), edit)), "no delivery copy in this child");
-	const other = storeWith({ candidate: OTHER, version: "v1.2.3" });
-	assert.ok(blocked(run(other, edit, CAND)), "record bound to another candidate");
-	state.clock = T0 + 3 * HOUR;
-	assert.equal(run(store, edit), undefined, "session delivery stays live after 3 hours (no time expiry)");
-});
-
 test("delivery artifacts: only an approved md/txt regular file inside the approved directory is read; escapes, bad content and secret-like text block", () => {
 	resetState();
-	const store = storeWith({ artifactDir: A });
-	const create = (file: string) => `gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file "${file}"`;
-	assert.equal(run(store, create(`${A}/pr.md`)), undefined, "control inside the directory");
+	const store = mergeStore({ artifactDir: A });
+	const merge = (file: string) => `${MERGE} --body-file "${file}"`;
+	assert.equal(run(store, merge(`${A}/pr.md`)), undefined, "control inside the directory");
 	const outside = path.join(root, "outside");
 	fs.mkdirSync(outside, { recursive: true });
 	fs.writeFileSync(path.join(outside, "x.md"), "outside\n");
@@ -328,11 +394,10 @@ test("delivery artifacts: only an approved md/txt regular file inside the approv
 	fs.mkdirSync(path.join(ART_DIR, "adir.md"), { recursive: true });
 	fs.linkSync(path.join(outside, "x.md"), path.join(ART_DIR, "hard.md"));
 	const bad = [`${slash(path.join(outside, "x.md"))}`, `${A}/../outside/x.md`, `${A}/bad.json`, `${A}/pr`, `${A}/adir.md`, `${A}/missing.md`, `${A}/empty.md`, `${A}/big.md`, `${A}/nul.md`, `${A}/cred.md`, `${A}/hard.md`, `${A}/./pr.md`, `${A}//pr.md`];
-	for (const file of bad) assert.ok(blocked(run(store, create(file))), file);
-	assert.ok(blocked(run(storeWith({}), create(`${A}/pr.md`))), "file form blocked without an approved artifact directory");
+	for (const file of bad) assert.ok(blocked(run(store, merge(file))), file);
+	assert.ok(blocked(run(mergeStore({}), merge(`${A}/pr.md`))), "file form blocked without an approved artifact directory");
 	assert.equal(C.checkArtifactFile(`${A}/pr.md`, A), undefined, "direct check control");
 });
-
 test("artifact directory at approval: placement, existence, no alias and no containment with the candidate are enforced", () => {
 	assert.equal(C.validateArtifactDir(A, CAND), A, "approved directory is accepted");
 	const refuse = [`${slash(root)}/plain`, `C:/`, `${slash(CAND)}/_evidence/t1`, slash(path.dirname(CAND)), "relative/worktrees/pi/_evidence/t", `${A}/..`, `${A}\\pr`, `${A}/pr.md`, `${A}/`, `${A}/\u00e9`];
@@ -377,24 +442,24 @@ test("artifact directory 8.3 short name: a short-name alias of the artifact dire
 test("delivery store: identical binding reuses one record with the same issuedAt and no time field; a different binding is new; abort keeps delivery; explicit revoke clears it; cap of four", () => {
 	resetState();
 	const store = newStore();
-	const first = store.addDeliveryGrant(bindingOf({ version: "v1.2.3" }));
+	const first = store.addDeliveryGrant(bindingOf());
 	assert.equal("expiresAt" in first, false, "session-scoped record carries no expiry");
 	assert.equal(first.issuedAt, T0);
 	state.clock = T0 + 3 * HOUR;
-	assert.deepEqual(store.findDelivery(bindingOf({ version: "v1.2.3" })), first, "identical live request finds the same record");
-	assert.equal(store.addDeliveryGrant(bindingOf({ version: "v1.2.3" })).issuedAt, first.issuedAt, "re-add keeps the same issuedAt");
+	assert.deepEqual(store.findDelivery(bindingOf()), first, "identical live request finds the same record");
+	assert.equal(store.addDeliveryGrant(bindingOf()).issuedAt, first.issuedAt, "re-add keeps the same issuedAt");
 	assert.equal(store.deliveryCount(), 1);
-	store.addDeliveryGrant(bindingOf({ version: "v1.2.3", base: "release" }));
-	assert.equal(store.deliveryCount(), 2, "different binding is a new record");
+	store.addDeliveryGrant(bindingOf({ sha: OLD_MERGED }));
+	store.addDeliveryGrant(bindingOf({ base: "release" }));
+	assert.equal(store.deliveryCount(), 3, "different SHA or base is a new record");
 	store.revokeAll();
-	assert.equal(store.deliveryCount(), 2, "abort (revokeAll with no argument) keeps delivery");
+	assert.equal(store.deliveryCount(), 3, "abort (revokeAll with no argument) keeps delivery");
 	store.revokeAll(true);
 	assert.equal(store.deliveryCount(), 0, "explicit revoke clears delivery");
 	const capped = newStore();
 	for (let i = 0; i < 4; i++) capped.addDeliveryGrant(bindingOf({ branch: `feat/n${i}` }));
 	assert.throws(() => capped.addDeliveryGrant(bindingOf({ branch: "feat/n9" })), RangeError, "cap of four live records");
 });
-
 test("delivery lifecycle: release-engineer user or package children get the same session record; project-source and other roles get none; fresh parent and revoke clear it", () => {
 	resetState();
 	const store = storeWith({ version: "v1.2.3", latest: true, artifactDir: A });
@@ -421,16 +486,17 @@ test("delivery lifecycle: release-engineer user or package children get the same
 	assert.equal(C.claimChildGuard(store, C.LEASE_ROLE, CAND, GUARD_FILE, { open: true }, true).deliveryCount, 0, "revoked record is not copied");
 });
 
-test("delivery envelope: round trip keeps the record; tampered role, repo, base, artifact dir or latest fail closed; any expiresAt or TTL field is refused as session-scoped", () => {
+test("delivery envelope: round trip keeps the record under deliveryActions; legacy keys, tampered fields and any expiresAt or TTL field fail closed", () => {
 	resetState();
-	const store = storeWith({ version: "v1.2.3", latest: true, artifactDir: A });
+	const store = storeWith({ latest: true, artifactDir: A });
 	const record = store.copyDelivery(CAND)[0];
 	const text = C.serializeGrants([], [], [record]);
 	assert.deepEqual(C.loadChildDelivery(text), [record]);
 	assert.deepEqual(C.loadChildDelivery('{"v":1,"grants":[]}'), [], "old envelope has no delivery");
+	assert.throws(() => C.loadChildDelivery(JSON.stringify({ v: 1, grants: [], delivery: [record] })), /legacy/, "legacy delivery key");
 	const tamper = (edit: (r: Record<string, unknown>) => void) => {
 		const envelope = JSON.parse(text);
-		envelope.delivery = envelope.delivery.map((r: Record<string, unknown>) => { const c = { ...r }; edit(c); return c; });
+		envelope.deliveryActions = envelope.deliveryActions.map((r: Record<string, unknown>) => { const c = { ...r }; edit(c); return c; });
 		return JSON.stringify(envelope);
 	};
 	const cases: Array<[string, (r: Record<string, unknown>) => void]> = [
@@ -439,36 +505,29 @@ test("delivery envelope: round trip keeps the record; tampered role, repo, base,
 		["base equal to branch", (r) => { r.base = "feat/x"; }],
 		["artifact dir not canonical", (r) => { r.artifactDir = `${A}/`; }],
 		["artifact dir outside placement", (r) => { r.artifactDir = `${slash(root)}/plain`; }],
-		["latest without version", (r) => { r.version = undefined; }],
+		["release without version", (r) => { delete r.version; }],
+		["release without pr", (r) => { delete r.pr; }],
+		["release without sha", (r) => { delete r.sha; }],
+		["no action", (r) => { delete r.action; }],
+		["merge claim without bound", (r) => { r.action = "merge"; delete r.version; delete r.latest; }],
 		["protected branch", (r) => { r.branch = "main"; }],
 	];
 	for (const [name, edit] of cases) assert.throws(() => C.loadChildDelivery(tamper(edit)), undefined, name);
 	const ttlCases: Array<[string, (r: Record<string, unknown>) => void]> = [
 		["legacy 30 min expiresAt", (r) => { r.expiresAt = (r.issuedAt as number) + LEGACY_TTL; }],
-		["expiresAt above 30 min", (r) => { r.expiresAt = (r.issuedAt as number) + LEGACY_TTL + 1; }],
 		["null expiresAt", (r) => { r.expiresAt = null; }],
 		["ttlMs field", (r) => { r.ttlMs = LEGACY_TTL; }],
 	];
 	for (const [name, edit] of ttlCases) assert.throws(() => C.loadChildDelivery(tamper(edit)), /delivery records are session-scoped; expiresAt or TTL is unsupported/, name);
 });
 
-test("delivery mint refuses invalid bindings before any record exists", () => {
-	const store = newStore();
-	assert.throws(() => store.addDeliveryGrant(bindingOf({ branch: "master" })), RangeError, "protected branch");
-	assert.throws(() => store.addDeliveryGrant(bindingOf({ pushUrl: "https://u:tok@github.com/acme/widgets.git" })), RangeError, "credentialed URL");
-	assert.throws(() => store.addDeliveryGrant(bindingOf({ repo: "acme/other" })), RangeError, "repo not from URL");
-	assert.throws(() => store.addDeliveryGrant(bindingOf({ latest: true })), RangeError, "latest without version");
-	assert.throws(() => store.addDeliveryGrant(bindingOf({ version: "1.2" })), RangeError, "bad version");
-	assert.throws(() => store.addDeliveryGrant(bindingOf({ role: "general-worker" })), RangeError, "role");
-	assert.equal(store.deliveryCount(), 0);
-});
-
 test("live readers run from a neutral cwd with explicit git -C: gh and git lookups never resolve from the candidate", (t) => {
 	if (process.versions.bun) { t.skip("NOT RUN: Bun syncBuiltinESMExports does not refresh the ESM namespace; child_process stubs cannot apply and real gh/git would run"); return; }
 	resetState();
-	const store = storeWith({ version: "v1.2.3", artifactDir: A });
-	const edit = `gh pr edit 12 --repo acme/widgets --title "T"`;
-	const release = `gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes`;
+	const store = storeWith();
+	const repo = makeRepo("neutral-edit");
+	git(repo, "checkout", "-q", "feat/x");
+	const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: { candidate: repo, pushUrl: GH_URL, branch: "feat/x" }, gateCommits: true };
 	const stub = {
 		gh: (args: string[]) => {
 			if (args[0] === "pr" && args[1] === "view") return state.views[args[2]];
@@ -478,22 +537,21 @@ test("live readers run from a neutral cwd with explicit git -C: gh and git looku
 		lsRemote: () => 2,
 	};
 	const { verdicts, calls } = withExecCapture(stub, (captured) => ({
-		verdicts: [edit, release].map((command) => C.guardToolCall({ scope: "child", store, agentDir: AGENT_DIR }, "bash", { command }, CAND)),
+		verdicts: [C.guardToolCall({ scope: "child", store, agentDir: AGENT_DIR }, "bash", { command: RELEASE }, CAND), C.guardToolCall(trusted, "bash", { command: EDIT }, repo)],
 		calls: captured,
 	}));
-	assert.deepEqual(verdicts, [undefined, undefined], "allowed through the default readers");
+	assert.deepEqual(verdicts, [undefined, undefined], "release grant and automatic PR edit allowed through the default readers");
 	const gh = calls.filter((c) => c.file === "gh");
 	const ls = calls.filter((c) => c.file === "git" && c.args[0] === "ls-remote");
-	const git = calls.filter((c) => c.file === "git" && c.args[0] !== "ls-remote");
-	assert.ok(gh.length >= 2 && ls.length === 1 && git.length >= 1, `calls gh=${gh.length} ls-remote=${ls.length} git=${git.length}`);
+	const gits = calls.filter((c) => c.file === "git" && c.args[0] !== "ls-remote");
+	assert.ok(gh.length >= 2 && ls.length === 1 && gits.length >= 1, `calls gh=${gh.length} ls-remote=${ls.length} git=${gits.length}`);
 	for (const c of [...gh, ...ls]) assert.ok(neutral(c.cwd), `${c.file} ${c.args.join(" ")} cwd=${String(c.cwd)}`);
-	for (const c of git) {
+	for (const c of gits) {
 		assert.equal(c.args[0], "-C", `git ${c.args.join(" ")}`);
-		assert.equal(c.args[1], CAND, `git -C target ${c.args.join(" ")}`);
+		assert.ok([CAND, repo].includes(c.args[1]), `git -C target ${c.args.join(" ")}`);
 		assert.ok(neutral(c.cwd), `git cwd=${String(c.cwd)}`);
 	}
 });
-
 test("delivery copy drops records whose artifact directory vanished; the record stays, external envelopes still fail closed", () => {
 	resetState();
 	const gone = path.join(root, "worktrees", "pi", "_evidence", "task-gone");
@@ -527,11 +585,11 @@ test("release merged-PR match: one matching live entry is enough; unrelated olde
 	state.merged = [other, mine];
 	assert.equal(run(store, rel), undefined, "one matching plus an unrelated older entry");
 	const cases: Array<[string, unknown]> = [
-		["two matching entries", [mine, { ...mine, number: 13 }]],
+		["two matching entries", [mine, { ...mine }]],
 		["zero matching entries", [other]],
 		["fork PR with the matching SHA", [{ ...mine, isCrossRepository: true }]],
 		["wrong base", [{ ...mine, baseRefName: "release" }]],
-		["old matching PR without the approved PR number", [{ ...mine, mergedAt: new Date(T0 - 1000).toISOString() }]],
+		["matching SHA but a different PR number", [{ ...mine, number: 77 }]],
 		["malformed null live entry", [null, mine]],
 		["malformed live list", "not a list"],
 	];
@@ -542,25 +600,14 @@ test("release merged-PR match: one matching live entry is enough; unrelated olde
 	}
 });
 
-test("release issuedAt cutoff with no approved PR number: merge one ms before the grant issuedAt blocks; exactly at and one ms after pass", () => {
-	const rel = `gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes`;
-	const cases: Array<[string, number, boolean]> = [
-		["mergedAt one ms before issuedAt", -1, true],
-		["mergedAt exactly issuedAt", 0, false],
-		["mergedAt one ms after issuedAt", 1, false],
-	];
-	for (const [name, offsetMs, expectBlock] of cases) {
+test("release has no time-based fallback: mergedAt never substitutes for the approved PR number or target SHA", () => {
+	for (const offsetMs of [-1, 0, 1, 99 * HOUR]) {
 		resetState();
-		const store = storeWith({ version: "v1.2.3", artifactDir: A });
-		const { issuedAt } = store.copyDelivery(CAND)[0];
-		assert.equal(issuedAt, T0, "grant stamped at the controlled clock");
-		state.merged = [{ number: 12, mergeCommit: { oid: MERGED }, mergedAt: new Date(issuedAt + offsetMs).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }];
-		const verdict = run(store, rel);
-		if (expectBlock) assert.ok(blocked(verdict), name);
-		else assert.equal(verdict, undefined, name);
+		const store = storeWith();
+		state.merged = [{ number: 77, mergeCommit: { oid: MERGED }, mergedAt: new Date(T0 + offsetMs).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }];
+		assert.ok(blocked(run(store, RELEASE)), `other PR, mergedAt offset ${offsetMs}`);
 	}
 });
-
 test("artifact file refusal reasons are exact; a real regular fixture passes", () => {
 	const dir = path.join(root, "worktrees", "pi", "_evidence", "exact");
 	fs.mkdirSync(dir, { recursive: true });

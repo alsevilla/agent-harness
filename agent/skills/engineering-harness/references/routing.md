@@ -73,7 +73,7 @@ Never use Oracle as routine second opinion.
 ## Release / SHIP / LEARN
 Use `release-engineer` when the task actually enters SHIP or LEARN.
 
-SHIP remains conditional: ordinary coding completion is not a release. `release-engineer` reads `engineering-harness/ship/index.md`, validates exact candidate/version, fresh evidence, migrations/config/artifacts, destination and explicit authority, and performs only authorized release operations.
+SHIP remains conditional: ordinary coding completion is not a release. `release-engineer` reads `engineering-harness/ship/index.md`, validates exact candidate/version, fresh evidence, migrations/config/artifacts, destination and explicit authority, and performs only authorized release operations. Automatic PR delivery: when the task includes PR delivery and every required check passed on the exact candidate, main selects `release-engineer` for the task-owned commit, non-force feature push and PR create/update without an extra approval prompt; a local-only/no-publication instruction or a failed/blocked required check means no `release-engineer` launch (failing checks of unknown cause go to the debugger first). Merge and release each need their own explicit approval (merge: exact PR + approved candidate HEAD SHA; release: version + target SHA) and one never authorizes the other. This is an orchestration gate; the routing fixture cases R29-R32 check the expected selection offline and are not evidence of live autonomous delivery.
 
 LEARN is also conditional: `release-engineer` reads `engineering-harness/learn/index.md` only when stable reusable knowledge is worth preserving. Do not create session summaries as durable knowledge.
 

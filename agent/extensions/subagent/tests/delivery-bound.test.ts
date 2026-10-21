@@ -1,4 +1,4 @@
-// Fingerprint-bound delivery grants (RED first). Opt-in: an unbound grant is byte-for-byte unchanged. Offline: gh is injected, git runs on local fixture repos only.
+// Fingerprint-bound merge grants (mandatory binding) and the fingerprint helper. Offline: gh is injected, git runs on local fixture repos only.
 //   DELIVERY_TEST_SCRATCH=<scratch> node --test agent/extensions/subagent/tests/delivery-bound.test.ts
 import assert from "node:assert/strict";
 import cpDefault, { spawnSync } from "node:child_process";
@@ -43,8 +43,11 @@ function makeRepo(): string {
 }
 const write = (repo: string, name: string, text: string) => { fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true }); fs.writeFileSync(path.join(repo, name), text); };
 const headOf = (repo: string) => git(repo, "rev-parse", "HEAD");
+const RELEASE_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const bindingOf = (repo: string, over: Record<string, unknown> = {}) => ({ role: C.LEASE_ROLE, candidate: repo, pushUrl: GH_URL, repo: "acme/widgets", branch: "feat/x", base: "main", ...over });
-const boundBinding = (repo: string, opts: Record<string, unknown> = {}, over: Record<string, unknown> = {}) => bindingOf(repo, { bound: C.bindDelivery(repo, "feat/x", opts), ...over });
+// Merge grant: PR + reviewed HEAD SHA + mandatory fingerprint binding (sha === bound.head).
+const boundBinding = (repo: string, opts: Record<string, unknown> = {}, over: Record<string, unknown> = {}) => { const bound = C.bindDelivery(repo, "feat/x", opts); return bindingOf(repo, { action: "merge", pr: 12, sha: bound.head, bound, ...over }); };
+const releaseBinding = (repo: string, over: Record<string, unknown> = {}) => bindingOf(repo, { action: "release", pr: 12, sha: RELEASE_SHA, version: "v1.2.3", ...over });
 const T0 = Date.parse("2030-01-01T00:00:00.000Z");
 const newStore = () => C.createGrantStore(() => T0);
 const views: Record<string, any> = {};
@@ -68,18 +71,27 @@ const RELEASE = ["gh", "release", "create", "v1.2.3 --repo acme/widgets --target
 const CREATE = ["gh", "pr", "create", `--repo acme/widgets --base main --head feat/x --title "T" --body "B"`].join(" ");
 const setView = (sha: string) => { views[12] = { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: sha, isCrossRepository: false }; };
 
-test("unbound grant is byte-for-byte unchanged: no bound field, no deliveryBound key, same record semantics", () => {
+test("action grants travel under the deliveryActions key only; legacy keys and unbound or combined shapes are refused", () => {
 	const repo = makeRepo();
 	const store = newStore();
-	const rec = store.addDeliveryGrant(bindingOf(repo));
-	assert.equal("bound" in rec, false);
+	const rec = store.addDeliveryGrant(boundBinding(repo));
 	const text = C.serializeGrants([], [], [rec]);
-	assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ["delivery", "grants", "v"]);
-	assert.equal(run(store, repo, PUSH), undefined);
-	write(repo, "new.txt", "x\n");
-	assert.equal(run(store, repo, PUSH), undefined, "unbound grants do not care about local state");
+	assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ["deliveryActions", "grants", "v"]);
+	assert.equal(C.loadChildDelivery(text).length, 1);
+	assert.throws(() => C.loadChildDelivery(JSON.stringify({ v: 1, grants: [], delivery: [rec] })), /legacy/);
+	assert.throws(() => C.loadChildDelivery(JSON.stringify({ v: 1, grants: [], deliveryBound: [rec] })), /legacy/);
+	const bound = rec.bound;
+	assert.throws(() => store.addDeliveryGrant(bindingOf(repo)), RangeError, "no action");
+	assert.throws(() => store.addDeliveryGrant(bindingOf(repo, { action: "merge", pr: 12, sha: bound.head })), RangeError, "unbound merge");
+	assert.throws(() => store.addDeliveryGrant(boundBinding(repo, {}, { pr: undefined })), RangeError, "pr-less merge");
+	assert.throws(() => store.addDeliveryGrant(boundBinding(repo, {}, { sha: "1".repeat(40) })), RangeError, "sha differs from bound HEAD");
+	assert.throws(() => store.addDeliveryGrant(boundBinding(repo, {}, { version: "v1.2.3" })), RangeError, "merge + version");
+	assert.throws(() => store.addDeliveryGrant(releaseBinding(repo, { bound })), RangeError, "bound release");
+	assert.throws(() => store.addDeliveryGrant(releaseBinding(repo, { pr: undefined })), RangeError, "pr-less release");
+	assert.throws(() => store.addDeliveryGrant(releaseBinding(repo, { sha: undefined })), RangeError, "release without target sha");
+	assert.throws(() => store.addDeliveryGrant(releaseBinding(repo, { version: undefined })), RangeError, "release without version");
+	assert.equal(store.addDeliveryGrant(releaseBinding(repo)).action, "release");
 });
-
 test("production fingerprint helper: deterministic, typed, bounded", () => {
 	const repo = makeRepo();
 	const a = F.candidateFingerprint(repo);
@@ -116,7 +128,7 @@ test("bindDelivery refuses detached HEAD, another branch, UNSUPPORTED entries, b
 	assert.throws(() => C.bindDelivery(repo, "feat/x", {}), /checked out|attached/i);
 });
 
-test("push, merge and release are allowed on the exact bound state and refused after every kind of change; PR create/edit are unchecked", { timeout: 120_000 }, () => {
+test("merge is allowed on the exact bound state and refused after every kind of change; a merge grant never covers push or release", { timeout: 120_000 }, () => {
 	const mutations: Array<[string, (r: string) => void]> = [
 		["new commit", (r) => { write(r, "g.txt", "g\n"); git(r, "add", "g.txt"); commit(r, "more"); }],
 		["unstaged edit", (r) => write(r, "f.txt", "zzzz\n")],
@@ -128,116 +140,116 @@ test("push, merge and release are allowed on the exact bound state and refused a
 	for (const [name, mutate] of mutations) {
 		const repo = makeRepo();
 		const store = newStore();
-		store.addDeliveryGrant(boundBinding(repo, {}, { version: "v1.2.3" }));
-		setView(headOf(repo));
-		assert.equal(run(store, repo, PUSH), undefined, `${name}: push fresh`);
-		assert.equal(run(store, repo, mergeCmd(headOf(repo))), undefined, `${name}: merge fresh`);
-		assert.equal(run(store, repo, RELEASE), undefined, `${name}: release fresh`);
+		store.addDeliveryGrant(boundBinding(repo));
+		const approved = headOf(repo);
+		setView(approved);
+		assert.equal(run(store, repo, mergeCmd(approved)), undefined, `${name}: merge fresh`);
+		assert.ok(blocked(run(store, repo, PUSH)), `${name}: a merge grant is not a push`);
+		assert.ok(blocked(run(store, repo, RELEASE)), `${name}: a merge grant is not a release`);
 		const bound = store.copyDelivery(repo)[0].bound;
 		mutate(repo);
 		setView(headOf(repo));
-		for (const [label, cmd] of [["push", PUSH], ["merge", mergeCmd(headOf(repo))], ["release", RELEASE]]) assert.ok(blocked(run(store, repo, cmd)), `${name}: ${label} stale`);
-		assert.equal(run(store, repo, CREATE), undefined, `${name}: PR create is not fingerprint-checked`);
+		assert.ok(blocked(run(store, repo, mergeCmd(headOf(repo)))), `${name}: merge of a drifted candidate`);
+		assert.ok(blocked(run(store, repo, mergeCmd(approved))), `${name}: merge of the approved SHA on a drifted candidate`);
 		assert.deepEqual(store.copyDelivery(repo)[0].bound, bound, `${name}: use never rebinds`);
 	}
 });
-
 test("legitimate metadata does not invalidate: ref updates, upstream, ignored files, _evidence output; excluded untracked output is allowed but staging into it is not", () => {
 	const repo = makeRepo();
 	const store = newStore();
 	store.addDeliveryGrant(boundBinding(repo));
-	git(repo, "update-ref", "refs/remotes/origin/feat/x", headOf(repo));
+	const sha = headOf(repo);
+	setView(sha);
+	git(repo, "update-ref", "refs/remotes/origin/feat/x", sha);
 	git(repo, "config", "branch.feat/x.remote", "origin");
 	write(repo, "ignored/log.txt", "1\n");
 	write(repo, "_evidence/r/out.md", "1\n");
-	assert.equal(run(store, repo, PUSH), undefined);
+	assert.equal(run(store, repo, mergeCmd(sha)), undefined);
 	const store2 = newStore();
 	store2.addDeliveryGrant(boundBinding(repo, { exclude: ["out"] }));
 	write(repo, "out/a.txt", "1\n");
-	assert.equal(run(store2, repo, PUSH), undefined, "excluded untracked output");
+	assert.equal(run(store2, repo, mergeCmd(sha)), undefined, "excluded untracked output");
 	git(repo, "add", "-f", "out/a.txt");
-	assert.ok(blocked(run(store2, repo, PUSH)), "staging into an excluded dir changes the unfiltered staged digest");
+	assert.ok(blocked(run(store2, repo, mergeCmd(sha))), "staging into an excluded dir changes the unfiltered staged digest");
 });
-
-test("merge needs --match-head-commit equal to the bound HEAD", () => {
+test("merge needs the exact PR, --match-head-commit equal to the approved bound HEAD and the live PR head", () => {
 	const repo = makeRepo();
 	const store = newStore();
 	store.addDeliveryGrant(boundBinding(repo));
+	const sha = headOf(repo);
 	const other = "1".repeat(40);
 	setView(other);
-	assert.ok(blocked(run(store, repo, mergeCmd(other))));
-	setView(headOf(repo));
-	assert.equal(run(store, repo, mergeCmd(headOf(repo))), undefined);
+	assert.ok(blocked(run(store, repo, mergeCmd(other))), "other SHA");
+	assert.ok(blocked(run(store, repo, mergeCmd(sha))), "live PR head moved after approval");
+	setView(sha);
+	assert.ok(blocked(run(store, repo, mergeCmd(sha).replace(" 12 ", " 13 "))), "another PR number");
+	assert.equal(run(store, repo, mergeCmd(sha)), undefined);
 });
-
-test("fail closed: injected reader errors and UNSUPPORTED entries refuse this grant; another unbound grant independently still allows", () => {
+test("fail closed: injected reader errors and UNSUPPORTED entries refuse the merge grant", () => {
 	const repo = makeRepo();
 	const only = newStore();
 	only.addDeliveryGrant(boundBinding(repo));
-	const both = newStore();
-	both.addDeliveryGrant(boundBinding(repo));
-	both.addDeliveryGrant(bindingOf(repo, { base: "dev" }));
-	assert.ok(blocked(run(only, repo, PUSH, { bound: () => { throw new Error("git read failure"); } })));
+	const sha = headOf(repo);
+	setView(sha);
+	assert.ok(blocked(run(only, repo, mergeCmd(sha), { bound: () => { throw new Error("git read failure"); } })));
 	const nested = path.join(repo, "nested");
 	fs.mkdirSync(nested);
 	git(nested, "init", "-q");
 	write(repo, "nested/inner.txt", "x\n");
-	assert.ok(blocked(run(only, repo, PUSH)), "UNSUPPORTED record");
-	assert.equal(run(both, repo, PUSH), undefined, "binding constrains only its own grant");
+	assert.ok(blocked(run(only, repo, mergeCmd(sha))), "UNSUPPORTED record");
 });
-
-test("store: bound identity separates records; new bound state replaces the older bound record only; unbound untouched", () => {
+test("store: SHA and bound identity separate records; a new bound state for the same scope replaces the older one", () => {
 	const repo = makeRepo();
 	const store = newStore();
 	const first = store.addDeliveryGrant(boundBinding(repo));
 	assert.equal(store.addDeliveryGrant(boundBinding(repo)).issuedAt, first.issuedAt);
 	assert.equal(store.deliveryCount(), 1);
-	assert.equal(store.findDelivery(bindingOf(repo)), undefined, "unbound request never matches a bound record");
-	store.addDeliveryGrant(bindingOf(repo));
-	assert.equal(store.deliveryCount(), 2);
 	assert.equal(store.findDelivery(boundBinding(repo))?.bound.head, first.bound.head);
+	store.addDeliveryGrant(releaseBinding(repo));
+	assert.equal(store.deliveryCount(), 2, "a release approval is a separate record");
 	write(repo, "n.txt", "n\n");
 	store.addDeliveryGrant(boundBinding(repo));
-	assert.equal(store.deliveryCount(), 2, "replaced, not appended");
+	assert.equal(store.deliveryCount(), 2, "same SHA, new fingerprint: replaced, not appended");
 	const all = store.listDelivery();
-	assert.equal(all.filter((d: any) => d.bound).length, 1);
-	assert.notEqual(all.find((d: any) => d.bound).bound.fingerprint, first.bound.fingerprint);
-	assert.equal(all.filter((d: any) => !d.bound).length, 1);
+	assert.notEqual(all.find((d: any) => d.action === "merge").bound.fingerprint, first.bound.fingerprint);
+	assert.equal(all.filter((d: any) => d.action === "release").length, 1);
 });
-
-test("envelope: bound records use the separate deliveryBound key; round trip; shape tampering fails closed", () => {
+test("envelope: records round trip under deliveryActions; shape tampering fails closed", () => {
 	const repo = makeRepo();
 	const store = newStore();
-	store.addDeliveryGrant(bindingOf(repo, { base: "dev" }));
+	store.addDeliveryGrant(releaseBinding(repo));
 	store.addDeliveryGrant(boundBinding(repo));
 	const records = store.copyDelivery(repo);
 	const text = C.serializeGrants([], [], records);
 	const env = JSON.parse(text);
 	assert.equal(env.v, 1);
-	assert.equal(env.delivery.length, 1);
-	assert.equal(env.deliveryBound.length, 1);
-	assert.ok(env.delivery.every((r: any) => !("bound" in r)), "an old loader that ignores deliveryBound never sees a bound record as unbound");
-	assert.deepEqual(C.loadChildDelivery(text).map((r: any) => r.base).sort(), ["dev", "main"]);
+	assert.equal(env.deliveryActions.length, 2);
+	assert.equal("delivery" in env || "deliveryBound" in env, false, "an old loader sees no grant at all");
 	assert.deepEqual(C.loadChildDelivery(text).find((r: any) => r.bound), records.find((r: any) => r.bound));
+	const merge = (e: any) => e.deliveryActions.find((r: any) => r.action === "merge");
 	const edit = (fn: (e: any) => void) => { const e = JSON.parse(text); fn(e); return JSON.stringify(e); };
 	const cases: Array<[string, (e: any) => void]> = [
-		["bound inside delivery", (e) => { e.delivery.push(e.deliveryBound[0]); }],
-		["unbound inside deliveryBound", (e) => { delete e.deliveryBound[0].bound; }],
-		["missing fingerprint", (e) => { delete e.deliveryBound[0].bound.fingerprint; }],
-		["bad head", (e) => { e.deliveryBound[0].bound.head = "abc"; }],
-		["ref not the branch", (e) => { e.deliveryBound[0].bound.ref = "refs/heads/other"; }],
-		["unknown bound key", (e) => { e.deliveryBound[0].bound.extra = 1; }],
-		["bad exclude", (e) => { e.deliveryBound[0].bound.exclude = ["../x"]; }],
-		["deliveryBound not a list", (e) => { e.deliveryBound = {}; }],
+		["merge without bound", (e) => { delete merge(e).bound; }],
+		["missing fingerprint", (e) => { delete merge(e).bound.fingerprint; }],
+		["bad head", (e) => { merge(e).bound.head = "abc"; }],
+		["sha differs from bound head", (e) => { merge(e).sha = "1".repeat(40); }],
+		["ref not the branch", (e) => { merge(e).bound.ref = "refs/heads/other"; }],
+		["unknown bound key", (e) => { merge(e).bound.extra = 1; }],
+		["bad exclude", (e) => { merge(e).bound.exclude = ["../x"]; }],
+		["merge with version", (e) => { merge(e).version = "v1.2.3"; }],
+		["unknown action", (e) => { merge(e).action = "publish"; }],
+		["no action", (e) => { delete merge(e).action; }],
+		["deliveryActions not a list", (e) => { e.deliveryActions = {}; }],
 	];
 	for (const [name, fn] of cases) assert.throws(() => C.loadChildDelivery(edit(fn)), undefined, name);
 	// A tampered but well-formed fingerprint is not trusted: the child recomputes and it simply fails at use.
-	const tampered = C.loadChildDelivery(edit((e) => { e.deliveryBound[0].bound.fingerprint = "0".repeat(64); }));
+	const tampered = C.loadChildDelivery(edit((e) => { merge(e).bound.fingerprint = "0".repeat(64); }));
 	const child = newStore();
 	child.importDelivery(tampered.filter((r: any) => r.bound));
-	assert.ok(blocked(run(child, repo, PUSH)));
+	const sha = headOf(repo);
+	setView(sha);
+	assert.ok(blocked(run(child, repo, mergeCmd(sha))));
 });
-
 test("hygiene: candidate git config cannot run programs; argv is hardened and runs from a neutral cwd", () => {
 	const repo = makeRepo();
 	const marker = path.join(root, `marker-${counter}.txt`).split(path.sep).join("/");
@@ -270,29 +282,27 @@ test("hygiene: candidate git config cannot run programs; argv is hardened and ru
 	for (const flag of ["--cached", "--binary", "--no-renames", "--no-ext-diff", "--no-textconv"]) assert.ok(diff?.args.includes(flag), flag);
 });
 
-test("planPushRequest: a bound delivery is not covered-by-delivery (it could refuse later); an unbound one still is; commits never covered", () => {
+test("planPushRequest: merge and release grants never cover a push or commit", () => {
 	const repo = makeRepo();
 	const target = { candidate: repo, pushUrl: GH_URL, branch: "feat/x" };
 	const store = newStore();
 	store.addDeliveryGrant(boundBinding(repo));
+	store.addDeliveryGrant(releaseBinding(repo));
 	assert.deepEqual(C.planPushRequest(store, target, { commits: false }), { action: "ask" });
-	store.addDeliveryGrant(bindingOf(repo));
-	assert.deepEqual(C.planPushRequest(store, target, { commits: false }), { action: "covered-by-delivery" });
 	assert.deepEqual(C.planPushRequest(store, target, { commits: true }), { action: "ask" });
 });
-
-test("status labels a bound grant honestly and secret-free; README states the limits", () => {
+test("status labels merge and release grants secret-free; README states the limits", () => {
 	const repo = makeRepo();
 	const store = newStore();
 	const rec = store.addDeliveryGrant(boundBinding(repo));
+	store.addDeliveryGrant(releaseBinding(repo));
 	const text = C.authorizationStatus(store, T0);
-	assert.match(text, new RegExp(`bound: HEAD ${rec.bound.head.slice(0, 7)}, fp ${rec.bound.fingerprint.slice(0, 12)}, excl 0 \\(not rechecked in status\\)`));
+	assert.match(text, new RegExp(`- merge: repo acme/widgets, branch feat/x, base main, PR 12, SHA ${rec.sha.slice(0, 7)}, artifact dir none, valid, fp ${rec.bound.fingerprint.slice(0, 12)}, excl 0 \\(not rechecked in status\\)`));
+	assert.match(text, /- release: repo acme\/widgets, branch feat\/x, base main, PR 12, SHA fedcba9, version v1\.2\.3, latest no/);
 	assert.doesNotMatch(text, new RegExp(rec.bound.fingerprint));
-	assert.match(text, /binding constrains only this grant/i);
 	const readme = fs.readFileSync(path.resolve(import.meta.dirname, "..", "README.md"), "utf8");
-	for (const needle of [/binding constrains only this grant/i, /unbound/i, /trusted-context/i, /not race-free/i, /deliveryBound/, /ignored files/i, /PR create\/edit are not fingerprint-checked/i, /no pull, checkout or commit/i]) assert.match(readme, needle);
+	for (const needle of [/not race-free/i, /deliveryActions/, /ignored files/i, /no pull, checkout or commit/i, /legacy/i]) assert.match(readme, needle);
 });
-
 // ---- Repair: repository-local filters, linked ancestors, index flags that hide tracked edits. Each was reproduced against the first implementation (REPAIR REPORT).
 const asLinkAllowed = (target: string, link: string): boolean => { try { fs.symlinkSync(target, link, "junction"); return true; } catch { return false; } };
 const bindFails = (repo: string, re: RegExp) => assert.throws(() => C.bindDelivery(repo, "feat/x"), re);
@@ -339,12 +349,14 @@ test("index flags that hide tracked edits fail closed: assume-unchanged, skip-wo
 	const repo = makeRepo();
 	const store = newStore();
 	store.addDeliveryGrant(boundBinding(repo));
-	assert.equal(run(store, repo, PUSH), undefined);
+	const sha = headOf(repo);
+	setView(sha);
+	assert.equal(run(store, repo, mergeCmd(sha)), undefined);
 	git(repo, "update-index", "--assume-unchanged", "f.txt");
 	write(repo, "f.txt", "unreviewed text\n");
 	assert.equal(git(repo, "status", "--porcelain=v1"), "", "premise: Git status hides the edit");
 	bindFails(repo, /index|hid|assume|skip/i);
-	assert.ok(blocked(run(store, repo, PUSH)), "a stale bound grant must not stay fresh");
+	assert.ok(blocked(run(store, repo, mergeCmd(sha))), "a stale bound grant must not stay fresh");
 	git(repo, "update-index", "--no-assume-unchanged", "f.txt");
 	git(repo, "update-index", "--skip-worktree", "f.txt");
 	bindFails(repo, /index|hid|assume|skip/i);

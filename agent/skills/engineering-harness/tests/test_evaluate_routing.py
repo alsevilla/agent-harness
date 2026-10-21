@@ -86,11 +86,11 @@ def run_cli(*args):
 
 
 class FixtureSpecimenTests(unittest.TestCase):
-    def test_twenty_eight_unique_cases_with_positive_and_near_miss(self):
+    def test_thirty_two_unique_cases_with_positive_and_near_miss(self):
         fx = load_fixture()
         ids = [c["id"] for c in fx["cases"]]
-        self.assertEqual(len(ids), 28)
-        self.assertEqual(len(set(ids)), 28)
+        self.assertEqual(len(ids), 32)
+        self.assertEqual(len(set(ids)), 32)
         kinds = [c["kind"] for c in fx["cases"]]
         self.assertGreaterEqual(kinds.count("near_miss"), 3)
         self.assertGreaterEqual(kinds.count("positive"), 3)
@@ -153,6 +153,30 @@ class FixtureSpecimenTests(unittest.TestCase):
         self.assertEqual(c["R28"]["expect"]["roles_required"], ["release-engineer"])
         self.assertNotIn("platform-worker", c["R28"]["expect"]["roles_allowed"])
 
+    def test_automatic_pr_delivery_routing_cases(self):
+        """Deterministic fixture/policy expectations only; not a live autonomous workflow run."""
+        c = by_id(load_fixture())
+        # checks passed + PR delivery requested -> release-engineer with no extra approval wait
+        r = c["R29"]["expect"]
+        self.assertEqual(r["routes"], ["SHIP_AUTHORIZED"])
+        self.assertEqual(r["roles_required"], ["release-engineer"])
+        self.assertEqual(r["skills_required"], ["engineering-harness/ship"])
+        # local-only / no-publication -> no release-engineer launch
+        r = c["R30"]["expect"]
+        self.assertEqual(r["routes"], ["LOCAL_DONE"])
+        self.assertEqual(r["roles_allowed"], [])
+        # blocked/failed required checks -> no delivery; unknown cause goes to the debugger
+        r = c["R31"]["expect"]
+        self.assertEqual(r["routes"], ["T2_DEBUG_WORKER"])
+        self.assertEqual(r["roles_required"], ["debugger"])
+        self.assertNotIn("release-engineer", r["roles_allowed"])
+        # merge without its own exact approval is blocked
+        r = c["R32"]["expect"]
+        self.assertEqual(r["routes"], ["BLOCKED_NO_AUTHORITY"])
+        self.assertEqual(r["roles_allowed"], [])
+        for cid in ("R29", "R30", "R31", "R32"):
+            self.assertTrue(c[cid]["critical"], cid)
+
     def test_r20_requests_code_preparation_only_and_keeps_publication_blocked(self):
         r20 = by_id(load_fixture())["R20"]
         question = r20["question"].lower()
@@ -181,7 +205,7 @@ class EvaluatorTests(unittest.TestCase):
     def test_perfect_predictions_pass(self):
         rep = evaluate_rows(perfect_predictions(load_fixture()))
         self.assertTrue(rep["ok"])
-        self.assertEqual(rep["matched"], 28)
+        self.assertEqual(rep["matched"], 32)
         self.assertEqual(rep["accuracy"], 1.0)
         self.assertEqual(rep["critical_failures"], 0)
 
@@ -215,7 +239,7 @@ class EvaluatorTests(unittest.TestCase):
         fx = load_fixture()
         rows = set_row(perfect_predictions(fx), "R05", route="T1_WORKER", roles=["backend-worker"])
         rep = evaluate_rows(rows, fx)
-        self.assertEqual(rep["matched"], 27)
+        self.assertEqual(rep["matched"], 31)
         self.assertGreater(rep["accuracy"], 0.95)
         self.assertEqual(rep["critical_failures"], 1)
         self.assertFalse(rep["ok"])
@@ -301,7 +325,7 @@ class InputValidationTests(unittest.TestCase):
             ev.parse_predictions(text, self.ids)
 
     def test_good_text_parses(self):
-        self.assertEqual(len(ev.parse_predictions(self.good, self.ids)), 28)
+        self.assertEqual(len(ev.parse_predictions(self.good, self.ids)), 32)
 
     def test_malformed_json_line(self):
         self.assertInvalid(self.good[:-2] + "\n")  # truncated final object
@@ -980,7 +1004,7 @@ class CliTests(unittest.TestCase):
         p = self.write("pred.jsonl", to_jsonl(perfect_predictions(self.fx)))
         r = run_cli("--cases", str(CASES), "--predictions", p)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("matched: 28/28", r.stdout)
+        self.assertIn("matched: 32/32", r.stdout)
         self.assertIn("RESULT: PASS", r.stdout)
         self.assertIn("does NOT prove runtime skill activation", r.stdout)
 
@@ -1033,7 +1057,7 @@ class CliTests(unittest.TestCase):
         r = run_cli("--cases", str(CASES), "--predictions", str(p))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("sha256=" + hashlib.sha256(raw).hexdigest(), r.stdout)
-        self.assertIn("matched: 28/28", r.stdout)
+        self.assertIn("matched: 32/32", r.stdout)
 
     def test_utf8_bom_and_invalid_utf8_predictions_exit_two(self):
         body = to_jsonl(perfect_predictions(self.fx)).encode("utf-8")

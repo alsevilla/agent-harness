@@ -1,8 +1,9 @@
-// Runtime lifecycle for the release delivery grant: main-session wiring (simulated TUI dialog, abort, /revoke-authorization, shutdown) and the release-engineer launch envelope. Node-only (native TS):
+// Runtime lifecycle for the merge/release action grants: main-session wiring (simulated TUI dialog, abort, /revoke-authorization, shutdown) and the release-engineer launch envelope. Node-only (native TS):
 //   node --experimental-transform-types --test agent/extensions/subagent/tests/delivery-runtime.node.ts
 // Real installed Pi SDK session with a scripted operator; no live provider. Network is cut by a dead loopback proxy and git/gh argv from the bash tool is intercepted by a bash tripwire (offlineEnv, installTripwire). Every risky main call is refused before execution; the one child check is refused by the GH_REPO env rule before any GitHub read.
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import cpDefault, { spawn, spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,7 +11,7 @@ import readline from "node:readline";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostModules } from "./host-modules.ts";
-import { canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, serializeGrants } from "../safety-core.ts";
+import { bindDelivery, canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, serializeGrants } from "../safety-core.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const profileRoot = path.resolve(here, "../../../..");
@@ -71,12 +72,30 @@ const hermetic = offlineEnv(process.env);
 for (const k of Object.keys(process.env)) if (!(k in hermetic)) delete process.env[k];
 Object.assign(process.env, hermetic);
 
+// Mint-time live verification runs in the main process; answer gh and git ls-remote in-process (no network). Children are separate processes and unaffected.
+const RELEASE_SHA = "fedcba9876543210fedcba9876543210fedcba98";
+const STUB = { head: "0".repeat(40) };
+{
+	const cp = cpDefault as any;
+	const originalExec = cp.execFileSync;
+	const originalSpawn = cp.spawnSync;
+	cp.execFileSync = (file: string, args: string[], opts: unknown) => {
+		if (file !== "gh") return originalExec(file, args, opts);
+		if (args[0] === "pr" && args[1] === "view") return JSON.stringify({ state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: STUB.head, isCrossRepository: false });
+		return JSON.stringify([{ number: 12, mergeCommit: { oid: RELEASE_SHA }, isCrossRepository: false, headRefName: "feat/x", baseRefName: args[args.indexOf("--base") + 1] }]);
+	};
+	cp.spawnSync = (file: string, args: string[], opts: unknown) => (file === "git" && args[0] === "ls-remote" ? { status: 2, signal: null, error: undefined, stdout: "", stderr: "" } : originalSpawn(file, args, opts));
+	syncBuiltinESMExports();
+}
 const GITHUB_ORIGIN = "https://github.com/example-owner/example-repo.git";
 const MOVED_ORIGIN = "https://github.com/example-owner/moved-repo.git";
 const LOCAL_ORIGIN = path.join(root, "absent-origin.git");
 const CREATE_PR = 'gh pr create --repo example-owner/example-repo --base main --head feat/x --title "Release 1"';
 const MAIN_RM = "rm -rf probe-absent-dir";
-const REQ = { tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main" } } };
+const REL = { action: "release", branch: "feat/x", base: "main", pr: 12, sha: RELEASE_SHA, version: "v1.2.3" };
+const REQ = { tool: "request_authorization", args: { delivery: REL } };
+const MERGE_OP = ["gh", "pr", "mer" + "ge", `12 --repo example-owner/example-repo --squash --match-head-commit ${RELEASE_SHA}`].join(" ");
+const RELEASE_OP = ["gh", "rele" + "ase", "cre" + "ate", "v1.2.3 --repo example-owner/example-repo"].join(" ");
 
 function makeRepo(dir: string, origin: string): string {
 	fs.mkdirSync(dir, { recursive: true });
@@ -243,15 +262,18 @@ test("delivery approve (simulated TUI): one dialog; identical re-request reuses 
 	try {
 		const r = await s.run();
 		assert.equal(s.confirms.length, 1);
-		assert.equal(s.confirms[0][0], "Authorize release delivery?");
+		assert.equal(s.confirms[0][0], "Authorize release creation?");
 		assert.match(String(s.confirms[0][1]), /Repo: example-owner\/example-repo/);
-		assert.match(String(s.confirms[0][1]), /Branch: feat\/x into base main/);
+		assert.match(String(s.confirms[0][1]), /PR: #12 only \(feat\/x into main\)/);
+		assert.match(String(s.confirms[0][1]), new RegExp(`SHA: ${RELEASE_SHA}`));
+		assert.match(String(s.confirms[0][1]), /RELEASE only: tag v1\.2\.3/);
+		assert.match(String(s.confirms[0][1]), /does not approve any merge/);
 		assert.match(String(s.confirms[0][1]), /Scope: this PI session \(no time expiry\)/);
 		assert.equal(r[0].isError, false, r[0].text);
 		assert.match(r[0].text, /for this PI session/);
 		assert.doesNotMatch(r[0].text, /until \d{4}-/, "no absolute expiry in the receipt");
 		assert.equal(r[1].isError, false, r[1].text);
-		assert.match(r[1].text, /^Already authorized: release delivery .* is live for this PI session; no new dialog\./);
+		assert.match(r[1].text, /^Already authorized: release of PR #12 at fedcba9 for example-owner\/example-repo is live for this PI session; no new dialog\./);
 		assert.equal(s.confirms.length, 1, "identical re-request shows no second dialog");
 		assert.equal(r[2].isError, true);
 		assert.match(r[2].text, /Blocked by harness safety guard/);
@@ -287,23 +309,33 @@ test("delivery drift (simulated TUI): a binding change during the dialog mints n
 		assert.equal(r[0].isError, true);
 		assert.match(r[0].text, /repository binding changed during approval; no delivery grant minted\./);
 		assert.equal(r[1].isError, false, r[1].text);
-		assert.match(r[1].text, /^Authorized release-engineer release delivery for example-owner\/moved-repo feat\/x into main/);
+		assert.match(r[1].text, /^Authorized release-engineer release of PR #12 at fedcba9 for example-owner\/moved-repo for this PI session/);
 	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("delivery refusals (simulated TUI): invalid shapes, modes and origins never reach the dialog", { timeout: 300_000 }, async () => {
+test("delivery refusals (simulated TUI): legacy, combined, unbound and invalid shapes, modes and origins never reach the dialog", { timeout: 300_000 }, async () => {
 	const bad: Array<Record<string, unknown>> = [
-		{ delivery: { branch: "feat/x", base: "main" }, role: "general-worker" },
-		{ delivery: { branch: "feat/x", base: "main" }, ttl_minutes: 5 },
-		{ delivery: { branch: "feat/x", base: "main" }, operations: [{ kind: "shell", value: MAIN_RM }] },
-		{ delivery: { branch: "feat/x", base: "main" }, push_branch: { branch: "feat/x" } },
-		{ delivery: { branch: "feat/x", base: "feat/x" } },
-		{ delivery: { branch: "feat/x", base: "main", pr: 0 } },
-		{ delivery: { branch: "feat/x", base: "main", version: "1.2" } },
-		{ delivery: { branch: "feat/x", base: "main", latest: true } },
-		{ delivery: { branch: "feat/x", base: "main", artifact_dir: "/tmp/x" } },
-		{ delivery: { branch: "master", base: "main" } },
-		{ delivery: { branch: "feat/x", base: "main", cwd: ".." } },
+		{ delivery: REL, role: "general-worker" },
+		{ delivery: REL, ttl_minutes: 5 },
+		{ delivery: REL, operations: [{ kind: "shell", value: MAIN_RM }] },
+		{ delivery: REL, push_branch: { branch: "feat/x" } },
+		{ delivery: { ...REL, base: "feat/x" } },
+		{ delivery: { ...REL, pr: 0 } },
+		{ delivery: { ...REL, version: "1.2" } },
+		{ delivery: { ...REL, version: undefined } },
+		{ delivery: { ...REL, sha: "abc" } },
+		{ delivery: { ...REL, bind: { expect: "0".repeat(64) } } },
+		{ delivery: { ...REL, artifact_dir: "/tmp/x" } },
+		{ delivery: { ...REL, branch: "master" } },
+		{ delivery: { ...REL, cwd: ".." } },
+		{ delivery: { branch: "feat/x", base: "main" } },
+		{ delivery: { branch: "feat/x", base: "main", pr: 12, version: "v1.2.3" } },
+		{ delivery: { ...REL, action: "push" } },
+		{ delivery: { action: "merge", branch: "feat/x", base: "main", pr: 12, sha: RELEASE_SHA } },
+		{ delivery: { action: "merge", branch: "feat/x", base: "main", pr: 12, sha: RELEASE_SHA, version: "v1.2.3", bind: { expect: "0".repeat(64) } } },
+		{ operations: [{ kind: "shell", value: MERGE_OP }], role: "release-engineer" },
+		{ operations: [{ kind: "shell", value: RELEASE_OP }] },
+		{ operations: [{ kind: "shell", value: MAIN_RM }, { kind: "shell", value: MERGE_OP }] },
 	];
 	const s = await openMain(bad.map((args, i) => ({ tool: "request_authorization", args, id: `bad${i}` })).concat([{ text: "done" }]), { ui: approve, origin: GITHUB_ORIGIN });
 	try {
@@ -322,9 +354,8 @@ test("delivery refusals (simulated TUI): invalid shapes, modes and origins never
 		} finally { t.cleanup(); }
 	}
 });
-
 test("delivery ttl (simulated TUI): ttl_minutes is refused as session-scoped with no dialog", { timeout: 180_000 }, async () => {
-	const s = await openMain([{ tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main" }, ttl_minutes: 5 }, id: "ttl1" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN });
+	const s = await openMain([{ tool: "request_authorization", args: { delivery: REL, ttl_minutes: 5 }, id: "ttl1" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN });
 	try {
 		const r = await s.run();
 		assert.equal(r[0].isError, true, r[0].text);
@@ -398,7 +429,7 @@ test("delivery launch (simulated TUI): user/package release-engineer gets the sa
 	const agentFile = path.join(s.cwd, ".pi", "agents", "release-engineer.md");
 	fs.mkdirSync(path.dirname(agentFile), { recursive: true });
 	fs.writeFileSync(agentFile, "---\nname: release-engineer\ndescription: project-source impostor\n---\nNo prompt.\n");
-	const delivery = (guard: string | null) => (guard === null ? [] : JSON.parse(guard).delivery ?? []);
+	const delivery = (guard: string | null) => (guard === null ? [] : JSON.parse(guard).deliveryActions ?? []);
 	const { ai } = await sdk();
 	process.argv[1] = probe;
 	// Pi resolves user scope from HOME/.pi/agent (isolated HOME, see offlineEnv); seed the real role file there for this test only.
@@ -438,14 +469,14 @@ test("delivery launch (simulated TUI): user/package release-engineer gets the sa
 
 test("child delivery (runtime): a release-engineer child with a delivery copy still refuses gh forms when GH_REPO is set, before any GitHub read", { timeout: 180_000 }, async () => {
 	const repo = makeRepo(path.join(root, "delivery-child-repo"), GITHUB_ORIGIN);
-	const { ends, stderr } = await runChild([{ tool: "bash", args: { command: CREATE_PR }, id: "c1" }, { text: "done" }], {
+	const { ends, stderr } = await runChild([{ tool: "bash", args: { command: `${RELEASE_OP} --target ${RELEASE_SHA} --title "R" --generate-notes` }, id: "c1" }, { text: "done" }], {
 		dir: repo, role: "release-engineer", withLeases: true, env: { GH_REPO: "example-owner/example-repo" },
-		mint: (store) => { store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GITHUB_ORIGIN, repo: "example-owner/example-repo", branch: "feat/x", base: "main" }); },
+		mint: (store) => { store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GITHUB_ORIGIN, repo: "example-owner/example-repo", branch: "feat/x", base: "main", action: "release", pr: 12, sha: RELEASE_SHA, version: "v1.2.3" }); },
 	});
 	assert.equal(ends.length, 1, stderr);
 	assert.equal(ends[0].isError, true);
 	assert.match(ends[0].text, /Blocked by harness safety guard/);
-	assertNoTripwire("child GH_REPO createPR");
+	assertNoTripwire("child GH_REPO release");
 });
 
 test("delivery dialog text (simulated TUI): canonical artifact dir, file rules and session scope; the receipt has no time expiry", { timeout: 180_000 }, async () => {
@@ -453,7 +484,7 @@ test("delivery dialog text (simulated TUI): canonical artifact dir, file rules a
 	fs.mkdirSync(art, { recursive: true });
 	fs.writeFileSync(path.join(art, "pr.md"), "Summary\n");
 	const canonicalArt = fs.realpathSync.native(art).replace(/\\/g, "/");
-	const req = { tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main", artifact_dir: canonicalArt } }, id: "ta" };
+	const req = { tool: "request_authorization", args: { delivery: { ...REL, artifact_dir: canonicalArt } }, id: "ta" };
 	const s = await openMain([req, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN });
 	try {
 		const r = await s.run();
@@ -471,81 +502,106 @@ test("delivery dialog text (simulated TUI): canonical artifact dir, file rules a
 });
 
 test("delivery cap (simulated TUI): a fifth live delivery is refused before any dialog; the four earlier approvals stand", { timeout: 300_000 }, async () => {
-	const steps: SdkStep[] = ["main", "release", "develop", "staging", "qa"].map((base, i) => ({ tool: "request_authorization", args: { delivery: { branch: "feat/x", base } }, id: `cap${i}` }));
+	const steps: SdkStep[] = ["main", "release", "develop", "staging", "qa"].map((base, i) => ({ tool: "request_authorization", args: { delivery: { ...REL, base } }, id: `cap${i}` }));
 	const s = await openMain([...steps, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN });
 	try {
 		const r = await s.run();
 		assert.equal(s.confirms.length, 4, "the fifth request opens no dialog");
 		assert.ok(r.slice(0, 4).every((x: any) => !x.isError), JSON.stringify(r.map((x: any) => x.text)));
 		assert.equal(r[4].isError, true);
-		assert.match(r[4].text, /at most 4 live delivery grants; no delivery grant minted\./);
+		assert.match(r[4].text, /at most 4 live merge\/release grants; no delivery grant minted\./);
 	} finally { s.cleanup(); }
 });
 
-test("child delivery envelope (runtime): a legacy 30-minute record carrying expiresAt fails closed for every tool call", { timeout: 180_000 }, async () => {
+test("child delivery envelope (runtime): a legacy delivery key or a legacy 30-minute record fails closed for every tool call", { timeout: 180_000 }, async () => {
 	const repo = makeRepo(path.join(root, "delivery-tamper-repo"), GITHUB_ORIGIN);
 	const store = createGrantStore();
-	store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GITHUB_ORIGIN, repo: "example-owner/example-repo", branch: "feat/x", base: "main" });
+	store.addDeliveryGrant({ role: "release-engineer", candidate: repo, pushUrl: GITHUB_ORIGIN, repo: "example-owner/example-repo", branch: "feat/x", base: "main", action: "release", pr: 12, sha: RELEASE_SHA, version: "v1.2.3" });
 	const [record] = store.copyDelivery(repo);
-	const raw = serializeGrants([], [], [{ ...record, expiresAt: record.issuedAt + 30 * 60_000 }]);
-	const { ends, stderr } = await runChild([{ tool: "bash", args: { command: "echo delivery-tamper-probe" }, id: "t1" }, { text: "done" }], { dir: repo, role: "release-engineer", withLeases: true, raw });
-	assert.ok(ends.length >= 1, stderr);
-	for (const e of ends) { assert.equal(e.isError, true); assert.match(e.text, /invalid child grant envelope/); }
+	for (const raw of [serializeGrants([], [], [{ ...record, expiresAt: record.issuedAt + 30 * 60_000 }]), JSON.stringify({ v: 1, grants: [], delivery: [record] }), JSON.stringify({ v: 1, grants: [], deliveryBound: [record] })]) {
+		const { ends, stderr } = await runChild([{ tool: "bash", args: { command: "echo delivery-tamper-probe" }, id: "t1" }, { text: "done" }], { dir: repo, role: "release-engineer", withLeases: true, raw });
+		assert.ok(ends.length >= 1, stderr);
+		for (const e of ends) { assert.equal(e.isError, true); assert.match(e.text, /invalid child grant envelope/); }
+	}
 	assertNoTripwire("legacy envelope echo");
 });
-
-// Opt-in fingerprint binding through the real request_authorization tool: dialog content, reuse only on an equal live state, change-during-dialog refusal.
+// Mandatory fingerprint binding of a merge approval through the real request_authorization tool: dialog content, reuse only on an equal live state, change-during-dialog refusal.
 function boundRepo(): { dir: string; repoDir: string } {
 	const dir = fs.mkdtempSync(path.join(scratchBase, "delivery-bound-"));
 	const repoDir = path.join(dir, "project");
 	makeRepo(repoDir, GITHUB_ORIGIN);
 	const run = spawnSync("git", ["checkout", "-q", "feat/x"], { cwd: repoDir, windowsHide: true });
 	assert.equal(run.status, 0, String(run.stderr));
+	// openMain writes this same untracked file into the project; create it first so the reviewed fingerprint already includes it.
+	fs.writeFileSync(path.join(repoDir, ".env"), `FIXTURE=${MAIN_SENTINEL}
+`);
 	return { dir, repoDir };
 }
-const BOUND_REQ = { tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main", bind: {} } }, id: "b1" };
+// Merge request for the repo's current state (expect = the fingerprint the operator reviewed).
+function mergeReq(repoDir: string, id: string, over: Record<string, unknown> = {}) {
+	const state = bindDelivery(repoDir, "feat/x", {});
+	STUB.head = state.head;
+	return { tool: "request_authorization", args: { delivery: { action: "merge", branch: "feat/x", base: "main", pr: 12, sha: state.head, bind: { expect: state.fingerprint }, ...over } }, id };
+}
 
-test("delivery bind (simulated TUI): the dialog shows the bound state and limits; reuse only while the live state equals it; a changed state asks again", { timeout: 240_000 }, async () => {
+test("merge approval (simulated TUI): the dialog shows PR, SHA, bound state and limits; reuse only on an equal state; a state change during the dialog mints nothing", { timeout: 240_000 }, async () => {
 	const { dir, repoDir } = boundRepo();
-	const s = await openMain([BOUND_REQ, { ...BOUND_REQ, id: "b2" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	const req = mergeReq(repoDir, "b1");
+	const s = await openMain([req, { ...req, id: "b2" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
 	try {
 		const first = (await s.session.prompt("probe"), s.results());
+		const dialog = String(s.confirms[0][1]);
 		assert.equal(s.confirms.length, 1);
-		assert.match(String(s.confirms[0][1]), /Bound state: HEAD [0-9a-f]{40} on refs\/heads\/feat\/x; fingerprint [0-9a-f]{12}; excluded paths: none/);
-		assert.match(String(s.confirms[0][1]), /Binding constrains only this grant: push leases, unbound delivery grants and trusted-context allowances/);
-		assert.match(String(s.confirms[0][1]), /not race-free/);
+		assert.equal(s.confirms[0][0], "Authorize PR merge?");
+		assert.match(dialog, /PR: #12 only \(feat\/x into main\)/);
+		assert.match(dialog, /Action: MERGE only \(squash, --match-head-commit [0-9a-f]{40}\)/);
+		assert.match(dialog, /Bound candidate state: HEAD [0-9a-f]{40} on refs\/heads\/feat\/x; fingerprint [0-9a-f]{64}; excluded paths: none/);
+		assert.match(dialog, /not race-free/);
+		assert.match(dialog, /does not approve any release/);
 		assert.equal(first[0].isError, false, first[0].text);
-		assert.match(first[0].text, /release delivery bound to HEAD [0-9a-f]{7} for example-owner\/example-repo/);
+		assert.match(first[0].text, /merge of PR #12 at [0-9a-f]{7} for example-owner\/example-repo/);
 		assert.match(first[1].text, /^Already authorized/);
 		assert.equal(s.confirms.length, 1);
-		assertNoTripwire("delivery bind");
+		assertNoTripwire("merge approval");
 	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
-	// State changed between two requests: the stored bound record is not "Already authorized"; a new confirm supersedes it.
 	const other = boundRepo();
 	let calls = 0;
-	const ui = { confirm: async () => { calls += 1; if (calls === 1) fs.writeFileSync(path.join(other.repoDir, "late.txt"), "x\n"); return true; } };
-	const t = await openMain([BOUND_REQ, BOUND_REQ, { ...BOUND_REQ, id: "b3" }, { text: "done" }], { ui, origin: GITHUB_ORIGIN, dir: other.dir });
+	const ui = { confirm: async () => { calls += 1; fs.writeFileSync(path.join(other.repoDir, "late.txt"), "x\n"); return true; } };
+	const t = await openMain([mergeReq(other.repoDir, "b3"), { text: "done" }], { ui, origin: GITHUB_ORIGIN, dir: other.dir });
 	try {
 		const r = (await t.session.prompt("probe"), t.results());
 		assert.equal(r[0].isError, true);
 		assert.match(r[0].text, /candidate changed during approval; no delivery grant minted\./);
-		assert.equal(r[1].isError, false, r[1].text);
-		assert.match(r[1].text, /bound to HEAD/);
-		assert.match(r[2].text, /^Already authorized/);
-		assert.equal(calls, 2);
+		assert.equal(calls, 1);
 	} finally { t.cleanup(); fs.rmSync(other.dir, { recursive: true, force: true }); }
 });
 
-test("delivery bind (simulated TUI): a detached or other-branch candidate and a bad expect are refused with no dialog", { timeout: 240_000 }, async () => {
+test("merge approval (simulated TUI): unbound, mismatched-SHA, detached or other-branch candidates, a bad expect and a moved PR head are refused with no dialog", { timeout: 240_000 }, async () => {
 	const { dir, repoDir } = boundRepo();
-	spawnSync("git", ["checkout", "-q", "--detach"], { cwd: repoDir, windowsHide: true });
-	const bad = { tool: "request_authorization", args: { delivery: { branch: "feat/x", base: "main", bind: { expect: "0".repeat(64) } } }, id: "b4" };
-	const s = await openMain([BOUND_REQ, bad, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	const good = mergeReq(repoDir, "g1");
+	const good_args = (good.args as any).delivery;
+	const bad = (id: string, d: Record<string, unknown>) => ({ tool: "request_authorization", args: { delivery: { ...good_args, ...d } }, id });
+	const steps = [bad("m1", { bind: undefined }), bad("m2", { bind: { expect: "0".repeat(64) } }), bad("m3", { sha: "1".repeat(40) }), bad("m4", { pr: undefined }), bad("m5", { version: "v1.2.3" })];
+	const s = await openMain([...steps, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
 	try {
 		const r = (await s.session.prompt("probe"), s.results());
-		assert.equal(r[0].isError, true);
-		assert.match(r[0].text, /no delivery grant minted/);
-		assert.equal(r[1].isError, true);
+		assert.ok(r.length === steps.length && r.every((x: any) => x.isError), JSON.stringify(r.map((x: any) => x.text)));
 		assert.equal(s.confirms.length, 0);
-	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
+	} finally { s.cleanup(); }
+	const moved = await openMain([{ ...good, id: "m6" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	try {
+		STUB.head = "2".repeat(40);
+		const r = (await moved.session.prompt("probe"), moved.results());
+		assert.equal(r[0].isError, true);
+		assert.match(r[0].text, /PR head does not equal the approved SHA/);
+		assert.equal(moved.confirms.length, 0);
+	} finally { moved.cleanup(); }
+	spawnSync("git", ["checkout", "-q", "--detach"], { cwd: repoDir, windowsHide: true });
+	const detached = await openMain([{ ...good, id: "m7" }, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	try {
+		STUB.head = (good_args as any).sha;
+		const r = (await detached.session.prompt("probe"), detached.results());
+		assert.equal(r[0].isError, true);
+		assert.equal(detached.confirms.length, 0);
+	} finally { detached.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

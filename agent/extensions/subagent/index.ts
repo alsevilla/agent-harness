@@ -42,7 +42,7 @@ import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagSta
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
-import { assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type GuardOp, validateArtifactDir } from "./safety-core.ts";
+import { assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -713,9 +713,8 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 	const request = { commits: commits === true, artifactDir };
 	const plan = planPushRequest(safetyGrants, target, request);
 	const kind = request.commits ? "push and commit" : "push";
-	// Repeats are covered; a live delivery covers a push-only request. Neither opens a dialog.
+	// Repeats are covered and open no dialog.
 	if (plan.action === "covered") return ok(`Already authorized this session: ${LEASE_ROLE} may ${kind} ${target.branch} to the approved origin of ${target.candidate}.`);
-	if (plan.action === "covered-by-delivery") return ok(`Already covered by the approved delivery for ${target.branch} this session; no push lease minted.`);
 	const scope = request.commits ? `normal push and normal commits on this branch (git commit -m, or -F ${artifactDir ?? "no artifact directory"}; no amend, signing, hooks, pathspec or other commit options)` : "normal push of this branch";
 	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nBranch: ${target.branch}\nPush URL: ${target.pushUrl}\nScope: this session only; ${scope} (no tags, force, delete, mirror or other refs). /revoke-authorization or session end withdraws it.`;
 	const title = request.commits ? "Authorize release-engineer branch pushes and commits?" : "Authorize release-engineer branch pushes?";
@@ -736,14 +735,17 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 	return ok(`Authorized ${LEASE_ROLE} to ${kind} ${target.branch} for this session.`);
 }
 
-interface DeliveryParams { branch: string; base: string; cwd?: string; pr?: number; version?: string; latest?: boolean; artifact_dir?: string; bind?: { exclude?: string[]; expect?: string } }
+interface DeliveryParams { action: "merge" | "release"; branch: string; base: string; pr: number; sha: string; cwd?: string; version?: string; latest?: boolean; artifact_dir?: string; bind?: { exclude?: string[]; expect?: string } }
 
-// Session-scoped release-engineer delivery for one bound repo/branch/base, like a push lease: one TUI confirm per new binding; an identical live binding returns without a dialog; the binding is revalidated after the dialog; no time expiry.
+// Session-scoped merge OR release approval (never both in one grant), like a push lease: one TUI confirm per new action binding; an identical live binding returns without a dialog; live PR state and the candidate binding are re-verified after the dialog; no time expiry. Push, PR create and PR edit are automatic for the trusted release-engineer and are not carried here.
 async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; delivery: DeliveryParams }, ctx: { cwd: string; ui: { confirm(title: string, message: string, options?: { timeout?: number }): Promise<boolean> } }) {
 	const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
 	const d = params.delivery;
 	if (params.role !== undefined && params.role !== LEASE_ROLE) return fail(`delivery is only for role ${LEASE_ROLE}; no delivery grant minted.`);
 	if (params.ttl_minutes !== undefined) return fail("delivery grants are session-scoped; TTL unsupported (ttl_minutes rejected); no delivery grant minted.");
+	if (d.action !== "merge" && d.action !== "release") return fail("delivery.action must be merge or release; legacy combined delivery grants are not accepted; no delivery grant minted.");
+	if (d.action === "merge" && (d.version !== undefined || d.latest !== undefined || d.bind?.expect === undefined)) return fail("a merge grant needs bind.expect (the verified candidate fingerprint) and carries no release fields; no delivery grant minted.");
+	if (d.action === "release" && (d.bind !== undefined || d.version === undefined)) return fail("a release grant needs version and sha (the merge commit) and takes no bind; no delivery grant minted.");
 	let target: ReturnType<typeof pushBranchTarget>;
 	try {
 		target = pushBranchTarget(path.resolve(ctx.cwd, d.cwd ?? "."), d.branch);
@@ -753,25 +755,31 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	if (!target) return fail("not a verified git repository with exactly one origin push URL; no delivery grant minted.");
 	const repo = parseRepoFromPushUrl(target.pushUrl);
 	if (!repo) return fail("origin is not a github.com repository in a supported URL form; no delivery grant minted.");
-	// Opt-in fingerprint binding, computed before the dialog and recomputed after it; any refusal mints nothing.
+	// Merge only: the fingerprint is computed before the dialog and recomputed after it; any refusal mints nothing.
 	let bound: BoundState | undefined;
-	if (d.bind !== undefined) {
+	if (d.action === "merge") {
 		try { bound = bindDelivery(target.candidate, target.branch, d.bind); } catch (error) { return fail(`${(error as Error).message}; no delivery grant minted.`); }
 	}
-	const binding = { role: LEASE_ROLE, candidate: target.candidate, pushUrl: target.pushUrl, repo, branch: target.branch, base: d.base, pr: d.pr, version: d.version, latest: d.latest, artifactDir: d.artifact_dir, ...(bound ? { bound } : {}) };
+	const binding = { role: LEASE_ROLE, candidate: target.candidate, pushUrl: target.pushUrl, repo, branch: target.branch, base: d.base, action: d.action, pr: d.pr, sha: d.sha, version: d.version, latest: d.latest, artifactDir: d.artifact_dir, ...(bound ? { bound } : {}) };
 	let artifactDir: string | undefined;
 	let superseded: ReturnType<typeof safetyGrants.findSuperseded>;
 	try {
 		artifactDir = d.artifact_dir === undefined ? undefined : validateArtifactDir(d.artifact_dir, target.candidate);
 		const live = safetyGrants.findDelivery(binding);
-		if (live) return { content: [{ type: "text" as const, text: `Already authorized: release delivery for ${repo} ${target.branch} into ${d.base} is live for this PI session; no new dialog.` }], details: {} };
+		if (live) return { content: [{ type: "text" as const, text: `Already authorized: ${d.action} of PR #${d.pr} at ${d.sha.slice(0, 7)} for ${repo} is live for this PI session; no new dialog.` }], details: {} };
 		superseded = safetyGrants.findSuperseded(binding);
-		if (!superseded && safetyGrants.deliveryCount() >= MAX_DELIVERY_GRANTS) return fail(`at most ${MAX_DELIVERY_GRANTS} live delivery grants; no delivery grant minted.`);
+		if (!superseded && safetyGrants.deliveryCount() >= MAX_DELIVERY_GRANTS) return fail(`at most ${MAX_DELIVERY_GRANTS} live merge/release grants; no delivery grant minted.`);
+		const refusal = verifyDeliveryTarget(binding as DeliveryBinding);
+		if (refusal) return fail(`${refusal}; no delivery grant minted.`);
 	} catch (error) {
 		return fail(`${(error as Error).message}; no delivery grant minted.`);
 	}
-	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nRepo: ${repo}\nPush URL: ${target.pushUrl}\nBranch: ${target.branch} into base ${d.base}\nPR: ${d.pr !== undefined ? `#${d.pr} only` : "the open PR of this branch into the base"}\nRelease: ${d.version ?? "none"}${d.latest ? " as latest" : ""}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\nScope: this PI session (no time expiry); reusable for push of this branch, PR create (only when no PR is bound), PR edit, PR merge and release create. No tags, force, delete, other refs, npm, deploy or API. Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit; stop them first for immediate effect.${bound === undefined ? "" : `\nBound state: HEAD ${bound.head} on ${bound.ref}; fingerprint ${bound.fingerprint.slice(0, 12)}; excluded paths: ${bound.exclude.join(", ") || "none"}${superseded?.bound ? `; supersedes bound state ${superseded.bound.head.slice(0, 7)}` : ""}\nBinding: push, PR merge and release create are refused for this grant when the candidate (HEAD, branch, staged, unstaged or untracked files) differs from this state; merge also needs --match-head-commit equal to this HEAD; release needs no pull, checkout or commit after approval. PR create/edit are not checked. Ignored files are outside the fingerprint. Binding constrains only this grant: push leases, unbound delivery grants and trusted-context allowances still permit delivery without this check, and the check is not race-free.`}`;
-	const approved = await ctx.ui.confirm("Authorize release delivery?", text, { timeout: 120_000 });
+	const identity = `Repo: ${repo}\nPR: #${d.pr} only (${target.branch} into ${d.base})\nSHA: ${d.sha}`;
+	const detail = d.action === "merge"
+		? `Action: MERGE only (squash, --match-head-commit ${d.sha}). Bound candidate state: HEAD ${bound?.head} on ${bound?.ref}; fingerprint ${bound?.fingerprint}; excluded paths: ${bound?.exclude.join(", ") || "none"}${superseded?.bound ? `; replaces bound state ${superseded.bound.head.slice(0, 7)}` : ""}. Refused if the live PR head or the candidate (HEAD, branch, staged, unstaged or untracked files) differs. Ignored files are outside the fingerprint; not race-free. This does not approve any release.`
+		: `Action: RELEASE only: tag ${d.version}${d.latest ? " as latest" : ""} at target ${d.sha} (the merge commit of PR #${d.pr}); refused if the tag already exists. This does not approve any merge.`;
+	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nPush URL: ${target.pushUrl}\n${identity}\n${detail}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\nScope: this PI session (no time expiry). No push, PR create/edit, other tags, force, delete, other refs, npm, deploy or API. Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit.`;
+	const approved = await ctx.ui.confirm(d.action === "merge" ? "Authorize PR merge?" : "Authorize release creation?", text, { timeout: 120_000 });
 	if (!approved) return fail("Not authorized by the operator; no delivery grant minted.");
 	let again: ReturnType<typeof pushBranchTarget>;
 	try {
@@ -785,9 +793,11 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 		try { after = bindDelivery(target.candidate, target.branch, { exclude: bound.exclude }); } catch { after = undefined; }
 		if (!after || after.head !== bound.head || after.ref !== bound.ref || after.fingerprint !== bound.fingerprint) return fail("candidate changed during approval; no delivery grant minted.");
 	}
+	const stale = verifyDeliveryTarget(binding as DeliveryBinding);
+	if (stale) return fail(`${stale} (changed during approval); no delivery grant minted.`);
 	try {
-		const minted = safetyGrants.addDeliveryGrant(binding);
-		return { content: [{ type: "text" as const, text: `Authorized ${LEASE_ROLE} release delivery${bound ? ` bound to HEAD ${bound.head.slice(0, 7)}` : ""} for ${repo} ${target.branch} into ${d.base} for this PI session (until /revoke-authorization or session end; running children keep copies until they exit).` }], details: {} };
+		safetyGrants.addDeliveryGrant(binding);
+		return { content: [{ type: "text" as const, text: `Authorized ${LEASE_ROLE} ${d.action} of PR #${d.pr} at ${d.sha.slice(0, 7)} for ${repo} for this PI session (until /revoke-authorization or session end; running children keep copies until they exit).` }], details: {} };
 	} catch (error) {
 		return fail(`${(error as Error).message}; no delivery grant minted.`);
 	}
@@ -1207,11 +1217,11 @@ export default function (pi: ExtensionAPI) {
     });
     pi.registerTool({
         name: "request_authorization", label: "Request authorization",
-        description: "Not needed for an explicitly requested ordinary commit, feature-branch push or PR creation by a trusted release-engineer (no authorization is required; do not call this proactively). Use it only for risky operations the guard genuinely blocked, such as merge or release, with separate operator approval. Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked, or exclusively via push_branch a session-only release-engineer push lease for one feature branch (commits: true also allows normal commits, artifact_dir binds -F message files), or exclusively via delivery a session-scoped reusable release-engineer delivery (push, PR create/edit/merge, release create) bound to one repo/branch/base. Refused outside the interactive TUI.",
+        description: "Not needed for an explicitly requested ordinary commit, feature-branch push or PR creation by a trusted release-engineer (no authorization is required; do not call this proactively). Use it only for risky operations the guard genuinely blocked, with separate operator approval. PR merge and release create are never single-use operations: each needs its own delivery action grant (exact PR + SHA pins; merge also the verified candidate fingerprint). Same-owned PR edit is automatic for the trusted release-engineer. Ask the human operator in the TUI to grant exact single-use authorization (max " + MAX_GRANT_OPS + " operations) for risky operations the safety guard blocked, or exclusively via push_branch a session-only release-engineer push lease for one feature branch (commits: true also allows normal commits, artifact_dir binds -F message files), or exclusively via delivery a session-scoped release-engineer merge OR release approval bound to one repo/PR/SHA. Refused outside the interactive TUI.",
         parameters: Type.Object({
             operations: Type.Optional(Type.Array(Type.Object({ kind: StringEnum(["shell", "write"] as const), value: Type.String({ description: "Exact shell command or file path" }) }), { minItems: 1, maxItems: MAX_GRANT_OPS })),
             push_branch: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch name; protected branches are refused" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), commits: Type.Optional(Type.Boolean({ description: "true also allows normal git commit -m or -F commits on this branch (policy-enforced only for release-engineer children)" })), artifact_dir: Type.Optional(Type.String({ description: "With commits true: absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding the -F message file" })) }, { description: "Exclusive with operations: one session release-engineer PR-branch push lease" })),
-            delivery: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch to push and deliver" }), base: Type.String({ description: "PR base branch, e.g. main" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), pr: Type.Optional(Type.Number({ minimum: 1, description: "Existing PR number to bind; omit to allow the branch's open PR into the base" })), version: Type.Optional(Type.String({ description: "Approved release tag, e.g. v1.2.3" })), latest: Type.Optional(Type.Boolean({ description: "Approve release --latest; needs version" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })), bind: Type.Optional(Type.Object({ exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 8, description: "Relative untracked output folders left out of the fingerprint; never tracked paths" })), expect: Type.Optional(Type.String({ description: "64-hex candidate fingerprint main verified; mint refused if the live state differs" })) }, { description: "Opt-in: bind this grant to the candidate state (HEAD attached to the branch, fingerprint) at approval; push, merge and release are then refused for this grant if it changes. Request after the final commit. Constrains only this grant; not race-free" })) }, { description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer delivery (no time expiry)" })),
+            delivery: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "One action per grant: merge or release; separate approvals" }), branch: Type.String({ description: "Feature branch of the PR" }), base: Type.String({ description: "PR base branch, e.g. main" }), pr: Type.Number({ minimum: 1, description: "Exact PR number" }), sha: Type.String({ description: "40-hex SHA. merge: the reviewed PR head (must equal the candidate HEAD). release: the release target = merge commit of the PR" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), version: Type.Optional(Type.String({ description: "release only: approved tag, e.g. v1.2.3 (must not exist yet)" })), latest: Type.Optional(Type.Boolean({ description: "release only: approve --latest" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })), bind: Type.Optional(Type.Object({ exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 8, description: "Relative untracked output folders left out of the fingerprint; never tracked paths" })), expect: Type.Optional(Type.String({ description: "64-hex candidate fingerprint of the reviewed candidate; mint refused if the live state differs" })) }, { description: "merge only and mandatory (expect required): binds the grant to the candidate HEAD (= sha) and fingerprint verified at approval. Not allowed for release. Not race-free" })) }, { description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer merge OR release approval (no time expiry); legacy combined grants are rejected" })),
             role: Type.Optional(Type.String({ description: "Child role the grant binds to; omit for main" })),
             ttl_minutes: Type.Optional(Type.Number({ minimum: 1, maximum: GRANT_TTL_MAX_MS / 60_000, description: "Default 30; rejected for push_branch and delivery (delivery is session-scoped; TTL unsupported)" })),
         }),
