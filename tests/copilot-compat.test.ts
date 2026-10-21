@@ -267,16 +267,36 @@ test("role preflight keeps native availability separate from non-ready model com
   const p = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported" });
   expect(p.native.ok).toBe(true);
   expect(p.model).toMatchObject({ status: "unverified", ready: false });
-  expect(p.ready).toBe(false);
+  expect("ready" in p).toBe(false);
+  expect(p.nativeDispatchReady).toBe(true);
+  expect(p.modelRequirementsVerified).toBe(false);
   expect(p.modelBoundDelegation).toBe("non-ready");
   expect(p.limitations.join(" ")).toMatch(/not.*(intercept|authority)/i);
   const none = compat.rolePreflight(roles, { role: "reviewer" } as never);
   expect(none.native.ok).toBe(false);
-  expect(none.ready).toBe(false);
+  expect("ready" in none).toBe(false);
+  expect(none.nativeDispatchReady).toBe(false);
+  expect(none.modelRequirementsVerified).toBe(false);
   expect(() => compat.rolePreflight(roles, { role: "ghost" } as never)).toThrow(/registry/);
   const unsupportedModel = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: { rejectedModels: [compat.modelRequirement(real("reviewer")).model] } });
   expect(unsupportedModel.native.ok).toBe(true);
   expect(unsupportedModel.model.status).toBe("unsupported");
+  // independence: native availability is unaffected by model evidence, and no input flips model verification or model-bound readiness
+  expect(unsupportedModel).toMatchObject({ nativeDispatchReady: true, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
+  const req = compat.modelRequirement(real("reviewer"));
+  const adv = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: { advertisedModels: [req.model, req.fallbackModel] } });
+  expect(adv).toMatchObject({ nativeDispatchReady: true, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
+  for (const [ns, i, d] of [["probe", inv, "unverified"], ["probe", inv, "unsupported"], ["probe", inv, undefined], ["other", inv, "supported"], ["", inv, "supported"], ["probe", ["reviewer"], "supported"], ["probe", "probe:reviewer", "supported"]] as const) {
+    const bad = compat.rolePreflight(roles, { role: "reviewer", namespace: ns, inventory: i as never, dispatch: d as never, modelEvidence: { advertisedModels: [req.model] } });
+    expect(bad, JSON.stringify([ns, d])).toMatchObject({ nativeDispatchReady: false, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
+  }
+  for (const evidence of [{ honored: true }, { ready: true }, { modelRequirementsVerified: true }, { status: "honored" }])
+    for (const extra of [{}, { ready: true, nativeDispatchReady: false, modelRequirementsVerified: true, honored: true }]) {
+      const q = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: evidence as never, ...extra } as never);
+      expect(q).toMatchObject({ nativeDispatchReady: true, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
+      expect("ready" in q).toBe(false);
+      expect(JSON.stringify(q)).not.toMatch(/"modelRequirementsVerified":true|honored":true/);
+    }
 });
 
 test("handoff needs the full packet: absolute candidate, task, expected behavior, dense nonblank scope lists", () => {
@@ -340,7 +360,8 @@ test("named-role CLI prints registry requirement and is non-ready/unverified wit
   expect(out.status).toBe(2);
   const j = JSON.parse(out.stdout);
   expect(j.requirement).toEqual(compat.modelRequirement(real("reviewer")));
-  expect(j).toMatchObject({ ready: false, native: { ok: false }, model: { status: "unverified", ready: false } });
+  expect("ready" in j).toBe(false);
+  expect(j).toMatchObject({ nativeDispatchReady: false, modelRequirementsVerified: false, modelBoundDelegation: "non-ready", native: { ok: false }, model: { status: "unverified", ready: false } });
   expect(cli("--role", "ghost").status).toBe(1);
   expect(cli("--role", "Reviewer").status).toBe(1);
   expect(cli("--role").status).toBe(1);

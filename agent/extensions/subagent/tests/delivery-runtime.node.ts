@@ -81,6 +81,7 @@ const STUB = { head: "0".repeat(40) };
 	const originalSpawn = cp.spawnSync;
 	cp.execFileSync = (file: string, args: string[], opts: unknown) => {
 		if (file !== "gh") return originalExec(file, args, opts);
+		if (args[0] === "pr" && args[1] === "view" && args.some((a) => a.includes("mergeCommit"))) return JSON.stringify({ number: Number(args[2]), state: "MERGED", mergeCommit: { oid: RELEASE_SHA }, isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" });
 		if (args[0] === "pr" && args[1] === "view") return JSON.stringify({ state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: STUB.head, isCrossRepository: false });
 		return JSON.stringify([{ number: 12, mergeCommit: { oid: RELEASE_SHA }, isCrossRepository: false, headRefName: "feat/x", baseRefName: args[args.indexOf("--base") + 1] }]);
 	};
@@ -502,7 +503,7 @@ test("delivery dialog text (simulated TUI): canonical artifact dir, file rules a
 });
 
 test("delivery cap (simulated TUI): a fifth live delivery is refused before any dialog; the four earlier approvals stand", { timeout: 300_000 }, async () => {
-	const steps: SdkStep[] = ["main", "release", "develop", "staging", "qa"].map((base, i) => ({ tool: "request_authorization", args: { delivery: { ...REL, base } }, id: `cap${i}` }));
+	const steps: SdkStep[] = [12, 13, 14, 15, 16].map((pr, i) => ({ tool: "request_authorization", args: { delivery: { ...REL, pr } }, id: `cap${i}` })); // distinct PRs: each release is verified by its exact PR number now
 	const s = await openMain([...steps, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN });
 	try {
 		const r = await s.run();

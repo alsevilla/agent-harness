@@ -42,7 +42,7 @@ import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagSta
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
-import { assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
+import { assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -170,9 +170,11 @@ interface DispatchDefaults {
 	contextWindowFor?: (model: string) => number | undefined;
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
+	prBase?: string; // validated per-entry trusted PR base; shared by every attempt (fallbacks, steering restarts) of this one launch
 }
 
 const WORKSPACE_WAITING = "Waiting for workspace";
+const withBase = (defaults: DispatchDefaults, prBase: string | undefined): DispatchDefaults => (prBase === undefined ? defaults : { ...defaults, prBase });
 
 // Admission boundary for every launch path (single, chain, parallel, background, future DAG): the claim is registered before any await and held across declared fallbacks.
 async function runSingleAgent(
@@ -405,7 +407,7 @@ async function runAgentAttempt(
         }
 		if (signal?.aborted) throw new Error("Subagent was aborted"); // an abort during the prompt-file write spawns nothing
 		// Guard entry is always injected after pause-gate/relay; a missing guard file throws (fail closed). Grants are claimed only by the job's first actual spawn (grantWindow).
-		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package");
+		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase);
 		args.push("--extension", guard.entry);
 		let wasAborted = false;
 
@@ -595,6 +597,9 @@ async function runAgentAttempt(
 // Null is listed (like modelTier) so the SDK keeps it for runtime refusal instead of dropping it into the ordinary primary run.
 const MODEL_SLOT = Type.Union([Type.Literal("fallback"), Type.Null()]);
 
+// Optional exact PR base for the trusted release-engineer's PR create/edit. Null is listed (like modelTier) so the SDK keeps it for runtime refusal instead of dropping it into the unbound legacy behavior.
+const PR_BASE = Type.Optional(Type.Union([Type.String({ description: "Exact base branch the trusted release-engineer must use for PR create/edit of this entry. Omitted keeps the legacy syntactic-only base check; supply it whenever the base is known." }), Type.Null()]));
+
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
@@ -602,6 +607,7 @@ const TaskItem = Type.Object({
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration: this task only reads its checkout (default write). Not an OS sandbox." })),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
 	modelSlot: Type.Optional(MODEL_SLOT),
+	prBase: PR_BASE,
 });
 
 const ChainItem = Type.Object({
@@ -611,6 +617,7 @@ const ChainItem = Type.Object({
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration: this step only reads its checkout (default write). Not an OS sandbox." })),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
 	modelSlot: Type.Optional(MODEL_SLOT),
+	prBase: PR_BASE,
 });
 
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
@@ -628,12 +635,14 @@ const DagNode = Type.Object({
 	readOnly: Type.Optional(Type.Union([Type.Boolean({ description: "Trusted declaration: this node only reads its checkout (default write). Not an OS sandbox." }), Type.Null()])),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()])),
 	modelSlot: Type.Optional(MODEL_SLOT),
+	prBase: PR_BASE,
 }, { additionalProperties: false });
 
 const SubagentParams = Type.Object({
     background: Type.Optional(Type.Boolean({description: "Default true: return a job ID immediately; completion arrives automatically. Set false to explicitly wait for the entire task.", default: true})),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()], { description: "Optional Pi model tier for a single task; select per entry in batch modes." })),
 	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
+	prBase: PR_BASE,
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -913,7 +922,18 @@ export default function (pi: ExtensionAPI) {
 
 			const batchMode = hasChain || hasTasks || hasDag;
 			if (batchMode && (params.modelTier !== undefined || params.modelSlot !== undefined)) return { content: [{ type: "text", text: `Invalid ${params.modelTier !== undefined ? "modelTier" : "modelSlot"}: root selection is only valid for a single task.` }], details: makeDetails(mode)([]), isError: true };
-			const tierRequests = hasDag ? dagNodes! : hasChain ? params.chain! : hasTasks ? params.tasks! : hasSingle ? [{ agent: params.agent!, modelTier: params.modelTier, modelSlot: params.modelSlot }] : [];
+			if (batchMode && params.prBase !== undefined) return { content: [{ type: "text", text: "Invalid prBase: root selection is only valid for a single task." }], details: makeDetails(mode)([]), isError: true };
+			const tierRequests = hasDag ? dagNodes! : hasChain ? params.chain! : hasTasks ? params.tasks! : hasSingle ? [{ agent: params.agent!, modelTier: params.modelTier, modelSlot: params.modelSlot, prBase: params.prBase, cwd: params.cwd }] : [];
+			// prBase narrows only the trusted (user/package) release-engineer context; every entry is validated once, before any entry launches.
+			for (let i = 0; i < tierRequests.length; i++) {
+				const request = tierRequests[i] as { agent: string; prBase?: unknown; cwd?: string; id?: string };
+				if (request.prBase === undefined) continue;
+				const location = hasDag ? `dag node "${request.id}"` : hasChain ? `chain[${i}]` : hasTasks ? `tasks[${i}]` : "single";
+				const trusted = agents.find((entry) => entry.name === request.agent);
+				const refuse = (why: string) => ({ content: [{ type: "text" as const, text: `Invalid prBase: ${location}: ${why}` }], details: makeDetails(mode)([]), isError: true });
+				if (!trusted || trusted.name !== LEASE_ROLE || (trusted.source !== "user" && trusted.source !== "package")) return refuse("only the trusted release-engineer role accepts a PR base.");
+				try { checkPrBase(request.prBase, path.resolve(ctx.cwd, request.cwd ?? ".")); } catch (error) { return refuse(error instanceof Error ? error.message : "invalid."); }
+			}
 			const selected = preparedDispatch?.selected ?? new Map<number, SelectedAgent>();
 			if (!preparedDispatch) {
 				for (let i = 0; i < tierRequests.length; i++) {
@@ -985,7 +1005,7 @@ export default function (pi: ExtensionAPI) {
 					accept: (result: SingleResult) => !isFailedResult(result) && !printedToolMarkup(result),
 					report: (result: SingleResult) => withTerminalDiagnostics(extractFinalText(result.messages), result),
 					run: (node, parents, nodeSignal) => {
-						return runSingleAgent(ctx.cwd, { ...dispatchDefaults, waitKey: node.id, onSpawn: () => launched.add(node.id) }, taskAgents(dagNodes!.findIndex((entry) => entry.id === node.id)), node.agent, appendParentReports(node.task, parents), node.cwd, undefined, nodeSignal, undefined, makeDetails("dag"), node.readOnly ? "read" : "write");
+						return runSingleAgent(ctx.cwd, { ...dispatchDefaults, prBase: node.prBase, waitKey: node.id, onSpawn: () => launched.add(node.id) }, taskAgents(dagNodes!.findIndex((entry) => entry.id === node.id)), node.agent, appendParentReports(node.task, parents), node.cwd, undefined, nodeSignal, undefined, makeDetails("dag"), node.readOnly ? "read" : "write");
 					},
 				});
 				const rowById = new Map(rows.map((row) => [row.nodeId, row]));
@@ -1029,7 +1049,7 @@ export default function (pi: ExtensionAPI) {
 
 					const result = await runSingleAgent(
 						ctx.cwd,
-						dispatchDefaults,
+						withBase(dispatchDefaults, step.prBase ?? undefined),
 						taskAgents(i),
 						step.agent,
 						taskWithContext,
@@ -1105,7 +1125,7 @@ export default function (pi: ExtensionAPI) {
 				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
 					const result = await runSingleAgent(
 						ctx.cwd,
-						dispatchDefaults,
+						withBase(dispatchDefaults, t.prBase ?? undefined),
 						taskAgents(index),
 						t.agent,
 						t.task,
@@ -1155,7 +1175,7 @@ export default function (pi: ExtensionAPI) {
 			if (params.agent && params.task) {
 				const result = await runSingleAgent(
 					ctx.cwd,
-					dispatchDefaults,
+					withBase(dispatchDefaults, params.prBase ?? undefined),
 					taskAgents(0),
 					params.agent,
 					params.task,

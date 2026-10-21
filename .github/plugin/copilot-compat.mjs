@@ -146,13 +146,13 @@ export function nativeIdentity(roles, role, namespace, inventory, capability) {
   return r.ok ? { ok: true, nativeName: r.role } : r;
 }
 
-/** Named-role preflight: native availability and model compatibility reported separately; model-bound delegation is never ready here. Throws if the role is not in the registry. */
+/** Named-role preflight: nativeDispatchReady is native availability only (not permission or source authority); modelRequirementsVerified is always false (no caller input proves model honoring) and model-bound delegation is never ready here. Throws if the role is not in the registry. */
 export function rolePreflight(roles, { role, namespace, inventory, dispatch, modelEvidence } = {}) {
   const entry = dense(roles) ? roles.find((r) => r && r.name === role) : undefined;
   if (!entry) throw new Error(`role ${JSON.stringify(role)} is not in the registry`);
   const model = modelCompatibility(modelRequirement(entry), modelEvidence);
   const native = nativeIdentity(roles, role, namespace, inventory, dispatch);
-  return { role, requirement: model.requirement, native, model, ready: native.ok && model.ready, modelBoundDelegation: "non-ready", limitations: LIMITATIONS };
+  return { role, requirement: model.requirement, native, model, nativeDispatchReady: native.ok, modelRequirementsVerified: false, modelBoundDelegation: "non-ready", limitations: LIMITATIONS };
 }
 
 /** Reads roles.json and agent headers under a package root. */
@@ -166,7 +166,7 @@ export function checkPackage(root) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  // Strict args: [--root DIR] [--role NAME], each at most once, no positionals. --role prints requirements/preflight without native calls; exit 2 = unverified/non-ready.
+  // Strict args: [--root DIR] [--role NAME], each at most once, no positionals. --role prints requirements/preflight without native calls; exit 2 = model-bound delegation non-ready (nativeDispatchReady is reported separately).
   const args = process.argv.slice(2);
   const opts = {};
   let bad = "";

@@ -50,7 +50,7 @@ const live = (over: Record<string, unknown> = {}) => ({
 	pushUrl: () => URL,
 	tagStatus: () => 2,
 	bound: () => ({ head: HEAD, ref: "refs/heads/feat/x", fingerprint: "a".repeat(64), exclude: [] as string[] }),
-	ghJson: (args: string[]) => (args[1] === "view" ? (VIEWS[args[2]] ?? { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: HEAD, isCrossRepository: false }) : [{ number: 12, mergeCommit: { oid: MERGED }, mergedAt: new Date(Date.now() + 60_000).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }]),
+	ghJson: (args: string[]) => (args[1] === "view" && args.some((a) => a.includes("mergeCommit")) ? { number: 12, state: "MERGED", mergeCommit: { oid: MERGED }, isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" } : args[1] === "view" ? (VIEWS[args[2]] ?? { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: HEAD, isCrossRepository: false }) : [{ number: 12, mergeCommit: { oid: MERGED }, mergedAt: new Date(Date.now() + 60_000).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }]),
 	...over,
 });
 const trusted = (store = C.createGrantStore()) => ({ scope: "child" as const, store, agentDir: AGENT_DIR, pushTarget: target, gateCommits: true, live: live() });

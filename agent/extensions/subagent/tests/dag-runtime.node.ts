@@ -21,7 +21,7 @@ const dataUrl = (source: string) => "data:text/javascript," + encodeURIComponent
 const childUrl = dataUrl(`import { EventEmitter } from "node:events";
 export function spawn(_command, args, options) {
 	const child = new EventEmitter();
-	child.args = args; child.cwd = options.cwd; child.signals = []; child.exited = false; child.received = [];
+	child.args = args; child.cwd = options.cwd; child.env = options.env; child.signals = []; child.exited = false; child.received = [];
 	child.model = args.includes("--model") ? args[args.indexOf("--model") + 1] : "inherited";
 	child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
 	child.exitCode = null; child.signalCode = null;
@@ -73,6 +73,7 @@ registerHooks({
 
 interface Child {
 	args: string[];
+	env?: Record<string, string | undefined>;
 	cwd: string;
 	model: string;
 	signals: string[];
@@ -1714,4 +1715,126 @@ check("parallel background: a throwing launch ends the job failed and keeps the 
 	const text = recovered.content[0].text;
 	assert.match(text, /GOOD-RESULT/);
 	assert.match(text, /Claude subscription guard missing/);
+});
+
+// Optional trusted PR base (prBase): per-entry in single/tasks/chain/dag, carried to every trusted release-engineer spawn as a bound push target.
+// The child double records the PI_SAFETY_GRANTS envelope it was launched with; nothing real spawns and no gh/network is touched.
+import { spawnSync } from "node:child_process";
+const PRB_ORIGIN = "https://github.com/acme/widgets.git";
+function makeFeatureRepo(label: string): string {
+	const cfg = path.join(userDir, "prbase-gitconfig");
+	fs.writeFileSync(cfg, "");
+	process.env.GIT_CONFIG_GLOBAL = cfg; process.env.GIT_CONFIG_NOSYSTEM = "1";
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), `prbase-${label}-`));
+	created.push(dir);
+	const git = (...args: string[]) => assert.equal(spawnSync("git", args, { cwd: dir, windowsHide: true }).status, 0, `git ${args.join(" ")}`);
+	git("init", "-q"); git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "init");
+	git("checkout", "-q", "-b", "feat/x"); git("remote", "add", "origin", PRB_ORIGIN);
+	return fs.realpathSync.native(dir);
+}
+const envelopeOfChild = (child: Child) => child.env?.PI_SAFETY_GRANTS as string;
+const parsedEnvelope = (child: Child) => JSON.parse(envelopeOfChild(child));
+const bases = ["main", "release/1.x", undefined] as const;
+const shapeArgs = (mode: string, items: any[], backgroundMode: boolean) => {
+	const args: any = { background: backgroundMode, agentScope: "both" };
+	if (mode === "single") Object.assign(args, items[0]);
+	else if (mode === "dag") args.dag = items.map((item, i) => ({ ...item, id: `p${i}`, ...(i ? { dependsOn: [`p${i - 1}`] } : {}) }));
+	else args[mode === "parallel" ? "tasks" : "chain"] = items;
+	return args;
+};
+
+test("prBase reaches each trusted release-engineer spawn per entry in single, parallel, chain and dag (foreground and background); omitted stays the legacy envelope", { timeout: 120_000 }, async () => {
+	const sdk = await import(piAiUrl);
+	const core = await import(new URL("../safety-core.ts", import.meta.url).href);
+	for (const mode of ["single", "parallel", "chain", "dag"] as const) for (const backgroundMode of [false, true]) {
+		const host = fakePi(); subagentExtension(host);
+		const tool = host.tools.get("subagent")!, control = host.tools.get("subagent_control")!;
+		const ctx = dagCtx(makeFeatureRepo(`${mode}-${backgroundMode}`));
+		const used = mode === "single" ? [bases[0]] : [...bases];
+		const items = used.map((prBase, i) => ({ agent: "release-engineer", task: `entry-${i}`, ...(prBase !== undefined ? { prBase } : {}) }));
+		const valid = sdk.validateToolArguments(tool, { type: "toolCall", id: "prb", name: "subagent", arguments: shapeArgs(mode, items, backgroundMode) });
+		const offset = children().length;
+		const launch = tool.execute("prb", valid, undefined, undefined, ctx);
+		const acknowledgement = backgroundMode ? await launch : undefined;
+		if (backgroundMode) assert.notEqual(acknowledgement!.isError, true);
+		for (let i = 0; i < used.length; i++) {
+			await waitFor(() => children().length === offset + i + 1, `${mode} ${backgroundMode} entry-${i} spawn`);
+			const child = children()[offset + i];
+			const env = parsedEnvelope(child);
+			if (used[i] === undefined) {
+				assert.equal("pushTargetBound" in env, false, `${mode} omitted base stays legacy`);
+				assert.equal(env.pushTarget.branch, "feat/x");
+			} else {
+				assert.equal("pushTarget" in env, false);
+				assert.equal(core.loadChildPushTarget(envelopeOfChild(child)).base, used[i], `${mode} ${backgroundMode} entry-${i}`);
+			}
+			finish(child, `entry-${i} done`);
+		}
+		if (backgroundMode) {
+			const jobId = acknowledgement!.details.jobId;
+			await waitFor(() => host.sent.some((m: any) => m.details?.jobId === jobId && m.details.state === "completed"), "completed");
+			assert.notEqual((await control.execute("result", { action: "result", target: jobId }, undefined, undefined, ctx)).isError, true);
+		} else assert.notEqual((await launch).isError, true);
+	}
+});
+
+check("prBase is refused before any launch: batch root, malformed, null, same-feature, untrusted role and project-source impostor", async () => {
+	const sdk = await import(piAiUrl);
+	for (const mode of ["single", "parallel", "chain", "dag"] as const) {
+		const host = fakePi(); subagentExtension(host);
+		const tool = host.tools.get("subagent")!;
+		const repo = makeFeatureRepo(`reject-${mode}`);
+		const ctx = dagCtx(repo);
+		const before = children().length;
+		const refuse = async (args: any, why: string) => {
+			const result = await tool.execute("prb-bad", args, undefined, undefined, ctx);
+			assert.equal(result.isError, true, `${mode}: ${why}`);
+			assert.equal(children().length, before, `${mode}: ${why}: nothing launched`);
+			return result;
+		};
+		const good = (extra: Record<string, unknown> = {}) => ({ agent: "release-engineer", task: "t", ...extra });
+		const at = (entries: any[]) => shapeArgs(mode, entries, false);
+		if (mode !== "single") {
+			const root = at([good(), good()]); root.prBase = "main";
+			await refuse(root, "root prBase in batch mode");
+			const rootNull = at([good(), good()]); rootNull.prBase = null;
+			await refuse(rootNull, "root null prBase in batch mode");
+			await refuse(at([good({ prBase: "main" }), { agent: "backend-worker", task: "t", prBase: "main" }]), "untrusted role in a later entry (no earlier spawn)");
+		}
+		for (const bad of ["", " main", "a..b", "-x", "feat/x", "x".repeat(101), 5, null, {}, ["main"]]) await refuse(at([good({ prBase: bad })]), `prBase ${JSON.stringify(bad)}`);
+		await refuse(at([{ agent: "backend-worker", task: "t", prBase: "main" }]), "non-release-engineer role");
+		await refuse(at([{ agent: "ghost-role", task: "t", prBase: "main" }]), "unknown role");
+		// A project-source role named release-engineer is never the trusted context.
+		const dir = path.join(repo, ".pi", "agents"); fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, "release-engineer.md"), "---\nname: release-engineer\ndescription: impostor\n---\nNo prompt.\n");
+		const impostor = at([good({ prBase: "main" })]); impostor.agentScope = "project"; impostor.confirmProjectAgents = false;
+		await refuse(impostor, "project-source impostor");
+		// The SDK schema keeps the field (and null) so the runtime, not a silent drop, decides.
+		const kept = sdk.validateToolArguments(tool, { type: "toolCall", id: "prb", name: "subagent", arguments: at([good({ prBase: null })]) });
+		const first: any = mode === "single" ? kept : (kept.dag ?? kept.chain ?? kept.tasks)[0];
+		assert.equal(first.prBase, null, `${mode}: SDK validation keeps null for runtime refusal`);
+		assert.throws(() => sdk.validateToolArguments(tool, { type: "toolCall", id: "prb", name: "subagent", arguments: at([good({ prBase: { x: 1 } })]) }), /Validation failed/);
+	}
+});
+
+check("fallback attempts of one job keep the same bound base; a later job is bound independently", async () => {
+	const repo = makeFeatureRepo("fallback-base");
+	const agents = [role("release-engineer", { model: PRIMARY, fallbackModel: [LUNA] })];
+	const core = await import(new URL("../safety-core.ts", import.meta.url).href);
+	const run = (prBase: string | undefined, task: string) => (runSingleAgent as any)(repo, { prBase }, agents, "release-engineer", task, undefined, undefined, undefined, undefined, makeDetails);
+	const offset = children().length;
+	const first = run("main", "primary");
+	await waitFor(() => children().length === offset + 1, "primary spawns");
+	children()[offset].emitLine({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "503 provider unavailable", usage: { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } });
+	children()[offset].exit(1);
+	await waitFor(() => children().length === offset + 2, "fallback spawns");
+	assert.equal(children()[offset + 1].model, LUNA);
+	for (const child of [children()[offset], children()[offset + 1]]) assert.equal(core.loadChildPushTarget(envelopeOfChild(child)).base, "main");
+	finish(children()[offset + 1], "done");
+	await first;
+	const later = run("release/1.x", "later");
+	await waitFor(() => children().length === offset + 3, "later job spawns");
+	assert.equal(core.loadChildPushTarget(envelopeOfChild(children()[offset + 2])).base, "release/1.x");
+	finish(children()[offset + 2], "done");
+	await later;
 });

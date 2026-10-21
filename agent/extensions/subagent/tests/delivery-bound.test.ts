@@ -55,8 +55,7 @@ const live = (over: Record<string, unknown> = {}) => ({
 	env: () => ({}),
 	pushUrl: (c: string, b: string) => C.livePushUrl(c, b),
 	ghJson: (args: string[]) => {
-		if (args[0] === "pr" && args[1] === "view") return views[args[2]];
-		if (args[0] === "pr" && args[1] === "list") return [{ number: 12, mergeCommit: { oid: "fedcba9876543210fedcba9876543210fedcba98" }, mergedAt: new Date(T0 + 1000).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }];
+		if (args[0] === "pr" && args[1] === "view") return args.some((a) => a.includes("mergeCommit")) ? { number: 12, state: "MERGED", mergeCommit: { oid: "fedcba9876543210fedcba9876543210fedcba98" }, isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" } : views[args[2]];
 		throw new Error("unexpected gh");
 	},
 	tagStatus: () => 2,

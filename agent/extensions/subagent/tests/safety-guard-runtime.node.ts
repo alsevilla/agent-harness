@@ -11,7 +11,7 @@ import readline from "node:readline";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostModules } from "./host-modules.ts";
-import { authorizableOp, canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, pushBranchTarget } from "../safety-core.ts";
+import { authorizableOp, canonicalCwd, CHILD_GRANT_ENV, claimChildGuard, createGrantStore, pushBranchTarget, serializeGrants } from "../safety-core.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const profileRoot = path.resolve(here, "../../../..");
@@ -129,6 +129,27 @@ test("child fail-closed: a malformed grant envelope refuses every tool call", { 
 	assert.equal(ends.length, 1, stderr);
 	assert.equal(ends[0].isError, true);
 	assert.match(ends[0].text, /invalid child grant envelope/);
+});
+
+test("child fail-closed: a bound PR-base envelope loads; a stripped, mutated or doubled base refuses every tool call", { timeout: 300_000 }, async () => {
+	const repo = makeRepo(path.join(root, "bound-base-repo"));
+	const target = { candidate: repo, pushUrl: ORIGIN, branch: "feat/x", base: "main" };
+	const good = serializeGrants([], [], [], true, target);
+	const ok = await runChild([{ tool: "bash", args: { command: "echo probe" }, id: "b0" }, { text: "done" }], { [CHILD_GRANT_ENV]: good });
+	assert.equal(ok.ends[0].isError, false, `a valid bound envelope is loaded: ${ok.stderr}`);
+	const parsed = JSON.parse(good);
+	const mutations: Array<[string, unknown]> = [
+		["base equals the feature branch", { ...parsed, pushTargetBound: { ...target, base: "feat/x" } }],
+		["base missing", { ...parsed, pushTargetBound: { candidate: repo, pushUrl: ORIGIN, branch: "feat/x" } }],
+		["base not a string", { ...parsed, pushTargetBound: { ...target, base: 7 } }],
+		["bound and legacy keys together", { ...parsed, pushTarget: { candidate: repo, pushUrl: ORIGIN, branch: "feat/x" } }],
+	];
+	for (const [name, envelope] of mutations) {
+		const { ends, stderr } = await runChild([{ tool: "bash", args: { command: "echo probe" }, id: "b1" }, { text: "done" }], { [CHILD_GRANT_ENV]: JSON.stringify(envelope) });
+		assert.equal(ends.length, 1, `${name}: ${stderr}`);
+		assert.equal(ends[0].isError, true, name);
+		assert.match(ends[0].text, /invalid child grant envelope/, name);
+	}
 });
 
 // Main-session cases (promoted from the independent SDK probe). Simulated TUI operator: mode "tui", hasUI, scripted ui.confirm. Not a live terminal, not a live provider.

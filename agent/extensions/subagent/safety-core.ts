@@ -704,9 +704,13 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 
-export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: { candidate: string; pushUrl: string; branch: string }): string {
+// Push target of the trusted release-engineer launch. `base` is the optional parent-supplied PR base: when present, PR create/edit must match it exactly; when absent the legacy syntactic-only base check applies.
+export interface PushTarget { candidate: string; pushUrl: string; branch: string; base?: string }
+
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: PushTarget): string {
+	// A known PR base travels under its own key (pushTargetBound), never inside pushTarget: a loader that predates it ignores the unknown key and sees no push target (every automatic PR/push path stays blocked) instead of rebuilding a legacy target that drops the base.
 	// Action grants (merge/release) travel under their own key: an older loader ignores unknown keys and so sees no grant, never a broader one. The legacy delivery/deliveryBound keys are never written.
-	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { deliveryActions: delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? { pushTarget } : {}) });
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { deliveryActions: delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? (pushTarget.base !== undefined ? { pushTargetBound: pushTarget } : { pushTarget }) : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -914,16 +918,24 @@ export function loadChildGate(text: string): boolean {
 	return true;
 }
 
-export function loadChildPushTarget(text: string): { candidate: string; pushUrl: string; branch: string } | undefined {
+export function loadChildPushTarget(text: string): PushTarget | undefined {
 	if (redirectedGitEnvironment()) return undefined;
-	const parsed = JSON.parse(text) as { v?: number; pushTarget?: unknown };
+	const parsed = JSON.parse(text) as { v?: number; pushTarget?: unknown; pushTargetBound?: unknown };
 	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
-	if (parsed.pushTarget === undefined) return undefined;
-	const value = parsed.pushTarget as Record<string, unknown>;
-	if (!value || typeof value.candidate !== "string" || !path.isAbsolute(value.candidate) || typeof value.pushUrl !== "string") throw new TypeError("invalid push target");
+	// Both keys together are ambiguous (a bound context must never coexist with a legacy one); either alone is the whole context.
+	if (parsed.pushTarget !== undefined && parsed.pushTargetBound !== undefined) throw new TypeError("ambiguous push target");
+	const bound = parsed.pushTargetBound !== undefined;
+	const raw = bound ? parsed.pushTargetBound : parsed.pushTarget;
+	if (raw === undefined) return undefined;
+	const value = raw as Record<string, unknown>;
+	if (!value || typeof value !== "object" || Array.isArray(value) || typeof value.candidate !== "string" || !path.isAbsolute(value.candidate) || typeof value.pushUrl !== "string") throw new TypeError("invalid push target");
+	// The legacy key never carries a base and the bound key always does (exact key set): a stripped, extra or mistyped field is refused, not normalized away.
+	const keys = Object.keys(value).sort().join(",");
+	if (keys !== (bound ? "base,branch,candidate,pushUrl" : "branch,candidate,pushUrl")) throw new TypeError("invalid push target");
+	if (bound && (!baseBranchOk(value.base) || value.base === value.branch)) throw new TypeError("invalid push target base");
 	const target = pushBranchTarget(value.candidate, String(value.branch));
 	if (!target || target.pushUrl !== value.pushUrl) throw new TypeError("invalid push target");
-	return target;
+	return bound ? { ...target, base: value.base as string } : target;
 }
 
 export const MAX_DELIVERY_GRANTS = 4;
@@ -967,6 +979,14 @@ export function parseRepoFromPushUrl(url: unknown): string | undefined {
 
 function baseBranchOk(name: unknown): name is string {
 	return typeof name === "string" && BARE_BRANCH.test(name) && !/\.\.|\/\/|[./]$|\/\.|\.lock(\/|$)/.test(name);
+}
+
+// Pre-launch check of a supplied PR base against the candidate's live feature branch (the claim re-checks it): valid branch name, not the feature branch itself. Throws RangeError.
+export function checkPrBase(base: unknown, cwd: string): string {
+	if (!baseBranchOk(base)) throw new RangeError("prBase must be a valid branch name");
+	const live = redirectedGitEnvironment() ? undefined : gitRead(canonicalCwd(cwd), ["symbolic-ref", "--short", "HEAD"])?.[0];
+	if (!live || live === base) throw new RangeError("prBase needs a verifiable feature branch different from it");
+	return base;
 }
 
 // Segments after the drive: no empty, dot, dot-dot, or trailing dot/space segment.
@@ -1233,11 +1253,13 @@ function boundHolds(g: DeliveryGrant, live: DeliveryLive): boolean {
 	}
 }
 
-// Merged PRs of the branch that match exactly this approved PR, target, head, base and non-fork; unrelated entries do not count.
+// The approved PR fetched by exact number from the grant's repo: merged, same-repo, approved head/base and merge commit. No list, history or time fallback; any other answer is false.
+const MERGED_VIEW_FIELDS = "number,state,baseRefName,headRefName,isCrossRepository,mergeCommit";
 function mergedMatches(g: { repo: string; branch: string; base: string; pr: number }, target: string, live: DeliveryLive): boolean {
-	const merged = live.ghJson(["pr", "list", "--repo", g.repo, "--head", g.branch, "--base", g.base, "--state", "merged", "--json", "number,mergeCommit,mergedAt,isCrossRepository,headRefName,baseRefName", "--limit", "20"]);
-	if (!Array.isArray(merged) || merged.some((m) => !m || typeof m !== "object")) return false;
-	return (merged as Record<string, any>[]).filter((pr) => pr.number === g.pr && pr.mergeCommit?.oid === target && pr.isCrossRepository === false && pr.headRefName === g.branch && pr.baseRefName === g.base).length === 1;
+	const v = live.ghJson(["pr", "view", String(g.pr), "--repo", g.repo, "--json", MERGED_VIEW_FIELDS]);
+	if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+	const pr = v as Record<string, any>;
+	return pr.number === g.pr && pr.state === "MERGED" && pr.isCrossRepository === false && pr.headRefName === g.branch && pr.baseRefName === g.base && typeof pr.mergeCommit?.oid === "string" && BARE_SHA.test(target) && pr.mergeCommit.oid === target;
 }
 
 // One grant against one command. The grant's action must equal the command's kind; any mismatch or read problem is false (refusal).
@@ -1319,21 +1341,29 @@ export interface ChildGuardLaunch {
 export interface ClaimWindow { open: boolean }
 
 // Claims this role's grants for one child spawn (single use) and returns the guard entry plus the child's environment.
-export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false): ChildGuardLaunch {
+export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false, prBase?: string): ChildGuardLaunch {
 	if (!fs.existsSync(guardFile)) throw new Error("Safety guard missing: child launch refused (fail closed).");
-	const mayClaim = window.open;
-	window.open = false;
-	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
+	// A supplied PR base narrows the trusted release-engineer context only. Refuse before any grant is claimed or the window closes.
+	if (prBase !== undefined && (!(withLeases && role === LEASE_ROLE) || !baseBranchOk(prBase))) throw new RangeError("prBase needs a trusted release-engineer launch and a valid branch name");
 	// Lease copies are non-consuming: every legitimate release-engineer spawn of this candidate gets them, including fallback and later spawns.
 	const leases = withLeases && role === LEASE_ROLE ? store.copyLeases(canonicalCwd(candidate)) : [];
 	// Delivery copies follow the lease rule: non-consuming, release-engineer only, same absolute expiry for every spawn of this candidate.
 	const delivery = withLeases && role === LEASE_ROLE ? store.copyDelivery(canonicalCwd(candidate)) : [];
 	// Normal commits are gated only in the trusted release-engineer launch (same trust signal as the lease copies).
 	const gateCommits = withLeases && role === LEASE_ROLE;
-	let pushTarget: { candidate: string; pushUrl: string; branch: string } | undefined;
+	let pushTarget: PushTarget | undefined;
 	if (gateCommits && !redirectedGitEnvironment()) {
 		try { const branch = gitRead(canonicalCwd(candidate), ["symbolic-ref", "--short", "HEAD"])?.[0]; if (branch) pushTarget = pushBranchTarget(canonicalCwd(candidate), branch); } catch { /* no automatic push context */ }
 	}
+	if (prBase !== undefined) {
+		// Known base never degrades to legacy: no verified target or a base equal to the feature branch refuses the launch.
+		if (!pushTarget || pushTarget.branch === prBase) throw new RangeError("prBase needs a verified push target different from the base");
+		pushTarget = { ...pushTarget, base: prBase };
+	}
+	// Every refusal above precedes the claim: a refused launch neither closes the window nor consumes a single-use grant.
+	const mayClaim = window.open;
+	window.open = false;
+	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
 	const value = claimed.length || leases.length || delivery.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget) : undefined;
 	return {
 		entry: guardFile,
@@ -1446,7 +1476,7 @@ function normalTrustedPush(target: { candidate: string; pushUrl: string; branch:
 }
 
 // Automatic same-owned PR metadata edit (trusted release-engineer, no grant): exact `gh pr edit` form (parser allowlist: --repo, --title, --body or --body-file only), origin repo, live PR open, same-repo and headed by the task's feature branch. Never base, reviewers, labels, state or cross-repo changes.
-function normalTrustedPrEdit(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined, live: DeliveryLive): boolean {
+function normalTrustedPrEdit(target: PushTarget | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined, live: DeliveryLive): boolean {
 	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
 	const command = parseDeliveryCommand(decision.op.command);
 	if (!command || command.kind !== "edit") return false;
@@ -1456,11 +1486,11 @@ function normalTrustedPrEdit(target: { candidate: string; pushUrl: string; branc
 		const repo = parseRepoFromPushUrl(target.pushUrl);
 		if (repo === undefined || command.repo !== repo || (command.bodyFile !== undefined && !automaticArtifactAllowed(command.bodyFile, target))) return false;
 		const view = prView(command.pr, repo, live);
-		return openSameRepo(view, target.branch) && baseBranchOk(view.baseRefName);
+		return openSameRepo(view, target.branch) && baseBranchOk(view.baseRefName) && (target.base === undefined || view.baseRefName === target.base);
 	} catch { return false; }
 }
 
-function normalTrustedPrCreate(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined, live: DeliveryLive): boolean {
+function normalTrustedPrCreate(target: PushTarget | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined, live: DeliveryLive): boolean {
 	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
 	const command = parseDeliveryCommand(decision.op.command);
 	if (!command || command.kind !== "create" || (command.body === undefined) === (command.bodyFile === undefined)) return false;
@@ -1468,7 +1498,7 @@ function normalTrustedPrCreate(target: { candidate: string; pushUrl: string; bra
 		const env = live.env();
 		if (env.GH_HOST !== undefined || env.GH_REPO !== undefined || !trustedTargetLive(target, decision.op.cwd, liveUrl)) return false;
 		const repo = parseRepoFromPushUrl(target.pushUrl);
-		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target));
+		return repo !== undefined && command.repo === repo && command.head === target.branch && command.base !== target.branch && baseBranchOk(command.base) && (target.base === undefined || command.base === target.base) && (command.bodyFile === undefined || automaticArtifactAllowed(command.bodyFile, target));
 	} catch { return false; }
 }
 
@@ -1492,7 +1522,7 @@ function unsupportedCommitHint(decision: Extract<Decision, { action: "block" }>)
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: { candidate: string; pushUrl: string; branch: string } }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") return undefined;

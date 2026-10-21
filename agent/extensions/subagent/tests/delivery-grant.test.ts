@@ -54,7 +54,7 @@ const GUARD_FILE = path.join(import.meta.dirname, "..", "safety-guard-entry.ts")
 const AGENT_DIR = path.join(root, "agent");
 
 // Injected live readers (no network, no real gh). views/merged are keyed like gh JSON; undefined means gh returned nothing usable.
-const state = { clock: T0, env: {} as Record<string, string>, views: {} as Record<string, any>, merged: [] as any[], calls: [] as string[], ghThrow: false, tags: 2, pushUrl: undefined as undefined | ((c: string, b: string) => string | undefined), bound: { ...BOUND } as any };
+const state = { clock: T0, env: {} as Record<string, string>, views: {} as Record<string, any>, mergedViews: {} as Record<string, any>, calls: [] as string[], ghThrow: false, tags: 2, pushUrl: undefined as undefined | ((c: string, b: string) => string | undefined), bound: { ...BOUND } as any };
 function resetState() {
 	state.clock = T0;
 	state.env = {};
@@ -64,8 +64,9 @@ function resetState() {
 	state.pushUrl = undefined;
 	state.bound = { ...BOUND };
 	state.views = { 12: { state: "OPEN", baseRefName: "main", headRefName: "feat/x", headRefOid: HEAD, isCrossRepository: false } };
-	state.merged = [{ number: 12, mergeCommit: { oid: MERGED }, mergedAt: new Date(T0 + 1000).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }];
+	state.mergedViews = { 12: { number: 12, state: "MERGED", baseRefName: "main", headRefName: "feat/x", isCrossRepository: false, mergeCommit: { oid: MERGED } } };
 }
+const MERGED_VIEW_FIELDS = "number,state,baseRefName,headRefName,isCrossRepository,mergeCommit";
 resetState();
 const liveReaders = () => ({
 	env: () => state.env,
@@ -73,13 +74,13 @@ const liveReaders = () => ({
 	ghJson: (args: string[]) => {
 		state.calls.push(args.join(" "));
 		if (state.ghThrow) throw new Error("network timeout");
-		if (args[0] === "pr" && args[1] === "view") return state.views[args[2]];
-		if (args[0] === "pr" && args[1] === "list") return state.merged;
+		if (args[0] === "pr" && args[1] === "view") return args.includes(MERGED_VIEW_FIELDS) ? (args.length === 7 && args[3] === "--repo" && args[4] === "acme/widgets" && args[5] === "--json" ? state.mergedViews[args[2]] : (() => { throw new Error(`unexpected merged view call ${args.join(" ")}`); })()) : state.views[args[2]];
 		throw new Error(`unexpected gh call ${args.join(" ")}`);
 	},
 	tagStatus: () => state.tags,
 	bound: () => state.bound,
 });
+const verifyReleaseVia = (store: any) => C.verifyDeliveryTarget(store.findDelivery(bindingOf({ pr: 4242, version: "v1.2.3", artifactDir: A })) ?? bindingOf({ pr: 4242, version: "v1.2.3", artifactDir: A }), liveReaders());
 const newStore = () => C.createGrantStore(() => state.clock);
 const baseOf = (over: Record<string, unknown> = {}) => ({ role: C.LEASE_ROLE, candidate: CAND, pushUrl: GH_URL, repo: "acme/widgets", branch: "feat/x", base: "main", ...over });
 // Release grant: PR + exact tag + target SHA (the merge commit). Merge grant: PR + reviewed HEAD + mandatory bound state (injected reader supplies the live state).
@@ -248,9 +249,9 @@ test("release approval needs exact PR, version and target SHA; an existing tag f
 	assert.ok(blocked(run(store, RELEASE.replace("v1.2.3", "v9.9.9"))), "another tag");
 	for (const tags of [0, 1, -1]) { state.tags = tags; assert.ok(blocked(run(store, RELEASE)), `tag status ${tags} (exists or unreadable)`); }
 	state.tags = 2;
-	state.merged = [{ ...state.merged[0], number: 99 }];
+	state.mergedViews[12] = { ...state.mergedViews[12], number: 99 };
 	assert.ok(blocked(run(store, RELEASE)), "merged PR number differs from the approved PR (mergedAt is never a substitute)");
-	state.merged = [{ ...state.merged[0], mergedAt: new Date(T0 + 99 * HOUR).toISOString(), number: 98 }];
+	state.mergedViews[12] = { ...state.mergedViews[12], mergedAt: new Date(T0 + 99 * HOUR).toISOString(), number: 98 };
 	assert.ok(blocked(run(store, RELEASE)), "a later mergedAt does not qualify another PR");
 });
 
@@ -530,8 +531,7 @@ test("live readers run from a neutral cwd with explicit git -C: gh and git looku
 	const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: { candidate: repo, pushUrl: GH_URL, branch: "feat/x" }, gateCommits: true };
 	const stub = {
 		gh: (args: string[]) => {
-			if (args[0] === "pr" && args[1] === "view") return state.views[args[2]];
-			if (args[0] === "pr" && args[1] === "list") return state.merged;
+			if (args[0] === "pr" && args[1] === "view") return args.includes(MERGED_VIEW_FIELDS) ? state.mergedViews[args[2]] : state.views[args[2]];
 			throw new Error(`unexpected gh call ${args.join(" ")}`);
 		},
 		lsRemote: () => 2,
@@ -576,35 +576,44 @@ test("delivery version: strict SemVer per field; v-prefix and bare forms allowed
 	assert.equal(C.MAX_DELIVERY_GRANTS, 4);
 });
 
-test("release merged-PR match: one matching live entry is enough; unrelated older entries do not block; wrong, ambiguous or malformed matches block", () => {
+test("release merged-PR match: exact approved PR is fetched directly (no list, any age, exact number and repo); every wrong or malformed answer blocks", () => {
 	const rel = `gh release create v1.2.3 --repo acme/widgets --target ${MERGED} --title "R" --generate-notes`;
-	const mine = { number: 12, mergeCommit: { oid: MERGED }, mergedAt: new Date(T0 + 1000).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" };
-	const other = { number: 11, mergeCommit: { oid: OLD_MERGED }, mergedAt: new Date(T0 - 5000).toISOString(), isCrossRepository: false, headRefName: "feat/old", baseRefName: "main" };
 	resetState();
-	const store = storeWith({ version: "v1.2.3", artifactDir: A });
-	state.merged = [other, mine];
-	assert.equal(run(store, rel), undefined, "one matching plus an unrelated older entry");
+	const store = storeWith({ version: "v1.2.3", artifactDir: A, pr: 4242 });
+	const mine = { number: 4242, state: "MERGED", baseRefName: "main", headRefName: "feat/x", isCrossRepository: false, mergeCommit: { oid: MERGED } };
+	state.mergedViews = { 4242: mine };
+	assert.equal(run(store, rel), undefined, "approved PR older than any bounded list is found by exact number");
+	assert.deepEqual(state.calls.filter((c) => c.startsWith("pr ")), [`pr view 4242 --repo acme/widgets --json ${MERGED_VIEW_FIELDS}`], "exactly one exact view, no list/history lookup");
+	assert.equal(verifyReleaseVia(store), undefined);
 	const cases: Array<[string, unknown]> = [
-		["two matching entries", [mine, { ...mine }]],
-		["zero matching entries", [other]],
-		["fork PR with the matching SHA", [{ ...mine, isCrossRepository: true }]],
-		["wrong base", [{ ...mine, baseRefName: "release" }]],
-		["matching SHA but a different PR number", [{ ...mine, number: 77 }]],
-		["malformed null live entry", [null, mine]],
-		["malformed live list", "not a list"],
+		["open", { ...mine, state: "OPEN" }], ["closed", { ...mine, state: "CLOSED" }], ["state missing", { ...mine, state: undefined }], ["state lowercase", { ...mine, state: "merged" }],
+		["other number", { ...mine, number: 77 }], ["number string", { ...mine, number: "4242" }], ["number missing", { ...mine, number: undefined }],
+		["fork", { ...mine, isCrossRepository: true }], ["fork missing", { ...mine, isCrossRepository: undefined }], ["fork null", { ...mine, isCrossRepository: null }],
+		["other head", { ...mine, headRefName: "feat/y" }], ["head missing", { ...mine, headRefName: undefined }], ["other base", { ...mine, baseRefName: "release" }], ["base missing", { ...mine, baseRefName: undefined }],
+		["other merge sha", { ...mine, mergeCommit: { oid: OLD_MERGED } }], ["merge commit missing", { ...mine, mergeCommit: undefined }], ["merge commit null", { ...mine, mergeCommit: null }], ["oid number", { ...mine, mergeCommit: { oid: 1 } }], ["oid missing", { ...mine, mergeCommit: {} }],
+		["oid short", { ...mine, mergeCommit: { oid: MERGED.slice(0, 7) } }], ["oid uppercase", { ...mine, mergeCommit: { oid: MERGED.toUpperCase() } }],
+		["array", [mine]], ["null", null], ["string", "MERGED"], ["number", 4242], ["undefined (not found)", undefined],
 	];
-	for (const [name, merged] of cases) {
+	for (const [name, view] of cases) {
 		resetState();
-		state.merged = merged as any[];
+		state.mergedViews = { 4242: view };
 		assert.ok(blocked(run(store, rel)), name);
+		assert.notEqual(verifyReleaseVia(store), undefined, `mint-time ${name}`);
 	}
+	resetState();
+	state.ghThrow = true;
+	assert.ok(blocked(run(store, rel)), "network/gh error");
+	assert.equal(state.calls.some((c) => c.startsWith("pr list")), false, "no list fallback on failure");
+	resetState();
+	state.mergedViews = { 12: { ...mine, number: 12 } };
+	assert.ok(blocked(run(store, rel)), "an approved PR number that is not the merged PR (grant is 4242) is not substituted");
 });
 
 test("release has no time-based fallback: mergedAt never substitutes for the approved PR number or target SHA", () => {
 	for (const offsetMs of [-1, 0, 1, 99 * HOUR]) {
 		resetState();
 		const store = storeWith();
-		state.merged = [{ number: 77, mergeCommit: { oid: MERGED }, mergedAt: new Date(T0 + offsetMs).toISOString(), isCrossRepository: false, headRefName: "feat/x", baseRefName: "main" }];
+		state.mergedViews = { 12: { number: 77, state: "MERGED", baseRefName: "main", headRefName: "feat/x", isCrossRepository: false, mergeCommit: { oid: MERGED }, mergedAt: new Date(T0 + offsetMs).toISOString() } };
 		assert.ok(blocked(run(store, RELEASE)), `other PR, mergedAt offset ${offsetMs}`);
 	}
 });
