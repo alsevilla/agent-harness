@@ -1,0 +1,63 @@
+{
+ "kind": "observed-finite-sample",
+ "note": "One print-mode Copilot CLI 1.0.98 session. Finite sample, not a universal SDK or tool manifest (none was captured). Not trusted authority.",
+ "copilotVersion": "1.0.98",
+ "sourceSha256": {
+  "stdout.jsonl": "2ff7362ee7390ea0ef8949d3c605ee7e43fc52a55a517f31d1d63de36764b720",
+  "hooks.jsonl": "54892b0e7a89711c77252cf920a254d13dfca9cddfe8834f8b6131f567b35ada",
+  "identity.json": "8d0f9e35fc58477fa3716b86af8b63edcd4889272592390ba1b6e69b12976377",
+  "plugin/plugin.json": "8bd4c624bbdbb7ef15d4ade9d850cfcabe5f384d203d29f14530aaae5740afc9",
+  "plugin/hooks.json": "3f1c28651bf46bb30136f3339c06e467bf0b148fca855053b06738f6efae2f64",
+  "plugin/log-hook.mjs": "5460174ba23619558979c4a0fe485bbbcbef8df355c013dd3205d37b89800784",
+  "plugin/agents/probe-alpha.agent.md": "98243b8898b3679b6573e3d3b56bbf0c72e6e9d5c8dbf660a760c4885ec2cccb",
+  "plugin/agents/probe-beta.agent.md": "0389b71f927d59872162f01f72c6e132a320341cebae746dd29b6d56fc8b5fb9",
+  "plugin/agents/probe-model.agent.md": "24d49453345cb18dec65cc885dc9b70ac85c588612f8e85013b59ad9f639b79c",
+  "prompt.txt": "28fa42dc136a6a1803da72f31ee7d148866a9763fd21c93c9b14f98bc38b70e6",
+  "run-probe.mjs": "97781a77873d0c8ae555786bbef8e54a78afc8514ed3e886827d7231a4af2e1a"
+ },
+ "pluginNamespace": "probe-native-fixture",
+ "calls": [
+  {
+   "agentType": "probe-native-fixture:probe-alpha",
+   "toolStart": "2026-10-21T11:06:14.884Z",
+   "subagentStart": "2026-10-21T11:06:15.177Z",
+   "subagentCompleted": "2026-10-21T11:06:19.252Z",
+   "success": true
+  },
+  {
+   "agentType": "probe-native-fixture:probe-alpha",
+   "toolStart": "2026-10-21T11:06:21.257Z",
+   "subagentStart": "2026-10-21T11:06:21.798Z",
+   "subagentCompleted": "2026-10-21T11:06:24.572Z",
+   "success": true
+  },
+  {
+   "agentType": "probe-native-fixture:probe-beta",
+   "toolStart": "2026-10-21T11:06:21.257Z",
+   "subagentStart": "2026-10-21T11:06:21.798Z",
+   "subagentCompleted": "2026-10-21T11:06:24.541Z",
+   "success": true
+  },
+  {
+   "agentType": "probe-native-fixture:probe-missing",
+   "toolStart": "2026-10-21T11:06:28.480Z",
+   "success": false,
+   "error": "Unknown agent_type: probe-native-fixture:probe-missing. Valid types are: <omitted>"
+  },
+  {
+   "agentType": "probe-native-fixture:probe-model",
+   "toolStart": "2026-10-21T11:06:30.223Z",
+   "success": false,
+   "error": "Model 'anthropic/claude-haiku-5-5' is not available. Available models: <omitted>"
+  }
+ ],
+ "askUserInvocations": 0,
+ "hooksObserved": [
+  "sessionStart",
+  "preToolUse",
+  "postToolUse",
+  "subagentStart",
+  "subagentStop"
+ ],
+ "hookPayloadHasAuthority": false
+}

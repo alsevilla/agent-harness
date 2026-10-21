@@ -37,7 +37,8 @@ test('shared policy preserves Pi controls and fails closed only at affected capa
   assert.match(preview, /not a pinned minimum or sdk-loader compatibility claim/);
   assert.match(preview, /`unknown field ignored: metadata` warning/);
   assert.match(preview, /not an automatic copilot-global policy/);
-  assert.match(preview, /pi extensions, patches, `agent\/roles\.json` and `settings\.example` remain pi-specific/);
+  assert.match(preview, /pi extensions, patches and `settings\.example` remain pi-specific/);
+  assert.match(preview, /`agent\/roles\.json` is the shared registry/);
   assert.match(preview, /observed cli was copilot v1\.0\.97/);
   assert.match(preview, /shared prompt files are not exported to copilot/);
   assert.match(preview, /not pi job\/grant\/control parity/);
