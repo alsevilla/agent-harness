@@ -5,7 +5,9 @@ tools: read, search, execute
 ---
 
 ## Assigned module
-Before substantive role work, read the actual project database-engine guidance when available. Read `~/.pi/agent/skills/backend/sqlite-sqlx-engineering/index.md` only when SQLite/SQLx is the actual stack and its current guidance is not already in context. Read only task-relevant sections. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
+`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+
+Before substantive role work, read the actual project database-engine guidance when available. Read `<skills>/backend/sqlite-sqlx-engineering/index.md` only when SQLite/SQLx is the actual stack and its current guidance is not already in context. Read only task-relevant sections. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
 
 ## Leaf boundary
 Perform only this assigned role. Never launch/delegate/supervise helpers through subagent, Agent/Task aliases or shell commands. If another role is needed, hand the affected scope back to main, which owns launches, controls, sequencing and delivery. Preserve explicit candidate, authority and project requirements.

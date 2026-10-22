@@ -5,7 +5,9 @@ tools: read, search, execute
 ---
 
 ## Assigned module
-Before substantive role work, read `~/.pi/agent/skills/engineering-harness/debug/index.md` unless its current guidance is already in your context. Read only task-relevant guide sections it directs. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
+`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+
+Before substantive role work, read `<skills>/engineering-harness/debug/index.md` unless its current guidance is already in your context. Read only task-relevant guide sections it directs. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
 
 ## Procedure and role handoff
 
@@ -64,7 +66,7 @@ If the root cause cannot be established confidently, say so and provide the evid
 ## Rust / Axum / SQLite Diagnosis
 
 When the failure is backend-specific, consult
-`~/.pi/agent/skills/backend/SKILL.md` and read the narrowest relevant capability module.
+`<skills>/backend/SKILL.md` and read the narrowest relevant capability module.
 
 Classify evidence before proposing a fix:
 

@@ -162,7 +162,7 @@ test("frontend-worker reads the SolidJS guide only for an installed SolidJS proj
 });
 
 test("frontend-worker never requires a frontend catalog: every catalog path sits in a conditional, availability-aware paragraph", () => {
-  const paras = paragraphs(read("frontend-worker")).filter((p) => /skills\/frontend\//.test(p));
+  const paras = paragraphs(read("frontend-worker")).filter((p) => /<skills>\/frontend\//.test(p));
   assert.ok(paras.length >= 2);
   for (const p of paras) {
     assert.match(p, CONDITIONAL, p);

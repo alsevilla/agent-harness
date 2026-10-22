@@ -64,7 +64,7 @@ material product policy.
 
 When the screen/step structure is unresolved, load:
 
-`~/.pi/agent/skills/frontend/ux-flow-wireframer/index.md`
+`frontend/ux-flow-wireframer/index.md` under the installed shared skills directory
 
 Resolve flow structure before visual polish.
 

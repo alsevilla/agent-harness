@@ -73,7 +73,7 @@ This entrypoint must:
 4. invoke `backend` whenever backend concerns are material;
 5. keep all agent creation/sequencing in the main conversation.
 
-Use `~/.pi/agent/skills/SKILLS.md` as the canonical routing index when needed.
+Use `SKILLS.md` in the installed shared skills directory as the canonical routing index when needed.
 Invoke registered skills through the Skill mechanism instead of recreating their
 procedures from memory.
 
@@ -96,7 +96,7 @@ Explicitly invoking a skill does not bypass its prerequisites.
 ## Bootstrap Procedure
 
 1. Reconstruct the user's actual engineering goal and the latest trustworthy lifecycle state.
-2. Consult the routing index in `~/.pi/agent/skills/SKILLS.md` when needed. Read only applicable extended-policy sections, not the entire appendix.
+2. Consult the routing index in `SKILLS.md` (installed shared skills directory) when needed. Read only applicable extended-policy sections, not the entire appendix.
 3. Identify unresolved authority, product, scope, evidence, and candidate-state questions.
 4. Select the **single lifecycle skill** that owns the current unresolved state.
 5. Prepare the phase task packet and pass prerequisite/authority gates; do not start dedicated role work yet.
@@ -158,4 +158,4 @@ perform assigned roles under the main orchestrator.
 - Readiness does not equal delivery authorization.
 - External methodologies do not silently replace this harness.
 
-If `~/.pi/agent/skills/SKILLS.md` or the required registered procedure is missing, report the installation problem instead of silently approximating the workflow.
+If `SKILLS.md` in the installed shared skills directory or the required registered procedure is missing, report the installation problem instead of silently approximating the workflow.

@@ -8,7 +8,9 @@ tools: read, search, execute, edit
 Precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` or Serena mutation tools does not disable editing; do not report that it does. Shell access is not a write sandbox.
 
 ## Assigned module
-Before substantive role work, read `~/.pi/agent/skills/backend/SKILL.md` unless its current guidance is already in your context. Read only task-relevant guidance it directs; database implementation guidance is owned by `database-worker`. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
+`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+
+Before substantive role work, read `<skills>/backend/SKILL.md` unless its current guidance is already in your context. Read only task-relevant guidance it directs; database implementation guidance is owned by `database-worker`. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
 
 ## Leaf boundary
 Perform only this assigned role. Never launch/delegate/supervise helpers through subagent, Agent/Task aliases or shell commands. If another role is needed, hand the affected scope back to main, which owns launches, controls, sequencing and delivery. Preserve explicit candidate, authority and project requirements.
@@ -29,7 +31,7 @@ the relevant specialist can analyze first.
 
 Read:
 
-`~/.pi/agent/skills/backend/SKILL.md`
+`<skills>/backend/SKILL.md`
 
 Load the narrowest child:
 - `rust-axum-engineering` for Rust/Axum/Tokio/Tower implementation only.
