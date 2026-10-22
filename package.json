@@ -1,6 +1,6 @@
 {
 	"name": "@alsevilla/pi-engineering-harness",
-	"version": "1.10.0",
+	"version": "1.10.1",
 	"description": "Native Pi engineering harness: subagent roles, ask-user and engineering skills.",
 	"license": "MIT",
 	"engines": {
