@@ -57,6 +57,7 @@ test("subagentStart context gives absolute skills root, host boundary and handof
       expect(Object.keys(out)).toEqual(["additionalContext"]);
       const c: string = out.additionalContext;
       expect(c).toContain(skills);
+      expect(c).toContain("agent/skills/");
       expect(isAbsolute(skills)).toBe(true);
       for (const f of ["candidate", "task", "expected behavior", "allowed scope", "checks", "evidence"]) expect(c.toLowerCase()).toContain(f);
       expect(c).toMatch(/BLOCKED/);
@@ -131,23 +132,12 @@ test("no environment variable or file changes the guard result (no override chan
   expect(readFileSync(join(plugin, "release-guard.mjs"), "utf8")).not.toMatch(/process\.env|readFileSync|existsSync/);
 });
 
-// Profiles: host-aware module root. ~/.pi is allowed only in the single Pi mapping sentence.
+// Profiles: canonical repo-relative module paths (agent/skills/...); the portable root rule is pinned in tests/portable-module-paths.test.ts.
 const agentFiles = readdirSync(join(root, "agent", "agents")).filter((f) => f.endsWith(".md"));
-test("canonical profiles keep 20 roles and never direct Copilot into ~/.pi; modules resolve via <skills> root with fail-closed BLOCKED", () => {
+test("canonical profiles keep 20 roles and name no user-home or <skills> module path", () => {
   expect(agentFiles).toHaveLength(20);
   expect(roles).toHaveLength(20);
-  for (const f of agentFiles) {
-    const lines = read("agent", "agents", f).split(/\r?\n/);
-    const pi = lines.filter((l) => l.includes("~/.pi"));
-    const uses = lines.filter((l) => l.includes("<skills>/"));
-    for (const l of pi) expect(l.startsWith("`<skills>` is the installed shared skills directory.")).toBe(true);
-    if (uses.length) {
-      expect(pi).toHaveLength(1);
-      expect(pi[0]).toMatch(/Copilot:.*absolute path.*subagentStart.*parent handoff/);
-      expect(pi[0]).toMatch(/BLOCKED/);
-      expect(pi[0]).toMatch(/never.*~\/\.pi/);
-    } else expect(pi).toHaveLength(0);
-  }
+  for (const f of agentFiles) expect(read("agent", "agents", f)).not.toMatch(/~\/\.pi|<skills>/);
 });
 
 test("shared references loaded from profiles and the routing appendix do not hard-code ~/.pi skill paths", () => {
@@ -297,4 +287,42 @@ test("guard joins Bash double-quoted backslash LF/CRLF continuations so a split 
     denied(guard(bs(`echo "example; ${MERGE} @${eol}still message"; ${MERGE}`), "bash")); // real next statement
     silent(guard(bs(`curl -X PUT "${DQ_URL}mer@${eol}ge"`), "powershell")); // PowerShell backslash stays literal
   }
+});
+
+// Startup context: short static Copilot boundary appended after the two canonical policy reads (no reflected input).
+test("sessionStart appends the static Copilot merge/release boundary after both canonical files; subagentStart agrees", () => {
+  const r = run("session-start.mjs", { sessionId: "s", timestamp: 1, cwd: root, source: "startup", initialPrompt: "REFLECT-ME" });
+  expect(r.status).toBe(0);
+  const c: string = JSON.parse(r.stdout).additionalContext;
+  expect(c).not.toContain("REFLECT-ME");
+  const tail = c.slice(c.indexOf(read("agent", "skills", "SKILLS.md").trim()) + read("agent", "skills", "SKILLS.md").trim().length);
+  expect(tail).toMatch(/merge and release execution is unsupported/i);
+  expect(tail).toMatch(/ask_user[^.]*cannot mint a Pi delivery grant/i);
+  expect(tail).toMatch(/operator[^.]*outside the session/i);
+  expect(tail.length).toBeLessThan(700);
+  const child: string = JSON.parse(run("agent-context.mjs", start()).stdout).additionalContext;
+  expect(child).toMatch(/ask_user[^.]*cannot mint a Pi delivery grant/i);
+  expect(child).toMatch(/operator[^.]*outside the session/i);
+});
+
+// Git config enabling follow-tags on the command line (-c push.followTags=...); persistent config/env are never read.
+test("guard denies command-level push.followTags enabling and keeps ordinary pushes and effective-false forms silent", () => {
+  const p = (pre: string, post = "") => `${GIT} ${pre} push origin feature/x ${post}`.replace(/ +/g, " ").trim();
+  for (const c of [p("-c push.followTags=true"), p("-c push.followtags=TRUE"), p("-c PUSH.FOLLOWTAGS=yes"), p("-c push.followTags=on"), p("-c push.followTags=1"), p("-c push.followTags"), p("-c push.followTags=false -c push.followTags=true"), p("-c push.followTags=false", "--follow-tags"), p("-C . -c 'push.followTags=true'"), p('-c "push.followTags=true"')]) { denied(guard(c)); denied(guard(c, "powershell")); }
+  for (const c of [p(""), p("-c push.followTags=false"), p("-c push.followTags=0"), p("-c push.followTags=no"), p("-c push.followTags="), p("-c push.followTags=true -c push.followTags=false"), p("-c push.followTags=true", "--no-follow-tags"), p("", "--follow-tags --no-follow-tags"), p("-c user.name=x"), p("-c core.pager=push.followTags=true")]) { silent(guard(c)); silent(guard(c, "powershell")); }
+  denied(guard(p("", "--no-follow-tags --follow-tags")));
+});
+
+// Values consumed by -o/--push-option (and other value-taking push flags) are data, not flags; `--` ends flags.
+test("guard treats consumed push-option values as inert data when computing follow-tags precedence", () => {
+  const p = (pre: string, post = "") => `${GIT} ${pre} push origin feature/x ${post}`.replace(/ +/g, " ").trim();
+  for (const c of [p("", "--follow-tags -o --no-follow-tags"), p("-c push.followTags=true", "-o --no-follow-tags"), p("", "--follow-tags --push-option --no-follow-tags"), p("", "--follow-tags --receive-pack --no-follow-tags"), p("", "--follow-tags -- --no-follow-tags")]) { denied(guard(c)); denied(guard(c, "powershell")); }
+  for (const c of [p("", "--follow-tags --no-follow-tags"), p("", "--follow-tags --no-follow-tags -o ci.skip"), p("", "-o ci.skip"), p("", "-o --follow-tags"), p("", "--push-option --tags"), p("", "-o --mirror"), p("", "-o v1.2.3"), p("", "--push-option=--follow-tags")]) { silent(guard(c)); silent(guard(c, "powershell")); }
+});
+
+// Git bool parsing accepts any numeric zero (sign, octal/hex, k/m/g unit) as false; nonzero stays true.
+test("guard treats Git-valid numeric zero push.followTags values as false and nonzero as true", () => {
+  const p = (v: string) => `${GIT} -c push.followTags=${v} push origin feature/x`;
+  for (const v of ["-0", "+0", "00", "0k", "0K", "0m", "0g", "0x0", "0X00", "-0x0", "+0x0k"]) { silent(guard(p(v))); silent(guard(p(v), "powershell")); }
+  for (const v of ["1", "-1", "1k", "0x1", "010", "-0x1", "0x10", "01", "0x"]) { denied(guard(p(v))); denied(guard(p(v), "powershell")); }
 });

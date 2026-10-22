@@ -7,6 +7,8 @@ const MAX_FILE_BYTES = 1024 * 1024;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const policyPaths = [resolve(root, "agent/AGENTS.md"), resolve(root, "agent/skills/SKILLS.md")];
 
+const BOUNDARY = "Copilot host boundary (static, grants no authority): merge and release execution is unsupported in this plugin; a native ask_user answer cannot mint a Pi delivery grant; the operator performs those operations outside the session.";
+
 function fail(message) {
   console.error(`copilot-bootstrap: ${message}`);
   process.exit(1);
@@ -38,7 +40,7 @@ try {
     if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) fail(`canonical file exceeds 1 MiB: ${path}`);
     return `## ${path}\n\n${content.trim()}`;
   });
-  const context = `Shared Copilot bootstrap from ${root}. Read relevant module guidance from the index; Pi-only capabilities are not implied on Copilot.\n\n${sections.join("\n\n")}`;
+  const context = `Shared Copilot bootstrap from ${root}. Read relevant module guidance from the index; Pi-only capabilities are not implied on Copilot.\n\n${sections.join("\n\n")}\n\n${BOUNDARY}`;
   process.stdout.write(`${JSON.stringify({ additionalContext: context })}\n`);
 } catch (error) {
   console.error(`copilot-bootstrap: ${error.message}`);

@@ -5,9 +5,9 @@ tools: read, search, execute, edit
 ---
 
 ## Assigned modules
-`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
 
-For SHIP work, before substantive role work read `<skills>/engineering-harness/ship/index.md` unless its current guidance is already in your context.
+For SHIP work, before substantive role work read `agent/skills/engineering-harness/ship/index.md` unless its current guidance is already in your context.
 
 For LEARN work before the final commit or PR, or when the task explicitly asks to preserve durable knowledge, read the absolute `learn/index.md` module path from the assignment packet unless its current guidance is already in your context.
 

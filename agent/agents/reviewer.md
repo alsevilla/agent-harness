@@ -5,9 +5,9 @@ tools: read, search, execute
 ---
 
 ## Assigned module
-`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
 
-Before substantive role work, read `<skills>/engineering-harness/review/index.md` unless its current guidance is already in your context. Read only task-relevant guide sections it directs. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
+Before substantive role work, read `agent/skills/engineering-harness/review/index.md` unless its current guidance is already in your context. Read only task-relevant guide sections it directs. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
 
 ## Procedure and role handoff
 

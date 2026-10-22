@@ -115,15 +115,15 @@ but this skill does not create a second orchestrator.
 
 | Skill | Primary use | Primary owner | Use when | Location |
 |---|---|---|---|---|
-| `accessible-ui-patterns` | Accessibility + interaction semantics | `ui-ux-specialist`, `frontend-worker` | Keyboard/focus, ARIA widgets, dialogs, forms/errors, target size, reduced motion, async feedback, responsive accessibility | `~/.pi/agent/skills/frontend/accessible-ui-patterns/index.md` |
-| `design-dashboards` | Dashboard UX/information design | `ui-ux-specialist` | Operational dashboards, KPI layouts, monitoring, tables/charts, dashboard critique/redesign/spec | `~/.pi/agent/skills/frontend/design-dashboards/index.md` |
-| `design-motion-principles` | Motion + micro-interactions | `ui-ux-specialist`, then `frontend-worker` | Transitions, enter/exit behavior, hover/press feedback, purposeful motion, motion audit | `~/.pi/agent/skills/frontend/design-motion-principles/index.md` |
-| `frontend-design` | Distinct visual direction | `ui-ux-specialist` | New page/surface or intentional visual redesign where aesthetic direction is materially open | `~/.pi/agent/skills/frontend/frontend-design/index.md` |
-| `solidjs-engineering` | SolidJS implementation correctness | `frontend-worker` | Fine-grained reactivity, reactive props, effects/memos, cleanup, resources, list rendering, Solid lifecycle/SSR/testing | `~/.pi/agent/skills/frontend/solidjs-engineering/index.md` |
-| `typescript-advanced-types` | Advanced TS type engineering | `frontend-worker` | Complex generics, conditional/mapped/template types, reusable type utilities, type-safe API/form/state work | `~/.pi/agent/skills/frontend/typescript-advanced-types/index.md` |
-| `ui-ux-pro-max` | Broad UI/UX design intelligence | `ui-ux-specialist` | Design system search, layout/color/typography/icons/charts/general UX guidance when no narrower skill fully owns the concern | `~/.pi/agent/skills/frontend/ui-ux-pro-max/index.md` |
-| `ux-flow-wireframer` | User-flow + low-fidelity structure | `ui-ux-specialist` | New or materially changed multi-step flows, dead-end/redundancy audit, branches/recovery, Mermaid flow map, text wireframes before visual design/code | `~/.pi/agent/skills/frontend/ux-flow-wireframer/index.md` |
-| `web-design-guidelines` | UI code/best-practice audit | `ui-ux-specialist` or `reviewer` when explicitly routed | Review existing UI implementation against current web interface guidelines | `~/.pi/agent/skills/frontend/web-design-guidelines/index.md` |
+| `accessible-ui-patterns` | Accessibility + interaction semantics | `ui-ux-specialist`, `frontend-worker` | Keyboard/focus, ARIA widgets, dialogs, forms/errors, target size, reduced motion, async feedback, responsive accessibility | `agent/skills/frontend/accessible-ui-patterns/index.md` |
+| `design-dashboards` | Dashboard UX/information design | `ui-ux-specialist` | Operational dashboards, KPI layouts, monitoring, tables/charts, dashboard critique/redesign/spec | `agent/skills/frontend/design-dashboards/index.md` |
+| `design-motion-principles` | Motion + micro-interactions | `ui-ux-specialist`, then `frontend-worker` | Transitions, enter/exit behavior, hover/press feedback, purposeful motion, motion audit | `agent/skills/frontend/design-motion-principles/index.md` |
+| `frontend-design` | Distinct visual direction | `ui-ux-specialist` | New page/surface or intentional visual redesign where aesthetic direction is materially open | `agent/skills/frontend/frontend-design/index.md` |
+| `solidjs-engineering` | SolidJS implementation correctness | `frontend-worker` | Fine-grained reactivity, reactive props, effects/memos, cleanup, resources, list rendering, Solid lifecycle/SSR/testing | `agent/skills/frontend/solidjs-engineering/index.md` |
+| `typescript-advanced-types` | Advanced TS type engineering | `frontend-worker` | Complex generics, conditional/mapped/template types, reusable type utilities, type-safe API/form/state work | `agent/skills/frontend/typescript-advanced-types/index.md` |
+| `ui-ux-pro-max` | Broad UI/UX design intelligence | `ui-ux-specialist` | Design system search, layout/color/typography/icons/charts/general UX guidance when no narrower skill fully owns the concern | `agent/skills/frontend/ui-ux-pro-max/index.md` |
+| `ux-flow-wireframer` | User-flow + low-fidelity structure | `ui-ux-specialist` | New or materially changed multi-step flows, dead-end/redundancy audit, branches/recovery, Mermaid flow map, text wireframes before visual design/code | `agent/skills/frontend/ux-flow-wireframer/index.md` |
+| `web-design-guidelines` | UI code/best-practice audit | `ui-ux-specialist` or `reviewer` when explicitly routed | Review existing UI implementation against current web interface guidelines | `agent/skills/frontend/web-design-guidelines/index.md` |
 
 ---
 

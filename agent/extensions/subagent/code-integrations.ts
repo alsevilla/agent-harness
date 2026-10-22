@@ -140,7 +140,7 @@ export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(
 export function packageResourceGuidance(root: string | null): string {
 	if (!root) return "";
 	const skills = path.join(root, "skills").split(path.sep).join("/");
-	return `\n\nPackage resources: ~/.pi/agent/skills/engineering-harness/ and ~/.pi/agent/skills/agent-creation/ resolve to ${skills}/engineering-harness/ and ${skills}/agent-creation/. Precedence: these bundled paths take effect over any profile path in the role text. Backend, frontend, graphify and browser skill catalogs are not bundled; any instruction to read them is unavailable, so use the project's own guidance or other available generic guidance instead. Roles not bundled in this package are unavailable and are never dispatched.`;
+	return `\n\nPackage resources: agent/skills/engineering-harness/ and agent/skills/agent-creation/ resolve to ${skills}/engineering-harness/ and ${skills}/agent-creation/. Precedence: these bundled paths take effect over any profile path in the role text. Backend, frontend, graphify and browser skill catalogs are not bundled; any instruction to read them is unavailable, so use the project's own guidance or other available generic guidance instead. Roles not bundled in this package are unavailable and are never dispatched.`;
 }
 
 const QMD_EXTENSION = fileURLToPath(new URL("../qmd/index.ts", import.meta.url));

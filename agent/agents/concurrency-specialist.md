@@ -14,9 +14,9 @@ When unresolved material concurrency/async semantics are part of the task, analy
 
 When Rust/Tokio details are involved, consult:
 
-`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
 
-`<skills>/backend/rust-axum-engineering/index.md`
+`agent/skills/backend/rust-axum-engineering/index.md`
 
 Focus on correctness under simultaneous operations and overload.
 
@@ -58,7 +58,7 @@ Do not approve a design because light-load tests pass.
 
 When overload behavior itself is being tested, consult:
 
-`<skills>/backend/load-resilience-testing/index.md`
+`agent/skills/backend/load-resilience-testing/index.md`
 
 Review:
 - bounded vs unbounded queues;

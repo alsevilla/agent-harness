@@ -88,9 +88,9 @@ Do not create a second writer merely because several concerns are present.
 
 | Skill | Primary use | Primary owner | Use when | Location |
 |---|---|---|---|---|
-| `rust-axum-engineering` | Rust + Axum + Tokio + Tower implementation | `backend-worker` | Handlers, services, errors, typed state/extractors, middleware, async tasks, cancellation, shutdown, bounded concurrency, backend tests | `~/.pi/agent/skills/backend/rust-axum-engineering/index.md` |
-| `sqlite-sqlx-engineering` | SQLite + SQLx persistence engineering, only for that actual stack | `database-specialist` for material unresolved semantics, `database-worker` for authorized implementation | Schema, migrations, SQLx pool/options, transactions, WAL, busy handling, constraints, indexes, query plans, idempotency, burst writes | `~/.pi/agent/skills/backend/sqlite-sqlx-engineering/index.md` |
-| `load-resilience-testing` | Burst/load/resilience evidence | `test-engineer` / `performance-specialist` with domain specialists as needed | Arrival-rate workloads, overload/backpressure, DB contention, dependency failure, shutdown-under-load, restart/recovery, soak when justified | `~/.pi/agent/skills/backend/load-resilience-testing/index.md` |
+| `rust-axum-engineering` | Rust + Axum + Tokio + Tower implementation | `backend-worker` | Handlers, services, errors, typed state/extractors, middleware, async tasks, cancellation, shutdown, bounded concurrency, backend tests | `agent/skills/backend/rust-axum-engineering/index.md` |
+| `sqlite-sqlx-engineering` | SQLite + SQLx persistence engineering, only for that actual stack | `database-specialist` for material unresolved semantics, `database-worker` for authorized implementation | Schema, migrations, SQLx pool/options, transactions, WAL, busy handling, constraints, indexes, query plans, idempotency, burst writes | `agent/skills/backend/sqlite-sqlx-engineering/index.md` |
+| `load-resilience-testing` | Burst/load/resilience evidence | `test-engineer` / `performance-specialist` with domain specialists as needed | Arrival-rate workloads, overload/backpressure, DB contention, dependency failure, shutdown-under-load, restart/recovery, soak when justified | `agent/skills/backend/load-resilience-testing/index.md` |
 
 ## Routing Priority
 

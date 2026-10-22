@@ -103,12 +103,27 @@ function protectedStatement(ws) {
     return urls.some((u) => /\/merge(?:[?#]|$)|\/releases(?:[/?#]|$)|\/git\/refs\/tags/i.test(u) || (/\/git\/refs(?:[/?#]|$)/i.test(u) && ws.some((w) => /refs\/tags\//i.test(w))));
   }
   if (exe === "git") {
-    let i = 1;
-    while (i < ws.length && ws[i].startsWith("-")) i += /^-[Cc]$/.test(ws[i]) ? 2 : 1;
+    let i = 1, cfgFollow = false;
+    while (i < ws.length && ws[i].startsWith("-")) {
+      // Command-line `-c name=value` only (no persistent Git config/env is read); later -c wins, a bare name means true.
+      const kv = ws[i] === "-c" ? /^([^=]*)(?:=(.*))?$/s.exec(ws[i + 1] || "") : null;
+      if (kv && low(kv[1]) === "push.followtags") cfgFollow = kv[2] === undefined || !/^(?:|false|no|off|[+-]?(?:0+|0x0+)[kmg]?)$/i.test(kv[2].trim()); // Git bool: any numeric zero (sign, octal/hex, k/m/g) is false
+      i += /^-[Cc]$/.test(ws[i]) ? 2 : 1;
+    }
     if (low(ws[i] || "") !== "push") return false;
-    const rest = ws.slice(i + 1);
-    if (rest.some((w) => /^--(?:tags|follow-tags|mirror)(?:=|$)/.test(low(w)))) return true;
-    const pos = positional(rest, 0, /^$/);
+    // Split push args into flags and positionals: values consumed by -o/--push-option/--receive-pack/--exec/--repo are data, and `--` ends flags.
+    const rest = ws.slice(i + 1), flags = [], pos = [];
+    for (let j = 0, end = false; j < rest.length; j++) {
+      const w = rest[j];
+      if (end || !w.startsWith("-") || w === "-") pos.push(w);
+      else if (w === "--") end = true;
+      else if (w === "-o" || /^--(?:push-option|receive-pack|exec|repo)$/.test(low(w))) j++;
+      else flags.push(low(w));
+    }
+    if (flags.some((w) => /^--(?:tags|mirror)(?:=|$)/.test(w))) return true;
+    // Command-line --follow-tags/--no-follow-tags overrides the -c value; the last one wins.
+    const fl = flags.filter((w) => /^--(?:no-)?follow-tags(?:=|$)/.test(w));
+    if (fl.length ? !fl[fl.length - 1].startsWith("--no-") : cfgFollow) return true;
     return (pos[1] === "tag" && pos.length > 2) || pos.some((w) => tagRef.test(w));
   }
   return false;

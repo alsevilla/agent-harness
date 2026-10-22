@@ -95,9 +95,9 @@ coordinate with `database-specialist` for material unresolved database semantics
 
 When burst/load behavior is material, consult:
 
-`<skills>` is the installed shared skills directory. Pi: `~/.pi/agent/skills`. Copilot: only the absolute path from the subagentStart context or the parent handoff (never a `~/.pi` path); if neither is available, report BLOCKED for that read.
+Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
 
-`<skills>/backend/load-resilience-testing/index.md`
+`agent/skills/backend/load-resilience-testing/index.md`
 
 Prefer workload models that match the real producer.
 
