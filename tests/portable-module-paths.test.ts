@@ -59,7 +59,7 @@ test("subagentStart context from an unrelated cwd gives the installed root plus 
     const r = spawnSync("node", [join(root, ".github", "plugin", "agent-context.mjs")], { cwd, encoding: "utf8", input: JSON.stringify({ sessionId: "s", timestamp: 1, cwd, agentName: "EVIL-NAME", transcriptPath: "t" }) });
     expect(r.status).toBe(0);
     const c: string = JSON.parse(r.stdout).additionalContext;
-    expect(c).toContain(join(root, "agent", "skills"));
+    expect(c).toContain(root);
     expect(c).toContain("agent/skills/");
     expect(c).toMatch(/never the project cwd/);
     expect(c).not.toMatch(/~\/\.pi|<skills>|EVIL-NAME/);

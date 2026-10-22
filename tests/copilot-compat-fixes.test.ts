@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
-import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync, mkdirSync, copyFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join, resolve, isAbsolute } from "node:path";
+import { join, resolve, isAbsolute, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
 const root = resolve(import.meta.dir, "..");
@@ -45,8 +45,8 @@ test("plugin scripts never emit allow or ask decisions and never import the inte
 
 // subagentStart: static context only (verified input: sessionId, timestamp, cwd, transcriptPath, agentName; output additionalContext).
 const start = (extra: object = {}) => ({ sessionId: "s", timestamp: 1700000000000, cwd: root, transcriptPath: "t.jsonl", agentName: "general-worker", ...extra });
-test("subagentStart context gives absolute skills root, host boundary and handoff fields; bare and namespaced names; spaced cwd", () => {
-  const skills = join(root, "agent", "skills");
+test("subagentStart context gives absolute repository root, host boundary and handoff fields; bare and namespaced names; spaced cwd", () => {
+  const skills = root;
   const cwd = mkdtempSync(join(tmpdir(), "agent ctx ü "));
   try {
     for (const name of ["general-worker", "agent-harness:general-worker"]) {
@@ -325,4 +325,33 @@ test("guard treats Git-valid numeric zero push.followTags values as false and no
   const p = (v: string) => `${GIT} -c push.followTags=${v} push origin feature/x`;
   for (const v of ["-0", "+0", "00", "0k", "0K", "0m", "0g", "0x0", "0X00", "-0x0", "+0x0k"]) { silent(guard(p(v))); silent(guard(p(v), "powershell")); }
   for (const v of ["1", "-1", "1k", "0x1", "010", "-0x1", "0x10", "01", "0x"]) { denied(guard(p(v))); denied(guard(p(v), "powershell")); }
+});
+
+// Contract: advertised root is the installed repository/plugin root; profile paths `agent/skills/...` join onto it to real files.
+test("subagentStart advertised root joins canonical profile module paths to real installed files (spaced/Unicode install, unrelated cwd)", () => {
+  const inst = mkdtempSync(join(tmpdir(), "inst ü root "));
+  const cwd = mkdtempSync(join(tmpdir(), "unrelated cwd "));
+  try {
+    const mods = ["agent/skills/backend/SKILL.md", "agent/skills/engineering-harness/review/index.md"];
+    for (const m of [...mods, ".github/plugin/agent-context.mjs"]) {
+      mkdirSync(dirname(join(inst, m)), { recursive: true });
+      copyFileSync(join(root, m), join(inst, m));
+    }
+    const r = spawnSync("node", [join(inst, ".github", "plugin", "agent-context.mjs")], { cwd, encoding: "utf8", input: JSON.stringify(start({ cwd })) });
+    expect(r.status).toBe(0);
+    const c: string = JSON.parse(r.stdout).additionalContext;
+    const m = c.match(/^Installed shared-source repository root \(absolute\): (.+)$/m);
+    expect(m).not.toBeNull();
+    const advertised = m![1];
+    expect(advertised).toBe(inst);
+    for (const mod of mods) {
+      const p = join(advertised, mod);
+      expect(p).toBe(join(inst, ...mod.split("/")));
+      expect(p).not.toContain(join("agent", "skills", "agent"));
+      expect(existsSync(p)).toBe(true);
+      expect(readFileSync(p, "utf8")).toBe(read(...mod.split("/")));
+    }
+    // A module absent from the installed root blocks only that read.
+    expect(existsSync(join(advertised, "agent/skills/missing/SKILL.md"))).toBe(false);
+  } finally { rmSync(inst, { recursive: true, force: true }); rmSync(cwd, { recursive: true, force: true }); }
 });
