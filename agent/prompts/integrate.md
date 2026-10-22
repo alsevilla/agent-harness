@@ -6,4 +6,4 @@ Task packet:
 
 $ARGUMENTS
 
-Read `~/.pi/agent/skills/engineering-harness/integrate/index.md` and apply it to this assignment. Resolve its relative files from that module folder. Preserve global role routing and authority; loading a procedure does not complete an agent role.
+Read `agent/skills/engineering-harness/integrate/index.md` (under the installed shared-source root, not the project cwd) and apply it to this assignment. Resolve its relative files from that module folder. Preserve global role routing and authority; loading a procedure does not complete an agent role.

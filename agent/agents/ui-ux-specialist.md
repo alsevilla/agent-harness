@@ -78,6 +78,8 @@ Capabilities are procedures, not workflow owners.
 Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Do not claim unrun checks or source mutation.
 Deliver accepted flow, hierarchy/layout, states/copy, responsive/accessibility/motion expectations, evidence vs assumptions and testable acceptance criteria. Preserve research provenance and existing design authority; do not invent user research or claim implementation/verification.
 
-For deeper domain questions, search headings in `~/.pi/agent/skills/engineering-harness/references/roles/ui-ux-specialist.md` and read only the matching section. Routine packets need no extra reference read.
+Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
+
+For deeper domain questions, search headings in `agent/skills/engineering-harness/references/roles/ui-ux-specialist.md` and read only the matching section. Routine packets need no extra reference read.
 
 Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify extensions. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

@@ -28,7 +28,7 @@ export function policyBody(root: string | null, contextFiles: Array<{ content: s
 		policy,
 		"",
 		`Installed harness skill (absolute): ${posix(path.join(root, "skills", "engineering-harness", "SKILL.md"))}`,
-		`Where the policy names ~/.pi/agent/skills/, use ${posix(root)}/skills/ instead.`,
+		`Where the policy names agent/skills/, use ${posix(root)}/skills/ instead.`,
 	].join("\n");
 }
 

@@ -95,7 +95,9 @@ coordinate with `database-specialist` for material unresolved database semantics
 
 When burst/load behavior is material, consult:
 
-`~/.pi/agent/skills/backend/load-resilience-testing/index.md`
+Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
+
+`agent/skills/backend/load-resilience-testing/index.md`
 
 Prefer workload models that match the real producer.
 

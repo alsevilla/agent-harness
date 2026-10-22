@@ -8,6 +8,23 @@
         "powershell": "node \"$env:COPILOT_PLUGIN_ROOT/.github/plugin/session-start.mjs\"; exit $LASTEXITCODE",
         "timeoutSec": 10
       }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "node \"${PLUGIN_ROOT}/.github/plugin/agent-context.mjs\"",
+        "powershell": "node \"$env:COPILOT_PLUGIN_ROOT/.github/plugin/agent-context.mjs\"; exit $LASTEXITCODE",
+        "timeoutSec": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "matcher": "bash|powershell",
+        "bash": "node \"${PLUGIN_ROOT}/.github/plugin/release-guard.mjs\"",
+        "powershell": "node \"$env:COPILOT_PLUGIN_ROOT/.github/plugin/release-guard.mjs\"; exit $LASTEXITCODE",
+        "timeoutSec": 10
+      }
     ]
   }
 }

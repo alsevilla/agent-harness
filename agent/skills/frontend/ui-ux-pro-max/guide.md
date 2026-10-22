@@ -44,7 +44,7 @@ This copy is installed inside the frontend capability collection.
 
 `<skill-base-dir>` means the module directory that contains this `guide.md`:
 
-`~/.pi/agent/skills/frontend/ui-ux-pro-max`
+`agent/skills/frontend/ui-ux-pro-max`
 
 Resolve scripts relative to that directory. Do not assume the original Pi/plugin path.
 

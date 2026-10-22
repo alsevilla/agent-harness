@@ -64,7 +64,7 @@ of the personal skills directory. Router skills are also direct children; they
 refer to other registered skills by name rather than containing them physically.
 
 ```text
-~/.pi/agent/skills/
+agent/skills/
 ├── SKILLS.md
 ├── engineering-harness/SKILL.md
 ├── discover/SKILL.md
@@ -100,7 +100,7 @@ refer to other registered skills by name rather than containing them physically.
 
 This layout is intentional. Do **not** move independently invocable skills under
 `engineering-harness/`, `backend/`, or `frontend/`. Pi registers personal
-skills from `~/.pi/agent/skills/<skill-name>/SKILL.md`; router skills organize
+skills from `agent/skills/<skill-name>/SKILL.md`; router skills organize
 selection logically, not physically.
 
 `engineering-harness`, `backend`, and `frontend` are registered router skills.
@@ -114,10 +114,10 @@ The engineering lifecycle owns workflow. Domain capability catalogs provide narr
 
 | Capability collection | When to consult | Location |
 |---|---|---|
-| Backend | **Mandatory domain router** when Rust/Axum/Tokio implementation, SQLite/SQLx persistence, backend concurrency, burst/load/resilience testing, database behavior, backend review/debugging, or API/persistence performance materially affect the task | `~/.pi/agent/skills/backend/SKILL.md` |
-| Frontend | **Mandatory domain router** when UI/UX design, user-flow/wireframe work, SolidJS implementation, dashboards, accessibility, motion, frontend audits, or advanced TypeScript materially affect the task | `~/.pi/agent/skills/frontend/SKILL.md` |
-| Graphify | Graphify is explicitly selected for its repository/knowledge capability | `~/.pi/agent/skills/graphify/SKILL.md` |
-| Betterwright / Browser | Live browser automation and browser evidence. `betterwright` and `browser` are generated aliases of the same Betterwright protocol; keep both unless the installer/provider contract says otherwise. | `~/.pi/agent/skills/betterwright/SKILL.md` / `~/.pi/agent/skills/browser/SKILL.md` |
+| Backend | **Mandatory domain router** when Rust/Axum/Tokio implementation, SQLite/SQLx persistence, backend concurrency, burst/load/resilience testing, database behavior, backend review/debugging, or API/persistence performance materially affect the task | `agent/skills/backend/SKILL.md` |
+| Frontend | **Mandatory domain router** when UI/UX design, user-flow/wireframe work, SolidJS implementation, dashboards, accessibility, motion, frontend audits, or advanced TypeScript materially affect the task | `agent/skills/frontend/SKILL.md` |
+| Graphify | Graphify is explicitly selected for its repository/knowledge capability | `agent/skills/graphify/SKILL.md` |
+| Betterwright / Browser | Live browser automation and browser evidence. `betterwright` and `browser` are generated aliases of the same Betterwright protocol; keep both unless the installer/provider contract says otherwise. | `agent/skills/betterwright/SKILL.md` / `agent/skills/browser/SKILL.md` |
 
 For backend or frontend work, first invoke the matching domain router (`backend` / `frontend`), then select only the narrowest useful domain capability. Domain skills do not replace `plan`, `execute`, `verify`, or `review`.
 
@@ -169,19 +169,19 @@ wrapper caused by a blocked launch is not evidence that the role ran.
 
 | Skill | Type | When to use | Installed location | Normal authority |
 |---|---|---|---|---|
-| `engineering-harness` | **Mandatory bootstrap / router** | Every main-session engineering request or resumed engineering task; reconstruct lifecycle state, invoke the current lifecycle skill, and require frontend/backend domain routers when material. | `~/.pi/agent/skills/engineering-harness/SKILL.md` | Routing only |
-| `discover` | Lifecycle | Requirements, terminology, architecture, source of truth, current behavior, constraints, or blast radius are materially unclear. | `~/.pi/agent/skills/engineering-harness/discover/index.md` | Read-only by default |
-| `knowledge` | Supporting | Retrieve and reconcile authoritative project truth, specifications, prior decisions, implementation evidence, or authority conflicts. | `~/.pi/agent/skills/engineering-harness/knowledge/index.md` | Read-only unless its procedure explicitly permits otherwise |
-| `decision` | Supporting | A material project choice must become explicit, informed, scoped, authorized, and optionally durable. | `~/.pi/agent/skills/engineering-harness/decision/index.md` | Conditional; decision recording only when authorized |
-| `plan` | Lifecycle | Behavior is sufficiently understood, but implementation needs decomposition, sequencing, ownership, TDD design, verification/review planning, or authorization. | `~/.pi/agent/skills/engineering-harness/plan/index.md` | Read-only |
-| `debug` | Conditional lifecycle | An observed defect or failure has an uncertain cause. Diagnose causally before choosing a correction. | `~/.pi/agent/skills/engineering-harness/debug/index.md` | Read-only active repo; narrow disposable evidence only when explicitly permitted |
-| `worktree` | Supporting | Isolation has already been justified; worktree ownership, tool-path confinement, retention, recovery, or disposition mechanics are needed. | `~/.pi/agent/skills/engineering-harness/worktree/index.md` | Conditional Git/worktree mutation; never grants execution authority |
-| `execute` | Lifecycle | Implement a non-trivial change only after the plan is explicitly READY FOR EXECUTION; use TDD and one-writer discipline. | `~/.pi/agent/skills/engineering-harness/execute/index.md` | Authorized implementation writes only |
-| `verify` | Lifecycle | Obtain independent behavioral evidence for the completed candidate; worker-written tests are not independent verification. | `~/.pi/agent/skills/engineering-harness/verify/index.md` | Read-only active repo; disposable isolation only when explicitly permitted |
-| `review` | Lifecycle | Adversarially challenge implementation, tests, assumptions, scope, authority, regressions, and architectural invariants. | `~/.pi/agent/skills/engineering-harness/review/index.md` | Read-only |
-| `integrate` | Conditional lifecycle | Integrate an approved source candidate into a distinct destination candidate while preserving candidate identity, dirty-state safety, and separate Git authorities. | `~/.pi/agent/skills/engineering-harness/integrate/index.md` | Conditional Git mutation with explicit operation authority |
-| `ship` | Lifecycle | Assess release readiness and preserve delivery integrity for the exact approved candidate; perform delivery actions only when separately authorized. | `~/.pi/agent/skills/engineering-harness/ship/index.md` | Readiness is read-only; delivery mutation requires explicit authority |
-| `learn` | Lifecycle | Preserve durable reusable decisions, invariants, patterns, pitfalls, environment facts, or process lessons after completed/materially informative work. | `~/.pi/agent/skills/engineering-harness/learn/index.md` | Durable knowledge write only when its gate allows |
+| `engineering-harness` | **Mandatory bootstrap / router** | Every main-session engineering request or resumed engineering task; reconstruct lifecycle state, invoke the current lifecycle skill, and require frontend/backend domain routers when material. | `agent/skills/engineering-harness/SKILL.md` | Routing only |
+| `discover` | Lifecycle | Requirements, terminology, architecture, source of truth, current behavior, constraints, or blast radius are materially unclear. | `agent/skills/engineering-harness/discover/index.md` | Read-only by default |
+| `knowledge` | Supporting | Retrieve and reconcile authoritative project truth, specifications, prior decisions, implementation evidence, or authority conflicts. | `agent/skills/engineering-harness/knowledge/index.md` | Read-only unless its procedure explicitly permits otherwise |
+| `decision` | Supporting | A material project choice must become explicit, informed, scoped, authorized, and optionally durable. | `agent/skills/engineering-harness/decision/index.md` | Conditional; decision recording only when authorized |
+| `plan` | Lifecycle | Behavior is sufficiently understood, but implementation needs decomposition, sequencing, ownership, TDD design, verification/review planning, or authorization. | `agent/skills/engineering-harness/plan/index.md` | Read-only |
+| `debug` | Conditional lifecycle | An observed defect or failure has an uncertain cause. Diagnose causally before choosing a correction. | `agent/skills/engineering-harness/debug/index.md` | Read-only active repo; narrow disposable evidence only when explicitly permitted |
+| `worktree` | Supporting | Isolation has already been justified; worktree ownership, tool-path confinement, retention, recovery, or disposition mechanics are needed. | `agent/skills/engineering-harness/worktree/index.md` | Conditional Git/worktree mutation; never grants execution authority |
+| `execute` | Lifecycle | Implement a non-trivial change only after the plan is explicitly READY FOR EXECUTION; use TDD and one-writer discipline. | `agent/skills/engineering-harness/execute/index.md` | Authorized implementation writes only |
+| `verify` | Lifecycle | Obtain independent behavioral evidence for the completed candidate; worker-written tests are not independent verification. | `agent/skills/engineering-harness/verify/index.md` | Read-only active repo; disposable isolation only when explicitly permitted |
+| `review` | Lifecycle | Adversarially challenge implementation, tests, assumptions, scope, authority, regressions, and architectural invariants. | `agent/skills/engineering-harness/review/index.md` | Read-only |
+| `integrate` | Conditional lifecycle | Integrate an approved source candidate into a distinct destination candidate while preserving candidate identity, dirty-state safety, and separate Git authorities. | `agent/skills/engineering-harness/integrate/index.md` | Conditional Git mutation with explicit operation authority |
+| `ship` | Lifecycle | Assess release readiness and preserve delivery integrity for the exact approved candidate; perform delivery actions only when separately authorized. | `agent/skills/engineering-harness/ship/index.md` | Readiness is read-only; delivery mutation requires explicit authority |
+| `learn` | Lifecycle | Preserve durable reusable decisions, invariants, patterns, pitfalls, environment facts, or process lessons after completed/materially informative work. | `agent/skills/engineering-harness/learn/index.md` | Durable knowledge write only when its gate allows |
 
 ---
 
@@ -356,8 +356,8 @@ Graphify is a supporting capability, not a harness lifecycle phase:
 
 | Skill | When to use | Location |
 |---|---|---|
-| `graphify` | When the user explicitly invokes `/graphify` or the Graphify capability is otherwise intentionally selected | `~/.pi/agent/skills/graphify/SKILL.md` |
-| `betterwright` / `browser` | Browser automation/evidence needed by the governing lifecycle or explicitly requested by the user. These are aliases of the same generated Betterwright protocol, not separate workflow owners. | `~/.pi/agent/skills/betterwright/SKILL.md` / `~/.pi/agent/skills/browser/SKILL.md` |
+| `graphify` | When the user explicitly invokes `/graphify` or the Graphify capability is otherwise intentionally selected | `agent/skills/graphify/SKILL.md` |
+| `betterwright` / `browser` | Browser automation/evidence needed by the governing lifecycle or explicitly requested by the user. These are aliases of the same generated Betterwright protocol, not separate workflow owners. | `agent/skills/betterwright/SKILL.md` / `agent/skills/browser/SKILL.md` |
 
 
 Do not stack overlapping planning/execution methodologies merely because they are installed.
@@ -1355,7 +1355,7 @@ Scout report.
 
 Personal harness skills that must be directly invocable are installed as:
 
-`~/.pi/agent/skills/<skill-name>/SKILL.md`
+`agent/skills/<skill-name>/SKILL.md`
 
 Do not assume recursive registration beneath router directories.
 `engineering-harness`, `backend`, and `frontend` are logical router skills, not
@@ -1456,20 +1456,20 @@ accepts or rejects handoffs, resolves authority, and sequences phases.
 For phases with a dedicated role, phase entry and agent dispatch are distinct
 requirements:
 
-- DISCOVER: `read module ~/.pi/agent/skills/engineering-harness/discover/index.md` owns procedure. When repository reconnaissance is
+- DISCOVER: `read module agent/skills/engineering-harness/discover/index.md` owns procedure. When repository reconnaissance is
   required, the main conversation dispatches `scout`; it does not silently act
   as Scout.
-- DEBUG: `read module ~/.pi/agent/skills/engineering-harness/debug/index.md` owns diagnostic procedure. When root cause is unproven,
+- DEBUG: `read module agent/skills/engineering-harness/debug/index.md` owns diagnostic procedure. When root cause is unproven,
   the main conversation **MUST dispatch `debugger`**. The orchestrator must not
   perform the causal diagnosis itself as a substitute.
-- EXECUTE: `read module ~/.pi/agent/skills/engineering-harness/execute/index.md` owns execution gates. Non-trivial source mutation is
+- EXECUTE: `read module agent/skills/engineering-harness/execute/index.md` owns execution gates. Non-trivial source mutation is
   performed by the appropriate writer (`rust-worker` / `frontend-worker`), not
   by the orchestrator after merely loading Execute. Existing narrow direct-edit
   exceptions remain the only exception.
-- VERIFY: `read module ~/.pi/agent/skills/engineering-harness/verify/index.md` owns verification procedure. Independent verification
+- VERIFY: `read module agent/skills/engineering-harness/verify/index.md` owns verification procedure. Independent verification
   is performed by `test-engineer`; the orchestrator does not self-certify the
   candidate.
-- REVIEW: `read module ~/.pi/agent/skills/engineering-harness/review/index.md` owns review procedure. Entering REVIEW requires an
+- REVIEW: `read module agent/skills/engineering-harness/review/index.md` owns review procedure. Entering REVIEW requires an
   actual `reviewer` dispatch; the orchestrator does not adversarially review its
   own coordinated work as a substitute.
 - Frontend design/UX gate: `Skill(frontend)` routes unresolved design/UX work to
@@ -2313,7 +2313,7 @@ For documentation-only or comment-only changes that are genuinely non-behavioral
 
 # graphify
 
--   **graphify** (`~/.pi/agent/skills/graphify/SKILL.md`) - any input to
+-   **graphify** (`agent/skills/graphify/SKILL.md`) - any input to
     knowledge graph. Trigger: `/graphify` When the user types
     `/graphify`, use the installed graphify skill or instructions before
     doing anything else.
