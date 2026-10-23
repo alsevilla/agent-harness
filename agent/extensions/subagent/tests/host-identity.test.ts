@@ -10,14 +10,22 @@ import { latestVerdict, main } from "../../../../scripts/check-pi-latest.mjs";
 const roots: string[] = [];
 after(() => roots.forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
 
+const PEERS = Object.keys(JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "..", "..", "package.json"), "utf8")).peerDependencies).sort();
+/** One complete valid peer tree: every declared runtime peer, with the entry file and package.json hostIdentity requires. */
+function installSdk(modules: string, version: unknown, skip: string[] = []) {
+  for (const pkg of PEERS) {
+    if (skip.includes(pkg)) continue;
+    const base = path.join(modules, ...pkg.split("/"));
+    const entry = pkg === "typebox" ? path.join("build", "index.mjs") : path.join("dist", "index.js");
+    fs.mkdirSync(path.dirname(path.join(base, entry)), { recursive: true }); fs.writeFileSync(path.join(base, entry), "");
+    fs.writeFileSync(path.join(base, "package.json"), JSON.stringify({ name: pkg, version: pkg === "@earendil-works/pi-coding-agent" ? version : "1.0.0" }));
+  }
+}
+
 function fakeHome(versions: Record<string, string>) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "host-identity-")); roots.push(root);
   const releases = path.join(root, ".pi", "agent", "install", "releases");
-  for (const [dir, packageVersion] of Object.entries(versions)) for (const pkg of ["pi-coding-agent", "pi-ai"]) {
-    const base = path.join(releases, dir, "node_modules", "@earendil-works", pkg);
-    fs.mkdirSync(path.join(base, "dist"), { recursive: true }); fs.writeFileSync(path.join(base, "dist", "index.js"), "");
-    fs.writeFileSync(path.join(base, "package.json"), JSON.stringify({ name: `@earendil-works/${pkg}`, version: packageVersion }));
-  }
+  for (const [dir, packageVersion] of Object.entries(versions)) installSdk(path.join(releases, dir, "node_modules"), packageVersion);
   return { root, releases };
 }
 function withEnv(env: Record<string, string | undefined>, body: () => void) {
@@ -151,11 +159,7 @@ test("CLI accepts only string plain-release semver without leading zeros, locall
   const { root } = fakeHome({});
   const custom = (version: unknown) => {
     const modules = path.join(root, `custom-${roots.length}-${Math.random().toString(36).slice(2)}`, "node_modules");
-    for (const pkg of ["pi-coding-agent", "pi-ai"]) {
-      const base = path.join(modules, "@earendil-works", pkg);
-      fs.mkdirSync(path.join(base, "dist"), { recursive: true }); fs.writeFileSync(path.join(base, "dist", "index.js"), "");
-      fs.writeFileSync(path.join(base, "package.json"), JSON.stringify({ name: `@earendil-works/${pkg}`, version }));
-    }
+    installSdk(modules, version);
     return modules;
   };
   assert.equal((await cli(custom("1.4.0"), latest("1.4.0"))).code, 0);
@@ -166,4 +170,35 @@ test("CLI accepts only string plain-release semver without leading zeros, locall
   for (const bad of ["01.4.0", "1.4.00", "1.4.0-beta"]) assert.equal((await cli(custom(bad), latest(bad))).code, 3, `both ${bad}`);
   assert.equal((await cli(custom("1.4.0"), latest("01.4.0"))).code, 3);
   assert.equal((await cli(custom("1.4.0"), async () => new Response(JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: ["1.4.0"] }), { status: 200 }))).code, 3);
+});
+
+test("the declared runtime peer set is exactly the five Pi SDK packages the fixtures model", () => {
+  assert.deepEqual(PEERS, ["@earendil-works/pi-agent-core", "@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"]);
+});
+
+for (const missing of PEERS) {
+  test(`CLI fails closed, with no registry request, when the SDK lacks ${missing}`, async () => {
+    const { releases } = fakeHome({});
+    const modules = path.join(releases, "1.4.0", "node_modules");
+    installSdk(modules, "1.4.0", [missing]);
+    let requests = 0;
+    const out = await cli(modules, async () => { requests++; return latest("1.4.0")(); });
+    assert.equal(out.code, 3); assert.equal(out.result.validated, false);
+    assert.match(out.result.reason, /latest-runtime validation unavailable/);
+    assert.match(out.result.reason, /missing|expected/);
+    assert.equal(requests, 0);
+    assert.throws(() => hostIdentity(modules));
+  });
+}
+
+test("CLI fails closed for a peer with an unreadable or wrongly named package.json", async () => {
+  const { releases } = fakeHome({});
+  for (const [label, version, content] of [["bad-json", "1.4.0", "{nope"], ["other-name", "1.5.0", JSON.stringify({ name: "someone-else", version: "1.0.0" })]]) {
+    const modules = path.join(releases, version, "node_modules");
+    installSdk(modules, version);
+    fs.writeFileSync(path.join(modules, "@earendil-works", "pi-tui", "package.json"), content);
+    let requests = 0;
+    const out = await cli(modules, async () => { requests++; return latest(version)(); });
+    assert.equal(out.code, 3, label); assert.equal(out.result.validated, false, label); assert.equal(requests, 0, label);
+  }
 });

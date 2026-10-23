@@ -4,6 +4,9 @@ import path from "node:path";
 
 const packages = ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"];
 
+/** The runtime peer set package.json declares: the SDK a host tree must hold completely to count as a Pi SDK. */
+const declaredPeers = (): string[] => Object.keys(JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "..", "..", "package.json"), "utf8")).peerDependencies ?? {}).sort();
+
 export function hostModules(required = packages, selected: string | undefined = process.env.NATIVE_PROBE_HOST_MODULES): string {
   if (selected) {
     if (!fs.statSync(selected, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`NATIVE_PROBE_HOST_MODULES selected ${selected}, but it is not a directory`);
@@ -29,7 +32,13 @@ const releaseOf = (modules: string) => /[\\/]releases[\\/](\d+\.\d+\.\d+)[\\/]no
 
 /** The Pi package the host-package tests actually load: its own package.json version, not an assumed directory name. */
 export function hostIdentity(selected: string | undefined = process.env.NATIVE_PROBE_HOST_MODULES) {
-  const modules = hostModules(packages, selected);
+  const peers = declaredPeers();
+  if (!peers.length) throw new Error("package.json declares no runtime peer dependencies");
+  const modules = hostModules(peers, selected);
+  for (const peer of peers) { // a peer must be that package, readable, not merely a path with an entry file
+    const reportedPeer = JSON.parse(fs.readFileSync(path.join(modules, ...peer.split("/"), "package.json"), "utf8"));
+    if (reportedPeer?.name !== peer) throw new Error(`${modules} holds ${reportedPeer?.name} where ${peer} is expected`);
+  }
   const packageName = "@earendil-works/pi-coding-agent";
   const reported = JSON.parse(fs.readFileSync(path.join(modules, ...packageName.split("/"), "package.json"), "utf8"));
   const release = releaseOf(path.resolve(modules)); // equivalent spellings (/., trailing separator) are the same selection
