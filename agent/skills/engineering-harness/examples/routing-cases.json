@@ -14,7 +14,8 @@
         "roles_allowed": ["backend-worker"],
         "skills_required": ["backend"],
         "skills_forbidden": ["backend/rust-axum-engineering"],
-        "model_tiers": {"backend-worker": ["economy", "omitted"]}
+        "model_tiers": {"backend-worker": ["economy", "omitted"]},
+        "required_reads": ["agent/skills/backend/SKILL.md"]
       }
     },
     {
@@ -303,7 +304,8 @@
         "roles_required": ["release-engineer"],
         "roles_allowed": ["release-engineer"],
         "skills_required": ["engineering-harness/ship"],
-        "skills_forbidden": []
+        "skills_forbidden": [],
+        "required_reads": ["agent/skills/engineering-harness/ship/index.md"]
       }
     },
     {
@@ -458,6 +460,51 @@
         "roles_allowed": [],
         "skills_required": [],
         "skills_forbidden": []
+      }
+    },
+    {
+      "id": "R33",
+      "kind": "near_miss",
+      "question": "Three tests in one module fail with the same wrong rounding result; the cause is not established. Find it and fix it.",
+      "context": "Unknown-cause defect whose symptoms share one suspected cause in one module: one investigation, not one debugger per failing test. The fix stays with a single backend worker after the cause is known.",
+      "critical": false,
+      "expect": {
+        "routes": ["T2_DEBUG_WORKER"],
+        "roles_required": ["debugger", "backend-worker"],
+        "roles_allowed": ["debugger", "backend-worker"],
+        "skills_required": [],
+        "skills_forbidden": [],
+        "max_dispatches": {"debugger": 1}
+      }
+    },
+    {
+      "id": "R34",
+      "kind": "near_miss",
+      "question": "Rename the helper normalizeUrl to canonicalUrl in src/url.ts, including its three call sites and inline tests, all in that one file.",
+      "context": "Tooling-style mechanical edit confined to one file with one owner. Splitting it across several workers adds packet overhead and edit conflicts; one writer is enough.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["general-worker"],
+        "roles_allowed": ["general-worker"],
+        "skills_required": [],
+        "skills_forbidden": [],
+        "max_dispatches": {"general-worker": 1}
+      }
+    },
+    {
+      "id": "R35",
+      "kind": "near_miss",
+      "question": "The backend-worker job ended with a partial REPORT: the handler change is written but its error-path test is missing. Finish it.",
+      "context": "The finished job cannot be resumed or restarted. Preserve its partial writes and continue with one new narrowed packet to the same role that cites the REPORT; no second worker role and no duplicate fan-out. Independent verification is still a later step.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["backend-worker"],
+        "roles_allowed": ["backend-worker"],
+        "skills_required": [],
+        "skills_forbidden": [],
+        "max_dispatches": {"backend-worker": 1}
       }
     }
   ]

@@ -107,6 +107,7 @@ Decide per batch before dispatch by independence, task size, setup or context ov
 - Parallel only when items are independent and enumerable, ownership is disjoint, each item's task size is large against its setup or context overhead, and reconciliation cost is mechanical (disjoint files, one summary).
 - Choosing single is not a bypass: it never removes a mandatory role, specialist gate, independent verification or review, or tier rule. Main still runs each required gate.
 - Decompose dependent downstream work only after the prerequisite result is accepted; each child brief then carries only the accepted decisions it needs.
+- One investigation per unknown bug: several symptoms of one suspected cause, or one file's edits, go to one debugger or one writer, not one worker per symptom. Split only where causes or ownership are independent.
 
 ## Planning
 Do not create a formal multi-step plan for trivial/localized work. Use `plan` when dependencies, sequencing, rollout, migration, or cross-layer coordination make an explicit execution contract materially useful.

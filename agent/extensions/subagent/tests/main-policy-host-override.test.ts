@@ -27,8 +27,8 @@ test("explicit host-module selection is validated before the installed release f
 	assert.equal(typeof valid.status, "number");
 	assert.equal(valid.status, 0, `${valid.stdout}
 ${valid.stderr}`);
-	assert.match(valid.stdout + valid.stderr, /ℹ pass 8\b/);
-	assert.match(valid.stdout + valid.stderr, /ℹ tests 8\b/);
+	assert.match(valid.stdout + valid.stderr, /ℹ pass 10\b/);
+	assert.match(valid.stdout + valid.stderr, /ℹ tests 10\b/);
 	assert.ok((valid.stdout + valid.stderr).includes(`[${HOST_RELEASE}] a native install`));
 
 	const invalid = spawnSync(process.execPath, nodeTest, { cwd: REPO, env: { ...env, NATIVE_PROBE_HOST_MODULES: invalidModules }, encoding: "utf8", timeout: TEST_TIMEOUT_MS, windowsHide: true });

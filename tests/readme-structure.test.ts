@@ -77,6 +77,24 @@ test("the boundary body is intact: all seven compatibility rows and the preview 
   assert.match(body, /Preview with the tested local `copilot --plugin-dir \.` path/);
 });
 
+test("Optional skill catalogs lists Defuddle as an external skill and CLI, not a bundled catalog or native export", () => {
+  const start = lines.indexOf("## Optional skill catalogs");
+  const end = lines.findIndex((l, i) => i > start && l.startsWith("### "));
+  assert.ok(start >= 0 && end > start, "section found");
+  const section = lines.slice(start, end).join("\n");
+  const rows = lines.slice(start, end).filter((l) => /^\| /.test(l) && !/^\| (Catalog|---)/.test(l)).map((l) => l.split("|")[1].trim());
+  assert.deepEqual(rows, ["backend", "frontend", "browser", "graphify", "defuddle (external)"]);
+  const row = lines.slice(start, end).find((l) => l.startsWith("| defuddle"))!;
+  assert.match(row, /external/i);
+  assert.match(row, /not bundled/i);
+  assert.match(row, /`defuddle parse <url> --md`/);
+  assert.match(row, /agent\/skills\/engineering-harness\/references\/runtime\.md/);
+  assert.match(row, /browser/i);
+  assert.doesNotMatch(section, /agent\/skills\/defuddle/);
+  assert.doesNotMatch(row, /[A-Za-z]:[\/]|\/Users\/|\.agents/);
+  assert.match(section, /exactly two skills, `engineering-harness` and `agent-creation`/);
+});
+
 test("Copilot references use anchors rather than position, and the optional Defuddle guidance is linked to an existing runtime heading", () => {
   assert.doesNotMatch(text, /limited native preview: SessionStart loads canonical startup context as described above/);
   assert.match(text, /\[Copilot CLI preview boundary\]\(#copilot-cli-preview-boundary\)/);

@@ -5,7 +5,10 @@ Scores explicitly provided routing predictions (JSONL, one object per case) agai
 examples/routing-cases.json. Passing provided predictions does NOT prove runtime skill
 activation; --self-check only proves fixture/evaluator consistency. A prediction may carry
 `calls`: the recorded argument objects of native `subagent` calls; cases with
-`expect.model_tiers` score the modelTier of every dispatched entry from those calls.
+`expect.model_tiers` score the modelTier of every dispatched entry from those calls, and cases with
+`expect.max_dispatches` count the recorded dispatches per role (absent calls = unobserved, never a pass).
+An optional `read_observations` object feeds NON-SCORING read diagnostics (see read_diagnostics): observed
+reads only, never skill activation or use.
 Exit: 0 all matched and no critical failure; 1 mismatch or critical failure; 2 invalid input or usage.
 """
 import argparse
@@ -33,9 +36,14 @@ KINDS = frozenset({"positive", "near_miss"})
 FIXTURE_KEYS = frozenset({"schema", "description", "cases"})
 CASE_KEYS = frozenset({"id", "kind", "question", "context", "critical", "expect"})
 EXPECT_KEYS = frozenset({"routes", "roles_required", "roles_allowed", "skills_required", "skills_forbidden"})
-EXPECT_OPTIONAL = frozenset({"model_tiers"})
+EXPECT_OPTIONAL = frozenset({"model_tiers", "max_dispatches", "required_reads"})
 PRED_KEYS = frozenset({"id", "route", "roles", "skills"})
-PRED_OPTIONAL = frozenset({"calls", "calls_provenance"})
+PRED_OPTIONAL = frozenset({"calls", "calls_provenance", "read_observations"})
+READ_KEYS = frozenset({"provenance", "complete", "events"})
+EVENT_KEYS = frozenset({"path", "status"})
+# full: a successful read of the whole file; partial: offset/limit read; truncated: output cut by a limit;
+# failed: attempted but errored; injected / retained: context supplied or kept, not a read call.
+READ_STATUSES = ("full", "partial", "truncated", "failed", "injected", "retained")
 # Native `subagent` tool contract; tests compare these with agent/extensions/subagent/index.ts and dag.ts.
 TIERS = frozenset({"economy", "capable"})
 TIER_CHOICES = frozenset({"economy", "capable", "omitted"})  # omitted: modelTier absent, role default runs
@@ -56,7 +64,7 @@ NATIVE_SCOPES = frozenset({"user", "project", "both"})
 ID_RE = re.compile(r"R[0-9]{2,3}")
 SKILL_RE = re.compile(r"[a-z0-9][a-z0-9/-]*")
 VIOLATION_KINDS = ("route", "role_missing", "role_order", "role_unexpected", "skill_missing", "skill_forbidden",
-                   "order_unobserved", "tier_unobserved", "tier_omitted", "tier_wrong")
+                   "order_unobserved", "tier_unobserved", "tier_omitted", "tier_wrong", "dispatch_unobserved", "dispatch_over")
 
 
 class RoutingEvalError(ValueError):
@@ -169,6 +177,21 @@ def parse_fixture(text):
                     raise RoutingEvalError(f"{cid}.model_tiers: {role!r} must be in roles_required")
                 if not _names(accepted, f"{cid}.model_tiers.{role}", allowed=TIER_CHOICES):
                     raise RoutingEvalError(f"{cid}.model_tiers.{role}: must be non-empty")
+        if "max_dispatches" in exp:
+            limits = exp["max_dispatches"]
+            if not isinstance(limits, dict) or not limits:
+                raise RoutingEvalError(f"{cid}.max_dispatches: expected non-empty object")
+            for role, limit in limits.items():
+                if role not in allowed:
+                    raise RoutingEvalError(f"{cid}.max_dispatches: {role!r} must be in roles_allowed")
+                if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+                    raise RoutingEvalError(f"{cid}.max_dispatches.{role}: expected an integer >= 1, got {limit!r}")
+        if "required_reads" in exp:
+            paths = exp["required_reads"]
+            if not _names(paths, f"{cid}.required_reads", unique=True):
+                raise RoutingEvalError(f"{cid}.required_reads: must be non-empty")
+            for path in paths:
+                _text(path, f"{cid}.required_reads")
     return data
 
 
@@ -293,8 +316,9 @@ def parse_calls(value, where):
     steps and transitive dag dependencies. Array position of tasks/dag entries and call order are
     never precedence.
     """
-    if not isinstance(value, list) or not value:
-        raise RoutingEvalError(f"{where}: expected non-empty list of call objects")
+    # Top-level empty list = complete observation of zero dispatches; nested batch lists stay non-empty.
+    if not isinstance(value, list):
+        raise RoutingEvalError(f"{where}: expected list of call objects")
     dispatches = []
     for n, call in enumerate(value):
         at = f"{where}[{n}]"
@@ -357,6 +381,25 @@ def parse_calls(value, where):
     return dispatches
 
 
+def parse_read_observations(value, where):
+    """Validate one optional read-observation record (diagnostics only; nothing here is a claim of use).
+
+    `complete` is the operator's statement that `events` lists every read attempt of the observed session
+    scope; the evaluator cannot verify it. Paths are matched later by exact string equality.
+    """
+    obs = _obj(value, READ_KEYS, where)
+    _text(obs["provenance"], f"{where}.provenance")
+    _flag(obs["complete"], f"{where}.complete")
+    if not isinstance(obs["events"], list):
+        raise RoutingEvalError(f"{where}.events: expected list")
+    events = []
+    for i, raw in enumerate(obs["events"]):
+        event = _obj(raw, EVENT_KEYS, f"{where}.events[{i}]")
+        events.append({"path": _text(event["path"], f"{where}.events[{i}].path"),
+                       "status": _choice(event["status"], READ_STATUSES, f"{where}.events[{i}].status")})
+    return {"complete": obs["complete"], "events": events}
+
+
 def parse_predictions(text, case_ids):
     lines = text.splitlines()
     if not lines:
@@ -377,6 +420,8 @@ def parse_predictions(text, case_ids):
             "roles": _names(rec["roles"], f"{where}.roles", allowed=ROLES, unique=False),
             "skills": _names(rec["skills"], f"{where}.skills", pattern=SKILL_RE),
             "dispatches": None,
+            "reads": parse_read_observations(rec["read_observations"], f"{where}.read_observations")
+            if "read_observations" in rec else None,
         }
         if ("calls" in rec) != ("calls_provenance" in rec):
             raise RoutingEvalError(f"{where}: calls and calls_provenance must be given together")
@@ -415,6 +460,37 @@ def _call_order(needed, dispatches):
     return None
 
 
+def read_diagnostics(fixture, predictions):
+    """Optional, NON-SCORING diagnostics over provided read observations; never part of accuracy, ok or critical.
+
+    Only observed reads: a full read of a required path is not use or activation. A case with a required-path
+    map is measured only when its observation is declared complete; a missing or incomplete observation is
+    UNKNOWN, never zero. Injected and retained events are context, not reads, and never count as full reads.
+    """
+    statuses = dict.fromkeys(READ_STATUSES, 0)
+    observed = mapped = measured = full = total = zero = 0
+    unknown = []
+    for case in fixture["cases"]:
+        reads, required = predictions[case["id"]]["reads"], case["expect"].get("required_reads")
+        if reads is not None:
+            observed += 1
+            for event in reads["events"]:
+                statuses[event["status"]] += 1
+        if required is None:
+            continue
+        mapped += 1
+        if reads is None or not reads["complete"]:
+            unknown.append(case["id"])
+            continue
+        got = sum(1 for path in required if any(e["path"] == path and e["status"] == "full" for e in reads["events"]))
+        measured, full, total = measured + 1, full + got, total + len(required)
+        zero += 1 if got == 0 else 0
+    return {"observations": observed, "statuses": statuses, "mapped_cases": mapped, "measured_cases": measured,
+            "unknown_cases": unknown, "required_full": full, "required_total": total,
+            "recall": full / total if measured else None, "zero_observed_cases": zero,
+            "zero_rate": zero / measured if measured else None}
+
+
 def evaluate(fixture, predictions):
     results, counts, critical_total = [], dict.fromkeys(VIOLATION_KINDS, 0), 0
     for case in fixture["cases"]:
@@ -451,6 +527,13 @@ def evaluate(fixture, predictions):
                     kind = "tier_omitted" if tier == "omitted" else "tier_wrong"
                     found.append((kind, f"{role} dispatched with modelTier {tier}, expected one of {accepted}"))
                     break
+        for role, limit in exp.get("max_dispatches", {}).items():
+            if pred["dispatches"] is None:
+                found.append(("dispatch_unobserved", f"no recorded native calls to count dispatches of {role}"))
+                continue
+            made = sum(1 for d in pred["dispatches"] if d["agent"] == role)
+            if made > limit:
+                found.append(("dispatch_over", f"{role} dispatched {made} times in recorded calls, at most {limit} expected"))
         # Critical: any miss in a critical case, or any forbidden skill (always critical).
         critical = bool(found) and (case["critical"] or any(k == "skill_forbidden" for k, _ in found))
         for kind, _ in found:
@@ -468,10 +551,24 @@ def evaluate(fixture, predictions):
         "critical_cases": sum(1 for c in cases if c["critical"]),
         "tier_cases": sum(1 for c in cases if "model_tiers" in c["expect"]),
         "tier_observed": sum(1 for c in cases if "model_tiers" in c["expect"] and predictions[c["id"]]["dispatches"] is not None),
+        "dispatch_cases": sum(1 for c in cases if "max_dispatches" in c["expect"]),
+        "dispatch_observed": sum(1 for c in cases if "max_dispatches" in c["expect"] and predictions[c["id"]]["dispatches"] is not None),
+        "read_diagnostics": read_diagnostics(fixture, predictions),
         "violations": counts, "critical_failures": critical_total,
         "mismatches": [r for r in results if not r["matched"]],
         "ok": matched == total and critical_total == 0,
     }
+
+
+def format_read_diagnostics(d):
+    head = "read_diagnostics (non-scoring; observed reads only, NOT skill use or activation): "
+    if not d["observations"] and not d["mapped_cases"]:
+        return head + "none provided"
+    pct = lambda value: "UNKNOWN" if value is None else f"{value:.4f}"
+    return (head + f"observations={d['observations']} required_read_cases={d['mapped_cases']} measured={d['measured_cases']} "
+            f"unknown={len(d['unknown_cases'])} required_full_read_recall={pct(d['recall'])} "
+            f"({d['required_full']}/{d['required_total']}) zero_observed_read_rate={pct(d['zero_rate'])} "
+            + " ".join(f"{k}={v}" for k, v in d["statuses"].items()))
 
 
 def format_report(rep, provenance):
@@ -482,6 +579,8 @@ def format_report(rep, provenance):
         "violations: " + " ".join(f"{k}={v}" for k, v in rep["violations"].items()),
         f"critical_failures: {rep['critical_failures']}",
         f"tier_cases: {rep['tier_cases']} (with calls provided: {rep['tier_observed']})",
+        f"dispatch_cases: {rep['dispatch_cases']} (with calls provided: {rep['dispatch_observed']})",
+        format_read_diagnostics(rep["read_diagnostics"]),
     ]
     for m in rep["mismatches"]:
         tag = " [CRITICAL]" if m["critical_failure"] else ""
@@ -495,17 +594,17 @@ def _self_check_predictions(fixture):
     for c in fixture["cases"]:
         exp = c["expect"]
         calls = None
-        if "model_tiers" in exp:  # synthetic call mirroring the expectation; a chain when order matters
+        if "model_tiers" in exp or "max_dispatches" in exp:  # synthetic call mirroring the expectation; a chain when order matters
             steps = []
             for r in exp["roles_required"]:
                 step = {"agent": r, "task": "synthetic self-check"}
-                tier = exp["model_tiers"].get(r, ["omitted"])[0]
+                tier = exp.get("model_tiers", {}).get(r, ["omitted"])[0]
                 if tier != "omitted":
                     step["modelTier"] = tier
                 steps.append(step)
-            calls = parse_calls([{"chain": steps} if len(steps) > 1 else steps[0]], "self-check")
+            calls = parse_calls([{"chain": steps} if len(steps) > 1 else steps[0]], "self-check") if steps else []
         preds[c["id"]] = {"route": exp["routes"][0], "roles": list(exp["roles_required"]),
-                          "skills": list(exp["skills_required"]), "dispatches": calls}
+                          "skills": list(exp["skills_required"]), "dispatches": calls, "reads": None}
     return preds
 
 

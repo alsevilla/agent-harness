@@ -313,7 +313,7 @@ export function createCooldownStore(options: CooldownStoreOptions): CooldownStor
 		let raw: Buffer;
 		try {
 			const info = await fs.stat(file);
-			if (!info.isFile()) throw new CooldownStoreError("unreadable"); // Bun reads a directory as empty, so check the type first
+			if (!info.isFile()) throw new CooldownStoreError("unreadable"); // a directory must not read as an empty store, so check the type first
 			raw = await fs.readFile(file);
 		} catch (error) {
 			if (error instanceof CooldownStoreError) throw error;

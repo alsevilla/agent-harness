@@ -151,7 +151,7 @@ export class WorkerStore {
     } else if (event.type === "tool_execution_start") {
       const name = oneLine(event.toolName ?? "tool"), args = event.args ?? {};
       const command = toolCommand(name, args);
-      const integration = name.startsWith("serena_") ? "serena" : name.startsWith("graphify_") || /(?:^|[;&|\n])\s*(?:(?:uvx|npx|bunx)\s+|uv\s+run\s+|(?:python3?|py)\s+-m\s+)?(?:[^\s;&|]*[\/\\])?graphify(?:\.(?:exe|cmd|py))?(?=\s|$)/i.test(args.command ?? "") ? "graphify" : undefined;
+      const integration = name.startsWith("serena_") ? "serena" : name.startsWith("graphify_") || /(?:^|[;&|\n])\s*(?:(?:uvx|npx)\s+|uv\s+run\s+|(?:python3?|py)\s+-m\s+)?(?:[^\s;&|]*[\/\\])?graphify(?:\.(?:exe|cmd|py))?(?=\s|$)/i.test(args.command ?? "") ? "graphify" : undefined;
       if (integration) (r.integrations[integration] ??= {calls: 0, returned: 0, errors: 0}).calls++;
       const target = args.path ?? args.relative_path ?? args.file_path ?? "";
       if (name === "read" && /graphify-out[\/\\]/i.test(target)) r.graphReferences++;

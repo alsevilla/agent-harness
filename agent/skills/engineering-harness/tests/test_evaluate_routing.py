@@ -54,8 +54,8 @@ def perfect_predictions(fixture):
     for c in fixture["cases"]:
         e = c["expect"]
         row = {"id": c["id"], "route": e["routes"][0], "roles": e["roles_required"], "skills": e["skills_required"]}
-        if "model_tiers" in e:
-            row["calls"] = calls_for(e["roles_required"], e["model_tiers"])
+        if "model_tiers" in e or "max_dispatches" in e:
+            row["calls"] = calls_for(e["roles_required"], e.get("model_tiers", {}))
             row["calls_provenance"] = "unit-test synthetic capture"
         rows.append(row)
     return rows
@@ -86,11 +86,11 @@ def run_cli(*args):
 
 
 class FixtureSpecimenTests(unittest.TestCase):
-    def test_thirty_two_unique_cases_with_positive_and_near_miss(self):
+    def test_thirty_five_unique_cases_with_positive_and_near_miss(self):
         fx = load_fixture()
         ids = [c["id"] for c in fx["cases"]]
-        self.assertEqual(len(ids), 32)
-        self.assertEqual(len(set(ids)), 32)
+        self.assertEqual(len(ids), 35)
+        self.assertEqual(len(set(ids)), 35)
         kinds = [c["kind"] for c in fx["cases"]]
         self.assertGreaterEqual(kinds.count("near_miss"), 3)
         self.assertGreaterEqual(kinds.count("positive"), 3)
@@ -205,7 +205,7 @@ class EvaluatorTests(unittest.TestCase):
     def test_perfect_predictions_pass(self):
         rep = evaluate_rows(perfect_predictions(load_fixture()))
         self.assertTrue(rep["ok"])
-        self.assertEqual(rep["matched"], 32)
+        self.assertEqual(rep["matched"], 35)
         self.assertEqual(rep["accuracy"], 1.0)
         self.assertEqual(rep["critical_failures"], 0)
 
@@ -239,7 +239,7 @@ class EvaluatorTests(unittest.TestCase):
         fx = load_fixture()
         rows = set_row(perfect_predictions(fx), "R05", route="T1_WORKER", roles=["backend-worker"])
         rep = evaluate_rows(rows, fx)
-        self.assertEqual(rep["matched"], 31)
+        self.assertEqual(rep["matched"], 34)
         self.assertGreater(rep["accuracy"], 0.95)
         self.assertEqual(rep["critical_failures"], 1)
         self.assertFalse(rep["ok"])
@@ -325,7 +325,7 @@ class InputValidationTests(unittest.TestCase):
             ev.parse_predictions(text, self.ids)
 
     def test_good_text_parses(self):
-        self.assertEqual(len(ev.parse_predictions(self.good, self.ids)), 32)
+        self.assertEqual(len(ev.parse_predictions(self.good, self.ids)), 35)
 
     def test_malformed_json_line(self):
         self.assertInvalid(self.good[:-2] + "\n")  # truncated final object
@@ -518,6 +518,7 @@ class ModelTierTests(unittest.TestCase):
         fx = json.loads(CASES.read_text(encoding="utf-8"))
         for c in fx["cases"]:
             c["expect"].pop("model_tiers", None)
+            c["expect"].pop("max_dispatches", None)
         fixture = ev.parse_fixture(json.dumps(fx))
         rows = [{k: r[k] for k in ("id", "route", "roles", "skills")} for r in perfect_predictions(self.fx)]
         self.assertTrue(evaluate_rows(rows, fixture)["ok"])
@@ -1004,6 +1005,7 @@ class CallOrderTests(unittest.TestCase):
         fx = json.loads(CASES.read_text(encoding="utf-8"))
         for c in fx["cases"]:
             c["expect"].pop("model_tiers", None)
+            c["expect"].pop("max_dispatches", None)
         fixture = ev.parse_fixture(json.dumps(fx))
         base = [{k: r[k] for k in ("id", "route", "roles", "skills")} for r in perfect_predictions(self.fx)]
         self.assertTrue(evaluate_rows(base, fixture)["ok"])
@@ -1048,6 +1050,197 @@ class MalformedTierTests(unittest.TestCase):
                 ev.parse_calls([entry()], "calls")
 
 
+class DispatchLimitTests(unittest.TestCase):
+    """max_dispatches counts actual recorded calls (every supported mode); a missing capture is unobserved, never a pass."""
+
+    def setUp(self):
+        self.fx = load_fixture()
+
+    def run_case(self, cid, roles, calls):
+        rows = perfect_predictions(self.fx)
+        row = case_row(rows, cid)
+        row["roles"], row["calls"], row["calls_provenance"] = roles, calls, "unit-test synthetic capture"
+        return evaluate_rows(rows, self.fx)
+
+    def test_near_miss_cases_carry_dispatch_limits(self):
+        c = by_id(self.fx)
+        for cid, role in (("R33", "debugger"), ("R34", "general-worker"), ("R35", "backend-worker")):
+            self.assertEqual(c[cid]["kind"], "near_miss", cid)
+            self.assertEqual(c[cid]["expect"]["max_dispatches"], {role: 1}, cid)
+        self.assertEqual(c["R33"]["expect"]["roles_required"], ["debugger", "backend-worker"])
+
+    def test_within_limit_passes_in_every_call_mode(self):
+        w = {"agent": "general-worker", "task": "t"}
+        for call in (w, {"tasks": [w]}, {"chain": [w]}, {"dag": [{**w, "id": "a"}]}):
+            rep = self.run_case("R34", ["general-worker"], [call])
+            self.assertTrue(rep["ok"], call)
+            self.assertEqual(rep["violations"]["dispatch_over"], 0)
+
+    def test_over_fanout_counts_every_mode_and_separate_calls(self):
+        w = {"agent": "general-worker", "task": "t"}
+        for label, calls in (("tasks", [{"tasks": [w, w]}]), ("chain", [{"chain": [w, w]}]),
+                             ("dag", [{"dag": [{**w, "id": "a"}, {**w, "id": "b"}]}]), ("separate", [w, w])):
+            rep = self.run_case("R34", ["general-worker"] * 2, calls)
+            self.assertEqual(rep["violations"]["dispatch_over"], 1, label)
+            self.assertFalse(rep["ok"], label)
+            self.assertIn("dispatched 2 times", rep["mismatches"][0]["details"][-1], label)
+
+    def test_limit_applies_per_role_not_to_other_allowed_roles(self):
+        dbg = {"agent": "debugger", "task": "t"}
+        wrk = {"agent": "backend-worker", "task": "t"}
+        ok = self.run_case("R33", ["debugger", "backend-worker", "backend-worker"], [{"chain": [dbg, wrk, wrk]}])
+        self.assertEqual(ok["violations"]["dispatch_over"], 0)
+        over = self.run_case("R33", ["debugger", "debugger", "backend-worker"], [{"chain": [dbg, dbg, wrk]}])
+        self.assertEqual(over["violations"]["dispatch_over"], 1)
+
+    def test_counts_do_not_prove_order(self):
+        dbg = {"agent": "debugger", "task": "t"}
+        wrk = {"agent": "backend-worker", "task": "t"}
+        rep = self.run_case("R33", ["debugger", "backend-worker"], [{"tasks": [dbg, wrk]}])
+        self.assertEqual(rep["violations"]["dispatch_over"], 0)
+        self.assertEqual(rep["violations"]["order_unobserved"], 1)
+
+    def test_missing_calls_is_unobserved_not_a_pass(self):
+        rows = perfect_predictions(self.fx)
+        row = case_row(rows, "R35")
+        row.pop("calls")
+        row.pop("calls_provenance")
+        rep = evaluate_rows(rows, self.fx)
+        self.assertEqual(rep["violations"]["dispatch_unobserved"], 1)
+        self.assertEqual(rep["violations"]["dispatch_over"], 0)
+        self.assertFalse(rep["ok"])
+        self.assertEqual((rep["dispatch_cases"], rep["dispatch_observed"]), (3, 2))
+
+    def test_fixture_validation(self):
+        raw = json.loads(CASES.read_text(encoding="utf-8"))
+        case = next(c for c in raw["cases"] if c["id"] == "R35")
+        for bad in ({}, {"backend-worker": 0}, {"backend-worker": True}, {"backend-worker": "1"}, {"backend-worker": 1.5},
+                    {"debugger": 1}, {"nonsense": 1}):
+            mutated = copy.deepcopy(raw)
+            next(c for c in mutated["cases"] if c["id"] == "R35")["expect"]["max_dispatches"] = bad
+            with self.assertRaises(ev.RoutingEvalError, msg=bad):
+                ev.parse_fixture(json.dumps(mutated))
+        self.assertEqual(case["expect"]["max_dispatches"], {"backend-worker": 1})
+
+    def test_old_fixtures_without_limits_are_unchanged(self):
+        raw = json.loads(CASES.read_text(encoding="utf-8"))
+        for c in raw["cases"]:
+            c["expect"].pop("max_dispatches", None)
+        fixture = ev.parse_fixture(json.dumps(raw))
+        rep = evaluate_rows(perfect_predictions(self.fx), fixture)
+        self.assertEqual((rep["dispatch_cases"], rep["ok"]), (0, True))
+
+
+class ReadDiagnosticsTests(unittest.TestCase):
+    """Optional, non-scoring observed-read diagnostics: unknown is never zero and a read is never use."""
+    R01 = "agent/skills/backend/SKILL.md"
+    R21 = "agent/skills/engineering-harness/ship/index.md"
+
+    def setUp(self):
+        self.fx = load_fixture()
+
+    def obs(self, events, complete=True):
+        return {"provenance": "unit-test synthetic trace", "complete": complete,
+                "events": [{"path": p, "status": s} for p, s in events]}
+
+    def run_reads(self, **by_case):
+        rows = perfect_predictions(self.fx)
+        for cid, value in by_case.items():
+            case_row(rows, cid)["read_observations"] = value
+        return evaluate_rows(rows, self.fx)
+
+    def test_fixture_declares_two_required_read_maps_pointing_at_existing_files(self):
+        c = by_id(self.fx)
+        self.assertEqual(c["R01"]["expect"]["required_reads"], [self.R01])
+        self.assertEqual(c["R21"]["expect"]["required_reads"], [self.R21])
+        for path in (self.R01, self.R21):
+            self.assertTrue((SKILLS_DIR.parent.parent / path).is_file(), path)
+
+    def test_no_observation_is_unknown_not_zero(self):
+        d = evaluate_rows(perfect_predictions(self.fx), self.fx)["read_diagnostics"]
+        self.assertEqual((d["mapped_cases"], d["measured_cases"], d["unknown_cases"]), (2, 0, ["R01", "R21"]))
+        self.assertIsNone(d["recall"])
+        self.assertIsNone(d["zero_rate"])
+        self.assertEqual(d["zero_observed_cases"], 0)
+
+    def test_incomplete_observation_is_unknown_not_zero(self):
+        d = self.run_reads(R01=self.obs([], complete=False), R21=self.obs([(self.R21, "full")], complete=False))["read_diagnostics"]
+        self.assertEqual(d["unknown_cases"], ["R01", "R21"])
+        self.assertIsNone(d["zero_rate"])
+        self.assertEqual(d["statuses"]["full"], 1)  # events are still tallied, never turned into a rate
+
+    def test_complete_observations_report_recall_and_zero_rate(self):
+        d = self.run_reads(R01=self.obs([(self.R01, "full")]), R21=self.obs([]))["read_diagnostics"]
+        self.assertEqual((d["measured_cases"], d["required_full"], d["required_total"]), (2, 1, 2))
+        self.assertEqual(d["recall"], 0.5)
+        self.assertEqual((d["zero_observed_cases"], d["zero_rate"]), (1, 0.5))
+        self.assertEqual(d["unknown_cases"], [])
+
+    def test_only_a_full_successful_read_counts_other_statuses_are_distinct(self):
+        events = [(self.R01, s) for s in ("partial", "truncated", "failed", "injected", "retained")]
+        d = self.run_reads(R01=self.obs(events), R21=self.obs([(self.R21, "full")]))["read_diagnostics"]
+        self.assertEqual((d["required_full"], d["required_total"], d["zero_observed_cases"]), (1, 2, 1))
+        for status in ("partial", "truncated", "failed", "injected", "retained"):
+            self.assertEqual(d["statuses"][status], 1, status)
+        self.assertEqual(d["statuses"]["full"], 1)
+
+    def test_paths_match_exactly(self):
+        d = self.run_reads(R01=self.obs([("./" + self.R01, "full"), (self.R01.upper(), "full")]),
+                           R21=self.obs([(self.R21.replace("/", chr(92)), "full")]))["read_diagnostics"]
+        self.assertEqual(d["required_full"], 0)
+
+    def test_diagnostics_never_change_score_ok_or_critical(self):
+        base = evaluate_rows(perfect_predictions(self.fx), self.fx)
+        zero = self.run_reads(R01=self.obs([]), R21=self.obs([]))
+        full = self.run_reads(R01=self.obs([(self.R01, "full")]), R21=self.obs([(self.R21, "full")]))
+        strip = lambda rep: {k: v for k, v in rep.items() if k != "read_diagnostics"}
+        self.assertEqual(strip(base), strip(zero))
+        self.assertEqual(strip(base), strip(full))
+        self.assertTrue(zero["ok"] and full["ok"])
+
+    def test_observation_without_a_required_map_is_tallied_only(self):
+        d = self.run_reads(R03=self.obs([("agent/skills/frontend/SKILL.md", "full")]))["read_diagnostics"]
+        self.assertEqual((d["observations"], d["mapped_cases"], d["statuses"]["full"]), (1, 2, 1))
+        self.assertEqual(d["measured_cases"], 0)
+
+    def test_malformed_observations_fail_closed(self):
+        good = self.obs([(self.R01, "full")])
+        bad = [None, [], {}, {**good, "extra": 1}, {**good, "provenance": " "}, {**good, "complete": "yes"},
+               {**good, "complete": 1}, {**good, "events": {}}, {**good, "events": [{"path": self.R01}]},
+               {**good, "events": [{"path": self.R01, "status": "read"}]},
+               {**good, "events": [{"path": "", "status": "full"}]},
+               {**good, "events": [{"path": self.R01, "status": "full", "n": 1}]}]
+        for value in bad:
+            rows = perfect_predictions(self.fx)
+            case_row(rows, "R01")["read_observations"] = value
+            with self.assertRaises(ev.RoutingEvalError, msg=value):
+                ev.parse_predictions(to_jsonl(rows), {c["id"] for c in self.fx["cases"]})
+
+    def test_required_reads_fixture_validation(self):
+        raw = json.loads(CASES.read_text(encoding="utf-8"))
+        for bad in ([], "x", [""], [1], ["a", "a"]):
+            mutated = copy.deepcopy(raw)
+            next(c for c in mutated["cases"] if c["id"] == "R01")["expect"]["required_reads"] = bad
+            with self.assertRaises(ev.RoutingEvalError, msg=bad):
+                ev.parse_fixture(json.dumps(mutated))
+
+    def test_cli_labels_diagnostics_non_scoring_and_self_check_synthesizes_no_reads(self):
+        sc = run_cli("--cases", str(CASES), "--self-check")
+        self.assertIn("required_full_read_recall=UNKNOWN", sc.stdout)
+        self.assertIn("NOT skill use or activation", sc.stdout)
+        self.assertIn("observations=0", sc.stdout)
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = perfect_predictions(self.fx)
+            case_row(rows, "R01")["read_observations"] = self.obs([(self.R01, "full")])
+            path = Path(tmp) / "pred.jsonl"
+            path.write_text(to_jsonl(rows), encoding="utf-8")
+            r = run_cli("--cases", str(CASES), "--predictions", str(path))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("required_full_read_recall=1.0000 (1/1)", r.stdout)
+        self.assertIn("read_diagnostics (non-scoring", r.stdout)
+        self.assertIn("RESULT: PASS", r.stdout)
+
+
 class CliTests(unittest.TestCase):
     def setUp(self):
         self.fx = load_fixture()
@@ -1066,7 +1259,7 @@ class CliTests(unittest.TestCase):
         p = self.write("pred.jsonl", to_jsonl(perfect_predictions(self.fx)))
         r = run_cli("--cases", str(CASES), "--predictions", p)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("matched: 32/32", r.stdout)
+        self.assertIn("matched: 35/35", r.stdout)
         self.assertIn("RESULT: PASS", r.stdout)
         self.assertIn("does NOT prove runtime skill activation", r.stdout)
 
@@ -1119,7 +1312,7 @@ class CliTests(unittest.TestCase):
         r = run_cli("--cases", str(CASES), "--predictions", str(p))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("sha256=" + hashlib.sha256(raw).hexdigest(), r.stdout)
-        self.assertIn("matched: 32/32", r.stdout)
+        self.assertIn("matched: 35/35", r.stdout)
 
     def test_utf8_bom_and_invalid_utf8_predictions_exit_two(self):
         body = to_jsonl(perfect_predictions(self.fx)).encode("utf-8")
@@ -1145,6 +1338,64 @@ class CliTests(unittest.TestCase):
         self.assertIn("error:", r.stderr)
         self.assertNotIn("Traceback", r.stderr)
         self.assertNotIn("RESULT:", r.stdout)
+
+    def optional_role_fixture(self, cap):
+        # Accepted optional-role shape: general-worker allowed and capped, but not required.
+        raw = json.loads(CASES.read_text(encoding="utf-8"))
+        expect = next(c for c in raw["cases"] if c["id"] == "R34")["expect"]
+        expect["roles_required"] = []
+        expect["max_dispatches"] = {"general-worker": cap}
+        return self.write(f"optional-cap{cap}.json", json.dumps(raw))
+
+    def test_optional_role_cap_one_self_check_exits_zero_without_traceback(self):
+        r = run_cli("--cases", self.optional_role_fixture(1), "--self-check")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("matched: 35/35", r.stdout)
+        self.assertIn("RESULT: PASS", r.stdout)
+
+    def test_optional_role_cap_zero_is_contextual_input_error(self):
+        r = run_cli("--cases", self.optional_role_fixture(0), "--self-check")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("R34.max_dispatches.general-worker: expected an integer >= 1", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_optional_role_predictions_without_calls_stay_unobserved(self):
+        path = self.optional_role_fixture(1)
+        fx = ev.parse_fixture(Path(path).read_text(encoding="utf-8"))
+        rows = perfect_predictions(fx)
+        row = case_row(rows, "R34")
+        row.pop("calls")
+        row.pop("calls_provenance")
+        p = self.write("optional-unobserved.jsonl", to_jsonl(rows))
+        r = run_cli("--cases", path, "--predictions", p)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("no recorded native calls to count dispatches of general-worker", r.stdout)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_optional_role_predictions_with_explicit_zero_calls_pass(self):
+        path = self.optional_role_fixture(1)
+        fx = ev.parse_fixture(Path(path).read_text(encoding="utf-8"))
+        rows = perfect_predictions(fx)
+        row = case_row(rows, "R34")
+        self.assertEqual((row["roles"], row["calls"]), ([], []))
+        p = self.write("optional-zero.jsonl", to_jsonl(rows))
+        r = run_cli("--cases", path, "--predictions", p)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("dispatch_cases: 3 (with calls provided: 3)", r.stdout)
+        self.assertIn("RESULT: PASS", r.stdout)
+
+    def test_optional_role_predictions_over_cap_still_fail(self):
+        path = self.optional_role_fixture(1)
+        fx = ev.parse_fixture(Path(path).read_text(encoding="utf-8"))
+        rows = perfect_predictions(fx)
+        set_row(rows, "R34", roles=["general-worker", "general-worker"],
+                calls=[{"agent": "general-worker", "task": "t"}, {"agent": "general-worker", "task": "t"}])
+        p = self.write("optional-over.jsonl", to_jsonl(rows))
+        r = run_cli("--cases", path, "--predictions", p)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("dispatched 2 times", r.stdout)
+        self.assertNotIn("Traceback", r.stderr)
 
 
 if __name__ == "__main__":
