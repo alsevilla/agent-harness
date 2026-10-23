@@ -2,14 +2,15 @@
 // Select it with COPILOT_NATIVE_OBSERVATIONS_DIR=<dir holding identity.json result.json usage.json stdout.jsonl hooks.jsonl>. Unset: skipped. Set but missing/malformed/different: fails.
 // It re-derives only the finite facts already committed in fixtures/copilot-native-observed.json. It does not establish all-role dispatch, native question/cancellation behavior,
 // role isolation, accepted model/effort/fallback honoring or hard authorization.
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { createHash } from "node:crypto";
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as compat from "../.github/plugin/copilot-compat.mjs";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dirname, "..");
 const FILES = ["identity.json", "result.json", "usage.json", "stdout.jsonl", "hooks.jsonl"] as const;
 const fixture = JSON.parse(readFileSync(join(root, "tests", "fixtures", "copilot-native-observed.json"), "utf8"));
 
@@ -59,7 +60,7 @@ test("replay validator refuses missing, malformed and different observation file
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test.skipIf(dir === undefined)("REPLAY of one retained Copilot CLI 1.0.98 capture re-derives the committed finite facts (no live model)", () => {
+test("REPLAY of one retained Copilot CLI 1.0.98 capture re-derives the committed finite facts (no live model)", { skip: dir === undefined ? "COPILOT_NATIVE_OBSERVATIONS_DIR is unset" : false }, () => {
   const o = replayObservations(dir as string);
   const ns = fixture.pluginNamespace as string;
   // The raw capture agrees with the committed derived calls, call by call (the error tails that list valid types/models are not compared).

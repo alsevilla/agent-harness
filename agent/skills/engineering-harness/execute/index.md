@@ -31,7 +31,7 @@
 
 ## Dispatch and completion checklist
 - Use one implementation worker per candidate; it owns the writes. Add independent Verify/Review or a specialist only for a justified risk under `references/routing.md`, and name that risk in the packet.
-- Packet brief: task, absolute candidate, role scope, authority and mutation boundary, essential restrictions, required checks, scratch/evidence paths. Use canonical references (governing plan, contract, REPORT path) instead of copied history or policy.
+- Packet brief: keep one compact shared brief as one shared artifact referenced by each packet, and send only the role-specific delta. It holds task, absolute candidate, accepted decisions and interfaces, role scope, file ownership, authority and mutation boundary, essential restrictions, required checks, completion criteria and scratch/evidence paths. Use canonical references (governing plan, contract, REPORT path) instead of copied history or policy.
 - Before dispatch and at completion, mark each required check as a result (command, exit code, outcome), NOT RUN with reason, or justified not-applicable with reason. UI focus/browser checks are not universal: require them only when UI is affected or assigned.
 - Reuse earlier evidence only for unchanged tested bytes, the same relevant environment and the same contract; otherwise rerun the affected checks. Details: `references/token-efficiency.md` ("Bounded checklist and evidence reuse", "Compaction batching").
 

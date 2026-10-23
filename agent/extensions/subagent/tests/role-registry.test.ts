@@ -1,6 +1,6 @@
 // Role registry and lifecycle contracts (RED first): the packaged profile registers exactly the 20 generic roles, every definition agrees
 // with the registry, and lifecycle ownership stays explicit. Project-local domain roles are not part of this generic profile.
-import { test } from "bun:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -176,7 +176,7 @@ test("registry contains the approved tier pairs without changing default role fi
 
 // Scenario regression for the written tier policy (routing.md "Explicit Pi model tier"). Fixtures pin what the existing resolver
 // returns for a requested tier on the real package registry; they do not measure whether an orchestrator chooses that tier.
-test("written tier scenarios resolve through the real package registry to the configured model, fallback and thinking", () => {
+test("written tier scenarios resolve through the real package registry to the configured model, fallback and thinking", { timeout: 30000 }, () => {
   const cwd = fs.mkdtempSync(`${os.tmpdir()}/pi-tier-scenarios-`);
   const user = `${cwd}/user`;
   fs.mkdirSync(`${user}/agents`, { recursive: true });
@@ -220,7 +220,7 @@ test("written tier scenarios resolve through the real package registry to the co
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
     fs.rmSync(cwd, { recursive: true, force: true });
   }
-}, 30000);
+});
 
 // Single source: roles.json owns every Pi setting; a canonical definition keeps only identity, native Copilot tools and the body.
 const headerRemoval = JSON.parse(fs.readFileSync(new URL("./fixtures/header-removal-baseline.json", import.meta.url), "utf8")) as {
@@ -605,7 +605,8 @@ const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "
 // Automatic PR delivery: release-engineer Delivery grant paragraph updated (automatic PR edit, separate identity-bound merge/release action grants, no single-use merge/release); pins re-derived from the on-disk profile.
 // These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
 const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
-  "release-engineer": { afterLfSha256: "58ff985572c8c95b79e61074cfbddf8dc738a7316041c9af3a398a857fe2e513", bodySha256: "08f98a19ed65c0f37aa28de6fd501616af25a4c4e8192a11fcb015acb2917eb3", reinsertedLfSha256: "b96a43a8d5ce67ef05d5dc58516007f8728d5b3d171163974d45d045744d2da9" },
+  // Automatic checkout cleanup paragraph added to the release-engineer body (post-merge-cleanup change); pins re-derived from the on-disk profile.
+  "release-engineer": { afterLfSha256: "51f9aca468437df4faaa92127a7f21f28b2dc5b438b6317ce710818bf088bb71", bodySha256: "309e4f8e943b794e8c8c3bacc79cfadf4fa2acd75e268c962a8990e135873f93", reinsertedLfSha256: "02ff9b5cda71dd330c3758323023487c7078a41fbc9fd600ff7c179777dcbef7" },
   // Approved new-body expectation (claudex-loop-adaptation): reviewer gained one untrusted-evidence sentence; historical baselines are not regenerated.
   reviewer: { afterLfSha256: "72f12d474e978845cd392e5ebcdce249f675eb956478d064faf6a35a2bdf5c88", bodySha256: "83b7b9f4d5a894031b06a47eba99b9b6f109870d8cb17c59101d9e36188178a4", reinsertedLfSha256: "703d1b71fdb11e9b4fe7208e48cbb7557d597cdac197b307d3532d08922026da" },
   // Copilot compatibility: host-aware <skills> module root replaces hard-coded ~/.pi paths (tests/copilot-compat-fixes.test.ts); pins re-derived from the on-disk profiles.

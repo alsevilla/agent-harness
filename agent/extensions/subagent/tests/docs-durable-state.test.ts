@@ -1,7 +1,8 @@
 // Doc contract for durable PLAN/resume-state, run-manifest holds, recovery of completed-but-unusable worker results and
 // main-session compaction ref mismatches. Reads committed guidance only (no runtime, no parser, no model). Agent copies are
 // checked directly; the retired pi-package mirror checks were removed with the pi-package layout.
-import { expect, test } from "bun:test";
+import test from "node:test";
+import { expect } from "../../../../tests/support/expect.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";

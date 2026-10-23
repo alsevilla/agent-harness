@@ -6,6 +6,10 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
+	"scripts": {
+		"test": "node scripts/run-node-tests.mjs",
+		"test:list": "node scripts/run-node-tests.mjs --list"
+	},
 	"pi": {
 		"extensions": [
 			"./agent/extensions/subagent/index.ts",

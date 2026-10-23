@@ -1,12 +1,17 @@
 // Pure helper tests: they exercise deterministic normalization/interpretation only. They do not intercept or prove native Copilot dispatch, questions or hooks.
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { join, resolve, isAbsolute } from "node:path";
+import { pathToFileURL } from "node:url";
+import { hostModules } from "../agent/extensions/subagent/tests/host-modules.ts";
 import * as compat from "../.github/plugin/copilot-compat.mjs";
+// Independent YAML parser: the one installed with the Pi host (what Pi's own parseFrontmatter uses).
+const { parse: parseYaml } = await import(pathToFileURL(join(hostModules(["yaml/dist/index.js"]), "yaml", "dist", "index.js")).href);
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dirname, "..");
 const rolesPath = join(root, "agent", "roles.json");
 const roles = JSON.parse(readFileSync(rolesPath, "utf8")) as { name: string; tools: string }[];
 const packet = { candidate: root, task: "t", expectedBehavior: "b", allowedScope: ["src"], prohibitedActions: ["none"] };
@@ -66,18 +71,18 @@ test("a cancelled, missing or malformed native question result is never approval
 });
 
 test("handoff PASS needs real check commands with exit codes and an absolute evidence path", () => {
-  const ok = { ...packet, status: "PASS", checks: [{ command: "bun test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "done", risks: "none" };
+  const ok = { ...packet, status: "PASS", checks: [{ command: "npm test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "done", risks: "none" };
   expect(compat.validateHandoff(ok)).toEqual([]);
   for (const bad of [
     undefined, "done", { ...ok, checks: "done" }, { ...ok, checks: [] }, { ...ok, checks: ["done"] }, { ...ok, checks: [{ command: "done" }] },
-    { ...ok, checks: [{ command: "bun test", exitCode: 1 }] }, { ...ok, checks: [{ command: "", exitCode: 0 }] },
+    { ...ok, checks: [{ command: "npm test", exitCode: 1 }] }, { ...ok, checks: [{ command: "", exitCode: 0 }] },
     { ...ok, evidence: [] }, { ...ok, evidence: ["rel/path"] }, { ...ok, status: "done" },
   ]) expect(compat.validateHandoff(bad as never).length).toBeGreaterThan(0);
-  expect(compat.validateHandoff({ ...ok, status: "FAIL", checks: [{ command: "bun test", exitCode: 1 }], risks: "tests fail" })).toEqual([]);
+  expect(compat.validateHandoff({ ...ok, status: "FAIL", checks: [{ command: "npm test", exitCode: 1 }], risks: "tests fail" })).toEqual([]);
 });
 
 test("handoff needs nonblank next action and risk statement, and dense complete entries (structural only)", () => {
-  const ok = { ...packet, status: "PASS", checks: [{ command: "bun test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
+  const ok = { ...packet, status: "PASS", checks: [{ command: "npm test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
   const { next, ...noNext } = ok; const { risks, ...noRisks } = ok;
   // eslint-disable-next-line no-sparse-arrays
   const sparse = (a: unknown[]) => { const x = new Array(a.length + 1); a.forEach((v, i) => (x[i] = v)); return x; };
@@ -85,7 +90,7 @@ test("handoff needs nonblank next action and risk statement, and dense complete 
     noNext, noRisks, { ...ok, next: "" }, { ...ok, risks: "  " }, { ...ok, next: 1 }, { ...ok, risks: null },
     { ...ok, checks: sparse(ok.checks) }, { ...ok, evidence: sparse(ok.evidence) }, { ...ok, evidence: [resolve(root, "README.md"), 7] },
     { ...ok, evidence: [resolve(root, "README.md"), "  "] }, { ...ok, checks: [...ok.checks, null] }, { ...ok, checks: [{ command: "   ", exitCode: 0 }] },
-    { ...ok, checks: [{ command: "bun test", exitCode: "0" }] }, { ...ok, checks: [{ command: 5, exitCode: 0 }] },
+    { ...ok, checks: [{ command: "npm test", exitCode: "0" }] }, { ...ok, checks: [{ command: 5, exitCode: 0 }] },
   ]) expect(compat.validateHandoff(bad as never).length).toBeGreaterThan(0);
   expect(compat.validateHandoff({ ...ok, next: "main reviews", risks: "none" })).toEqual([]);
 });
@@ -163,12 +168,12 @@ test("deleted references/copilot.md has no dangling pointer in package, README, 
   for (const f of [["agent", "skills", "engineering-harness", "SKILL.md"], [".github", "plugin", "session-start.mjs"], ["README.md"]]) expect(readFileSync(join(root, ...f), "utf8")).not.toMatch(/references\/copilot\.md/);
 });
 
-test("header reader accepts only a conservative plain-string subset, confirmed against Bun YAML", () => {
+test("header reader accepts only a conservative plain-string subset, confirmed against the host YAML parser", () => {
   const h = (d: string) => ["---", "name: scout", `description: ${d}`, "tools: read", "---", "body", ""].join("\n");
   const good = ["A plain one, with (punct).", "Read-only a/b; c, d.", "x1 y2", "Null object", "nope", "e.g. fine", "yes or no questions"];
   for (const g of good) {
     expect(compat.readHeader(h(g)).description).toBe(g);
-    expect((Bun as any).YAML.parse(h(g).split("---")[1]).description).toBe(g);
+    expect(parseYaml(h(g).split("---")[1]).description).toBe(g);
   }
   for (const bad of ["]", "}", ")", "1.", "-1.", "+1.", "1.e2", ".5", "1e3", "0x1F", ".inf", "-.inf", ".nan", "1_0", "1:2", "a'b", 'a"b', "a@b", "a%b", "a#b", "a\tb", "a,]", "d]", "a{b", "a|b", "a>b", "<<", "=", "\u00e9", "NULL", "No", "~"]) {
     expect(() => compat.readHeader(h(bad)), bad).toThrow();
@@ -193,7 +198,7 @@ test("decorated sparse arrays are not dense: refused for inventory and handoff e
   expect(compat.resolveRole("reviewer", inv, "supported").ok).toBe(false);
   const ev: unknown[] = new Array(1); (ev as any).note = "metadata, not a path";
   const checks: unknown[] = new Array(1); (checks as any).note = "m";
-  const ok = { ...packet, status: "PASS", checks: [{ command: "bun test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
+  const ok = { ...packet, status: "PASS", checks: [{ command: "npm test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
   expect(compat.validateHandoff({ ...ok, evidence: ev } as never).length).toBeGreaterThan(0);
   expect(compat.validateHandoff({ ...ok, checks } as never).length).toBeGreaterThan(0);
   const dense = ["reviewer"]; (dense as any).note = "extra non-index property is not a hole";
@@ -300,7 +305,7 @@ test("role preflight keeps native availability separate from non-ready model com
 });
 
 test("handoff needs the full packet: absolute candidate, task, expected behavior, dense nonblank scope lists", () => {
-  const ok = { ...packet, status: "PASS", checks: [{ command: "bun test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
+  const ok = { ...packet, status: "PASS", checks: [{ command: "npm test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
   expect(compat.validateHandoff(ok)).toEqual([]);
   const without = (k: string) => { const c: any = { ...ok }; delete c[k]; return c; };
   for (const k of ["candidate", "task", "expectedBehavior", "allowedScope", "prohibitedActions"]) expect(compat.validateHandoff(without(k)).join("\n"), k).toMatch(new RegExp(k));

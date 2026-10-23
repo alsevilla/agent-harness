@@ -1,5 +1,5 @@
-// Native /subagent create regression (RED first). Bun cannot resolve Pi packages from this directory, so under Bun this file
-// relaunches the same body under the installed Node with registerHooks mapping bare Pi specifiers (roles-editor pattern).
+// Native /subagent create regression (RED first). Host packages are not resolvable from this directory, so this file
+// uses registerHooks to map bare Pi specifiers (roles-editor pattern).
 // Every fixture lives under os.tmpdir() (the caller's TEMP/TMP); the real profile is only read (CLI copied into a synthetic agent dir).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -9,8 +9,6 @@ import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostModules as resolveHostModules } from "./host-modules.ts";
 
-const thisFile = fileURLToPath(import.meta.url);
-const isBun = typeof (process.versions as Record<string, string>).bun === "string";
 const hostModules = resolveHostModules();
 /** Test-only: an explicit Python 3 for the real-CLI test. Bare `python` on Windows is often the Store stub (exit 9009). */
 const TEST_PYTHON_ENV = "SUBAGENT_CREATE_TEST_PYTHON";
@@ -25,17 +23,7 @@ function resolveTestPython(): string | undefined {
 }
 const testPython = resolveTestPython();
 
-if (isBun) {
-	const { test } = await import("bun:test");
-	test("native create suite passes under Node native TypeScript transform", () => {
-		const env = { ...process.env, PYTHONDONTWRITEBYTECODE: "1" };
-		delete env.NODE_TEST_CONTEXT;
-		const run = spawnSync("node", ["--experimental-transform-types", "--test", thisFile], { encoding: "utf8", timeout: 300_000, windowsHide: true, env });
-		assert.equal(run.status, 0, run.stdout + run.stderr);
-	}, 320_000);
-} else {
-	await runNodeSuite();
-}
+await runNodeSuite();
 
 async function runNodeSuite(): Promise<void> {
 	const { test, after } = await import("node:test");

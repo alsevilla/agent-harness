@@ -1,5 +1,5 @@
 // Discovery -> runtime regression for ordered fallback chains.
-// Node-only (registerHooks, native TS): named *.node.ts so Bun auto-discovery skips it; tests/fallback-runtime.test.ts launches it under node --test.
+// Node-only (registerHooks, native TS): *.node.ts files are Node-only runtime suites; tests/fallback-runtime.test.ts launches this one as a child and guards its pass count (the canonical runner does not run it directly).
 // Real agents.ts discovery feeds real index.ts runSingleAgent; only the pi package, child_process and unrelated extension imports are doubled.
 import assert from "node:assert/strict";
 import * as fs from "node:fs";

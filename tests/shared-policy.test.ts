@@ -30,7 +30,7 @@ test('shared policy preserves Pi controls and fails closed only at affected capa
   assert.match(text, /`pi\.\*` and `roles\.json` are pi-only/);
   assert.match(text, /preserve user work, candidate\/worktree boundaries, security and project invariants/);
   assert.match(text, /readiness does not grant commit\/push\/merge\/publish\/deploy\/destructive-operation authority/);
-  const preview = compact(readme.slice(readme.indexOf('## Copilot CLI preview boundary'), readme.indexOf('## What it does')));
+  const preview = compact(readme.slice(readme.indexOf("### Copilot CLI preview boundary"), readme.indexOf("## Installation")));
   assert.match(preview, /all 20 canonical agents and six shared skills/);
   assert.match(preview, /one `backend-worker` read-only delegation/);
   assert.match(preview, /choice\/freeform questions/);

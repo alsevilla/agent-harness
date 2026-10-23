@@ -1,10 +1,11 @@
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { hostModules } from "../agent/extensions/subagent/tests/host-modules.ts";
 
-const root = join(import.meta.dir, "..");
+const root = join(import.meta.dirname, "..");
 
 test("Copilot plugin manifest has supported metadata and contained shared paths", () => {
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
@@ -89,10 +90,12 @@ test("Copilot metadata reuses shared Pi component sources without duplicate adap
 });
 
 const nativeAgents = join(root, "agent", "agents");
+// YAML parser: the one installed with the Pi host (the parser Pi's own parseFrontmatter uses); no repo-local dependency.
+const { parse: parseYaml } = await import(pathToFileURL(join(hostModules(["yaml/dist/index.js"]), "yaml", "dist", "index.js")).href);
 const frontmatter = (text: string) => {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) throw new Error("missing YAML frontmatter");
-  return { metadata: Bun.YAML.parse(match[1]) as Record<string, unknown>, body: text.slice(match[0].length) };
+  return { metadata: parseYaml(match[1]) as Record<string, unknown>, body: text.slice(match[0].length) };
 };
 // NATIVE_PROBE_HOST_MODULES pins an explicit host tree; unset uses the latest complete installed release (hostModules keeps its version-compat failure).
 const sdkFrontmatter = async (text: string) => {

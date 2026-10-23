@@ -1,6 +1,7 @@
 // Regression for the production candidate fingerprint (candidate-fingerprint.ts), the recipe in references/run-manifest.md, over disposable temp repositories.
 // Enforcement by a consumer (opt-in bound delivery grants) is covered by delivery-bound.test.ts.
-import { expect, test } from "bun:test";
+import test from "node:test";
+import { expect } from "../../../../tests/support/expect.ts";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -154,7 +155,7 @@ const canSymlink = (() => {
 	try { fs.symlinkSync("target", path.join(dir, "probe-link")); return true; } catch { return false; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 })();
 
-test.skipIf(!canSymlink)("a symlink is recorded by its link text and never followed (skipped when symlink creation is not permitted)", () => {
+test("a symlink is recorded by its link text and never followed (skipped when symlink creation is not permitted)", { skip: canSymlink ? false : "symlink creation is not permitted" }, () => {
 	const repo = makeRepo("link");
 	try {
 		fs.symlinkSync("f.txt", path.join(repo, "ln"));

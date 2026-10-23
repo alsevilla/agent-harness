@@ -40,10 +40,13 @@ PRED_OPTIONAL = frozenset({"calls", "calls_provenance"})
 TIERS = frozenset({"economy", "capable"})
 TIER_CHOICES = frozenset({"economy", "capable", "omitted"})  # omitted: modelTier absent, role default runs
 SLOTS = frozenset({"fallback"})  # optional per-entry modelSlot; requires an explicit modelTier
-NATIVE_ENTRY_KEYS = frozenset({"agent", "task", "cwd", "readOnly", "modelTier", "modelSlot"})
+NATIVE_ENTRY_KEYS = frozenset({"agent", "task", "cwd", "readOnly", "modelTier", "modelSlot", "prBase"})
 NATIVE_DAG_KEYS = NATIVE_ENTRY_KEYS | {"id", "dependsOn"}
 NATIVE_ROOT_KEYS = frozenset({"background", "modelTier", "modelSlot", "agent", "task", "tasks", "chain", "agentScope", "dag",
-                              "readOnly", "confirmProjectAgents", "cwd"})
+                              "readOnly", "confirmProjectAgents", "cwd", "prBase", "cleanup"})
+NATIVE_CLEANUP_KEYS = frozenset({"checkout", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent"})  # CLEANUP schema / CLEANUP_REQUEST_KEYS
+NATIVE_CLEANUP_ROLE = "release-engineer"  # the only role whose single-mode launch accepts `cleanup` (LEASE_ROLE)
+NATIVE_SHA = re.compile(r"[0-9a-f]{40}")  # BARE_SHA, used with fullmatch
 BATCH_MODES = ("tasks", "chain", "dag")
 NATIVE_MAX_TASKS = 8  # MAX_PARALLEL_TASKS in index.ts; the native chain schema has no item limit
 NATIVE_MAX_DAG_NODES = 8  # DAG_NODE_LIMIT in dag.ts and the dag schema maxItems
@@ -194,6 +197,26 @@ def _flag(value, where):
     return value
 
 
+def _cleanup(call, at):
+    """Shape of the root `cleanup` request as the runtime mints it (offline: no live PR, git or authorization claim is made)."""
+    where = f"{at}.cleanup"
+    value = _obj(call["cleanup"], NATIVE_CLEANUP_KEYS, where)
+    for key in ("checkout", "branch", "base"):
+        _text(value[key], f"{where}.{key}")
+    pr = value["pr"]
+    if isinstance(pr, bool) or not isinstance(pr, int) or not 1 <= pr <= 999999999:
+        raise RoutingEvalError(f"{where}.pr: expected a positive integer PR number")
+    for key in ("headSha", "mergeCommit"):
+        if not isinstance(value[key], str) or not NATIVE_SHA.fullmatch(value[key]):
+            raise RoutingEvalError(f"{where}.{key}: expected a 40-hex lowercase commit id")
+    if value["quiescent"] is not True:
+        raise RoutingEvalError(f"{where}.quiescent: main must declare the checkout quiescent (true)")
+    if call.get("agent") != NATIVE_CLEANUP_ROLE:
+        raise RoutingEvalError(f"{at}.cleanup: only a single-mode launch of {NATIVE_CLEANUP_ROLE} accepts it")
+    if "cwd" not in call or "prBase" in call or call.get("readOnly") is True:
+        raise RoutingEvalError(f"{at}.cleanup: needs cwd (the primary checkout), no prBase and not readOnly")
+
+
 def _entry(item, keys, where, dag):
     """Validate one tasks/chain/dag entry like the native TypeBox schema and dag validator."""
     required = {"agent", "task", "id"} if dag else {"agent", "task"}
@@ -205,6 +228,8 @@ def _entry(item, keys, where, dag):
         _flag(entry["readOnly"], f"{where}.readOnly")
     tier = _tier(entry["modelTier"], where) if "modelTier" in entry else None
     _slot(entry, where)
+    if "prBase" in entry:
+        _text(entry["prBase"], f"{where}.prBase")  # shape only; branch syntax and live-branch checks stay runtime (checkPrBase)
     return {"agent": _choice(entry["agent"], ROLES, f"{where}.agent"), "tier": tier}
 
 
@@ -291,7 +316,7 @@ def parse_calls(value, where):
         base = len(dispatches)
         if batch:
             mode = batch[0]
-            for key in ("modelTier", "modelSlot", "agent", "task"):
+            for key in ("modelTier", "modelSlot", "agent", "task", "prBase", "cleanup"):
                 if key in call:
                     raise RoutingEvalError(f"{at}.{key}: single-mode field; batch modes set it per entry")
             for key in ("cwd", "readOnly"):
@@ -321,6 +346,10 @@ def parse_calls(value, where):
             _text(call["task"], f"{at}.task")
             tier = _tier(call["modelTier"], at) if "modelTier" in call else None
             _slot(call, at)
+            if "prBase" in call:
+                _text(call["prBase"], f"{at}.prBase")
+            if "cleanup" in call:
+                _cleanup(call, at)
             dispatches.append({"agent": _choice(call["agent"], ROLES, f"{at}.agent"), "tier": tier, "before": frozenset()})
         if call.get("agentScope") == "project" and any(d["tier"] is not None for d in dispatches[base:]):
             raise RoutingEvalError(f"{at}.agentScope: project scope cannot take an explicit modelTier; "

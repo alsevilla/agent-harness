@@ -1,19 +1,25 @@
-import { afterAll, mock, test } from "bun:test";
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
+import { after, test } from "node:test";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 let agentDir = fileURLToPath(new URL("../../../", import.meta.url));
-mock.module("@earendil-works/pi-coding-agent", () => ({
-  getAgentDir: () => agentDir,
-}));
+// Node equivalent of the former module mock: resolve the Pi package to a data: module exposing only getAgentDir.
+(globalThis as any).__piTestAgentDir = () => agentDir;
+registerHooks({
+  resolve(specifier: string, context: object, nextResolve: (s: string, c: object) => { url: string }) {
+    if (specifier === "@earendil-works/pi-coding-agent") return { url: "data:text/javascript," + encodeURIComponent("export const getAgentDir = () => globalThis.__piTestAgentDir();"), shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+} as never);
 const { assembleChildSystemPrompt, candidateNavigationGuidance, configureCodeIntegrations, CORE_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
 // Controlled fixtures: a nonexistent global graph directory (no host ~/.graphify read), and git checkouts under a temp root removed at the end.
 const EMPTY_GLOBAL = join(tmpdir(), "code-integrations-no-global-graph");
 const fixtureRoot = fs.mkdtempSync(join(tmpdir(), "code-integrations-cwd-"));
-afterAll(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 function repoAt(name: string): string {
   const dir = join(fixtureRoot, name);
   fs.mkdirSync(join(dir, ".git"), { recursive: true });

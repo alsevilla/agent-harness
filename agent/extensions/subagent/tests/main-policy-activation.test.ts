@@ -3,7 +3,8 @@
 // compact policy as one engineering_policy section with the absolute installed SKILL.md path, no replay across turns, no
 // profile/cwd policy source, and no duplicate when the profile already carries the policy verbatim. Offline capture provider;
 // fixtures live under os.tmpdir(); the real profile and global settings are never read or written.
-import { expect, test } from "bun:test";
+import test from "node:test";
+import { expect } from "../../../../tests/support/expect.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -130,7 +131,7 @@ async function turn(session: any, requests: string[], text: string) {
 	const piRoot = path.join(HOST_MODULES, "@earendil-works");
 	const pi: any = await import(pathToFileURL(path.join(piRoot, "pi-coding-agent", "dist", "index.js")).href);
 	const ai: any = await import(pathToFileURL(path.join(piRoot, "pi-ai", "dist", "index.js")).href);
-	const t = (name: string, body: () => Promise<void>) => test(`[${HOST_VERSION}] ${name}`, body, 60_000);
+	const t = (name: string, body: () => Promise<void>) => test(`[${HOST_VERSION}] ${name}`, { timeout: 60_000 }, body);
 
 	t("a native install gives the first request the installed policy once, with the absolute SKILL.md path", async () => {
 		const requests: string[] = [];

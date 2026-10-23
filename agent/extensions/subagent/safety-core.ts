@@ -6,7 +6,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertExcludeUntracked, candidateFingerprint, validateExclude } from "./candidate-fingerprint.ts";
+import { assertExcludeUntracked, candidateFingerprint, git as hardenedGit, preflight as checkoutPreflight, assertNoRepoFsmonitor, validateExclude } from "./candidate-fingerprint.ts";
+import { overlaps, type OwnerTracker } from "./cleanup-state.ts";
 
 export type RiskRule =
 	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
@@ -548,6 +549,13 @@ export interface GrantStore {
 	summary(now: number): { count: number; main: number; roleBound: number; shell: number; write: number; read: number; nextExpiry?: number };
 	listLeases(): PushLease[];
 	listDelivery(): DeliveryGrant[];
+	addCleanupGrant(grant: CleanupGrant): void;
+	peekCleanup(id: string): CleanupGrant | undefined;
+	claimCleanup(id: string): CleanupGrant | undefined;
+	importCleanup(incoming: CleanupGrant[]): void;
+	findCleanup(candidate: string): CleanupGrant | undefined;
+	takeCleanup(id: string): boolean;
+	cleanupCount(): number;
 }
 
 function validateRecord(value: unknown): GrantRecord {
@@ -561,12 +569,53 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 	let records: GrantRecord[] = [];
 	let leases: PushLease[] = [];
 	let delivery: DeliveryGrant[] = [];
+	let cleanup: CleanupGrant[] = [];
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
+		cleanup = cleanup.filter((c) => t - c.issuedAt <= CLEANUP_TTL_MS);
 		return t;
 	};
 	return {
+		// Cleanup scopes are single-use and short-lived: revoked by abort and by shutdown, expired after CLEANUP_TTL_MS, claimed by one launch or consumed by one guard allow.
+		addCleanupGrant(grant) {
+			live();
+			const next = normalizeCleanup(grant);
+			cleanup = cleanup.filter((c) => normPath(c.candidate) !== normPath(next.candidate));
+			if (cleanup.length >= MAX_CLEANUP_GRANTS) throw new RangeError(`at most ${MAX_CLEANUP_GRANTS} pending cleanup scopes`);
+			cleanup.push(next);
+		},
+		peekCleanup(id) {
+			live();
+			const found = cleanup.find((c) => c.id === id);
+			return found ? { ...found } : undefined;
+		},
+		claimCleanup(id) {
+			live();
+			const index = cleanup.findIndex((c) => c.id === id);
+			return index < 0 ? undefined : cleanup.splice(index, 1)[0];
+		},
+		importCleanup(incoming) {
+			const valid = incoming.map(normalizeCleanup);
+			if (valid.length > MAX_CLEANUP_GRANTS) throw new RangeError("too many cleanup scopes");
+			cleanup.push(...valid);
+		},
+		findCleanup(candidate) {
+			live();
+			const found = cleanup.find((c) => normPath(c.candidate) === normPath(candidate));
+			return found ? { ...found } : undefined;
+		},
+		takeCleanup(id) {
+			live();
+			const index = cleanup.findIndex((c) => c.id === id);
+			if (index < 0) return false;
+			cleanup.splice(index, 1);
+			return true;
+		},
+		cleanupCount() {
+			live();
+			return cleanup.length;
+		},
 		mint({ role, candidate, ops, ttlMs = GRANT_TTL_DEFAULT_MS }) {
 			if (!Array.isArray(ops) || ops.length < 1 || ops.length > MAX_GRANT_OPS) throw new RangeError(`a batch carries 1 to ${MAX_GRANT_OPS} operations`);
 			if (!(ttlMs > 0 && ttlMs <= GRANT_TTL_MAX_MS)) throw new RangeError("ttl must be above 0 and at most 60 minutes");
@@ -596,6 +645,7 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		},
 		revokeAll(includeLeases = false) {
 			records = [];
+			cleanup = [];
 			if (includeLeases) {
 				leases = [];
 				delivery = [];
@@ -707,10 +757,10 @@ export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
 // Push target of the trusted release-engineer launch. `base` is the optional parent-supplied PR base: when present, PR create/edit must match it exactly; when absent the legacy syntactic-only base check applies.
 export interface PushTarget { candidate: string; pushUrl: string; branch: string; base?: string }
 
-export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: PushTarget): string {
+export function serializeGrants(records: GrantRecord[], leases: PushLease[] = [], delivery: DeliveryGrant[] = [], gateCommits = false, pushTarget?: PushTarget, cleanup: CleanupGrant[] = []): string {
 	// A known PR base travels under its own key (pushTargetBound), never inside pushTarget: a loader that predates it ignores the unknown key and sees no push target (every automatic PR/push path stays blocked) instead of rebuilding a legacy target that drops the base.
 	// Action grants (merge/release) travel under their own key: an older loader ignores unknown keys and so sees no grant, never a broader one. The legacy delivery/deliveryBound keys are never written.
-	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { deliveryActions: delivery } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? (pushTarget.base !== undefined ? { pushTargetBound: pushTarget } : { pushTarget }) : {}) });
+	return JSON.stringify({ v: 1, grants: records, ...(leases.length ? { leases } : {}), ...(delivery.length ? { deliveryActions: delivery } : {}), ...(cleanup.length ? { cleanupActions: cleanup } : {}), ...(gateCommits ? { gateCommits: true } : {}), ...(pushTarget ? (pushTarget.base !== undefined ? { pushTargetBound: pushTarget } : { pushTarget }) : {}) });
 }
 
 export function loadChildGrants(text: string): GrantRecord[] {
@@ -867,6 +917,7 @@ export function authorizationStatus(store: GrantStore, now: number): string {
 	const leases = store.listLeases();
 	lines.push(leases.length ? `push leases: ${leases.length} (session only, no expiry)` : "push leases: none");
 	for (const lease of leases) lines.push(`- ${lease.commits ? "push+commit" : "push"}: repo ${repoLabel(lease.pushUrl)}, branch ${lease.branch}, candidate ${lease.candidate}, artifact dir ${lease.artifactDir ?? "none"}, ${validityOf(lease.candidate, lease.branch, lease.pushUrl)}`);
+	if (store.cleanupCount()) lines.push(`cleanup scopes: ${store.cleanupCount()} (single-use, 10 min, checkout removal only; artifacts are never covered)`);
 	const deliveries = store.listDelivery();
 	lines.push(deliveries.length ? `merge/release grants: ${deliveries.length} (approved scope, session only)` : "merge/release grants: none");
 	for (const d of deliveries) lines.push(`- ${d.action}: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr}, SHA ${d.sha.slice(0, 7)}${d.action === "release" ? `, version ${d.version}, latest ${d.latest ? "yes" : "no"}` : ""}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}${d.bound ? `, fp ${d.bound.fingerprint.slice(0, 12)}, excl ${d.bound.exclude.length} (not rechecked in status)` : ""}`);
@@ -958,7 +1009,7 @@ export type DeliveryAction = "merge" | "release";
 export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; action: DeliveryAction; pr: number; sha: string; version?: string; latest?: boolean; artifactDir?: string; bound?: BoundState }
 export interface DeliveryGrant extends DeliveryBinding { issuedAt: number }
 // Live readers, injectable for offline tests. Production uses the real git/gh calls below.
-export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number }
+export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number; now?(): number }
 
 // A record whose artifact directory vanished stays stored but is not copied to a child (the envelope would otherwise fail closed as a whole).
 function artifactStillLive(d: DeliveryGrant): boolean {
@@ -1328,11 +1379,228 @@ function deliveryAllows(store: GrantStore, decision: Extract<Decision, { action:
 	return false;
 }
 
+// ---- Post-merge CHECKOUT cleanup (narrow): exactly `git worktree remove "<abs path>"` for one merged, clean, task-owned checkout, run by a main-launched release-engineer in the primary checkout, outside the target.
+// Main's request is only a selector plus a quiescence declaration: the scope is minted after independent live checks and every check runs again before the guard allows the one command. Artifact folders (_scratch/_evidence) are never covered: they are reported RETAINED.
+export const CLEANUP_TTL_MS = 10 * 60_000;
+const MAX_CLEANUP_GRANTS = 4;
+const CLEANUP_WALK_MAX = 20_000;
+const TASK_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const CLEANUP_KEYS = "base,branch,candidate,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role";
+const CLEANUP_REQUEST_KEYS = "base,branch,checkout,headSha,mergeCommit,pr,quiescent";
+const PR_CLEANUP_FIELDS = "number,state,baseRefName,headRefName,headRefOid,isCrossRepository,mergeCommit";
+export interface CleanupGrant { id: string; role: string; candidate: string; primary: string; pushUrl: string; repo: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string; issuedAt: number }
+
+const slashed = (p: string) => p.replace(/\\/g, "/");
+
+// Exactly <parent of primary>/worktrees/<basename of primary>/<task>: ASCII forward-slash, no dot segments, 8.3 aliases or underscore-led names (those are the artifact folders).
+function cleanupPlacement(candidate: unknown, primary: unknown): boolean {
+	const ok = (p: unknown): p is string => typeof p === "string" && p.length <= 240 && PATH_ARG.test(p) && !badSegments(p) && !p.split("/").some((s) => /~\d/.test(s));
+	if (!ok(candidate) || !ok(primary)) return false;
+	const cut = primary.lastIndexOf("/");
+	if (cut <= 0) return false;
+	const prefix = `${primary.slice(0, cut)}/worktrees/${primary.slice(cut + 1)}/`;
+	if (!normPath(candidate).startsWith(normPath(prefix))) return false;
+	const task = candidate.slice(prefix.length);
+	return TASK_SEGMENT.test(task) && !/[. ]$/.test(task);
+}
+
+function normalizeCleanup(input: unknown): CleanupGrant {
+	const v = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+	if (Object.keys(v).sort().join() !== CLEANUP_KEYS) throw new TypeError("invalid cleanup scope");
+	if (v.role !== LEASE_ROLE || typeof v.id !== "string" || !/^[0-9a-f-]{36}$/.test(v.id) || !cleanupPlacement(v.candidate, v.primary)) throw new TypeError("invalid cleanup scope");
+	assertPushUrl(v.pushUrl as string);
+	const repo = parseRepoFromPushUrl(v.pushUrl);
+	const branch = validatePushBranch(v.branch as string);
+	if (repo === undefined || v.repo !== repo || !baseBranchOk(v.base) || v.base === branch) throw new TypeError("invalid cleanup scope");
+	if (typeof v.pr !== "number" || !Number.isSafeInteger(v.pr) || v.pr < 1 || v.pr > 999999999) throw new TypeError("invalid cleanup scope");
+	if (typeof v.headSha !== "string" || !BARE_SHA.test(v.headSha) || typeof v.mergeCommit !== "string" || !BARE_SHA.test(v.mergeCommit) || typeof v.issuedAt !== "number" || !Number.isFinite(v.issuedAt)) throw new TypeError("invalid cleanup scope");
+	return { id: v.id, role: LEASE_ROLE, candidate: v.candidate as string, primary: v.primary as string, pushUrl: v.pushUrl as string, repo, branch, base: v.base, pr: v.pr, headSha: v.headSha, mergeCommit: v.mergeCommit, issuedAt: v.issuedAt };
+}
+
+// Absent key grants nothing; a present but malformed one fails the whole envelope closed.
+export function loadChildCleanup(text: string): CleanupGrant[] {
+	const parsed = JSON.parse(text) as { v?: number; cleanupActions?: unknown };
+	if (!parsed || parsed.v !== 1) throw new TypeError("invalid grant envelope");
+	if (parsed.cleanupActions === undefined) return [];
+	if (!Array.isArray(parsed.cleanupActions) || parsed.cleanupActions.length > MAX_CLEANUP_GRANTS) throw new TypeError("invalid cleanup list");
+	return parsed.cleanupActions.map(normalizeCleanup);
+}
+
+// Exact whole-command form: git worktree remove "<absolute forward-slash path>". No flags, no -C, no second path, no operators.
+export function parseCleanupCommand(command: string): string | undefined {
+	const t = tokenizeDelivery(command);
+	if (!t || t.length !== 4 || t.slice(0, 3).some((tok, i) => tok.quoted !== "" || tok.text !== ["git", "worktree", "remove"][i])) return undefined;
+	const p = t[3];
+	return p.quoted === '"' && p.text.length <= 240 && PATH_ARG.test(p.text) && !badSegments(p.text) ? p.text : undefined;
+}
+
+// The primary checkout a linked worktree belongs to: the parent of its git common dir (which must be named .git). Undefined when it cannot be proven.
+function primaryOf(candidate: string): string | undefined {
+	const common = gitRead(candidate, ["rev-parse", "--git-common-dir"]);
+	if (common?.length !== 1) return undefined;
+	const dir = canonicalCwd(path.resolve(candidate, common[0]));
+	return path.basename(dir).toLowerCase() === ".git" ? slashed(path.dirname(dir)) : undefined;
+}
+
+function walkCheckout(root: string): string | undefined {
+	let seen = 0;
+	const stack = [root];
+	while (stack.length) {
+		const dir = stack.pop()!;
+		for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (dir === root && e.name === ".git") continue;
+			if (++seen > CLEANUP_WALK_MAX) return "checkout is too large to verify";
+			const full = path.join(dir, e.name);
+			if (e.isSymbolicLink()) return "checkout contains a link";
+			if (e.name === ".git" || (dir === root && e.name === ".gitmodules")) return "checkout contains a nested repository or submodule";
+			if (e.isDirectory()) stack.push(full);
+			else if (!e.isFile() || fs.lstatSync(full).nlink !== 1) return "checkout contains a hard link or special file";
+		}
+	}
+	return undefined;
+}
+
+// Independent live proof for one cleanup scope; mint and guard both call it. Returns a fixed refusal reason, or undefined when the checkout is exactly the merged, clean, unlinked, unlocked task checkout. Any read problem refuses.
+export function verifyCleanup(g: CleanupGrant, live: DeliveryLive = defaultDeliveryLive(livePushUrl)): string | undefined {
+	try {
+		if (redirectedGitEnvironment()) return "git environment is redirected";
+		const env = live.env();
+		if (env.GH_HOST !== undefined || env.GH_REPO !== undefined) return "gh environment is redirected";
+		// Slow independent PR read FIRST (grant fields only): every local proof below runs after it, so nothing validated can go stale during the subprocess. The guard-to-shell window remains (not atomic).
+		const pr = live.ghJson(["pr", "view", String(g.pr), "--repo", g.repo, "--json", PR_CLEANUP_FIELDS]) as Record<string, any> | undefined;
+		if (!pr || typeof pr !== "object" || Array.isArray(pr)) return "the PR could not be read";
+		if (pr.number !== g.pr || pr.state !== "MERGED" || pr.isCrossRepository !== false || pr.headRefName !== g.branch || pr.baseRefName !== g.base) return "the PR is not merged from this same-repo branch and base";
+		if (pr.headRefOid !== g.headSha || pr.mergeCommit?.oid !== g.mergeCommit) return "the PR head or merge commit differs from the approved ones";
+		const { candidate, primary } = g;
+		if (!cleanupPlacement(candidate, primary)) return "checkout is not exactly worktrees/<repo>/<task> of the primary checkout";
+		for (const p of [candidate, primary]) {
+			const st = fs.lstatSync(p);
+			if (!st.isDirectory() || st.isSymbolicLink()) return "path is not a plain directory";
+			if (normPath(fs.realpathSync.native(p)) !== normPath(p)) return "path is an alias or link";
+		}
+		if (!fs.lstatSync(path.join(candidate, ".git")).isFile() || !fs.lstatSync(path.join(primary, ".git")).isDirectory()) return "checkout is not a linked worktree of the primary";
+		const top = gitRead(candidate, ["rev-parse", "--show-toplevel"]);
+		if (top?.length !== 1 || normPath(canonicalCwd(top[0])) !== normPath(candidate)) return "not the repository root of the checkout";
+		if (primaryOf(candidate) === undefined || normPath(primaryOf(candidate)!) !== normPath(primary)) return "checkout does not belong to the primary checkout";
+		const ref = gitRead(candidate, ["symbolic-ref", "-q", "HEAD"]);
+		if (ref?.length !== 1 || ref[0] !== `refs/heads/${g.branch}`) return "HEAD is not attached to the approved branch";
+		const head = gitRead(candidate, ["rev-parse", "HEAD"]);
+		if (head?.length !== 1 || head[0] !== g.headSha) return "checkout HEAD differs from the approved PR head";
+		if (live.pushUrl(candidate, g.branch) !== g.pushUrl || parseRepoFromPushUrl(g.pushUrl) !== g.repo) return "origin binding differs from the approved one";
+		// Removal runs with cwd = primary: a primary-only local/worktree/conditional-include fsmonitor would execute and the target preflight below cannot see it. Config query only; no status or walk of unrelated primary state.
+		try { assertNoRepoFsmonitor(primary); } catch { return "primary checkout fsmonitor configuration is not provable or would run a program during removal"; }
+		const list = gitRead(primary, ["worktree", "list", "--porcelain"]);
+		if (!list) return "registrations could not be read";
+		const entries: { path: string; flags: Set<string>; branch?: string }[] = [];
+		for (const line of list) {
+			if (line.startsWith("worktree ")) entries.push({ path: line.slice(9), flags: new Set() });
+			else if (entries.length && line.startsWith("branch ")) entries[entries.length - 1].branch = line.slice(7);
+			else if (entries.length) entries[entries.length - 1].flags.add(line.split(" ")[0]);
+		}
+		const self = entries.filter((e) => normPath(e.path) === normPath(candidate));
+		if (self.length !== 1 || ["locked", "prunable", "detached", "bare"].some((f) => self[0].flags.has(f)) || self[0].branch !== `refs/heads/${g.branch}`) return "registration is missing, locked, prunable or detached";
+		if (entries.some((e) => e !== self[0] && overlaps(e.path, candidate) && normPath(e.path) !== normPath(primary))) return "nested or overlapping registered checkout";
+		// Hardened local proof, shared with delivery fingerprints: refuses candidate-controlled programs (filters), hidden/skipped/sparse index states, gitlinks and linked directories BEFORE any Git command reads the working tree. fsmonitor is disabled inside the helper.
+		try { checkoutPreflight(candidate); } catch { return "checkout state is not provable (filters, hidden or sparse index entries, submodules or links)"; }
+		const walked = walkCheckout(candidate);
+		if (walked) return walked;
+		let status: string[];
+		try { status = hardenedGit(candidate, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--ignore-submodules=none"]).toString("utf8").split(" ").filter(Boolean); } catch { return "git status could not be read"; }
+		if (status.some((line) => line.startsWith("!!"))) return "ignored content is retained: unknown ignored data is never assumed disposable";
+		if (status.length) return "tracked or untracked changes are present";
+		return undefined;
+	} catch {
+		return "live state could not be read";
+	}
+}
+
+export interface CleanupDeps { store: GrantStore; owners: OwnerTracker; live?: DeliveryLive; primary: string; mainCwd: string; jobRunning(jobId: string): boolean }
+
+// Main-side mint, called from the subagent launch. The request is a selector and a quiescence declaration, never proof: ownership comes from the runtime tracker, everything else from live git and gh.
+export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true; grant: CleanupGrant } | { ok: false; reason: string } {
+	const refuse = (reason: string) => ({ ok: false as const, reason });
+	const live = deps.live ?? defaultDeliveryLive(livePushUrl);
+	try {
+		const r = (request && typeof request === "object" && !Array.isArray(request) ? request : {}) as Record<string, unknown>;
+		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent");
+		if (r.quiescent !== true) return refuse("main must declare the checkout quiescent (quiescent: true)");
+		if (typeof r.checkout !== "string" || !cleanupPlacement(r.checkout, slashed(canonicalCwd(deps.primary)))) return refuse("checkout is not exactly worktrees/<repo>/<task> of the launch primary");
+		const candidate = slashed(canonicalCwd(r.checkout));
+		if (normPath(candidate) !== normPath(r.checkout)) return refuse("checkout path is not canonical");
+		const primary = primaryOf(candidate);
+		if (primary === undefined || normPath(primary) !== normPath(slashed(canonicalCwd(deps.primary)))) return refuse("the launch folder is not the primary checkout of this checkout");
+		const main = slashed(canonicalCwd(deps.mainCwd));
+		if (normPath(main) === normPath(candidate) || normPath(main).startsWith(`${normPath(candidate)}/`)) return refuse("the main session runs inside the target");
+		const branch = validatePushBranch(r.branch as string);
+		const pushUrl = live.pushUrl(candidate, branch);
+		if (pushUrl === undefined) return refuse("the checkout has no verifiable origin binding");
+		const grant = normalizeCleanup({ id: randomUUID(), role: LEASE_ROLE, candidate, primary, pushUrl, repo: parseRepoFromPushUrl(pushUrl), branch, base: r.base, pr: r.pr, headSha: r.headSha, mergeCommit: r.mergeCommit, issuedAt: live.now?.() ?? Date.now() });
+		if (deps.owners.reserved(candidate)) return refuse("a cleanup for this checkout is already pending");
+		const owner = deps.owners.check(candidate, deps.jobRunning);
+		if (owner) return refuse(owner);
+		const why = verifyCleanup(grant, live);
+		if (why) return refuse(why);
+		deps.store.addCleanupGrant(grant);
+		return { ok: true, grant };
+	} catch (error) {
+		return refuse(error instanceof RangeError || error instanceof TypeError ? `cleanup request is invalid: ${error.message}` : "live state could not be read");
+	}
+}
+
+// Child guard: exact form, only GIT_DESTRUCTIVE, cwd is the primary and outside the target, scope present and fresh, live proof holds. Consumes the scope on allow, so a second attempt (replay) is denied.
+function cleanupAllows(store: GrantStore, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive): boolean {
+	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_DESTRUCTIVE") return false;
+	const target = parseCleanupCommand(decision.op.command);
+	if (!target) return false;
+	try {
+		const grant = store.findCleanup(target);
+		if (!grant || (live.now?.() ?? Date.now()) - grant.issuedAt > CLEANUP_TTL_MS) return false;
+		if (normPath(decision.op.cwd) !== normPath(grant.primary) || overlaps(decision.op.cwd, grant.candidate)) return false;
+		if (verifyCleanup(grant, live) !== undefined) return false;
+		return store.takeCleanup(grant.id);
+	} catch {
+		return false;
+	}
+}
+
+export interface CleanupPendingEntry { state: "READY" | "RETAINED"; checkout: string; reason?: string; launchCwd?: string; request?: { checkout: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string }; retainedArtifacts: { path: string; exists: boolean; reason: string }[] }
+
+// Pending state grounded in runtime facts only: a merge delivery grant this session issued, the live PR (MERGED), terminal owners and the live checkout. Child prose is never read. READY still needs main's own quiescence declaration at launch.
+export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunning: (jobId: string) => boolean, live: DeliveryLive = defaultDeliveryLive(livePushUrl)): CleanupPendingEntry[] {
+	const out: CleanupPendingEntry[] = [];
+	const seen = new Set<string>();
+	for (const d of store.listDelivery()) {
+		if (d.action !== "merge" || seen.has(normPath(d.candidate))) continue;
+		seen.add(normPath(d.candidate));
+		try {
+			if (!fs.existsSync(d.candidate)) continue;
+			const pr = live.ghJson(["pr", "view", String(d.pr), "--repo", d.repo, "--json", PR_CLEANUP_FIELDS]) as Record<string, any> | undefined;
+			if (!pr || typeof pr !== "object" || pr.state !== "MERGED" || typeof pr.mergeCommit?.oid !== "string" || !BARE_SHA.test(pr.mergeCommit.oid)) continue;
+			const candidate = slashed(canonicalCwd(d.candidate));
+			const task = path.posix.basename(candidate);
+			const group = path.posix.dirname(candidate);
+			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, exists: fs.existsSync(`${group}/${kind}/${task}`), reason: "artifact folders are never deleted automatically: a knowledge checkpoint cannot prove their contents disposable" }));
+			const primary = primaryOf(candidate);
+			const request = { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha, mergeCommit: pr.mergeCommit.oid as string };
+			const grant = primary === undefined ? undefined : { id: randomUUID(), role: LEASE_ROLE, candidate, primary, pushUrl: d.pushUrl, repo: d.repo, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha, mergeCommit: request.mergeCommit, issuedAt: live.now?.() ?? Date.now() };
+			const why = grant === undefined ? "the primary checkout could not be proven" : owners.check(candidate, jobRunning) ?? verifyCleanup(normalizeCleanup(grant), live);
+			out.push(why === undefined ? { state: "READY", checkout: candidate, launchCwd: primary, request, retainedArtifacts } : { state: "RETAINED", checkout: candidate, reason: why, retainedArtifacts });
+		} catch { /* unknown state is not pending */ }
+	}
+	return out;
+}
+
+export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
+	if (!entries.length) return "";
+	return ["CLEANUP_PENDING (runtime-verified from the live merged PR and terminal worker records, not from child text). For each READY checkout main may launch ONE release-engineer via subagent (single mode, cwd = launchCwd, outside the target) with cleanup = request plus quiescent: true, only after its own quiescence check. RETAINED entries stay; artifact folders are always retained.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+}
+
 export interface ChildGuardLaunch {
 	entry: string;
 	grantCount: number;
 	leaseCount: number;
 	deliveryCount: number;
+	cleanupCount: number; // 1 only for the launch that actually claimed the cleanup scope
 	gateCommits: boolean;
 	childEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 }
@@ -1341,18 +1609,26 @@ export interface ChildGuardLaunch {
 export interface ClaimWindow { open: boolean }
 
 // Claims this role's grants for one child spawn (single use) and returns the guard entry plus the child's environment.
-export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false, prBase?: string): ChildGuardLaunch {
+export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false, prBase?: string, cleanupId?: string): ChildGuardLaunch {
 	if (!fs.existsSync(guardFile)) throw new Error("Safety guard missing: child launch refused (fail closed).");
+	// A cleanup launch is its own context: trusted release-engineer only, started in the primary and outside the target, never combined with a PR base. Every refusal precedes the claim.
+	if (cleanupId !== undefined) {
+		const scope = store.peekCleanup(cleanupId);
+		if (!(withLeases && role === LEASE_ROLE) || prBase !== undefined) throw new RangeError("cleanup needs a trusted release-engineer launch without a PR base");
+		if (!scope) throw new RangeError("cleanup scope is missing, expired or revoked");
+		const cwd = canonicalCwd(candidate);
+		if (normPath(cwd) !== normPath(scope.primary) || overlaps(cwd, scope.candidate)) throw new RangeError("cleanup must be launched in the primary checkout, outside the target");
+	}
 	// A supplied PR base narrows the trusted release-engineer context only. Refuse before any grant is claimed or the window closes.
 	if (prBase !== undefined && (!(withLeases && role === LEASE_ROLE) || !baseBranchOk(prBase))) throw new RangeError("prBase needs a trusted release-engineer launch and a valid branch name");
 	// Lease copies are non-consuming: every legitimate release-engineer spawn of this candidate gets them, including fallback and later spawns.
-	const leases = withLeases && role === LEASE_ROLE ? store.copyLeases(canonicalCwd(candidate)) : [];
+	const leases = withLeases && role === LEASE_ROLE && cleanupId === undefined ? store.copyLeases(canonicalCwd(candidate)) : [];
 	// Delivery copies follow the lease rule: non-consuming, release-engineer only, same absolute expiry for every spawn of this candidate.
-	const delivery = withLeases && role === LEASE_ROLE ? store.copyDelivery(canonicalCwd(candidate)) : [];
+	const delivery = withLeases && role === LEASE_ROLE && cleanupId === undefined ? store.copyDelivery(canonicalCwd(candidate)) : [];
 	// Normal commits are gated only in the trusted release-engineer launch (same trust signal as the lease copies).
 	const gateCommits = withLeases && role === LEASE_ROLE;
 	let pushTarget: PushTarget | undefined;
-	if (gateCommits && !redirectedGitEnvironment()) {
+	if (gateCommits && cleanupId === undefined && !redirectedGitEnvironment()) {
 		try { const branch = gitRead(canonicalCwd(candidate), ["symbolic-ref", "--short", "HEAD"])?.[0]; if (branch) pushTarget = pushBranchTarget(canonicalCwd(candidate), branch); } catch { /* no automatic push context */ }
 	}
 	if (prBase !== undefined) {
@@ -1364,12 +1640,14 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	const mayClaim = window.open;
 	window.open = false;
 	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
-	const value = claimed.length || leases.length || delivery.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget) : undefined;
+	const cleanup = mayClaim && cleanupId !== undefined ? [store.claimCleanup(cleanupId)].filter((c): c is CleanupGrant => c !== undefined) : [];
+	const value = claimed.length || leases.length || delivery.length || cleanup.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget, cleanup) : undefined;
 	return {
 		entry: guardFile,
 		grantCount: claimed.length,
 		leaseCount: leases.length,
 		deliveryCount: delivery.length,
+		cleanupCount: cleanup.length,
 		gateCommits,
 		childEnv(base) {
 			const env: NodeJS.ProcessEnv = { ...base };
@@ -1535,6 +1813,7 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && guard.gateCommits === true && normalTrustedCommit(guard.pushTarget, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, live)) return undefined;
+	if (guard.scope === "child" && cleanupAllows(guard.store, decision, live)) return undefined;
 	const how = decision.grantable ? "needs an explicit operator grant (request_authorization is for a genuinely blocked risky command such as merge or release, not ordinary commit, feature push or PR create)" : "not grantable to a model: use the operator out-of-band";
 	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}${unsupportedCommitHint(decision)}.` };
 }

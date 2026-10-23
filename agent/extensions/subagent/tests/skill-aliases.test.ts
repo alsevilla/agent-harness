@@ -2,7 +2,8 @@
 // installed Pi public API: DefaultResourceLoader + createAgentSession + session.prompt (real command dispatch and real
 // /skill: expansion). The model is an offline capture provider registered by an inline extension, so nothing reaches a
 // network or paid provider. Fixtures live under os.tmpdir() (TEMP/TMP); process-global state is not mutated.
-import { expect, test } from "bun:test";
+import test from "node:test";
+import { expect } from "../../../../tests/support/expect.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -124,7 +125,7 @@ function skillBody(name: string): { file: string; body: string } {
 	return { file, body: pi.stripFrontmatter(fs.readFileSync(file, "utf8")).trim() };
 }
 
-const t = (name: string, body: () => Promise<void>) => test(name, body, 60_000);
+const t = (name: string, body: () => Promise<void>) => test(name, { timeout: 60_000 }, body);
 
 t("alias expansion reflects updated skill contents after the supported resource reload", () => {
 	const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "harness-alias-skill-"));

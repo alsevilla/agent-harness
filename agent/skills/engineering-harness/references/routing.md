@@ -101,6 +101,13 @@ Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independe
 - Ordered pipeline (stages known in advance, each needing the parent's actual result): use chain or DAG dependencies. Never parallelize dependent facts.
 - Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `debugger` first. No automatic self-looping helpers, new modes or unbounded retries.
 
+### Single versus parallel
+Decide per batch before dispatch by independence, task size, setup or context overhead and reconciliation cost. These are judgments; no runtime metric or saving is established by this rule.
+- Choose one writer (single) when items share files or ownership, a later item needs an earlier result, the task size is small against each child's setup or context overhead (packet, role context, integrations), or reconciliation cost (merging outputs, resolving conflicts, rerunning shared checks) would be about as large as the work.
+- Parallel only when items are independent and enumerable, ownership is disjoint, each item's task size is large against its setup or context overhead, and reconciliation cost is mechanical (disjoint files, one summary).
+- Choosing single is not a bypass: it never removes a mandatory role, specialist gate, independent verification or review, or tier rule. Main still runs each required gate.
+- Decompose dependent downstream work only after the prerequisite result is accepted; each child brief then carries only the accepted decisions it needs.
+
 ## Planning
 Do not create a formal multi-step plan for trivial/localized work. Use `plan` when dependencies, sequencing, rollout, migration, or cross-layer coordination make an explicit execution contract materially useful.
 

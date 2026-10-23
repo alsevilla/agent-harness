@@ -603,6 +603,9 @@ class ModelTierTests(unittest.TestCase):
             ("NATIVE_ENTRY_KEYS", frozenset({"not_a_native_field"})),
             ("NATIVE_DAG_KEYS", frozenset({"id"})),
             ("NATIVE_ROOT_KEYS", frozenset({"agent"})),
+            ("NATIVE_CLEANUP_KEYS", frozenset({"checkout"})),
+            ("NATIVE_CLEANUP_ROLE", "general-worker"),
+            ("NATIVE_SHA", re.compile("x")),
             ("NATIVE_MAX_TASKS", 9),
             ("NATIVE_MAX_DAG_NODES", 9),
             ("NATIVE_DAG_ID", re.compile("x")),
@@ -643,6 +646,11 @@ def native_drift():
     check("ChainItem keys", chain, set(ev.NATIVE_ENTRY_KEYS))
     check("DagNode keys", dag, set(ev.NATIVE_DAG_KEYS))
     check("SubagentParams keys", root, set(ev.NATIVE_ROOT_KEYS))
+    cleanup_block = re.search(r"const CLEANUP = .*?Type\.Null\(\)\]\)\);", src, re.S)
+    check("CLEANUP schema keys", set(re.findall(r"\b(checkout|branch|base|pr|headSha|mergeCommit|quiescent): Type\.", cleanup_block.group(0))), set(ev.NATIVE_CLEANUP_KEYS))
+    check("CLEANUP_REQUEST_KEYS", set(re.search(r'const CLEANUP_REQUEST_KEYS = "([^"]+)"', (SUBAGENT_DIR / "safety-core.ts").read_text(encoding="utf-8")).group(1).split(",")), set(ev.NATIVE_CLEANUP_KEYS))
+    check("cleanup role", re.search(r'LEASE_ROLE = "([^"]+)"', (SUBAGENT_DIR / "safety-core.ts").read_text(encoding="utf-8")).group(1), ev.NATIVE_CLEANUP_ROLE)
+    check("BARE_SHA", re.search(r"const BARE_SHA = /\^(.+)\$/;", (SUBAGENT_DIR / "safety-core.ts").read_text(encoding="utf-8")).group(1), ev.NATIVE_SHA.pattern)
     check("DagNode additionalProperties false", "additionalProperties: false" in dag_tail, True)
     literals = lambda text: set(re.findall(r'Type\.Literal\("(\w+)"\)', text))
     check("modelTier literals", literals(re.search(r"^\s*modelTier:.*$", task_body, re.M).group(0)), set(ev.TIERS))
@@ -774,6 +782,60 @@ class NativeCallValidationTests(unittest.TestCase):
         for call in ({"agent": "reviewer"}, {"task": "t"}, {"agent": "reviewer", "task": ""},
                      {"agent": "reviewer", "task": 5}, {"agent": "", "task": "t"}, {"agent": None, "task": "t"}):
             self.rejected(call)
+
+    def test_pr_base_accepted_per_entry_and_at_single_root(self):
+        # Optional trusted PR base: per entry in tasks/chain/dag, and at the root for a single task (index.ts accepts both).
+        for mode, make in (("tasks", entry), ("chain", entry), ("dag", lambda **kw: node("a", **kw))):
+            self.assertEqual(len(ev.parse_calls([{mode: [make(prBase="main")]}], "calls")), 1, mode)
+            self.assertEqual(len(ev.parse_calls([{mode: [make(prBase="release/1.x")]}], "calls")), 1, mode)
+        self.assertEqual(ev.parse_calls([entry(prBase="main")], "calls")[0]["agent"], "security-specialist")
+        self.assertEqual(len(ev.parse_calls([{"agent": "release-engineer", "task": "t", "prBase": "main"}], "calls")), 1)
+
+    def test_pr_base_refuses_null_blank_and_non_string_in_every_mode(self):
+        # Runtime refuses these: dag.ts validateDag per node, index.ts checkPrBase (baseBranchOk) per entry and at single root.
+        for label, bad in (("null", None), ("blank", ""), ("spaces", "  "), ("number", 5), ("list", ["main"]), ("object", {})):
+            self.rejected(entry(prBase=bad), f"single {label}")
+            self.rejected({"agent": "release-engineer", "task": "t", "prBase": bad}, f"single root {label}")
+            for mode, make in ("tasks", entry), ("chain", entry), ("dag", lambda **kw: node("a", **kw)):
+                self.rejected({mode: [make(prBase=bad)]}, f"{mode} {label}")
+
+    def test_pr_base_refused_at_batch_root_even_when_null(self):
+        # index.ts refuses any root prBase in batch modes (`!== undefined`), so JSON null counts as present.
+        for call in ({"tasks": [entry()]}, {"chain": [entry()]}, {"dag": [node("a")]}):
+            self.rejected({**call, "prBase": "main"}, "batch root prBase")
+            self.rejected({**call, "prBase": None}, "batch root null prBase")
+
+    CLEANUP = {"checkout": "C:/p/worktrees/pi/t", "branch": "feat/t", "base": "main", "pr": 12,
+               "headSha": "a" * 40, "mergeCommit": "b" * 40, "quiescent": True}
+
+    def cleanup_call(self, **extra):
+        return {"agent": "release-engineer", "task": "t", "cwd": "C:/p/pi", "cleanup": dict(self.CLEANUP), **extra}
+
+    def test_cleanup_accepted_only_in_the_shape_and_launch_the_runtime_mints(self):
+        # index.ts: single mode, trusted release-engineer, cwd = primary, no prBase, not readOnly; safety-core.ts prepareCleanup: exactly the seven keys, quiescent === true.
+        self.assertEqual(ev.parse_calls([self.cleanup_call()], "calls")[0]["agent"], "release-engineer")
+        self.assertEqual(len(ev.parse_calls([self.cleanup_call(background=False, readOnly=False)], "calls")), 1)
+
+    def test_cleanup_refused_for_wrong_shape_mode_role_or_companions(self):
+        bad_shapes = (
+            ("null", None), ("list", []), ("empty", {}), ("missing quiescent", {k: v for k, v in self.CLEANUP.items() if k != "quiescent"}),
+            ("extra key", {**self.CLEANUP, "force": True}), ("quiescent false", {**self.CLEANUP, "quiescent": False}), ("quiescent string", {**self.CLEANUP, "quiescent": "true"}),
+            ("blank checkout", {**self.CLEANUP, "checkout": " "}), ("pr string", {**self.CLEANUP, "pr": "12"}), ("pr bool", {**self.CLEANUP, "pr": True}),
+            ("pr zero", {**self.CLEANUP, "pr": 0}), ("pr float", {**self.CLEANUP, "pr": 1.5}), ("short sha", {**self.CLEANUP, "headSha": "abc"}),
+            ("upper sha", {**self.CLEANUP, "mergeCommit": "A" * 40}),
+        )
+        for label, bad in bad_shapes:
+            self.rejected({**self.cleanup_call(), "cleanup": bad}, label)
+        for label, call in (
+            ("other role", self.cleanup_call(agent="general-worker")),
+            ("no cwd", {k: v for k, v in self.cleanup_call().items() if k != "cwd"}),
+            ("with prBase", self.cleanup_call(prBase="main")),
+            ("readOnly", self.cleanup_call(readOnly=True)),
+        ):
+            self.rejected(call, label)
+        for mode, make in (("tasks", entry), ("chain", entry), ("dag", lambda **kw: node("a", **kw))):
+            self.rejected({mode: [make(agent="release-engineer")], "cleanup": dict(self.CLEANUP)}, f"batch root {mode}")
+            self.rejected({mode: [make(agent="release-engineer", cleanup=dict(self.CLEANUP))]}, f"per-entry {mode}")
 
     def test_invalid_graph_never_scores_pass_for_a_difficult_role(self):
         # Reviewer probe: a self-dependent capable security-specialist node credited R18 and exited 0.

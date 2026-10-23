@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, test } from "bun:test";
+import { after, test } from "node:test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../../../..");
@@ -19,13 +19,13 @@ const NATIVE_EXTENSIONS = ["./agent/extensions/subagent/index.ts", "./agent/exte
 const NATIVE_SKILLS = ["./agent/skills/engineering-harness", "./agent/skills/agent-creation"];
 const NATIVE_PROMPTS = ["./agent/prompts/learn.md"]; // the only prompt template the package exports
 
-// Cold probes (fresh copies, first module load) exceed bun's 5 s default; used for both the test timeout and the probe spawn.
+// Cold probes (fresh copies, first module load) exceed a short default timeout; used for both the test timeout and the probe spawn.
 const PROBE_TIMEOUT_MS = 60_000;
 const HOST_MODULES = hostModules(HOST_PACKAGES);
-const probeTest = (name: string, fn: () => void) => test(name, fn, PROBE_TIMEOUT_MS);
+const probeTest = (name: string, fn: () => void) => test(name, { timeout: PROBE_TIMEOUT_MS }, fn);
 
 const dirs: string[] = [];
-afterAll(() => {
+after(() => {
 	for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
