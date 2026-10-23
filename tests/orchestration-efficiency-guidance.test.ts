@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -158,4 +158,48 @@ test("routing.md states the relocated modelTier/modelSlot detail", () => {
 
 test("recovery.md escalation text is model-agnostic", () => {
   assert.doesNotMatch(recovery, /\b(?:Luna|Sol|Opus|Sonnet)\b/);
+});
+
+const skill = read("agent/skills/engineering-harness/SKILL.md");
+const readme = read("README.md");
+
+test("routing states one evidence-before-decomposition rule without a new universal gate", () => {
+  const text = compact(routing);
+  assert.equal(text.match(/Decompose dependent downstream work only after the prerequisite result is accepted/g)?.length, 1);
+  const start = routing.indexOf("### Evidence before decomposition");
+  assert.ok(start > routing.indexOf("## Task shape") && start < routing.indexOf("## Planning"), "rule lives in Task shape");
+  const rule = compact(routing.slice(start, routing.indexOf("\n### ", start + 5)));
+  assert.match(rule, /accept(?:ed)? (?:the )?(?:discovery|prerequisite)[^.]*evidence before (?:any )?material downstream assignment/i);
+  assert.match(rule, /already-known localized contracts? (?:do(?:es)? not|need no)[^.]*discovery/i);
+  assert.match(rule, /parallelize only disjoint, independent assignments/i);
+  assert.match(rule, /adds no (?:universal )?(?:chain|gate)/i);
+});
+
+test("SKILL.md routing table maps need to module, existing role and acceptance check within a size budget", () => {
+  const rows = skill.split(/\r?\n/).filter((line) => /^\|/.test(line) && !/^\|[-| ]+\|$/.test(line));
+  const header = rows[0].split("|").slice(1, -1).map((cell) => cell.trim());
+  assert.deepEqual(header, ["Need", "Module", "Role", "Acceptance check"]);
+  const roles = new Set(readdirSync(new URL("../agent/agents/", import.meta.url)).map((file) => file.replace(/\.md$/, "")));
+  for (const row of rows.slice(1)) {
+    const cells = row.split("|").slice(1, -1).map((cell) => cell.trim());
+    assert.equal(cells.length, 4, row);
+    assert.ok(cells[3].length > 0, row);
+    for (const [, name] of cells[2].matchAll(/`([a-z-]+)`/g)) assert.ok(name === "main" || roles.has(name), `${name} is not an existing role`);
+  }
+  const roleCol = rows.slice(1).map((row) => row.split("|")[3]).join(" ");
+  for (const owner of ["debugger", "test-engineer", "reviewer", "release-engineer", "backend-worker", "frontend-worker", "general-worker", "platform-worker"]) assert.ok(roleCol.includes(owner), owner);
+  assert.match(roleCol, /main/);
+  assert.match(skill, /main owns PLAN/);
+  assert.ok(skill.length <= 5200, `SKILL.md ${skill.length} chars`);
+});
+
+test("README states latest-only host support separately from the version actually tested", () => {
+  const text = compact(readme);
+  assert.match(text, /Only the latest Pi release is supported/);
+  assert.match(text, /scripts\/check-pi-latest\.mjs/);
+  assert.match(text, /latest-runtime validation unavailable/);
+  assert.match(text, /version actually tested/i);
+  assert.doesNotMatch(text, /tested baseline is Pi 1\.1\.0|Pi 1\.1\.0 \(tested baseline/);
+  assert.doesNotMatch(compact(read("agent/extensions/subagent/README.md")), /targets Pi 1\.1\.0 \(tested baseline/);
+  assert.doesNotMatch(compact(read("agent/VALIDATION.md")), /current tested baseline is Pi 1\.1\.0/);
 });

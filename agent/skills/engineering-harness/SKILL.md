@@ -11,17 +11,17 @@ Pi provides the named subagent, tools, control and model-registry mechanisms des
 
 For "queue this", record the request and order, acknowledge briefly, and continue current work. When a durable PLAN or resume queue exists, read `plan/index.md` ("Durable plan state") before resuming or changing it. Select modules/roles when that task is scheduled; do not launch or implement it early. Resolve loading directly without explaining internal deliberations.
 
-| Need | Module / role |
-|---|---|
-| Unknown location/dependencies | `discover/index.md`; Scout only when needed |
-| Unknown-cause failure | `debug/index.md`; actual `debugger` before speculative fixes |
-| Conflicting evidence / material choice | `knowledge/index.md` / `decision/index.md`; main owns authorization |
-| Necessary dependencies/migration/coordination plan | `plan/index.md`; **main owns PLAN** |
-| Authorized implementation | `execute/index.md`; `backend-worker` / `frontend-worker` / `general-worker` / `platform-worker` |
-| Selected independent evidence | `verify/index.md` -> `test-engineer`; `review/index.md` -> `reviewer` |
-| Requested isolation/integration | `worktree/index.md`, `integrate/index.md`; main owns orchestration |
-| Requested delivery/release | `ship/index.md` -> `release-engineer` |
-| Useful durable learning | `learn/index.md` -> `release-engineer` |
+| Need | Module | Role | Acceptance check |
+|---|---|---|---|
+| Unknown location/dependencies | `discover/index.md` | `scout`, only when needed | Handoff with path:line evidence; no PASS accepted from a digest |
+| Unknown-cause failure | `debug/index.md` | `debugger` before speculative fixes | Cause established by evidence |
+| Conflicting evidence / material choice | `knowledge/index.md` / `decision/index.md` | **main owns authorization** | Recorded decision or authority |
+| Necessary dependencies/migration/coordination plan | `plan/index.md` | **main owns PLAN** | READY FOR EXECUTION |
+| Authorized implementation | `execute/index.md` | `backend-worker` / `database-worker` / `frontend-worker` / `general-worker` / `platform-worker` | Focused RED/GREEN results in the worker REPORT |
+| Selected independent evidence | `verify/index.md` / `review/index.md` | `test-engineer` / `reviewer` | Result on the exact candidate identity |
+| Requested isolation/integration | `worktree/index.md` / `integrate/index.md` | **main owns orchestration** | Candidate identity and one writer confirmed |
+| Requested delivery/release | `ship/index.md` | `release-engineer` | Authorized operation result on the verified candidate |
+| Useful durable learning | `learn/index.md` | `release-engineer` | SAVED with readback, or NO LESSON |
 
 PLAN is not an architecture-specialist procedure. The architecture specialist supplies structural analysis/constraints; main incorporates them into PLAN and owns sequencing, writer ownership, gates and authorization.
 
