@@ -1,6 +1,8 @@
 // Narrow automatic post-merge CHECKOUT cleanup: main-minted exact scope, live re-verification in mint and guard, runtime owner tracking, envelope, handoff. Offline: gh is injected; git fixtures are disposable local repos under the scratch root. No real removal ever runs (the guard only decides).
 import assert from "node:assert/strict";
+import * as cpMod from "node:child_process";
 import { spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -284,32 +286,72 @@ test("envelope: strict loader fails closed on tampering; absence grants nothing"
 	// The real guard entry applying this envelope is exercised in cleanup-runtime.node.ts (child process).
 });
 
-test("pending handoff derives from runtime grants, live merged PR and terminal owners, never from child text", () => {
-	const t = makeTask();
+// Metadata-only discovery: wraps every Node fs and child_process entry point for the duration of one call and records what it touched.
+const IO = { fs: ["existsSync", "statSync", "lstatSync", "realpathSync", "readFileSync", "readdirSync", "openSync", "accessSync", "opendirSync"], cp: ["execFileSync", "spawnSync", "execSync", "spawn", "exec", "execFile", "fork"] };
+function recordIo<T>(fn: () => T): { result: T; calls: string[] } {
+	const calls: string[] = [];
+	const patched: [any, string, any][] = [];
+	for (const [mod, names] of [[fs as any, IO.fs], [cpMod as any, IO.cp]] as const) {
+		const target = mod.default ?? mod;
+		for (const name of names) {
+			const orig = target[name];
+			if (typeof orig !== "function") continue;
+			const wrapped = (...args: unknown[]) => { calls.push(`${name}(${String(args[0])})`); return orig.apply(target, args); };
+			if (orig.native) (wrapped as any).native = orig.native;
+			patched.push([target, name, orig]);
+			target[name] = wrapped;
+		}
+	}
+	syncBuiltinESMExports();
+	try { return { result: fn(), calls }; } finally {
+		for (const [target, name, orig] of patched) target[name] = orig;
+		syncBuiltinESMExports();
+	}
+}
+
+test("recordIo is not vacuous: it sees fs and child-process use made inside the window", () => {
+	const { calls } = recordIo(() => { fs.existsSync(root); spawnSync("git", ["--version"], { windowsHide: true }); });
+	assert.ok(calls.some((c) => c.startsWith("existsSync(")), calls.join());
+	assert.ok(calls.some((c) => c.startsWith("spawnSync(git")), calls.join());
+});
+
+test("pending discovery is a cheap runtime-metadata projection: 4 merge grants, zero Git/gh/subprocess/fs I/O, never READY or MERGED, no mergeCommit or launchCwd", () => {
+	const tasks = [makeTask(), makeTask(), makeTask(), makeTask()];
 	const store = C.createGrantStore();
-	const L = live(view(t));
-	store.addDeliveryGrant({ role: "release-engineer", candidate: t.dir, pushUrl: GH_URL, repo: "acme/widgets", branch: t.branch, base: "main", action: "merge", pr: 12, sha: t.head, bound: { head: t.head, ref: `refs/heads/${t.branch}`, fingerprint: "a".repeat(64), exclude: [] } });
-	const owners = terminalOwners(t);
-	const ready = C.cleanupPending(store, owners, () => false, L);
-	assert.equal(ready.length, 1);
-	assert.equal(ready[0].state, "READY");
-	assert.deepEqual(ready[0].request, { checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE });
-	assert.equal(ready[0].launchCwd, PRIMARY);
-	assert.deepEqual(ready[0].retainedArtifacts.map((a: any) => a.path).sort(), [t.evidence, t.scratch].sort());
-	assert.ok(ready[0].retainedArtifacts.every((a: any) => /never deleted automatically/.test(a.reason)));
-	const text = C.formatCleanupPending(ready);
-	assert.match(text, /^CLEANUP_PENDING/);
-	assert.deepEqual(C.cleanupPending(store, owners, () => false, live(view(t, { state: "OPEN" }))), []);
-	assert.deepEqual(C.cleanupPending(store, owners, () => false, live("throw")), []);
-	const active = new S.OwnerTracker();
-	active.begin({ workerId: "w", role: "release-engineer", cwd: t.dir });
-	const held = C.cleanupPending(store, active, () => false, L);
-	assert.equal(held[0].state, "RETAINED");
-	assert.match(held[0].reason, /owner/);
-	fs.writeFileSync(`${t.dir}/u.txt`, "u");
-	try { assert.equal(C.cleanupPending(store, owners, () => false, L)[0].state, "RETAINED"); } finally { fs.rmSync(`${t.dir}/u.txt`); }
-	assert.deepEqual(C.cleanupPending(C.createGrantStore(), owners, () => false, L), [], "no runtime delivery record, no pending");
+	for (const t of tasks) store.addDeliveryGrant({ role: "release-engineer", candidate: t.dir, pushUrl: GH_URL, repo: "acme/widgets", branch: t.branch, base: "main", action: "merge", pr: 12, sha: t.head, bound: { head: t.head, ref: `refs/heads/${t.branch}`, fingerprint: "a".repeat(64), exclude: [] } });
+	assert.equal(store.listDelivery().length, 4);
+	const owners = terminalOwners(tasks[0]);
+	owners.begin({ workerId: "w2", role: "release-engineer", cwd: tasks[1].dir }); // still active: retained with an in-memory reason
+	const liveCalls: string[] = [];
+	const tripLive = new Proxy({}, { get: (_t, k) => (...a: unknown[]) => { liveCalls.push(String(k)); throw new Error("live must not be consulted"); } });
+	const { result: entries, calls } = recordIo(() => C.cleanupPending(store, owners, () => false, tripLive));
+	assert.deepEqual(calls, [], "no fs, Git, gh or other subprocess access");
+	assert.deepEqual(liveCalls, [], "no live counter call (gh, tag, push URL, clock) for any of the 4 grants");
+	assert.equal(entries.length, 4, "positive control: entries are returned, not a vacuous fail-closed empty list");
+	const byDir = new Map(entries.map((e: any) => [e.checkout, e]));
+	const first: any = byDir.get(tasks[0].dir);
+	assert.equal(first.state, "PENDING_UNVERIFIED");
+	assert.deepEqual(first.request, { checkout: tasks[0].dir, branch: tasks[0].branch, base: "main", pr: 12, headSha: tasks[0].head });
+	assert.deepEqual(first.retainedArtifacts.map((x: any) => x.path).sort(), [tasks[0].evidence, tasks[0].scratch].sort());
+	assert.ok(first.retainedArtifacts.every((x: any) => /never deleted automatically/.test(x.reason) && !("exists" in x)), "no existence claim");
+	const held: any = byDir.get(tasks[1].dir);
+	assert.equal(held.state, "RETAINED");
+	assert.match(held.reason, /owner/);
+	assert.equal((byDir.get(tasks[2].dir) as any).state, "RETAINED");
+	assert.match((byDir.get(tasks[2].dir) as any).reason, /no known owner/, "unknown ownership retains");
+	for (const e of entries as any[]) for (const k of ["mergeCommit", "launchCwd"]) assert.ok(!(k in e) && !(e.request && k in e.request), `${k} is omitted`);
+	const text = C.formatCleanupPending(entries);
+	assert.match(text, /^CLEANUP_PENDING \(runtime metadata only/);
+	assert.match(text, /"state":"PENDING_UNVERIFIED"/);
+	assert.doesNotMatch(text, /"state":"READY"|"MERGED"|mergeCommit"|launchCwd/);
+	assert.deepEqual(C.cleanupPending(C.createGrantStore(), owners, () => false), [], "no runtime delivery record, no pending");
+	const nonMerge = C.createGrantStore();
+	nonMerge.addDeliveryGrant({ role: "release-engineer", candidate: tasks[0].dir, pushUrl: GH_URL, repo: "acme/widgets", branch: tasks[0].branch, base: "main", action: "release", pr: 12, sha: tasks[0].head, version: "v1.2.3" });
+	assert.deepEqual(C.cleanupPending(nonMerge, owners, () => false), [], "only merge grants are pending (a release grant is not)");
 	assert.equal(C.formatCleanupPending([]), "");
+	// Unchanged safety: discovery grants nothing. The explicit mint still needs and verifies the live merged PR.
+	assert.equal(mint(tasks[0]).res.ok, true, "positive control: the explicit mint verifies live and succeeds");
+	assert.equal(mint(tasks[0], { live: live(view(tasks[0], { state: "OPEN" })) }).res.ok, false, "mint refuses a PR that is not MERGED");
 });
 
 test("owner tracker: begin/end, reservations block overlapping launches, clear forgets (unknown fails closed)", () => {
@@ -552,7 +594,6 @@ const PRIMARY_ONLY: Record<string, (t: Task, marker: string) => void> = {
 	"primary includeIf gitdir hook": PRIMARY_INCLUDE(`gitdir:${PRIMARY}/.git`, hookBody),
 	"primary includeIf onbranch:main hook": PRIMARY_INCLUDE("onbranch:main", hookBody),
 };
-const pendingStore = (t: Task) => { const s = C.createGrantStore(); s.addDeliveryGrant({ role: "release-engineer", candidate: t.dir, pushUrl: GH_URL, repo: "acme/widgets", branch: t.branch, base: "main", action: "merge", pr: 12, sha: t.head, bound: { head: t.head, ref: `refs/heads/${t.branch}`, fingerprint: "a".repeat(64), exclude: [] } }); return s; };
 for (const [name, configure] of Object.entries(PRIMARY_ONLY)) {
 	test(`F1 primary-only (${name}): target preflight passes yet mint refuses; after mint the guard denies and pending retains; nothing runs, bytes preserved`, () => {
 		unsetLocal();
@@ -563,7 +604,7 @@ for (const [name, configure] of Object.entries(PRIMARY_ONLY)) {
 		try {
 			// Control, before mint: the clean primary mints and is READY.
 			const s = setup();
-			assert.equal(C.cleanupPending(pendingStore(s.t), terminalOwners(s.t), () => false, live(view(s.t)))[0].state, "READY", "positive control: clean primary is READY");
+			assert.equal(mint(s.t).res.ok, true, "positive control: clean primary mints");
 			configure(t, marker);
 			configure(s.t, marker);
 			assert.notEqual(primaryDirty(), "", "the primary really carries the setting");
@@ -577,7 +618,7 @@ for (const [name, configure] of Object.entries(PRIMARY_ONLY)) {
 			const verdict = run(guardOf(s.child, live(view(s.t))), REMOVE(s.t.dir));
 			assert.ok(blocked(verdict), `guard denies: ${blocked(verdict) ? "n/a" : probe(s.t)}`);
 			assert.equal(shellRuns, runsBefore, "no shell invocation");
-			assert.equal(C.cleanupPending(pendingStore(s.t), terminalOwners(s.t), () => false, live(view(s.t)))[0].state, "RETAINED", "pending retains (shared verifyCleanup)");
+			assert.equal(mint(s.t).res.ok, false, "a fresh mint refuses (shared verifyCleanup)");
 			assert.ok(!fs.existsSync(marker), "the monitor never ran");
 			for (const d of [t.dir, s.t.dir]) { assert.ok(fs.existsSync(d) && !fs.existsSync(`${d}/ignored`), "checkout untouched"); assert.equal(fs.readFileSync(`${d}/a.txt`, "utf8"), "a\n"); }
 		} finally { unsetLocal(); }
@@ -615,16 +656,12 @@ const MUTATIONS: Record<string, (t: Task) => void> = {
 };
 const mutating = (t: Task, f: () => void) => ({ ...live(view(t)), ghJson: () => { f(); return view(t); } });
 for (const [name, mutate] of Object.entries(MUTATIONS)) {
-	test(`F2 ${name} during the live PR read: mint, guard and pending all refuse and the data is preserved`, () => {
+	test(`F2 ${name} during the live PR read: mint and guard both refuse and the data is preserved`, () => {
 		const a = makeTask();
 		assert.equal(mint(a, { live: mutating(a, () => mutate(a)) }).res.ok, false, "mint");
 		const s = setup();
 		assert.ok(blocked(run(guardOf(s.child, mutating(s.t, () => mutate(s.t))), REMOVE(s.t.dir))), "guard");
-		const p = makeTask();
-		const store = C.createGrantStore();
-		store.addDeliveryGrant({ role: "release-engineer", candidate: p.dir, pushUrl: GH_URL, repo: "acme/widgets", branch: p.branch, base: "main", action: "merge", pr: 12, sha: p.head, bound: { head: p.head, ref: `refs/heads/${p.branch}`, fingerprint: "a".repeat(64), exclude: [] } });
-		assert.equal(C.cleanupPending(store, terminalOwners(p), () => false, mutating(p, () => mutate(p)))[0].state, "RETAINED", "pending");
-		for (const t of [a, s.t, p]) {
+		for (const t of [a, s.t]) {
 			if (name === "new ignored data") assert.equal(fs.readFileSync(`${t.dir}/ignored/user.db`, "utf8"), "UNIQUE-IGNORED");
 			else if (name === "tracked edit") assert.equal(fs.readFileSync(`${t.dir}/a.txt`, "utf8"), "UNIQUE-TRACKED\n");
 			assert.ok(fs.existsSync(t.dir));

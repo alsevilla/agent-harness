@@ -3,12 +3,12 @@
 Read only when measuring or changing routing/skill-selection guidance. This is an optional offline check: it is not a gate, not a runtime hook and not a model caller.
 
 ## Components
-- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 35 synthetic cases, 22 positive and 13 near-miss. Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
-- Evaluator: `scripts/evaluate-routing.py` (Python stdlib only; no network, no model calls).
-- Tests: `tests/test_evaluate_routing.py` (deterministic unit checks).
+- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 36 synthetic cases, 22 positive and 14 near-miss. Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
+- Evaluator: `scripts/evaluate-routing.mjs` (Node built-ins only, no dependency and no interpreter other than Node; no network, no model calls). Importing it runs nothing; the CLI starts only when the file is executed.
+- Tests: `tests/evaluate-routing.test.mjs` (`node:test`, deterministic unit checks; found by the canonical runner `scripts/run-node-tests.mjs`).
 
 ## Field meanings
-- `route`: the orchestrator's main route label (`T0_MAIN`, `T1_WORKER`, `T2_DEBUG_WORKER`, `T3_SPECIALIST_FIRST`, `T4_ORACLE_ESCALATION`, `DISCOVER_SCOUT_FIRST`, `LOCAL_DONE`, `VERIFY_INDEPENDENT`, `REVIEW`, `SHIP_AUTHORIZED`, `BLOCKED_NO_AUTHORITY`, `STOP_NO_LAUNCH`, `QUEUE_NO_LAUNCH`). It is not a role name.
+- `route`: the orchestrator's main route label (`T0_MAIN` (only the no-usable-dispatch fallback; standalone T0 otherwise routes to `T1_WORKER` with `general-worker`), `T1_WORKER`, `T2_DEBUG_WORKER`, `T3_SPECIALIST_FIRST`, `T4_ORACLE_ESCALATION`, `DISCOVER_SCOUT_FIRST`, `LOCAL_DONE`, `VERIFY_INDEPENDENT`, `REVIEW`, `SHIP_AUTHORIZED`, `BLOCKED_NO_AUTHORITY`, `STOP_NO_LAUNCH`, `QUEUE_NO_LAUNCH`). It is not a role name.
 - `roles`: actual named roles launched. Without `calls` the list order is the legacy order evidence; with `calls` it is only a multiset cross-check against the calls' agents and never runtime order.
 - `skills`: skills or modules selected for the case, including guidance already loaded earlier in the session. Selection is not a read: the evaluator cannot verify that a skill was read or activated, and a correctly formatted name does not prove activation.
 - `expect.routes`: accepted route labels. Policy-valid alternatives are listed explicitly.
@@ -45,11 +45,11 @@ The report line `read_diagnostics` is separate from `matched`, `accuracy`, `crit
 Every case id appears exactly once. Predictions without the optional fields stay valid for fixtures without `model_tiers` or `max_dispatches`. Blank lines, unknown fields, unknown ids or roles, duplicate JSON keys and `NaN`/`Infinity` are rejected. Ids and skill names are matched in full: a trailing newline, carriage return, leading space or uppercase letter is malformed (exit 2), never stripped. Syntax-valid skill names outside the installed set are accepted as generic vocabulary. The file is never rewritten.
 
 ## Commands (run from the candidate root `~/.pi`)
-- Fixture consistency: `python agent/skills/engineering-harness/scripts/evaluate-routing.py --cases agent/skills/engineering-harness/examples/routing-cases.json --self-check`
-- Recorded predictions: `python agent/skills/engineering-harness/scripts/evaluate-routing.py --cases agent/skills/engineering-harness/examples/routing-cases.json --predictions <absolute path to .jsonl>`
-- Unit checks: `python -m unittest discover -s agent/skills/engineering-harness/tests -p "test_*.py" -v`
+- Fixture consistency: `node agent/skills/engineering-harness/scripts/evaluate-routing.mjs --cases agent/skills/engineering-harness/examples/routing-cases.json --self-check`
+- Recorded predictions: `node agent/skills/engineering-harness/scripts/evaluate-routing.mjs --cases agent/skills/engineering-harness/examples/routing-cases.json --predictions <absolute path to .jsonl>`
+- Unit checks: `node scripts/run-node-tests.mjs agent/skills/engineering-harness/tests/evaluate-routing.test.mjs` (or `npm test` for the whole suite).
 
-Exit codes: `0` all matched and no critical failure; `1` mismatch or critical failure; `2` invalid input or usage. The report prints a provenance line that separates self-check output from recorded predictions. Its `sha256` is computed over the predictions file's raw bytes (CRLF files included). A UTF-8 BOM or invalid UTF-8 exits 2. JSON nested too deeply for the parser exits 2 with `error:` and no traceback.
+Exit codes: `0` all matched and no critical failure; `1` mismatch or critical failure; `2` invalid input or usage. The report prints a provenance line that separates self-check output from recorded predictions. Its `sha256` is computed over the predictions file's raw bytes (CRLF files included). A UTF-8 BOM or invalid UTF-8 exits 2. JSON nested deeper than 1000 levels exits 2 with `error:` and no stack trace. Usage mistakes (missing `--cases`, both or neither of `--predictions`/`--self-check`, unknown options) also exit 2; `-h`/`--help` exits 0. Unique option prefixes (`--self`) and `--option=value` are accepted.
 
 ## What each result proves
 | Input | Proves | Does NOT prove |
@@ -73,7 +73,16 @@ This guide does not run models. An operator runs the fixture questions manually,
 If an operator wants repeated or paid runs, that is an explicit operator action. The evaluator, the tests and this guide never start them.
 
 ## Relation to the upstream manual check
-The comparison evidence (`_evidence/baryonlabs-harness-comparison/REPORT.md`, row 3) describes an upstream manual skill-trigger guide with 20 queries (10 should-trigger, 10 should-not, near-miss emphasis). That is a human checklist and an optional optimizer concept. Its query set is not this fixture. The 35-case fixture here is derived from this repository's current policy, so the two results are not interchangeable. The upstream optimizer was not adopted, and no upstream text or code was copied.
+The comparison evidence (`_evidence/baryonlabs-harness-comparison/REPORT.md`, row 3) describes an upstream manual skill-trigger guide with 20 queries (10 should-trigger, 10 should-not, near-miss emphasis). That is a human checklist and an optional optimizer concept. Its query set is not this fixture. The 36-case fixture here is derived from this repository's current policy, so the two results are not interchangeable. The upstream optimizer was not adopted, and no upstream text or code was copied.
+
+## Node runtime notes (deliberate differences from the former Python evaluator)
+Behavior, flags, report text and exit codes are unchanged; these runtime differences are intentional and pinned by `NodeRuntimeDifferenceTests` in `tests/evaluate-routing.test.mjs`:
+- JSON is read by a strict built-in reader, not `JSON.parse`, so duplicate keys, `NaN`/`Infinity` and the int/float distinction stay errors exactly as before: `12.0`, `1e1` and `1.5` are floats (a float `pr` or `max_dispatches` is refused) and integers beyond 2^53 stay integers (range-checked). `__proto__` is an ordinary key.
+- Nesting deeper than 1000 levels is an explicit input error (`JSON nesting too deep`, exit 2); Python relied on its recursion limit.
+- "Blank" text uses Python's whitespace set (U+001C-U+001F and U+0085 are blank, U+FEFF is not), and sorted lists in error text use code-point order, so messages match the former output. Values in messages use Python-style `repr` (`'x'`, `True`, `None`, `[...]`); floats print as `1.0`.
+- `accuracy` and `required_full_read_recall` use round-half-to-even at four decimals like Python's `:.4f`.
+- Operating-system errors report Node's message text (the exit code is still 2), and file paths are printed as given, not normalized.
+- ES module exports are read-only, so the native-parity test drifts copies of the exported `NATIVE` constant set instead of monkey-patching, and the "internal errors are not masked" test uses a throwing getter instead of a mock.
 
 ## Limits
 - Expected labels are policy expectations, not ground truth from measurement.
@@ -82,7 +91,7 @@ The comparison evidence (`_evidence/baryonlabs-harness-comparison/REPORT.md`, ro
 - LOW, retained: route and roles are scored independently. Route/role consistency is not validated, so `T2_DEBUG_WORKER` without `debugger` (R06) or `T1_WORKER` without `backend-worker` (R07) can still pass. Consistency is a reviewer check; no policy engine was added.
 - LOW, retained: predicted skill names are not checked against installed skills (intentional generic vocabulary). The test suite checks only that fixture skill names resolve to an installed `SKILL.md` or `index.md`.
 - Order of allowed-but-not-required roles is not checked (see `roles_required`).
-- LOW, retained: prediction lines are split with `str.splitlines()`, so a raw U+2028 (or similar line separator) inside a JSON string makes that line malformed. This fails closed (exit 2), never as a false PASS.
+- LOW, retained: prediction lines are split on the same boundaries as Python's `str.splitlines()` (`\n`, `\r`, `\r\n`, `\v`, `\f`, U+001C-U+001E, U+0085, U+2028, U+2029), so a raw U+2028 (or similar line separator) inside a JSON string makes that line malformed. This fails closed (exit 2), never as a false PASS.
 - `calls_provenance` is free text: it is not proof that a capture is authentic. The synthetic `--self-check` calls and hand-written calls are not measurements of actual main-orchestrator accuracy.
 - Native call validation is a scoring input check, not a runtime permission engine; it models no tool permissions, guard or agent registry, and a call that passes still proves no launch.
 - Dispatch limits cover only the three cases that carry `max_dispatches`, and read diagnostics only the two cases that carry `required_reads`; none of this measures orchestration accuracy, cost or whether a read influenced the answer.

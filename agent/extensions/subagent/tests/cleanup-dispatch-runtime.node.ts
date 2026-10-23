@@ -101,16 +101,19 @@ function makeTask() {
 
 // gh is answered in-process, controlled per test. Everything else (git) is real.
 const GH = { branch: "", head: "", merged: false };
+// Every subprocess the code under test runs through child_process (Git and gh included), in call order: the discovery path must add none.
+const EXT: string[] = [];
 {
 	const cp = cpDefault as any;
 	const originalExec = cp.execFileSync;
 	const originalSpawn = cp.spawnSync;
 	cp.execFileSync = (file: string, args: string[], opts: unknown) => {
+		EXT.push(`${file} ${args[0]}`);
 		if (file !== "gh") return originalExec(file, args, opts);
 		if (args[0] === "pr" && args[1] === "view") return JSON.stringify({ number: Number(args[2]), state: GH.merged ? "MERGED" : "OPEN", baseRefName: "main", headRefName: GH.branch, headRefOid: GH.head, isCrossRepository: false, mergeCommit: { oid: MERGE_C } });
 		return JSON.stringify([]);
 	};
-	cp.spawnSync = (file: string, args: string[], opts: unknown) => (file === "git" && args[0] === "ls-remote" ? { status: 2, signal: null, error: undefined, stdout: "", stderr: "" } : originalSpawn(file, args, opts));
+	cp.spawnSync = (file: string, args: string[], opts: unknown) => (EXT.push(`${file} ${args[0]}`), file === "git" && args[0] === "ls-remote" ? { status: 2, signal: null, error: undefined, stdout: "", stderr: "" } : originalSpawn(file, args, opts));
 	syncBuiltinESMExports();
 }
 
@@ -153,18 +156,26 @@ async function readySession() {
 	finish(children()[before]);
 	await delivery;
 	GH.merged = true;
+	// Discovery is metadata only: the list adds no Git/gh/subprocess call and claims neither READY nor MERGED.
+	const mark = EXT.length;
 	const list = text(await host.tools.get("subagent_control")!.execute("list", { action: "list" }));
-	const line = list.split("\n").find((l) => l.startsWith("{") && l.includes('"READY"') && l.includes(t.dir));
-	assert.ok(line, `READY pending entry expected: ${list}`);
+	assert.deepEqual(EXT.slice(mark), [], "list ran no Git, gh or other subprocess");
+	const line = list.split("\n").find((l) => l.startsWith("{") && l.includes('"PENDING_UNVERIFIED"') && l.includes(t.dir));
+	assert.ok(line, `PENDING_UNVERIFIED entry expected: ${list}`);
+	assert.doesNotMatch(list.split("\n").filter((l) => l.startsWith("{")).join("\n"), /"READY"|"MERGED"|mergeCommit|launchCwd/, "entries carry no READY/MERGED claim, mergeCommit or launchCwd");
 	const entry = JSON.parse(line!);
-	return { host, t, entry, request: { ...entry.request, quiescent: true }, launch: (extra: Record<string, unknown> = {}) => host.tools.get("subagent")!.execute("clean", { agent: "release-engineer", task: "cleanup", cwd: entry.launchCwd, cleanup: { ...entry.request, quiescent: true }, ...extra }, undefined, undefined, ctx) };
+	// Main's explicit live PR query at the cleanup step supplies mergeCommit (the fake gh answers; the primary is main's own launch folder). Mint and guard verify both independently.
+	const queried = JSON.parse(String(cpDefault.execFileSync("gh", ["pr", "view", String(entry.request.pr), "--repo", "example-owner/example-repo", "--json", "state,mergeCommit"], { encoding: "utf8" })));
+	assert.equal(queried.state, "MERGED");
+	const request = { ...entry.request, mergeCommit: queried.mergeCommit.oid, quiescent: true };
+	return { host, t, entry, request, launchCwd: PRIMARY, launch: (extra: Record<string, unknown> = {}) => host.tools.get("subagent")!.execute("clean", { agent: "release-engineer", task: "cleanup", cwd: PRIMARY, cleanup: request, ...extra }, undefined, undefined, ctx) };
 }
 const writerInTarget = (host: ReturnType<typeof fakeHost>, dir: string) => host.tools.get("subagent")!.execute("w", { agent: "general-worker", task: "write", cwd: dir, background: false }, undefined, undefined, ctx).then((r: any) => ({ refused: r.isError === true || /cleanup is pending/.test(text(r)), text: text(r) }), (error: Error) => ({ refused: /cleanup is pending/.test(error.message), text: error.message }));
 
-test("F4 production chain: real tracked delivery owner, live MERGED pending READY, outside-target default-background cleanup launch carries exactly the claimed scope (cleanupId forwarded); replay, other roles and lifecycle", { timeout: 60_000 }, async () => {
+test("F4 production chain: real tracked delivery owner, metadata-only PENDING_UNVERIFIED discovery, explicit live mergeCommit query, outside-target default-background cleanup launch carries exactly the claimed scope (cleanupId forwarded); replay, other roles and lifecycle", { timeout: 60_000 }, async () => {
 	const s = await readySession();
 	const base = children().length;
-	const other = await s.host.tools.get("subagent")!.execute("x", { agent: "general-worker", task: "cleanup", cwd: s.entry.launchCwd, cleanup: s.request }, undefined, undefined, ctx);
+	const other = await s.host.tools.get("subagent")!.execute("x", { agent: "general-worker", task: "cleanup", cwd: s.launchCwd, cleanup: s.request }, undefined, undefined, ctx);
 	assert.equal(other.isError, true);
 	assert.match(text(other), /trusted release-engineer/);
 	assert.equal(children().length, base, "an untrusted role launches nothing");
@@ -216,7 +227,7 @@ test("F3 unclaimed abort: scope revoked and reservation released; nothing launch
 	const base = children().length;
 	const abort = new AbortController();
 	abort.abort();
-	await s.host.tools.get("subagent")!.execute("clean", { agent: "release-engineer", task: "cleanup", cwd: s.entry.launchCwd, background: false, cleanup: s.request }, abort.signal, undefined, ctx).catch(() => undefined);
+	await s.host.tools.get("subagent")!.execute("clean", { agent: "release-engineer", task: "cleanup", cwd: s.launchCwd, background: false, cleanup: s.request }, abort.signal, undefined, ctx).catch(() => undefined);
 	assert.equal(children().length, base, "an abort before the spawn launches nothing");
 	assert.equal((await writerInTarget(s.host, s.t.dir)).refused, true, "an unclaimed scope still reserves its folder until the abort is observed");
 	let status = "";
@@ -229,4 +240,47 @@ test("F3 unclaimed abort: scope revoked and reservation released; nothing launch
 	await waitFor(() => children().length === base + 1, "the folder is free again");
 	finish(children()[base]);
 	assert.equal((await writer).refused, false);
+});
+
+test("unrelated background completion and list run ZERO Git/gh/subprocess calls (a blocking gh is never reached) yet still message and list, with unverified pending text", { timeout: 60_000 }, async () => {
+	const host = fakeHost();
+	subagentExtension(host);
+	const t = makeTask();
+	GH.branch = t.branch; GH.head = t.head; GH.merged = false;
+	const state = bindDelivery(t.dir, t.branch, {});
+	const granted = await host.tools.get("request_authorization")!.execute("auth", { delivery: { action: "merge", branch: t.branch, base: "main", pr: 12, sha: state.head, cwd: t.dir, bind: { expect: state.fingerprint } } }, undefined, undefined, ctx);
+	assert.notEqual(granted.isError, true, text(granted));
+	const before = children().length;
+	const delivery = host.tools.get("subagent")!.execute("own", { agent: "release-engineer", task: "deliver", cwd: t.dir, background: false }, undefined, undefined, ctx);
+	await waitFor(() => children().length === before + 1, "delivery owner child spawns");
+	finish(children()[before]);
+	await delivery;
+	GH.merged = true;
+	// A gh that would stall (the production 15 s synchronous wait) is replaced by a recorder that fails the test if reached.
+	const cp = cpDefault as any;
+	const realExec = cp.execFileSync;
+	const reached: string[] = [];
+	cp.execFileSync = (file: string, args: string[], opts: unknown) => { if (file === "gh") { reached.push(args.join(" ")); throw new Error("blocking gh must not be reached"); } return realExec(file, args, opts); };
+	try {
+		const sentBefore = host.sent.length;
+		const spawnedBefore = children().length;
+		const started = await host.tools.get("subagent")!.execute("bg", { agent: "general-worker", task: "unrelated", cwd: PRIMARY }, undefined, undefined, ctx);
+		const jobId = /bg-\d+/.exec(text(started))?.[0];
+		assert.ok(jobId, text(started));
+		await waitFor(() => children().length === spawnedBefore + 1, `unrelated child running: ${text(started)} children=${children().length} exited=${children().map((c) => c.exited).join()}`);
+		const child = children()[spawnedBefore];
+		const mark = EXT.length; // launch work is done: everything from here is completion and list discovery
+		finish(child);
+		await waitFor(() => host.sent.slice(sentBefore).some((m) => m.customType === "subagent-completion"), "the completion message is still delivered");
+		const note = host.sent.slice(sentBefore).find((m) => m.customType === "subagent-cleanup-pending");
+		assert.ok(note, "positive control: non-empty pending metadata is surfaced (not a vacuous fail-closed empty)");
+		assert.match(note!.content, /runtime metadata only/);
+		assert.match(note!.content, /"PENDING_UNVERIFIED"|"RETAINED"/);
+		assert.doesNotMatch(note!.content.split("\n").filter((l) => l.startsWith("{")).join("\n"), /"READY"|"MERGED"|mergeCommit|launchCwd/);
+		const list = text(await host.tools.get("subagent_control")!.execute("list", { action: "list" }));
+		assert.match(list, /^\[/, "the job list stays a JSON array first");
+		assert.match(list, /CLEANUP_PENDING \(runtime metadata only/);
+		assert.deepEqual(EXT.slice(mark), [], "completion and list ran no Git, gh or other subprocess");
+		assert.deepEqual(reached, [], "the blocking gh double was never called");
+	} finally { cp.execFileSync = realExec; }
 });

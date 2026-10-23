@@ -8,8 +8,7 @@ review fixes, and recovery stay worker-owned until an explicit handoff ends that
 assignment. A worker ending or returning a handoff does not make its follow-up repairs standalone T0. Do not downgrade this scope to T0 because the fixes are small, known,
 mechanical, urgent, or because a worker's edits failed. In particular, missing
 match arms, dependency/type/API repairs, and changes needed to compile a delegated
-feature go back to the appropriate implementation worker. Main-session inspection,
-compiler/test runs, packet preparation, and synthesis remain allowed.
+feature go back to the appropriate implementation worker. Main-session inspection and compiler/test runs are delegated to the narrowest read-only role (batched); packet preparation and synthesis remain with main.
 
 For a failed edit, inspect the actual current files and failed command/result. If
 that worker is active, steer it with exact paths, diagnostics, intended change,
@@ -59,7 +58,7 @@ Split it by one behavior or failing target, with one bounded acceptance check;
 do not relaunch the unchanged oversized packet. Test implementation belongs to
 the appropriate backend-worker, frontend-worker or general-worker. Selected independent suite/baseline
 verification belongs to test-engineer, identified by exact candidate and contract.
-Main-session spot checks remain allowed, but do not substitute for these roles.
+Spot checks go to a read-only role and never substitute for these roles.
 
 After debugger evidence, route a material unresolved persistence/schema/migration
 choice to database-specialist (or the actual domain specialist needed). Do not
@@ -73,7 +72,7 @@ Do not retry an unchanged failed/blocked launch. Authentication, cooldown/429, a
 tool-permission failures are availability blockers, not proof a model is too weak.
 Report them; wait for recovery or use an explicitly supported, authorized profile.
 
-Escalate coordination from Luna to Sol when authoritative evidence conflicts,
+Escalate coordination to a configured `capable` tier or specialist route when authoritative evidence conflicts,
 high-consequence decisions remain unresolved, or one clarified follow-up still
 returns incomplete/contradictory reasoning. Preserve the evidence and name the
 unresolved question. Do not use a reviewer to take over worker writes or skip the
@@ -83,12 +82,12 @@ After a fix fails with an unexplained cause, return to DEBUG immediately. After
 two distinct evidence-backed correction attempts fail, stop repeating the route:
 reassess diagnosis and use stronger review if material risk or disagreement remains.
 This means change/reassess the route within existing authority, not automatically stop
-work or request another approval. Incomplete partial edits are remaining scope, not
+work or request another approval. Cap (AGENTS): at most 2 fix rounds per task and 2 review cycles per candidate, then reassess and return to main/user with the evidence; a new distinct failure starts a fresh count; unexplained failures still go to debugger first; no automatic escalation. The cap is a reassess/report trigger, not a refusal to continue authorized work. Incomplete partial edits are remaining scope, not
 two failed evidence-backed corrections. Honor explicit user pause/stop requests;
 questions about a blocker do not themselves revoke implementation authority.
-Oracle remains restricted to the exceptional triggers above; no automatic Opus run.
+Oracle remains restricted to the exceptional triggers above; no automatic Oracle run.
 
 Keep the role and model explicit. Use agent frontmatter or a supported profile;
 never assume arbitrary per-call model IDs are supported or silently fall back to
-Sonnet. Record route, actual model when reported, retries, tests, and blockers in
+another model. Record route, actual model when reported, retries, tests, and blockers in
 the normal concise handoff. Model names and prompt size do not prove billing savings.

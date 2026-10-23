@@ -95,11 +95,11 @@
       "id": "R07",
       "kind": "positive",
       "question": "Fix the typo recieve to receive in one code comment of a single file.",
-      "context": "Standalone mechanical edit with no behavior change and no delegated implementation in progress. Main may edit directly; a worker is also a policy-valid choice.",
+      "context": "Standalone mechanical edit with no behavior change and no delegated implementation in progress. Under the thin-orchestrator policy main does not edit: route it to one general-worker.",
       "critical": false,
       "expect": {
-        "routes": ["T0_MAIN", "T1_WORKER"],
-        "roles_required": [],
+        "routes": ["T1_WORKER"],
+        "roles_required": ["general-worker"],
         "roles_allowed": ["general-worker"],
         "skills_required": [],
         "skills_forbidden": []
@@ -505,6 +505,20 @@
         "skills_required": [],
         "skills_forbidden": [],
         "max_dispatches": {"backend-worker": 1}
+      }
+    },
+    {
+      "id": "R36",
+      "kind": "near_miss",
+      "question": "Fix the typo recieve to receive in one code comment of a single file.",
+      "context": "FALLBACK ONLY: the host reports no usable dispatch (no subagent capability). Only then may main read and make this standalone T0 mechanical edit itself; implementation, VERIFY, REVIEW, SHIP and delegated recovery stay blocked. Not a normal route.",
+      "critical": false,
+      "expect": {
+        "routes": ["T0_MAIN"],
+        "roles_required": [],
+        "roles_allowed": [],
+        "skills_required": [],
+        "skills_forbidden": []
       }
     }
   ]

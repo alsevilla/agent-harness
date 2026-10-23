@@ -1563,28 +1563,23 @@ function cleanupAllows(store: GrantStore, decision: Extract<Decision, { action: 
 	}
 }
 
-export interface CleanupPendingEntry { state: "READY" | "RETAINED"; checkout: string; reason?: string; launchCwd?: string; request?: { checkout: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string }; retainedArtifacts: { path: string; exists: boolean; reason: string }[] }
+export interface CleanupPendingEntry { state: "PENDING_UNVERIFIED" | "RETAINED"; checkout: string; reason?: string; request?: { checkout: string; branch: string; base: string; pr: number; headSha: string }; retainedArtifacts: { path: string; reason: string }[] }
 
-// Pending state grounded in runtime facts only: a merge delivery grant this session issued, the live PR (MERGED), terminal owners and the live checkout. Child prose is never read. READY still needs main's own quiescence declaration at launch.
-export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunning: (jobId: string) => boolean, live: DeliveryLive = defaultDeliveryLive(livePushUrl)): CleanupPendingEntry[] {
+// Discovery is advisory and must stay cheap: a bounded projection of in-memory runtime records (merge delivery grants this session issued, owner tracker). ZERO Git, gh, subprocess or filesystem I/O, because it runs on every background completion and list. It never claims READY or MERGED and omits mergeCommit and launchCwd: main obtains those with its own explicit live PR query when it schedules cleanup, and prepareCleanup and the child guard independently re-verify everything live.
+export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunning: (jobId: string) => boolean): CleanupPendingEntry[] {
 	const out: CleanupPendingEntry[] = [];
 	const seen = new Set<string>();
 	for (const d of store.listDelivery()) {
-		if (d.action !== "merge" || seen.has(normPath(d.candidate))) continue;
-		seen.add(normPath(d.candidate));
+		if (d.action !== "merge") continue;
 		try {
-			if (!fs.existsSync(d.candidate)) continue;
-			const pr = live.ghJson(["pr", "view", String(d.pr), "--repo", d.repo, "--json", PR_CLEANUP_FIELDS]) as Record<string, any> | undefined;
-			if (!pr || typeof pr !== "object" || pr.state !== "MERGED" || typeof pr.mergeCommit?.oid !== "string" || !BARE_SHA.test(pr.mergeCommit.oid)) continue;
-			const candidate = slashed(canonicalCwd(d.candidate));
+			const candidate = d.candidate.replace(/\\/g, "/").replace(/\/+$/, "");
+			if (seen.has(normPath(candidate))) continue;
+			seen.add(normPath(candidate));
 			const task = path.posix.basename(candidate);
 			const group = path.posix.dirname(candidate);
-			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, exists: fs.existsSync(`${group}/${kind}/${task}`), reason: "artifact folders are never deleted automatically: a knowledge checkpoint cannot prove their contents disposable" }));
-			const primary = primaryOf(candidate);
-			const request = { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha, mergeCommit: pr.mergeCommit.oid as string };
-			const grant = primary === undefined ? undefined : { id: randomUUID(), role: LEASE_ROLE, candidate, primary, pushUrl: d.pushUrl, repo: d.repo, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha, mergeCommit: request.mergeCommit, issuedAt: live.now?.() ?? Date.now() };
-			const why = grant === undefined ? "the primary checkout could not be proven" : owners.check(candidate, jobRunning) ?? verifyCleanup(normalizeCleanup(grant), live);
-			out.push(why === undefined ? { state: "READY", checkout: candidate, launchCwd: primary, request, retainedArtifacts } : { state: "RETAINED", checkout: candidate, reason: why, retainedArtifacts });
+			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "artifact folders are never deleted automatically: a knowledge checkpoint cannot prove their contents disposable" }));
+			const why = owners.check(candidate, jobRunning);
+			out.push(why === undefined ? { state: "PENDING_UNVERIFIED", checkout: candidate, request: { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha }, retainedArtifacts } : { state: "RETAINED", checkout: candidate, reason: why, retainedArtifacts });
 		} catch { /* unknown state is not pending */ }
 	}
 	return out;
@@ -1592,7 +1587,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime-verified from the live merged PR and terminal worker records, not from child text). For each READY checkout main may launch ONE release-engineer via subagent (single mode, cwd = launchCwd, outside the target) with cleanup = request plus quiescent: true, only after its own quiescence check. RETAINED entries stay; artifact folders are always retained.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay; artifact folders are always retained.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
 export interface ChildGuardLaunch {

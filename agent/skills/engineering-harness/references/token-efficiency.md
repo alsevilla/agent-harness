@@ -5,13 +5,14 @@ Read only when investigating token consumption, oversized results, repetitive ro
 ## Orchestrator
 - Keep task goal, acceptance criteria, exact candidate and authority boundaries.
 - Choose a narrow role once; reuse the decision until new evidence changes risk.
-- Do not re-read full code, worker logs or the skill catalog after a successful handoff.
+- Main does not read code, logs or evidence itself: delegate reads to the narrowest read-only role as one question-driven read packet per decision point; the leaf reads the referenced evidence. Do not re-read full code, worker logs or the skill catalog after a successful handoff.
+- Scout and digest replies carry verbatim snippets and path:line for failures, blockers, security/data risks and PASS claims; main never accepts PASS from a digest, mandatory VERIFY/REVIEW read REPORTs themselves, and evidence reuse stays hash-based.
 - Skip `scout` when exact source scope is already known; avoid routine `oracle` or reviewer calls.
 - Let implementation workers run focused relevant checks; reserve independent roles for critical risks per existing policy. Never skip justified independent checks.
 - Keep PLAN, DECISION, INTEGRATE sequencing with main.
 - Before dispatch, preflight each packet once: task, role scope, exact candidate, authority boundary, acceptance checks and scratch/evidence paths. Drop anything outside that role.
 - Reference a shared governing contract or evidence path instead of pasting history or full prior reports into several packets. Put reusable common context in one artifact and send only the role-specific delta.
-- Do not repeat fixed policy already in the child prompt, and omit instructions meant for other roles.
+- State only deviations from leaf, local-only and native-tool boilerplate; name a module only when it differs from the role default; omit instructions meant for other roles.
 - Guidance only, not a runtime-enforced budget or token measurement. Never drop a critical risk, failed check or blocker to meet a length target.
 
 ## Bounded checklist and evidence reuse

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Canonical Node-only test entrypoint: `npm test` / `node scripts/run-node-tests.mjs`.
 // Discovers every *.test.ts/*.test.mjs and *.node.ts runtime suite by walking the tree (no shell globs, so Bash and PowerShell behave alike),
-// then runs them in one `node --test` process. Python suites are separate (see README "Tests").
+// then runs them in one `node --test` process. The core harness (routing evaluator, agent creation) is Node-only; optional Graphify/UI-UX Python utilities are not core.
 //   node scripts/run-node-tests.mjs            run everything
 //   node scripts/run-node-tests.mjs --list     print the discovered files and the wrapper-covered exclusions, run nothing
 //   node scripts/run-node-tests.mjs <file...>  run only the named discovered files (repo-relative)

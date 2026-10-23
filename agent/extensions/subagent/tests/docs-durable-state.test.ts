@@ -188,11 +188,13 @@ test("policy and runtime docs describe the explicit modelSlot fallback selector 
 	for (const [name, text] of [["AGENTS", agents], ["runtime", runtime], ["routing", routing], ["subagent README", readme]]) {
 		expect(text, name).toMatch(/modelSlot/);
 		expect(text, name).toMatch(/"fallback"/);
-		expect(text, name).toMatch(/explicit `modelTier`|explicit tier/);
+		if (name !== "AGENTS") expect(text, name).toMatch(/explicit `modelTier`|explicit tier/); // AGENTS keeps a pointer; detail lives in routing
 	}
-	expect(agents).toMatch(/first configured fallback/);
-	expect(agents).toMatch(/no arbitrary model/i);
-	expect(agents).toMatch(/Explicit Pi `modelTier` selection is the narrow exception/);
+	expect(routing).toMatch(/first configured fallback/);
+	expect(routing).toMatch(/no arbitrary model/i);
+	expect(routing).toMatch(/Explicit Pi `modelTier` selection is the narrow exception/);
+	expect(agents).toMatch(/never arbitrary per-call model IDs/);
+	expect(agents).toMatch(/Explicit Pi `modelTier`\/`modelSlot: "fallback"` selection is the narrow exception/);
 	expect(readme).toMatch(/empty replay chain|no replay/i);
 	expect(readme).toMatch(/not a (guaranteed )?cross-provider|not automatically cross-provider/i);
 	expect(readme).toMatch(/Copilot[^\n]*(unsupported|no `?modelSlot`?)/i);

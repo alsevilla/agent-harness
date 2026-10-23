@@ -138,7 +138,7 @@ probeTest("a fresh isolated profile resolves the 20 bundled roles from the nativ
 		assert.equal(agent.source, "package", agent.name);
 		assert.equal(agent.filePath, path.join(REPO, "agent", "agents", `${agent.name}.md`), agent.name);
 	}
-	assert.ok(fs.existsSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create_agent.py")), "agent-create CLI resolves under the package root");
+	assert.ok(fs.existsSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create-agent.mjs")), "agent-create CLI resolves under the package root");
 	assert.deepEqual(listFiles(profile), [], "fresh profile stays empty: no copy, no settings, no roles");
 });
 
@@ -615,7 +615,7 @@ test("the README states the two default native extensions, two native skills, ma
 
 test("the agent-creation skill names the bundled role paths and the refusal label the helper emits", () => {
 	const skill = fs.readFileSync(path.join(REPO, "agent", "skills", "agent-creation", "SKILL.md"), "utf8");
-	const helper = fs.readFileSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create_agent.py"), "utf8");
+	const helper = fs.readFileSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create-agent.mjs"), "utf8");
 	assert.doesNotMatch(skill, /defaults\/(roles\.json|agents)/);
 	assert.ok(skill.includes("agent/roles.json") && skill.includes("agent/agents/*.md"), "bundled role paths");
 	assert.ok(fs.existsSync(path.join(REPO, "agent", "roles.json")));
