@@ -15,6 +15,7 @@ Unknown-cause bugs follow harness DEBUG. Leaf agents read assigned modules, neve
 | Dashboard/KPI/table/chart information design | design-dashboards/index.md |
 | Motion/interaction | design-motion-principles/index.md |
 | New visual direction | frontend-design/index.md OR ui-ux-pro-max/index.md |
+| Optional design tokens/theme/design spec/page override | design-system-artifacts/index.md |
 | Keyboard/focus/ARIA/forms | accessible-ui-patterns/index.md |
 | SolidJS implementation | solidjs-engineering/index.md |
 | Existing UI guideline audit | web-design-guidelines/index.md |
