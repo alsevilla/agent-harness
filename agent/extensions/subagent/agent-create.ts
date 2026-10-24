@@ -1,6 +1,6 @@
 /**
- * Native `/subagent create`: operator-only. It freezes the chosen spec in an owned temp dir, previews the Python CLI, and applies
- * only after an explicit CREATE. The Python CLI is the sole validator and writer; this module chooses argv, freezes bytes and
+ * Native `/subagent create`: operator-only. It freezes the chosen spec in an owned temp dir, previews the Node CLI (run with this
+ * process's own Node binary), and applies only after an explicit CREATE. The Node CLI is the sole validator and writer; this module chooses argv, freezes bytes and
  * classifies exits. Not a model tool, and created agents are not loaded, trusted or launched here.
  */
 import { execFile } from "node:child_process";
@@ -17,8 +17,6 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const EXIT_USAGE = 2;
 const EXIT_REFUSED = 1;
 const EXIT_PARTIAL = 3;
-/** Windows `python` launcher missing from PATH (the Store stub's "not recognized" code). */
-const LAUNCHER_NOT_FOUND = 9009;
 const WRITER_REFUSAL = "ERROR: writer:true requires --allow-writers";
 const SHELL_REFUSAL = /^ERROR: shell:(bash|powershell) requires --allow-shell$/;
 const STATUS_KEY = "subagent-create";
@@ -31,11 +29,26 @@ export type ProcessResult =
 	| { kind: "overflow"; stdout: Buffer; stderr: Buffer }
 	| { kind: "killed"; signal: NodeJS.Signals | null; stdout: Buffer; stderr: Buffer };
 
+/** Child environment: the parent's, minus every NODE_* variable (any casing, since a spread loses Windows case-insensitivity), so NODE_OPTIONS/NODE_PATH cannot preload code into the write-capable CLI. HOME/USERPROFILE/SystemRoot/PI_CODING_AGENT_DIR are kept. */
+export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const out: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(env)) if (!/^NODE_/i.test(key)) out[key] = value;
+	return out;
+}
+
+/** The CLI runs only on a real Node binary: basename node/node.exe (any case) and, for this process's own binary, no Bun/Deno/Electron marker (a standalone Pi build has execPath = Pi). No PATH fallback. */
+export function isNodeRuntime(execPath: string, versions: NodeJS.ProcessVersions = process.versions, own: string = process.execPath): boolean {
+	const base = (execPath.split(/[\\/]/).pop() ?? "").toLowerCase();
+	if (base !== "node" && base !== "node.exe") return false;
+	const v = versions as unknown as Record<string, string | undefined>;
+	return execPath !== own || !(v.bun || v.deno || v.electron);
+}
+
 /** shell:false, UTF-8 bytes kept whole (no per-chunk string concatenation), bounded output. */
-export function runProcess(cmd: string, args: string[], opts: { cwd: string; timeoutMs?: number }): Promise<ProcessResult> {
+export function runProcess(cmd: string, args: string[], opts: { cwd: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }): Promise<ProcessResult> {
 	return new Promise((resolve) => {
 		try {
-			execFile(cmd, args, { cwd: opts.cwd, encoding: "buffer", maxBuffer: MAX_OUTPUT_BYTES, shell: false, timeout: opts.timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+			execFile(cmd, args, { cwd: opts.cwd, env: opts.env ?? childEnv(), encoding: "buffer", maxBuffer: MAX_OUTPUT_BYTES, shell: false, timeout: opts.timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
 				if (!error) return resolve({ kind: "exit", code: 0, stdout, stderr });
 				const e = error as NodeJS.ErrnoException & { killed?: boolean; signal?: NodeJS.Signals | null };
 				if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return resolve({ kind: "overflow", stdout, stderr });
@@ -76,16 +89,15 @@ export interface CreateContext extends RoleCommandContext {
 }
 
 export interface CreateDeps {
-	run?: (cmd: string, args: string[], opts: { cwd: string; timeoutMs?: number }) => Promise<ProcessResult>;
-	python?: string;
+	run?: (cmd: string, args: string[], opts: { cwd: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }) => Promise<ProcessResult>;
+	/** Test seam: the Node binary to run the CLI with (default: this process's own `process.execPath`). */
+	node?: string;
 	agentDir?: string;
 	tmpRoot?: string;
 }
 
 type Grants = { writer: boolean; shell: boolean };
-type Preview = { kind: "ok"; bytes: Buffer; text: string } | { kind: "launcher" } | { kind: "refused"; grant: "writer" | "shell" } | { kind: "fail"; message: string };
-
-const defaultPython = (): string => (process.platform === "win32" ? "python" : "python3");
+type Preview = { kind: "ok"; bytes: Buffer; text: string } | { kind: "refused"; grant: "writer" | "shell" } | { kind: "fail"; message: string };
 
 function decodeStrict(bytes: Buffer): string | undefined {
 	try {
@@ -119,9 +131,6 @@ function cleanPath(input: string): string {
 
 function cliArgs(cli: string, root: string, agentDir: string, frozen: string, grants: Grants): string[] {
 	return [
-		"-I",
-		"-X",
-		"utf8",
 		cli,
 		"--spec",
 		frozen,
@@ -135,7 +144,7 @@ function cliArgs(cli: string, root: string, agentDir: string, frozen: string, gr
 }
 
 function classify(r: ProcessResult): Preview {
-	if (r.kind === "spawn" || (r.kind === "exit" && r.code === LAUNCHER_NOT_FOUND)) return { kind: "launcher" };
+	if (r.kind === "spawn") return { kind: "fail", message: `the Node runtime could not start the CLI${r.code ? ` (${r.code})` : ""}; nothing was written.` };
 	if (r.kind === "overflow") return { kind: "fail", message: "preview output exceeded 2 MiB; nothing was written." };
 	if (r.kind === "killed") return { kind: "fail", message: "preview timed out or was killed after 30 s; nothing was written." };
 	if (r.code === 0) {
@@ -174,18 +183,6 @@ async function askSpec(ctx: CreateContext): Promise<string | undefined> {
 	}
 }
 
-/** Shown only when the launcher could not start; Esc cancels. Nothing is installed, configured or guessed. */
-async function askPython(ctx: CreateContext, failed: string): Promise<string | undefined> {
-	ctx.ui.notify(`The Python launcher '${sanitizeForDisplay(failed)}' could not start. Enter an absolute path to Python 3, or Esc to cancel.`, "warning");
-	for (;;) {
-		const raw = await ctx.ui.input("Absolute path to a Python 3 executable (optional; Esc cancels)");
-		if (raw === undefined || raw.trim() === "") return undefined;
-		const exe = cleanPath(raw);
-		if (path.isAbsolute(exe) && isFile(exe)) return exe;
-		ctx.ui.notify("Python path must be an absolute path to an existing file.", "error");
-	}
-}
-
 /** Explicit per-run grant after the exact known CLI refusal; Cancel is first and is the default. */
 async function offerGrant(ctx: CreateContext, grant: "writer" | "shell"): Promise<boolean> {
 	const message = grant === "writer" ? `The CLI refused writer:true (${WRITER_REFUSAL}). Allow the writer grant? It adds edit tools to the agent.` : "The CLI refused a shell grant. Allow shell (bash|powershell)? This is not a sandbox.";
@@ -201,7 +198,7 @@ async function reviewCreate(ctx: CreateContext, text: string): Promise<boolean> 
 }
 
 function reportApply(ctx: CreateContext, r: ProcessResult): void {
-	if (r.kind === "spawn") return ctx.ui.notify("/subagent create: the Python launcher could not start for apply; nothing was written.", "error");
+	if (r.kind === "spawn") return ctx.ui.notify("/subagent create: the Node runtime could not start the CLI for apply; nothing was written.", "error");
 	if (r.kind === "overflow" || r.kind === "killed") return ctx.ui.notify("/subagent create: apply output exceeded 2 MiB or was killed; unknown completion; not retried. Review the project folder; nothing was deleted.", "error");
 	const out = sanitizeForDisplay(r.stdout.toString("utf8").trimEnd());
 	const err = sanitizeForDisplay(r.stderr.toString("utf8").trimEnd());
@@ -218,8 +215,8 @@ export async function runAgentCreate(ctx: CreateContext, rawArgs: string, deps: 
 
 	const run = deps.run ?? runProcess;
 	const agentDir = deps.agentDir ?? getAgentDir();
-	const cli = path.join(packageRoot() ?? agentDir, "skills", "agent-creation", "scripts", "create_agent.py");
-	let python = deps.python ?? defaultPython();
+	const cli = path.join(packageRoot() ?? agentDir, "skills", "agent-creation", "scripts", "create-agent.mjs");
+	const node = deps.node ?? process.execPath;
 	let owned: string | undefined;
 	ctx.ui.setStatus(STATUS_KEY, "subagent create: choosing inputs");
 	try {
@@ -228,6 +225,7 @@ export async function runAgentCreate(ctx: CreateContext, rawArgs: string, deps: 
 		const specPath = await askSpec(ctx);
 		if (specPath === undefined) return;
 		if (!isFile(cli)) throw new Error(`agent-creation CLI not found at ${cli}`);
+		if (!isNodeRuntime(node)) return void ctx.ui.notify("/subagent create: the Node runtime could not start the CLI (this process is not running on Node); nothing was written.", "error");
 
 		const dir = fs.mkdtempSync(path.join(deps.tmpRoot ?? os.tmpdir(), "subagent-create-"));
 		owned = dir;
@@ -238,18 +236,12 @@ export async function runAgentCreate(ctx: CreateContext, rawArgs: string, deps: 
 		const frozenUnchanged = (): boolean => fs.readFileSync(frozen).equals(frozenBytes);
 		const argv = (grants: Grants): string[] => cliArgs(cli, root, agentDir, frozen, grants);
 		const previewOnce = async (grants: Grants): Promise<Preview> =>
-			classify(await run(python, argv(grants), { cwd: dir, timeoutMs: PREVIEW_TIMEOUT_MS }));
+			classify(await run(node, argv(grants), { cwd: dir, timeoutMs: PREVIEW_TIMEOUT_MS, env: childEnv() }));
 
 		let grants: Grants = { writer: false, shell: false };
 		let first: Extract<Preview, { kind: "ok" }> | undefined;
 		for (;;) {
 			const out = await previewOnce(grants);
-			if (out.kind === "launcher") {
-				const next = await askPython(ctx, python);
-				if (next === undefined) return;
-				python = next;
-				continue;
-			}
 			if (out.kind === "refused") {
 				if (grants[out.grant]) return void ctx.ui.notify("/subagent create: the CLI still refused after the grant; nothing was written.", "error");
 				if (!(await offerGrant(ctx, out.grant))) return;
@@ -272,7 +264,7 @@ export async function runAgentCreate(ctx: CreateContext, rawArgs: string, deps: 
 		if (!frozenUnchanged()) return void ctx.ui.notify("/subagent create: frozen spec changed; nothing written.", "error");
 
 		ctx.ui.setStatus(STATUS_KEY, "subagent create: creating files");
-		reportApply(ctx, await run(python, [...argv(grants), "--apply"], { cwd: dir }));
+		reportApply(ctx, await run(node, [...argv(grants), "--apply"], { cwd: dir, env: childEnv() }));
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		ctx.ui.notify(`/subagent create stopped: ${sanitizeForDisplay(message)}. Check the project folder before retrying; nothing was deleted.`, "error");

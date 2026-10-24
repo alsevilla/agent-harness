@@ -1,25 +1,13 @@
-// Worker decision relay regression. Bun discovers this file and launches its body under Node, where
+// Worker decision relay regression.
 // registerHooks + native TypeScript transform load the REAL index.ts/background.ts/decision-relay.ts.
 // Only the pi package (existing runtime-doubles.mjs), child_process spawn and monitor UI are doubled.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const thisFile = fileURLToPath(import.meta.url);
-const isBun = typeof (process.versions as Record<string, string>).bun === "string";
 
-if (isBun) {
-	const { test } = await import("bun:test");
-	test("decision relay suite passes under Node native TypeScript transform", () => {
-		const run = spawnSync("node", ["--experimental-transform-types", "--test", thisFile], { encoding: "utf8", timeout: 180_000, windowsHide: true });
-		assert.equal(run.status, 0, run.stdout + run.stderr);
-	}, 200_000);
-} else {
-	await runNodeSuite();
-}
+await runNodeSuite();
 
 async function runNodeSuite() {
 	const { default: test, before, after, beforeEach, afterEach } = await import("node:test");

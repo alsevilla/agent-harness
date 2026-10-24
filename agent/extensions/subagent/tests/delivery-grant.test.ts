@@ -523,7 +523,6 @@ test("delivery envelope: round trip keeps the record under deliveryActions; lega
 });
 
 test("live readers run from a neutral cwd with explicit git -C: gh and git lookups never resolve from the candidate", (t) => {
-	if (process.versions.bun) { t.skip("NOT RUN: Bun syncBuiltinESMExports does not refresh the ESM namespace; child_process stubs cannot apply and real gh/git would run"); return; }
 	resetState();
 	const store = storeWith();
 	const repo = makeRepo("neutral-edit");

@@ -9,5 +9,5 @@ Produce a compact Discovery Brief:
 - recommended next phase.
 
 Do not implement. Do not turn discovery into a repository-wide survey.
-Use Scout only when repository reconnaissance is genuinely needed.
+Use Scout only when repository reconnaissance is genuinely needed. Scout is a read-only role: main delegates discovery reads to it, batched as one question-driven packet, instead of reading itself.
 Load `references/extended.md` only for broad/cross-system discovery.

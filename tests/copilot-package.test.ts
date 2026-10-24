@@ -1,15 +1,16 @@
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { hostModules } from "../agent/extensions/subagent/tests/host-modules.ts";
 
-const root = join(import.meta.dir, "..");
+const root = join(import.meta.dirname, "..");
 
 test("Copilot plugin manifest has supported metadata and contained shared paths", () => {
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
   expect(manifest.name).toBe("agent-harness");
-  expect(manifest.version).toBe("1.10.1");
+  expect(manifest.version).toBe("1.11.0");
   expect(manifest.agents).toBe("./agent/agents");
   expect(manifest.skills).toBe("./agent/skills");
   for (const [path, sentinel] of [[manifest.agents, "general-worker.md"], [manifest.skills, "engineering-harness/SKILL.md"]]) {
@@ -27,9 +28,14 @@ test("Pi package, Copilot manifest and README Source release name the same curre
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const manifest = JSON.parse(readFileSync(join(root, ".github", "plugin", "plugin.json"), "utf8"));
   const row = readFileSync(join(root, "README.md"), "utf8").match(/^\| Source release \| v(\d+\.\d+\.\d+) /m);
-  expect(row?.[1]).toBe("1.10.1");
+  expect(row?.[1]).toBe("1.11.0");
   expect(pkg.version).toBe(row?.[1]);
   expect(manifest.version).toBe(row?.[1]);
+});
+
+test("README current native role count matches agent/roles.json", () => {
+  const n = JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")).length;
+  expect(readFileSync(join(root, "README.md"), "utf8")).toContain(`The native package exposes these ${n} generic roles`);
 });
 
 test("Copilot marketplace lists this plugin and its platform-specific source", () => {
@@ -89,10 +95,12 @@ test("Copilot metadata reuses shared Pi component sources without duplicate adap
 });
 
 const nativeAgents = join(root, "agent", "agents");
+// YAML parser: the one installed with the Pi host (the parser Pi's own parseFrontmatter uses); no repo-local dependency.
+const { parse: parseYaml } = await import(pathToFileURL(join(hostModules(["yaml/dist/index.js"]), "yaml", "dist", "index.js")).href);
 const frontmatter = (text: string) => {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) throw new Error("missing YAML frontmatter");
-  return { metadata: Bun.YAML.parse(match[1]) as Record<string, unknown>, body: text.slice(match[0].length) };
+  return { metadata: parseYaml(match[1]) as Record<string, unknown>, body: text.slice(match[0].length) };
 };
 // NATIVE_PROBE_HOST_MODULES pins an explicit host tree; unset uses the latest complete installed release (hostModules keeps its version-compat failure).
 const sdkFrontmatter = async (text: string) => {
@@ -122,8 +130,8 @@ test("all profiles expose native Copilot headers with unchanged native tools and
 
 test("native profiles have valid metadata, exact roles, and documented tools", () => {
   const names = agentNames();
-  expect(names).toHaveLength(20);
-  expect(new Set(names).size).toBe(20);
+  expect(names).toHaveLength(21); // 20 baseline + additive planner
+  expect(new Set(names).size).toBe(21);
   const files = readdirSync(nativeAgents).filter((f) => f.endsWith(".md")).map((f) => f.replace(/\.md$/, ""));
   expect(files.sort()).toEqual([...names].sort());
   expect(readdirSync(nativeAgents)).toEqual(expect.arrayContaining(names.map((name) => `${name}.md`)));

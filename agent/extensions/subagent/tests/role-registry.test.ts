@@ -1,6 +1,6 @@
 // Role registry and lifecycle contracts (RED first): the packaged profile registers exactly the 20 generic roles, every definition agrees
 // with the registry, and lifecycle ownership stays explicit. Project-local domain roles are not part of this generic profile.
-import { test } from "bun:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -27,9 +27,13 @@ const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.m
 
 const GENERIC_ROLES = [
   "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
-  "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer",
+  "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "planner", "release-engineer",
   "reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "test-engineer", "ui-ux-specialist", "platform-worker",
 ];
+
+// Additive roles after the frozen 20-role baseline: name -> existing role whose validated tiers/tools it must mirror exactly. Baseline fixtures stay unchanged.
+const ADDED_ROLES: Record<string, string> = { planner: "architecture-specialist" };
+const BASELINE_ROLES = GENERIC_ROLES.filter((name) => !(name in ADDED_ROLES));
 
 // Canonical definitions carry no Pi settings: model, fallback, thinking and Pi tools come from roles.json; text is the definition file.
 function frontmatter(name: string) {
@@ -129,9 +133,9 @@ test("registry fields override annotations field-wise in real package discovery"
   }
 });
 
-test("registry registers exactly the 20 generic roles, unique, without statusline-setup", () => {
-  assert.equal(roles.length, 20);
-  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 20);
+test("registry registers exactly the 21 generic roles (20 baseline + additive planner), unique, without statusline-setup", () => {
+  assert.equal(roles.length, 21);
+  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 21);
   assert.deepEqual(roles.map((r: { name: string }) => r.name).sort(), [...GENERIC_ROLES].sort());
   assert.ok(!roles.some((r: { name: string }) => r.name === "statusline-setup"));
   assert.ok(!fs.existsSync(new URL("../../../agents/statusline-setup.md", import.meta.url)), "statusline-setup definition removed");
@@ -139,7 +143,7 @@ test("registry registers exactly the 20 generic roles, unique, without statuslin
 });
 
 test("every generic role receives standard code navigation integrations", () => {
-  assert.equal(integrations.roles.length, 20);
+  assert.equal(integrations.roles.length, 21);
   assert.ok(integrations.roles.includes("database-worker"));
   assert.ok(integrations.roles.includes("database-specialist"));
   assert.deepEqual([...integrations.roles].sort(), roles.map((r: { name: string }) => r.name).sort());
@@ -176,7 +180,7 @@ test("registry contains the approved tier pairs without changing default role fi
 
 // Scenario regression for the written tier policy (routing.md "Explicit Pi model tier"). Fixtures pin what the existing resolver
 // returns for a requested tier on the real package registry; they do not measure whether an orchestrator chooses that tier.
-test("written tier scenarios resolve through the real package registry to the configured model, fallback and thinking", () => {
+test("written tier scenarios resolve through the real package registry to the configured model, fallback and thinking", { timeout: 30000 }, () => {
   const cwd = fs.mkdtempSync(`${os.tmpdir()}/pi-tier-scenarios-`);
   const user = `${cwd}/user`;
   fs.mkdirSync(`${user}/agents`, { recursive: true });
@@ -220,20 +224,20 @@ test("written tier scenarios resolve through the real package registry to the co
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
     fs.rmSync(cwd, { recursive: true, force: true });
   }
-}, 30000);
+});
 
 // Single source: roles.json owns every Pi setting; a canonical definition keeps only identity, native Copilot tools and the body.
 const headerRemoval = JSON.parse(fs.readFileSync(new URL("./fixtures/header-removal-baseline.json", import.meta.url), "utf8")) as {
   roles: { name: string; headLfSha256: string; nativeToolsLine: string; descriptionLine: string; removed: string[]; bodySha256: string; expectedAfterLfSha256: string }[];
 };
 test("every canonical definition is header-free: identity and native tools only, all Pi settings live in roles.json", () => {
-  assert.deepEqual(headerRemoval.roles.map((entry) => entry.name).sort(), [...GENERIC_ROLES].sort());
+  assert.deepEqual(headerRemoval.roles.map((entry) => entry.name).sort(), [...BASELINE_ROLES].sort());
   for (const role of roles) {
     const text = fs.readFileSync(new URL(`../../../agents/${role.name}.md`, import.meta.url), "utf8");
     const { frontmatter: fm } = parseFrontmatter<Record<string, unknown>>(text);
     assert.equal(fm.name, role.name, `${role.name}: name`);
     assert.deepEqual(Object.keys(fm), ["name", "description", "tools"], `${role.name}: header keys`);
-    const native = headerRemoval.roles.find((entry) => entry.name === role.name)!;
+    const native = headerRemoval.roles.find((entry) => entry.name === (ADDED_ROLES[role.name] ?? role.name))!; // an added role mirrors its source role native tools
     assert.equal(text.replace(/\r\n/g, "\n").split("\n").find((line) => line.startsWith("tools:")), native.nativeToolsLine, `${role.name}: native Copilot tools unchanged`);
     assert.ok(typeof role.tools === "string" && role.tools.trim(), `${role.name}: roles.json tools`);
     assert.ok(role.modelTiers[role.defaultModelTier].model, `${role.name}: roles.json default model`);
@@ -605,7 +609,8 @@ const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "
 // Automatic PR delivery: release-engineer Delivery grant paragraph updated (automatic PR edit, separate identity-bound merge/release action grants, no single-use merge/release); pins re-derived from the on-disk profile.
 // These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
 const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
-  "release-engineer": { afterLfSha256: "58ff985572c8c95b79e61074cfbddf8dc738a7316041c9af3a398a857fe2e513", bodySha256: "08f98a19ed65c0f37aa28de6fd501616af25a4c4e8192a11fcb015acb2917eb3", reinsertedLfSha256: "b96a43a8d5ce67ef05d5dc58516007f8728d5b3d171163974d45d045744d2da9" },
+  // Automatic checkout cleanup paragraph added to the release-engineer body (post-merge-cleanup change); pins re-derived from the on-disk profile.
+  "release-engineer": { afterLfSha256: "51f9aca468437df4faaa92127a7f21f28b2dc5b438b6317ce710818bf088bb71", bodySha256: "309e4f8e943b794e8c8c3bacc79cfadf4fa2acd75e268c962a8990e135873f93", reinsertedLfSha256: "02ff9b5cda71dd330c3758323023487c7078a41fbc9fd600ff7c179777dcbef7" },
   // Approved new-body expectation (claudex-loop-adaptation): reviewer gained one untrusted-evidence sentence; historical baselines are not regenerated.
   reviewer: { afterLfSha256: "72f12d474e978845cd392e5ebcdce249f675eb956478d064faf6a35a2bdf5c88", bodySha256: "83b7b9f4d5a894031b06a47eba99b9b6f109870d8cb17c59101d9e36188178a4", reinsertedLfSha256: "703d1b71fdb11e9b4fe7208e48cbb7557d597cdac197b307d3532d08922026da" },
   // Copilot compatibility: host-aware <skills> module root replaces hard-coded ~/.pi paths (tests/copilot-compat-fixes.test.ts); pins re-derived from the on-disk profiles.
@@ -631,7 +636,7 @@ const lfText = (file: URL) => fs.readFileSync(file).toString("latin1").replace(/
 const sha256Latin1 = (text: string) => createHash("sha256").update(Buffer.from(text, "latin1")).digest("hex");
 test("tier-only baseline pins the 20 shipped roles; header removal removed only the approved model and metadata lines", () => {
   assert.equal(baseline.roles.length, 20);
-  assert.deepEqual(baseline.roles.map((role) => role.name).sort(), [...GENERIC_ROLES].sort());
+  assert.deepEqual(baseline.roles.map((role) => role.name).sort(), [...BASELINE_ROLES].sort());
   assert.equal(Object.keys(baseline.profileSha256).length, 20);
   assert.deepEqual(Object.keys(PROFILE_LF_SHA256).sort(), Object.keys(baseline.profileSha256).sort(), "LF pin set matches the fixture's 20 profiles");
   assert.equal(baseline.rolesJsonSha256, ORIGINAL_ROLES_SHA256, "fixture provenance: pinned roles.json is the pre-migration e2ddaed bytes");
@@ -714,7 +719,7 @@ test("package discovery projects the approved presets: default tuple, tools and 
 test("shipped roles.json is tier-only: exact entry keys, no root provider/model/fallbackModel/thinking, configured default tier", () => {
   const raw = fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8");
   const roles = JSON.parse(raw) as Record<string, unknown>[];
-  assert.equal(roles.length, 20);
+  assert.equal(roles.length, 21);
   for (const entry of roles) {
     const name = String(entry.name);
     assert.deepEqual(Object.keys(entry).sort(), ["defaultModelTier", "modelTiers", "name", "tools"], `${name}: entry keys`);
@@ -734,7 +739,7 @@ test("shipped roles.json is tier-only: exact entry keys, no root provider/model/
 
 test("raw roles.json equals the approved preset oracle for every role: default tier, tiers, fallback order, thinking and tools", () => {
   const raw = RAW_ROLES();
-  assert.equal(raw.length, approved.roles.length);
+  assert.equal(raw.length, approved.roles.length + Object.keys(ADDED_ROLES).length, "approved oracle covers the baseline roles; added roles are checked below");
   for (const expected of approved.roles) {
     const role = raw.find((item) => item.name === expected.name);
     assert.ok(role, expected.name);
@@ -749,6 +754,22 @@ test("raw roles.json equals the approved preset oracle for every role: default t
       assert.equal(cfg.thinking, pinned.thinking, `${expected.name}.${tier}: thinking`);
     }
   }
+});
+
+test("additive planner mirrors architecture-specialist tiers, models, thinking and tools exactly, read-only, and no baseline role changed", () => {
+  const raw = RAW_ROLES();
+  for (const [added, source] of Object.entries(ADDED_ROLES)) {
+    const a = raw.find((item) => item.name === added)!;
+    const b = raw.find((item) => item.name === source)!;
+    assert.ok(a && b);
+    assert.deepEqual({ ...a, name: source }, b, `${added} copies ${source} registry settings`);
+    assert.deepEqual(a.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool === "edit" || tool === "write"), [], `${added}: read-only tools`);
+    const text = fs.readFileSync(new URL(`../../../agents/${added}.md`, import.meta.url), "utf8");
+    assert.ok(text.split(String.fromCharCode(10)).map((line) => line.trim()).includes("tools: read, search, execute"), `${added}: native read-only tools line`);
+    assert.ok(text.includes("Never launch/delegate/supervise helpers"));
+    assert.match(text, /Main owns the governing PLAN/);
+  }
+  for (const entry of approved.roles) assert.ok(raw.find((item) => item.name === entry.name), `${entry.name} still present`);
 });
 
 test("approved preset update differs from the immutable baseline only by the recorded ledger; permissions and the role set are unchanged", () => {
@@ -783,12 +804,12 @@ test("write is the one approved tool delta: only release-engineer gains it, pinn
 
 test("shipped tier census matches the approved data shape (informational; not a runtime eligibility gate)", () => {
   const roles = RAW_ROLES();
-  assert.equal(roles.length, 20);
+  assert.equal(roles.length, 21); // 20 baseline + additive planner (economy default, both tiers)
   const defaults = roles.map((role) => role.defaultModelTier);
-  assert.equal(defaults.filter((tier) => tier === "economy").length, 19);
+  assert.equal(defaults.filter((tier) => tier === "economy").length, 20);
   assert.equal(defaults.filter((tier) => tier === "capable").length, 1, "only Oracle defaults to capable; it has no economy tier");
   const entries = roles.flatMap((role) => Object.keys(role.modelTiers));
-  assert.equal(entries.length, 38);
-  assert.equal(entries.filter((tier) => tier === "economy").length, 19);
-  assert.equal(entries.filter((tier) => tier === "capable").length, 19);
+  assert.equal(entries.length, 40);
+  assert.equal(entries.filter((tier) => tier === "economy").length, 20);
+  assert.equal(entries.filter((tier) => tier === "capable").length, 20);
 });

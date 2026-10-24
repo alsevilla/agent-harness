@@ -254,7 +254,7 @@ test("hygiene: candidate git config cannot run programs; argv is hardened and ru
 	const marker = path.join(root, `marker-${counter}.txt`).split(path.sep).join("/");
 	const hook = path.join(root, `hook-${counter}.sh`).split(path.sep).join("/");
 	fs.writeFileSync(hook, `#!/bin/sh\necho ran >> "${marker}"\nexit 0\n`);
-	git(repo, "config", "core.fsmonitor", hook);
+	// A repository-local core.fsmonitor is no longer tolerated by the fingerprint: it is refused outright (cleanup-grant.test.ts scope matrix), because the permitted removal command would run it.
 	write(repo, "a.bin", "bin\n");
 	write(repo, ".gitattributes", "*.bin diff=evil\n");
 	git(repo, "config", "diff.evil.textconv", hook);
@@ -267,8 +267,7 @@ test("hygiene: candidate git config cannot run programs; argv is hardened and ru
 	cp.execFileSync = (file: string, args: string[], options: any) => { calls.push({ file, args, cwd: options?.cwd }); return original(file, args, options); };
 	syncBuiltinESMExports();
 	try { F.candidateFingerprint(repo); } finally { cp.execFileSync = original; syncBuiltinESMExports(); }
-	assert.equal(fs.existsSync(marker), false, "fsmonitor/textconv/ext-diff from the candidate config ran nothing");
-	if (process.versions.bun) return; // Bun does not route the child_process namespace patch: the behavioral assertion above still ran; argv assertions run under node
+	assert.equal(fs.existsSync(marker), false, "textconv/ext-diff from the candidate config ran nothing");
 	assert.ok(calls.length >= 3);
 	for (const c of calls) {
 		assert.equal(c.file, "git");

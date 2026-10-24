@@ -1,10 +1,11 @@
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync, mkdirSync, copyFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve, isAbsolute, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dirname, "..");
 const plugin = join(root, ".github", "plugin");
 const read = (...p: string[]) => readFileSync(join(root, ...p), "utf8");
 const hooks = () => JSON.parse(readFileSync(join(plugin, "hooks.json"), "utf8")).hooks;
@@ -113,7 +114,7 @@ test("guard denies merge, release and direct tag/API publication in bash and pow
 });
 
 test("guard stays silent for ordinary commits, feature pushes, PR create/edit/view, reads and non-shell tools", () => {
-  for (const c of [`${GIT} commit -m "release notes"`, `${PUSH} origin feature/copilot-fixes`, `${PUSH} -u origin my-branch`, `${PUSH} origin 1.2-fix`, `${GH} pr create --fill`, `${GH} pr edit 5 --title t`, `${GH} pr view 5`, `${GH} pr status`, `${GH} release list`, `${GH} release view v1`, `${GH} api repos/o/r/releases`, `${GH} api repos/o/r/pulls/7`, `curl https://api.github.com/repos/o/r/releases`, `${GIT} tag -l`, `${GIT} log --oneline`, `bun test`, `echo merge release`, `workflow run`, `npm test`]) silent(guard(c));
+  for (const c of [`${GIT} commit -m "release notes"`, `${PUSH} origin feature/copilot-fixes`, `${PUSH} -u origin my-branch`, `${PUSH} origin 1.2-fix`, `${GH} pr create --fill`, `${GH} pr edit 5 --title t`, `${GH} pr view 5`, `${GH} pr status`, `${GH} release list`, `${GH} release view v1`, `${GH} api repos/o/r/releases`, `${GH} api repos/o/r/pulls/7`, `curl https://api.github.com/repos/o/r/releases`, `${GIT} tag -l`, `${GIT} log --oneline`, `node --test`, `echo merge release`, `workflow run`, `npm test`]) silent(guard(c));
   silent(run("release-guard.mjs", { sessionId: "s", timestamp: 1, cwd: root, toolName: "view", toolArgs: { path: "x" } }));
   silent(run("release-guard.mjs", { sessionId: "s", timestamp: 1, cwd: root, toolName: "edit", toolArgs: { command: PROTECTED[0] } }));
 });
@@ -134,9 +135,9 @@ test("no environment variable or file changes the guard result (no override chan
 
 // Profiles: canonical repo-relative module paths (agent/skills/...); the portable root rule is pinned in tests/portable-module-paths.test.ts.
 const agentFiles = readdirSync(join(root, "agent", "agents")).filter((f) => f.endsWith(".md"));
-test("canonical profiles keep 20 roles and name no user-home or <skills> module path", () => {
-  expect(agentFiles).toHaveLength(20);
-  expect(roles).toHaveLength(20);
+test("canonical profiles keep 21 roles (20 baseline + additive planner) and name no user-home or <skills> module path", () => {
+  expect(agentFiles).toHaveLength(21);
+  expect(roles).toHaveLength(21);
   for (const f of agentFiles) expect(read("agent", "agents", f)).not.toMatch(/~\/\.pi|<skills>/);
 });
 
@@ -146,7 +147,7 @@ test("shared references loaded from profiles and the routing appendix do not har
 
 test("read-only roles have no native edit tool in their headers, registry projection kept (execute retained)", () => {
   const ro = roles.filter((r) => !/\b(edit|write)\b/.test(r.tools));
-  expect(ro.length).toBe(14);
+  expect(ro.length).toBe(15); // 14 baseline read-only roles + additive planner
   for (const r of ro) {
     const header = read("agent", "agents", `${r.name}.md`).match(/^tools: (.*)$/m)![1];
     expect(header).toBe("read, search, execute");

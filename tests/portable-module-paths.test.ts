@@ -1,11 +1,12 @@
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { existsSync, readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 // Shared module references are canonical repo-relative `agent/skills/...`: never a user's home (~/.pi) and never a `<skills>` placeholder.
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(root, ...p), "utf8");
 const tracked = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).stdout.split("\0").filter(Boolean);
 // Retired generator (matches pinned baseline text) and test sources (which name the forbidden strings as assertions) are not shared references.

@@ -1,7 +1,8 @@
 // Role/shared prompt dedup contract: assembled child prompts keep every pre-dedup sentence except the listed redundant
 // restatements, keep headings and frontmatter, and shrink where a restatement was removed.
-import { afterAll, mock, test } from "bun:test";
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
+import { after, test } from "node:test";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
@@ -21,9 +22,16 @@ const FILES = {
 	qmd: path.join(PROFILE, "extensions", "qmd", "index.ts"),
 };
 for (const file of Object.values(FILES)) { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, "// controlled fixture\n"); }
-afterAll(() => { fs.rmSync(PROFILE, { recursive: true, force: true }); fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }); });
+after(() => { fs.rmSync(PROFILE, { recursive: true, force: true }); fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }); });
 const FULL_LAUNCH = ["--extension", FILES.ponytailExt, "--extension", FILES.serena, "--extension", FILES.qmd, "--extension", FILES.graphifyExt, "--skill", FILES.graphifySkill, "--tools", "read,grep,find,ls,serena_find_symbol,qmd_search"];
-mock.module("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => PROFILE }));
+// Node equivalent of the former module mock: resolve the Pi package to a data: module exposing only getAgentDir.
+(globalThis as any).__piTestAgentDir = () => PROFILE;
+registerHooks({
+  resolve(specifier: string, context: object, nextResolve: (s: string, c: object) => { url: string }) {
+    if (specifier === "@earendil-works/pi-coding-agent") return { url: "data:text/javascript," + encodeURIComponent("export const getAgentDir = () => globalThis.__piTestAgentDir();"), shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+} as never);
 const { assembleChildSystemPrompt, graphReferenceGuidance } = await import("../code-integrations.ts");
 
 const repo = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\\/g, "/").replace(/\/$/, "");
@@ -166,7 +174,7 @@ const HOST_PATH_REWRITE_REMOVED: Record<string, string[]> = { "backend-worker": 
 const HOST_PATH_REWRITE_ADDED: Record<string, string[]> = {"backend-worker":["05316f5a","0484df23","d2482a2c"],"concurrency-specialist":["05316f5a","9beab3fc","2bbe84da"],"database-specialist":["05316f5a","12b25721"],"debugger":["05316f5a","f848a8ef","7564472c"],"devops-specialist":["05316f5a","e5c13e20"],"frontend-worker":["05316f5a","502c0b6a","4c945cad","2c21e0f9"],"performance-specialist":["05316f5a","2bbe84da"],"release-engineer":["05316f5a","650ceb55"],"reviewer":["05316f5a","da59a309"],"scout":["05316f5a","7f8ade7a","eaaf1232"],"test-engineer":["05316f5a","7add79fc","45eb0e01","2bbe84da"],"ui-ux-specialist":["05316f5a","7e7baeb3"]};
 const HOST_PATH_REWRITE_UNADDED: Record<string, string[]> = { "backend-worker": ["ba103e70"], "database-specialist": ["904167e9"], "frontend-worker": ["eec9fd3e","7d96f658","3de47273"] };
 const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["f699bace", "2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b", "24903de1"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
-const REPAIR_ADDED: Record<string, string[]> = { reviewer: ["fc3fc8d6"], "release-engineer": ["b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "aeec0036", "e16de1ef", "640c0eec", "eece1ded", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "5b9429cd", "76d48a37", "d03ad015", "fb177cbb", "75070b2d", "98045f96", "f5869bdd", "845fda3d", "e7d3b119", "95ca1463", "cef6155c", "778dfea8", "495aa565", "89747583", "2b537dce", "702610b9", "3c98680f", "86b4a3b1", "1c60c140", "b0712e1e"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
+const REPAIR_ADDED: Record<string, string[]> = { reviewer: ["fc3fc8d6"], "release-engineer": ["4e8e66d6", "8463d536", "c17faae2", "dcded373", "dec089c4" /* automatic checkout cleanup paragraph */, "b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "aeec0036", "e16de1ef", "640c0eec", "eece1ded", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "5b9429cd", "76d48a37", "d03ad015", "fb177cbb", "75070b2d", "98045f96", "f5869bdd", "845fda3d", "e7d3b119", "95ca1463", "cef6155c", "778dfea8", "495aa565", "89747583", "2b537dce", "702610b9", "3c98680f", "86b4a3b1", "1c60c140", "b0712e1e"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
 // Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
 // Only lines of 20+ characters are hashed as sentences, matching sentences() above.
 const STACK_ADDED: Record<string, string[]> = {
@@ -517,7 +525,7 @@ test("variant requirements survive dedup: oracle subscription guard, release-eng
 // Essential no-helper boundary for all 19 live roles (the fixture covers the 18 pre-platform generic roles): the leaf prohibition, the no-subagent-tool statement and the shell-launch prohibition remain, and the removed restatements stay absent.
 test("every live role keeps the no-helper boundary and no longer restates the removed phrases", () => {
 	const names = fs.readdirSync(new URL("../../../agents/", import.meta.url)).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)).sort();
-	assert.equal(names.length, 20, "live role count");
+	assert.equal(names.length, 21, "live role count (20 baseline + additive planner)");
 	const missing: string[] = [];
 	for (const role of names) {
 		const text = assembled("live", role).text;

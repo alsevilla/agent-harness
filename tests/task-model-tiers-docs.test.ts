@@ -32,7 +32,8 @@ test("explicit economy tier is limited to bounded known-contract backend and fro
   assert.match(text, /frontend-worker: adjust presentational state of an existing component whose design is already approved and whose focused tests are named -> explicit economy/);
   assert.match(text, /omit the field: the role's `defaultModelTier` runs unchanged/);
   assert.match(text, /no automatic escalation/);
-  assert.match(compact(policy), /Explicit `economy` fits bounded known-contract backend or frontend implementation with declared checks/);
+  assert.match(text, /The role must configure economy/); // policy detail relocated here from AGENTS.md
+  assert.match(compact(policy), /`references\/routing\.md`, "Explicit Pi model tier"/);
   assert.match(compact(runtime), /routing\.md`? \("Explicit Pi model tier"\)/);
   assert.match(compact(runtime), /applies only the requested tier's configured model, fallbackModel and thinking to that task and changes no stored role default, preset or tools/);
   assert.match(text, /applies only the requested tier's configured model, fallback and thinking to that task; it changes no stored role default, preset or tools/);
@@ -84,4 +85,14 @@ test("high-risk work on economy-default roles requests configured capable; an un
   assert.match(compact(runtime), /high-risk work on an economy-default role requests configured `capable`/i);
   assert.match(compact(runtime), /loads the 20 user agent definitions/);
   assert.doesNotMatch(compact(runtime), /loads the 22 user agent definitions/);
+});
+
+test("worker tier follows task risk, not the main model; gate roles and bounded general work are exampled; no arbitrary model IDs", () => {
+  const text = compact(routing);
+  assert.match(text, /worker tier follows task risk, not the main model/i);
+  assert.match(text, /general-worker: bounded[^>]*-> omit `modelTier`/);
+  assert.match(text, /reviewer or test-engineer: T3\/T4 gate[^-]*-> explicit `capable`/);
+  assert.match(text, /never arbitrary model IDs/i);
+  assert.match(compact(policy), /worker tier follows task risk, not the main model/);
+  assert.doesNotMatch(compact(policy), /modelTier: "[^"]*(?:claude|opus|sonnet|gpt)/i);
 });

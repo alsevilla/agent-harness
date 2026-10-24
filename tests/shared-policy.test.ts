@@ -7,6 +7,7 @@ const policyPath = resolve('agent/AGENTS.md');
 const policy = readFileSync(policyPath, 'utf8');
 const skill = readFileSync(skillPath, 'utf8');
 const readme = readFileSync(resolve('README.md'), 'utf8');
+const routing = readFileSync(resolve('agent/skills/engineering-harness/references/routing.md'), 'utf8');
 const compact = (text: string) => text.toLowerCase().replace(/\s+/g, ' ');
 test('shared skill names the canonical shared policy and host-aware loading', () => {
   const link = skill.match(/`([^`]*AGENTS\.md)` relative to this `SKILL\.md`/i);
@@ -27,10 +28,10 @@ test('shared policy preserves Pi controls and fails closed only at affected capa
   assert.match(text, /never impersonate built-ins, substitute named roles, invent json schemas\/job apis, or prompt-emulate pi-only controls/);
   assert.match(text, /pi's actual named `subagent` calls, tools, control and model registry remain pi-native/);
   assert.match(text, /copilot uses the github cli-selected model/);
-  assert.match(text, /`pi\.\*` and `roles\.json` are pi-only/);
+  assert.match(compact(routing), /`pi\.\*` and `roles\.json` are pi-only/); // relocated from AGENTS.md
   assert.match(text, /preserve user work, candidate\/worktree boundaries, security and project invariants/);
   assert.match(text, /readiness does not grant commit\/push\/merge\/publish\/deploy\/destructive-operation authority/);
-  const preview = compact(readme.slice(readme.indexOf('## Copilot CLI preview boundary'), readme.indexOf('## What it does')));
+  const preview = compact(readme.slice(readme.indexOf("### Copilot CLI preview boundary"), readme.indexOf("## Installation")));
   assert.match(preview, /all 20 canonical agents and six shared skills/);
   assert.match(preview, /one `backend-worker` read-only delegation/);
   assert.match(preview, /choice\/freeform questions/);

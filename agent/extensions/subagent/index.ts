@@ -42,7 +42,8 @@ import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagSta
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
-import { assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
+import { OwnerTracker } from "./cleanup-state.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -50,6 +51,10 @@ const MAX_CONCURRENCY = 4;
 const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 // In-memory exact single-use grants for main and child risky operations; never persisted or relayed.
 const safetyGrants = createGrantStore();
+// Worker cwd/terminal ownership for post-merge cleanup (memory only; a fresh session knows nothing, which refuses).
+const owners = new OwnerTracker();
+// cleanup scope id -> background job id of its launch, so an abort can cancel the live launch (never the reservation of a claimed child).
+const cleanupJobs = new Map<string, string>();
 
 interface UsageStats {
 	input: number;
@@ -144,13 +149,12 @@ async function writePromptToTempFile(agentName: string, prompt: string): Promise
 
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
 	const currentScript = process.argv[1];
-	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-	if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
+	if (currentScript && fs.existsSync(currentScript)) {
 		return { command: process.execPath, args: [currentScript, ...args] };
 	}
 
 	const execName = path.basename(process.execPath).toLowerCase();
-	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
+	const isGenericRuntime = /^node(\.exe)?$/.test(execName);
 	if (!isGenericRuntime) {
 		return { command: process.execPath, args };
 	}
@@ -171,6 +175,7 @@ interface DispatchDefaults {
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
 	prBase?: string; // validated per-entry trusted PR base; shared by every attempt (fallbacks, steering restarts) of this one launch
+	cleanupId?: string; // id of the main-minted cleanup scope of this one launch; only its first spawn claims it
 }
 
 const WORKSPACE_WAITING = "Waiting for workspace";
@@ -358,6 +363,9 @@ async function runAgentAttempt(
         throw error;
     }
 
+	const ownerId = randomUUID();
+	let claimedCleanup: string | undefined;
+	let cleanExit = false;
 	let controlDir: string | undefined;
     let controlPath: string | undefined;
 	let tmpPromptDir: string | null = null;
@@ -407,8 +415,11 @@ async function runAgentAttempt(
         }
 		if (signal?.aborted) throw new Error("Subagent was aborted"); // an abort during the prompt-file write spawns nothing
 		// Guard entry is always injected after pause-gate/relay; a missing guard file throws (fail closed). Grants are claimed only by the job's first actual spawn (grantWindow).
-		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase);
+		// Ownership is recorded before the spawn and ended only after the process closed (finally): any gap reads as active, never idle.
+		owners.begin({ workerId: ownerId, role: agent.source === "user" || agent.source === "package" ? agentName : `untrusted:${agentName}`, cwd: canonicalCwd(cwd ?? defaultCwd), jobId: dispatchDefaults.jobId });
+		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
 		args.push("--extension", guard.entry);
+		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
 		let wasAborted = false;
 
 		let removeAbort = () => {};
@@ -531,6 +542,7 @@ async function runAgentAttempt(
 
 		removeAbort(); release?.(); release = undefined;
         currentResult.exitCode = exitCode;
+        cleanExit = exitCode === 0 && !wasAborted;
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, wasAborted ? "aborted" : isFailedResult(currentResult) ? "failed" : "completed", wasAborted ? "Subagent was aborted" : isFailedResult(currentResult) ? getResultOutput(currentResult) : undefined);
         if (wasAborted && dispatchDefaults.jobId) { currentResult.stopReason = "aborted"; currentResult.errorMessage = "Subagent was stopped"; return currentResult; }
 		if (wasAborted) throw new Error("Subagent was aborted");
@@ -577,6 +589,8 @@ async function runAgentAttempt(
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, signal?.aborted ? "aborted" : "failed", String(error));
         throw error;
     } finally {
+        owners.end(ownerId);
+        if (claimedCleanup) { owners.closeClaimed(claimedCleanup, cleanExit); cleanupJobs.delete(claimedCleanup); }
         release?.(); parentSignal?.removeEventListener("abort", parentAbort);
         if (controlDir) { for (const file of ["control.json", "control.json.next"]) try { fs.unlinkSync(path.join(controlDir, file)); } catch {} try { fs.rmdirSync(controlDir); } catch {} }
         if (tmpPromptPath)
@@ -599,6 +613,13 @@ const MODEL_SLOT = Type.Union([Type.Literal("fallback"), Type.Null()]);
 
 // Optional exact PR base for the trusted release-engineer's PR create/edit. Null is listed (like modelTier) so the SDK keeps it for runtime refusal instead of dropping it into the unbound legacy behavior.
 const PR_BASE = Type.Optional(Type.Union([Type.String({ description: "Exact base branch the trusted release-engineer must use for PR create/edit of this entry. Omitted keeps the legacy syntactic-only base check; supply it whenever the base is known." }), Type.Null()]));
+
+// Post-merge checkout cleanup request (single-mode trusted release-engineer only): a selector plus main's quiescence declaration, never proof; the runtime re-verifies everything live before minting and again in the child guard. Null is listed so the SDK keeps it for runtime refusal.
+const CLEANUP = Type.Optional(Type.Union([Type.Object({
+	checkout: Type.String({ description: "Exact absolute forward-slash path of the merged task checkout under worktrees/<repo>/<task>" }),
+	branch: Type.String(), base: Type.String(), pr: Type.Number(), headSha: Type.String({ description: "40-hex PR head the checkout is on" }), mergeCommit: Type.String({ description: "40-hex merge commit of the merged PR" }),
+	quiescent: Type.Boolean({ description: "Main's declaration that no worker, service or process uses the checkout; must be true" }),
+}, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are never removed." }), Type.Null()]));
 
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
@@ -643,6 +664,7 @@ const SubagentParams = Type.Object({
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()], { description: "Optional Pi model tier for a single task; select per entry in batch modes." })),
 	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
 	prBase: PR_BASE,
+	cleanup: CLEANUP,
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -813,10 +835,19 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 }
 
 export default function (pi: ExtensionAPI) {
+	let runtimeRef: BackgroundWorkers | undefined;
 	registerProviderCooldown(pi);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
-	pi.on("agent_settled", (event) => { if (event.aborted) safetyGrants.revokeAll(); });
-	pi.on("session_shutdown", () => safetyGrants.revokeAll(true));
+	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
+	pi.on("agent_settled", (event) => {
+		if (!event.aborted) return;
+		safetyGrants.revokeAll();
+		for (const jobId of cleanupJobs.values()) { try { runtimeRef?.cancel(jobId); } catch { /* already finished */ } }
+		cleanupJobs.clear();
+		owners.releaseUnclaimed();
+	});
+	pi.on("session_start", () => { cleanupJobs.clear(); owners.clear(); });
+	pi.on("session_shutdown", () => { safetyGrants.revokeAll(true); cleanupJobs.clear(); owners.clear(); });
 	pi.registerCommand("authorization", {
 		description: "Show session authorizations (read-only, secret-free): single-use grant counts, push and push+commit leases, delivery grants and their validity",
 		handler: async (_args, ctx) => {
@@ -842,6 +873,10 @@ export default function (pi: ExtensionAPI) {
 	const monitor = new WorkerMonitor(pi);
     const decisions = new DecisionRelay();
     const runtime = new BackgroundWorkers(pi, monitor, decisions);
+    runtimeRef = runtime;
+    // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.
+    const pendingText = () => { try { return formatCleanupPending(cleanupPending(safetyGrants, owners, (id) => runtime.jobs.get(id)?.state === "running")); } catch { return ""; } };
+    runtime.pendingNote = pendingText;
     const subagentTool = {
 		name: "subagent",
 		label: "Subagent",
@@ -854,7 +889,7 @@ export default function (pi: ExtensionAPI) {
 		].join(" "),
 		parameters: SubagentParams,
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx, preparedDispatch?: { discovery: ReturnType<typeof discoverAgents>; selected: Map<number, SelectedAgent> }) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx, preparedDispatch?: { discovery: ReturnType<typeof discoverAgents>; selected: Map<number, SelectedAgent>; cleanupId?: string }) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const dispatchDefaults: DispatchDefaults = {
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
@@ -986,13 +1021,25 @@ export default function (pi: ExtensionAPI) {
                 try { runtime.assertCanLaunch((params.dag ?? params.chain ?? params.tasks ?? [{agent: params.agent!}]).map(t => t.agent)); }
                 catch (error) { return {isError: true, content: [{type: "text", text: String(error)}]}; }
             }
+            // Cleanup scope: minted once at the outer call (the background re-entry carries only its id), after every other refusal and before any launch.
+            if (params.cleanup !== undefined && !preparedDispatch) {
+                const refuse = (why: string) => ({ content: [{ type: "text" as const, text: `Invalid cleanup: ${why}; nothing was launched.` }], details: makeDetails(mode)([]), isError: true });
+                const trusted = hasSingle && !batchMode ? agents.find((a) => a.name === params.agent) : undefined;
+                if (params.cleanup === null || !trusted || trusted.name !== LEASE_ROLE || (trusted.source !== "user" && trusted.source !== "package")) return refuse("only a single-mode launch of the trusted release-engineer accepts it");
+                if (params.cwd === undefined || (params.prBase !== undefined && params.prBase !== null) || params.readOnly === true) return refuse("cwd must be the primary checkout; no prBase and not readOnly");
+                const minted = prepareCleanup(params.cleanup, { store: safetyGrants, owners, primary: path.resolve(ctx.cwd, params.cwd), mainCwd: ctx.cwd, jobRunning: (id) => runtime.jobs.get(id)?.state === "running" });
+                if (!minted.ok) return refuse(minted.reason);
+                owners.reserve(minted.grant.candidate, minted.grant.issuedAt + CLEANUP_TTL_MS, minted.grant.id);
+                dispatchDefaults.cleanupId = minted.grant.id;
+            } else if (preparedDispatch?.cleanupId) dispatchDefaults.cleanupId = preparedDispatch.cleanupId;
             if (params.background !== false) {
                 const requests = params.dag ?? params.chain ?? params.tasks ?? [{agent: params.agent!, task: params.task!, cwd: params.cwd}];
                 if (params.tasks && params.tasks.length > MAX_PARALLEL_TASKS) return {isError: true, content: [{type: "text", text: "Max parallel tasks is 8."}], details: makeDetails("parallel")([])};
                 const unknown = requests.filter(t => !agents.some(a => a.name === t.agent)).map(t => t.agent);
                 if (unknown.length) return {isError: true, content: [{type: "text", text: "Unknown agents: " + unknown.join(", ")}], details: makeDetails("single")([])};
                 if (signal?.aborted) throw new Error("Dispatch was aborted");
-                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected }));
+                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected, cleanupId: dispatchDefaults.cleanupId }));
+                if (dispatchDefaults.cleanupId) cleanupJobs.set(dispatchDefaults.cleanupId, job.id);
                 return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + ". This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop."}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
             }
 
@@ -1272,7 +1319,7 @@ export default function (pi: ExtensionAPI) {
         parameters: Type.Object({action: StringEnum(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline"] as const), target: Type.Optional(Type.String({description: "Job ID bg-N, full worker ID, #N, or decision requestId dec-…"})), message: Type.Optional(Type.String()), answer: Type.Optional(Type.String({description: "Freeform answer text (action answer)"})), basis: Type.Optional(StringEnum(["user_answer", "existing_authorization"] as const)), reference: Type.Optional(Type.String({description: "Traceable source of the answer or authorization"})), reason: Type.Optional(Type.String({description: "Why the request is declined (action decline)"}))}),
         async execute(_id, params) {
             try {
-                if (params.action === "list") return {content: [{type: "text", text: JSON.stringify(runtime.list())}]};
+                if (params.action === "list") { const note = pendingText(); return {content: [{type: "text", text: JSON.stringify(runtime.list())}, ...(note ? [{type: "text" as const, text: note}] : [])]}; }
                 if (params.action === "decisions") return {content: [{type: "text", text: JSON.stringify(decisions.list())}]};
                 if (!params.target) throw new Error("target is required");
                 if (params.action === "answer" || params.action === "decline") return {content: [{type: "text", text: await runtime.answerDecision(params.target, params.action === "answer" ? {kind: "answer", answer: params.answer, basis: params.basis, reference: params.reference} : {kind: "decline", reason: params.reason})}]};

@@ -1,41 +1,16 @@
-// Native /subagent create regression (RED first). Bun cannot resolve Pi packages from this directory, so under Bun this file
-// relaunches the same body under the installed Node with registerHooks mapping bare Pi specifiers (roles-editor pattern).
-// Every fixture lives under os.tmpdir() (the caller's TEMP/TMP); the real profile is only read (CLI copied into a synthetic agent dir).
+// Native /subagent create regression (RED first). Host packages are not resolvable from this directory, so this file
+// uses registerHooks to map bare Pi specifiers (roles-editor pattern).
+// Every fixture lives under os.tmpdir() (the caller's TEMP/TMP). The real-CLI test runs the Node CLI through process.execPath with a synthetic HOME and agent dir.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { hostModules as resolveHostModules } from "./host-modules.ts";
 
-const thisFile = fileURLToPath(import.meta.url);
-const isBun = typeof (process.versions as Record<string, string>).bun === "string";
 const hostModules = resolveHostModules();
-/** Test-only: an explicit Python 3 for the real-CLI test. Bare `python` on Windows is often the Store stub (exit 9009). */
-const TEST_PYTHON_ENV = "SUBAGENT_CREATE_TEST_PYTHON";
-
-/** Explicit env is used as given (it must run: a broken explicit interpreter fails, it does not skip). Otherwise the conventional launcher if it is functional, else undefined (skip). */
-function resolveTestPython(): string | undefined {
-	const explicit = process.env[TEST_PYTHON_ENV];
-	if (explicit) return explicit;
-	const conventional = process.platform === "win32" ? "python" : "python3";
-	const probe = spawnSync(conventional, ["-I", "-X", "utf8", "-c", "import sys; print(sys.version_info[0])"], { encoding: "utf8", windowsHide: true, timeout: 20_000 });
-	return probe.status === 0 && probe.stdout.trim() === "3" ? conventional : undefined;
-}
-const testPython = resolveTestPython();
-
-if (isBun) {
-	const { test } = await import("bun:test");
-	test("native create suite passes under Node native TypeScript transform", () => {
-		const env = { ...process.env, PYTHONDONTWRITEBYTECODE: "1" };
-		delete env.NODE_TEST_CONTEXT;
-		const run = spawnSync("node", ["--experimental-transform-types", "--test", thisFile], { encoding: "utf8", timeout: 300_000, windowsHide: true, env });
-		assert.equal(run.status, 0, run.stdout + run.stderr);
-	}, 320_000);
-} else {
-	await runNodeSuite();
-}
+await runNodeSuite();
 
 async function runNodeSuite(): Promise<void> {
 	const { test, after } = await import("node:test");
@@ -58,7 +33,7 @@ async function runNodeSuite(): Promise<void> {
 	const themeModule: any = await import(installedUrl("pi-coding-agent/dist/modes/interactive/theme/theme.js"));
 	themeModule.initTheme("dark", false);
 	const stubTheme = themeModule.getThemeByName("dark");
-	const REAL_CLI = fileURLToPath(new URL("../../../skills/agent-creation/scripts/create_agent.py", import.meta.url));
+	const REAL_CLI = fileURLToPath(new URL("../../../skills/agent-creation/scripts/create-agent.mjs", import.meta.url));
 
 	const SPEC_JSON = JSON.stringify({ name: "alpha-review", description: "Reviews alpha", instructions: "Review carefully.", model: "anthropic/claude-haiku-5-5" });
 	const PREVIEW = "mode: preview\nproject root: <root>\npermissions: tools=read, grep, find, ls; write-tool=disabled; source-edit=readonly; writer=false; shell=false\nagent file: <root>/.pi/agents/alpha-review.md -> create\nno files written; re-run with --apply to create the files listed above\n--- BEGIN agent file: x ---\nbody\n--- END agent file ---\n";
@@ -113,14 +88,14 @@ async function runNodeSuite(): Promise<void> {
 		const agentDir = path.join(base, "global");
 		fs.mkdirSync(path.join(agentDir, "skills", "agent-creation", "scripts"), { recursive: true });
 		fs.writeFileSync(path.join(agentDir, "roles.json"), "[]");
-		fs.writeFileSync(path.join(agentDir, "skills", "agent-creation", "scripts", "create_agent.py"), "# stub: never executed by fake runners\n");
+		fs.writeFileSync(path.join(agentDir, "skills", "agent-creation", "scripts", "create-agent.mjs"), "// stub: never executed by fake runners\n");
 		const spec = path.join(base, "spec.json");
 		fs.writeFileSync(spec, SPEC_JSON);
 		const tmpRoot = path.join(base, "owned-tmp");
 		fs.mkdirSync(tmpRoot);
 		return { base, root, agentDir, spec, tmpRoot };
 	}
-	const deps = (w: ReturnType<typeof workspace>, run: any, extra: Record<string, unknown> = {}) => ({ run, python: "PYEXE", agentDir: w.agentDir, tmpRoot: w.tmpRoot, ...extra });
+	const deps = (w: ReturnType<typeof workspace>, run: any, extra: Record<string, unknown> = {}) => ({ run, node: "/fake/node.exe", agentDir: w.agentDir, tmpRoot: w.tmpRoot, ...extra });
 	const frozenOf = (args: string[]) => args[args.indexOf("--spec") + 1];
 	const ownedDirs = (w: ReturnType<typeof workspace>) => fs.readdirSync(w.tmpRoot);
 
@@ -199,10 +174,10 @@ async function runNodeSuite(): Promise<void> {
 		assert.equal(fake.calls.length, 1);
 		const [call] = fake.calls;
 		const frozen = frozenOf(call.args);
-		assert.equal(call.cmd, "PYEXE");
+		assert.equal(call.cmd, "/fake/node.exe");
 		// The bundled CLI wins in a native checkout (root package.json); a live profile without a manifest falls back to agentDir.
-		assert.deepEqual(call.args.slice(0, 4), ["-I", "-X", "utf8", path.join(agents.packageRoot() ?? w.agentDir, "skills", "agent-creation", "scripts", "create_agent.py")]);
-		assert.deepEqual(call.args.slice(4), ["--spec", frozen, "--project-root", w.root, "--agent-dir", w.agentDir]);
+		assert.deepEqual(call.args.slice(0, 1), [path.join(agents.packageRoot() ?? w.agentDir, "skills", "agent-creation", "scripts", "create-agent.mjs")]);
+		assert.deepEqual(call.args.slice(1), ["--spec", frozen, "--project-root", w.root, "--agent-dir", w.agentDir]);
 		assert.equal(call.timeoutMs, 30_000);
 		assert.equal(call.cwd, path.dirname(frozen));
 		assert.ok(path.dirname(frozen).startsWith(w.tmpRoot), "frozen dir must be in the owned temp root");
@@ -318,7 +293,7 @@ async function runNodeSuite(): Promise<void> {
 	// --- exit mapping: nothing but a zero exit with exact stdout can reach CREATE ------------------------------------------
 
 	const failures: [string, unknown, RegExp][] = [
-		["usage exit 2", exitWith(2, "usage: create_agent.py\n"), /usage|mismatch/i],
+		["usage exit 2", exitWith(2, "usage: create-agent.mjs\n"), /usage|mismatch/i],
 		["nonzero 7 without ERROR text", exitWith(7, "boom\n"), /unexpected exit 7/],
 		["killed by timeout", { kind: "killed", signal: "SIGTERM", stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }, /timed out or was killed/],
 		["output overflow", { kind: "overflow", stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }, /output exceeded/],
@@ -337,42 +312,101 @@ async function runNodeSuite(): Promise<void> {
 		});
 	}
 
-	test("spawn failure (launcher) offers an absolute interpreter path; Cancel stops; a supplied path is fixed for preview and apply", async () => {
+	test("spawn failure (Node binary cannot start) fails closed: one distinct message, no interpreter prompt, no apply, nothing written", async () => {
 		const w = workspace();
-		const override = path.join(w.agentDir, "skills", "agent-creation", "scripts", "create_agent.py");
-		const h = harness([["input", w.root], ["input", w.spec], ["input", "relative.exe"], ["input", override], ["confirm", true]]);
-		const fake = fakeRunner((args) => {
-			if (args.includes("--apply")) return exitOk("created: x\n");
-			return fake.calls.length === 1 ? spawnFail() : exitOk(PREVIEW);
-		});
+		const h = harness([["input", w.root], ["input", w.spec]]);
+		const fake = fakeRunner(() => spawnFail());
 		await mod.runAgentCreate(h.ctx, "", deps(w, fake.run));
-		assert.match(h.prompts[2].title, /Absolute path to a Python 3 executable/);
-		assert.match(h.notes.map((n) => n.message).join("\n"), /absolute/);
-		assert.deepEqual(fake.calls.map((c) => c.cmd), ["PYEXE", override, override, override]);
+		assert.equal(fake.calls.length, 1);
+		assert.equal(h.prompts.length, 2, "no interpreter-path prompt");
+		assert.match(h.notes.map((n) => n.message).join("\n"), /Node runtime could not start the CLI \(ENOENT\); nothing was written/);
+		assert.deepEqual(fs.readdirSync(w.root), []);
+		assert.deepEqual(ownedDirs(w), []);
 	});
 
-	test("non-executable absolute interpreter: the launcher prompt appears (not 'stopped'); Esc runs nothing and writes nothing", async () => {
+	test("non-executable node binary: runProcess spawn error is reported as a start failure (not 'stopped'); nothing runs or is written", async () => {
 		const w = workspace();
-		const notExecutable = path.join(w.base, "not-python.txt");
+		const notExecutable = path.join(w.base, "not-node.txt");
 		fs.writeFileSync(notExecutable, "not a program\n");
-		const h = harness([["input", w.root], ["input", w.spec], ["input", undefined]]);
-		await mod.runAgentCreate(h.ctx, "", { python: notExecutable, agentDir: w.agentDir, tmpRoot: w.tmpRoot });
+		const h = harness([["input", w.root], ["input", w.spec]]);
+		await mod.runAgentCreate(h.ctx, "", { node: notExecutable, agentDir: w.agentDir, tmpRoot: w.tmpRoot });
 		const text = h.notes.map((n) => n.message).join("\n");
-		assert.match(h.prompts[2].title, /Absolute path to a Python 3 executable/);
-		assert.match(text, /could not start/);
+		assert.match(text, /Node runtime could not start the CLI/);
 		assert.doesNotMatch(text, /stopped/);
 		assert.deepEqual(fs.readdirSync(w.root), []);
 		assert.deepEqual(ownedDirs(w), []);
 	});
 
-	test("launcher failure with Cancel at the override prompt runs nothing more", async () => {
+	// --- child environment and runtime gate -------------------------------------------------------------------------------------
+
+	test("childEnv drops every NODE_* variable in any casing and keeps HOME/USERPROFILE/SystemRoot/PI_CODING_AGENT_DIR", () => {
+		const env = { NODE_OPTIONS: "--require x", node_path: "p", Node_V8_Coverage: "c", NODE_: "e", HOME: "h", USERPROFILE: "u", SystemRoot: "s", PI_CODING_AGENT_DIR: "a", NODEX: "keep-not-prefix-match-underscore", PATH: "p" };
+		const out = mod.childEnv(env);
+		assert.deepEqual(Object.keys(out).sort(), ["HOME", "NODEX", "PATH", "PI_CODING_AGENT_DIR", "SystemRoot", "USERPROFILE"]);
+		assert.equal(Object.prototype.hasOwnProperty.call(env, "NODE_OPTIONS"), true, "input is not mutated");
+	});
+
+	test("preview and apply both run the CLI with a NODE_*-free environment", async () => {
 		const w = workspace();
-		const h = harness([["input", w.root], ["input", w.spec], ["input", undefined]]);
-		const fake = fakeRunner(() => spawnFail());
-		await mod.runAgentCreate(h.ctx, "", deps(w, fake.run));
-		assert.equal(fake.calls.length, 1);
-		assert.deepEqual(fs.readdirSync(w.root), []);
-		assert.deepEqual(ownedDirs(w), []);
+		const saved = { NODE_OPTIONS: process.env.NODE_OPTIONS, node_path: process.env.node_path };
+		process.env.NODE_OPTIONS = "--no-warnings";
+		process.env.node_path = path.join(w.base, "x");
+		try {
+			const h = harness([["input", w.root], ["input", w.spec], ["confirm", true]]);
+			const seen: NodeJS.ProcessEnv[] = [];
+			const fake = fakeRunner((args, _cmd, opts) => { seen.push(opts.env); return args.includes("--apply") ? exitOk("created: <root>/.pi/agents/alpha-review.md\n") : exitOk(PREVIEW); });
+			await mod.runAgentCreate(h.ctx, "", deps(w, fake.run));
+			assert.ok(seen.length >= 3, "preview, repeat preview and apply all ran");
+			for (const env of seen) assert.deepEqual(Object.keys(env ?? {}).filter((k) => /^NODE_/i.test(k)), []);
+		} finally {
+			for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+		}
+	});
+
+	test("a NODE_OPTIONS --require preload really runs in a plain Node child but not through runProcess", async () => {
+		const w = workspace();
+		const marker = path.join(w.base, "preload-ran.txt");
+		const preload = path.join(w.base, "preload.cjs");
+		fs.writeFileSync(preload, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")`);
+		const saved = process.env.NODE_OPTIONS;
+		process.env.NODE_OPTIONS = `--require=${JSON.stringify(preload.split(path.sep).join("/"))}`;
+		try {
+			const control = await new Promise<number>((resolve) => execFile(process.execPath, ["-e", "0"], { env: process.env, windowsHide: true }, (e) => resolve(e ? 1 : 0)));
+			assert.equal(control, 0);
+			assert.equal(fs.existsSync(marker), true, "control: the preload is effective with the unsanitized environment");
+			fs.rmSync(marker);
+			const r = await mod.runProcess(process.execPath, ["-e", "0"], { cwd: w.base });
+			assert.equal(r.kind, "exit");
+			assert.equal(fs.existsSync(marker), false, "preload marker absent with the sanitized environment");
+		} finally {
+			if (saved === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = saved;
+		}
+	});
+
+	test("isNodeRuntime: node/node.exe in any case on Node only; other binaries and Bun/Deno/Electron markers are refused", () => {
+		const own = "/x/pi.exe";
+		for (const ok of ["node", "node.exe", "/a/b/NODE.EXE", "C:/Program Files/nodejs/Node.exe", "C:/a/node"]) assert.equal(mod.isNodeRuntime(ok, {}, own), true, ok);
+		const backslash = String.fromCharCode(92);
+		assert.equal(mod.isNodeRuntime("C:" + backslash + "nodejs" + backslash + "node.exe", {}, own), true);
+		for (const bad of ["pi", "pi.exe", "/a/nodejs", "/a/node.exe.bak", "bun.exe", "", "/a/node/"]) assert.equal(mod.isNodeRuntime(bad, {}, own), false, bad);
+		for (const marker of ["bun", "deno", "electron"]) {
+			assert.equal(mod.isNodeRuntime("/x/node.exe", { [marker]: "1.0.0" }, "/x/node.exe"), false, marker);
+			assert.equal(mod.isNodeRuntime("/y/node.exe", { [marker]: "1.0.0" }, "/x/node.exe"), true, "marker only describes this process's own binary");
+		}
+		assert.equal(mod.isNodeRuntime(process.execPath), true, "the host test runner is Node");
+	});
+
+	test("non-Node execPath: nothing is spawned, nothing is written, same start-failure message, no PATH fallback", async () => {
+		const w = workspace();
+		for (const bin of ["/opt/pi/pi", "/opt/pi/pi.exe", "/opt/bun.exe"]) {
+			const h = harness([["input", w.root], ["input", w.spec]]);
+			const fake = fakeRunner(() => { throw new Error("must not spawn"); });
+			await mod.runAgentCreate(h.ctx, "", deps(w, fake.run, { node: bin }));
+			assert.equal(fake.calls.length, 0, bin);
+			assert.match(h.notes.map((n) => n.message).join("\n"), /Node runtime could not start the CLI/);
+			assert.deepEqual(fs.readdirSync(w.root), []);
+			assert.deepEqual(ownedDirs(w), []);
+		}
 	});
 
 	// --- apply ---------------------------------------------------------------------------------------------------------------
@@ -438,9 +472,9 @@ async function runNodeSuite(): Promise<void> {
 		assert.equal(slow.kind, "killed");
 	});
 
-	test("non-executable absolute interpreter: runProcess reports a spawn error instead of rejecting (Windows throws EFTYPE synchronously)", async () => {
+	test("non-executable absolute binary: runProcess reports a spawn error instead of rejecting (Windows throws EFTYPE synchronously)", async () => {
 		const w = workspace();
-		const notExecutable = path.join(w.base, "not-python.txt");
+		const notExecutable = path.join(w.base, "not-node.txt");
 		fs.writeFileSync(notExecutable, "not a program\n");
 		const r = await mod.runProcess(notExecutable, ["-I"], { cwd: w.base });
 		assert.equal(r.kind, "spawn");
@@ -460,29 +494,37 @@ async function runNodeSuite(): Promise<void> {
 		assert.equal(raw.includes("\u202e"), true);
 	});
 
-	// --- real Python CLI (synthetic project, synthetic global agent dir) ------------------------------------------------------
+	// --- real Node CLI (synthetic project, synthetic global agent dir, synthetic HOME) ------------------------------------------
 
-	test("real CLI: preview writes nothing; CREATE creates the previewed file; repeat is unchanged; a differing file is refused", { skip: testPython ? false : `no functional Python 3; set ${TEST_PYTHON_ENV} to an explicit interpreter` }, async () => {
+	test("real CLI (process.execPath, no interpreter override): preview writes nothing; CREATE creates the previewed file; repeat is unchanged; a differing file is refused", async () => {
 		const w = workspace();
-		fs.copyFileSync(REAL_CLI, path.join(w.agentDir, "skills", "agent-creation", "scripts", "create_agent.py"));
+		fs.copyFileSync(REAL_CLI, path.join(w.agentDir, "skills", "agent-creation", "scripts", "create-agent.mjs"));
 		const agentFile = path.join(w.root, ".pi", "agents", "alpha-review.md");
-		const real = (ctxScript: [string, unknown][]) => mod.runAgentCreate(harness(ctxScript).ctx, "", { python: testPython, agentDir: w.agentDir, tmpRoot: w.tmpRoot });
-		await real([["input", w.root], ["input", w.spec], ["confirm", false]]);
-		assert.equal(fs.existsSync(agentFile), false, "preview and cancel write nothing");
-		await real([["input", w.root], ["input", w.spec], ["confirm", true]]);
-		assert.equal(fs.existsSync(agentFile), true, "CREATE creates the file");
-		const created = fs.readFileSync(agentFile);
-		assert.match(created.toString("utf8"), /alpha-review/);
-		const h = harness([["input", w.root], ["input", w.spec], ["confirm", true]]);
-		await mod.runAgentCreate(h.ctx, "", { python: testPython, agentDir: w.agentDir, tmpRoot: w.tmpRoot });
-		assert.match(h.notes.map((n) => n.message).join("\n"), /unchanged: /);
-		assert.deepEqual(fs.readFileSync(agentFile), created);
-		fs.writeFileSync(agentFile, "someone else's file\n");
-		const h2 = harness([["input", w.root], ["input", w.spec]]);
-		await mod.runAgentCreate(h2.ctx, "", { python: testPython, agentDir: w.agentDir, tmpRoot: w.tmpRoot });
-		assert.match(h2.notes.map((n) => n.message).join("\n"), /existing file differs/);
-		assert.equal(fs.readFileSync(agentFile, "utf8"), "someone else's file\n");
-		assert.deepEqual(ownedDirs(w), []);
+		// The CLI resolves ~ through the process home: point it at an empty synthetic home so the live profile is never scanned.
+		const home = path.join(w.base, "home");
+		fs.mkdirSync(home);
+		const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+		process.env.HOME = process.env.USERPROFILE = home;
+		try {
+			const realDeps = { agentDir: w.agentDir, tmpRoot: w.tmpRoot };
+			const real = async (script: [string, unknown][]) => { const h = harness(script); await mod.runAgentCreate(h.ctx, "", realDeps); return h; };
+			await real([["input", w.root], ["input", w.spec], ["confirm", false]]);
+			assert.equal(fs.existsSync(agentFile), false, "preview and cancel write nothing");
+			await real([["input", w.root], ["input", w.spec], ["confirm", true]]);
+			assert.equal(fs.existsSync(agentFile), true, "CREATE creates the file");
+			const created = fs.readFileSync(agentFile);
+			assert.match(created.toString("utf8"), /alpha-review/);
+			const h = await real([["input", w.root], ["input", w.spec], ["confirm", true]]);
+			assert.match(h.notes.map((n) => n.message).join("\n"), /unchanged: /);
+			assert.deepEqual(fs.readFileSync(agentFile), created);
+			fs.writeFileSync(agentFile, "someone else's file\n");
+			const h2 = await real([["input", w.root], ["input", w.spec]]);
+			assert.match(h2.notes.map((n) => n.message).join("\n"), /existing file differs/);
+			assert.equal(fs.readFileSync(agentFile, "utf8"), "someone else's file\n");
+			assert.deepEqual(ownedDirs(w), []);
+		} finally {
+			for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+		}
 	});
 
 	// --- review window: small terminals, Cancel first, blind guard ----------------------------------------------------------------

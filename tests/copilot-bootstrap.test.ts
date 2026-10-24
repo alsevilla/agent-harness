@@ -1,10 +1,11 @@
-import { test, expect } from "bun:test";
+import test from "node:test";
+import { expect } from "./support/expect.ts";
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, cpSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-const root = resolve(import.meta.dir, "..");
+const root = resolve(import.meta.dirname, "..");
 const manifestPath = join(root, ".github", "plugin", "plugin.json");
 
 test("manifest hook target exists and registers a sessionStart command", () => {

@@ -36,7 +36,7 @@ const TRANSFORMS = [
 ];
 // Packaged role bodies only (pinned bytes are never edited): these restatements duplicate the Leaf boundary, which already forbids launching helpers. Counts are enforced like TRANSFORMS.
 const ROLE_BODY_DEDUP = [{ from: " Never spawn another agent.", expected: 15 }, { from: " Never spawn helpers.", expected: 3 }];
-const SKILL_FILES = { "agent-creation": ["SKILL.md", "scripts/create_agent.py", "examples/dotnet-worker.json"] };
+const SKILL_FILES = { "agent-creation": ["SKILL.md", "scripts/create-agent.mjs", "examples/dotnet-worker.json"] };
 const HARNESS_EXCLUDED = [/^examples\//, /^scripts\//, /^tests\//, /^references\/legacy-catalog\.md$/, /^references\/skill-evaluation\.md$/, /^references\/run-manifest\.md$/];
 const TEXT = /\.(md|ts|json|py)$/;
 const PACKAGE_NOTICES = `# Third-party notices

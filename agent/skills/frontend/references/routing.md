@@ -8,6 +8,7 @@ Use the narrowest applicable skill and pass findings to the assigned role.
 |---|---|---|
 | Screen/step structure, branching, recovery | ux-flow-wireframer | ui-ux-specialist |
 | Dashboard organization, KPI, table/chart information design | design-dashboards | ui-ux-specialist |
+| Tokens, theme, design spec or page override absent from accepted UI | design-system-artifacts | ui-ux-specialist for material choices; frontend-worker implements accepted tokens |
 | Keyboard, focus, ARIA, forms/errors, reduced motion | accessible-ui-patterns | ui-ux-specialist for judgment; frontend-worker for accepted behavior |
 | New visual direction | frontend-design OR ui-ux-pro-max | ui-ux-specialist |
 | Purposeful motion and transitions | design-motion-principles | ui-ux-specialist; frontend-worker implements accepted behavior |

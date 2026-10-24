@@ -1,5 +1,5 @@
-// Bun-discovered launcher for the ordered-fallback runtime regression. Bun 1.4.2 lacks node:module registerHooks,
-// so the hook-heavy suite (fallback-runtime.node.ts) runs under the installed `node` on PATH; never process.execPath (Bun).
+// Launcher for the ordered-fallback runtime regression: it runs the hook-heavy suite (fallback-runtime.node.ts) in a child Node
+// and guards its exact pass count. The canonical runner (scripts/run-node-tests.mjs) therefore does not also run that file directly.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import * as path from "node:path";
@@ -21,7 +21,7 @@ function runUnderNode(): Promise<NodeRun> {
 	delete env.NODE_TEST_CONTEXT; // inherited from a parent node --test would make the child emit TAP
 	return new Promise((resolve) => {
 		let output = "";
-		const child = spawn("node", ["--test", runner], { cwd: testsDir, env, timeout: 120_000, windowsHide: true });
+		const child = spawn(process.execPath, ["--experimental-transform-types", "--test", runner], { cwd: testsDir, env, timeout: 120_000, windowsHide: true });
 		child.stdout.on("data", (chunk) => (output += chunk));
 		child.stderr.on("data", (chunk) => (output += chunk));
 		child.on("error", (error) => resolve({ status: null, signal: null, output, error }));

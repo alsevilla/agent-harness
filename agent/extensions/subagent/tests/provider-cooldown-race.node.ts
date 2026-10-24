@@ -1,5 +1,5 @@
 // Cross-process proof for the provider-cooldown probe lease: real node processes race one expired probe.
-// Node-only (named *.node.ts so Bun discovery skips it). Run: node --experimental-strip-types --test agent/extensions/subagent/tests/provider-cooldown-race.node.ts
+// Node-only (*.node.ts runtime suite). Run: node --experimental-strip-types --test agent/extensions/subagent/tests/provider-cooldown-race.node.ts
 // Child processes re-enter this same file through PROVIDER_COOLDOWN_RACE_ROLE and never register tests.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

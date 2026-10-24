@@ -3,7 +3,8 @@
 // compact policy as one engineering_policy section with the absolute installed SKILL.md path, no replay across turns, no
 // profile/cwd policy source, and no duplicate when the profile already carries the policy verbatim. Offline capture provider;
 // fixtures live under os.tmpdir(); the real profile and global settings are never read or written.
-import { expect, test } from "bun:test";
+import test from "node:test";
+import { expect } from "../../../../tests/support/expect.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -62,6 +63,9 @@ function policyBlock(text: string): string | undefined {
 	return end < 0 ? undefined : text.slice(start + OPEN.length, end);
 }
 
+/** Replayed (effective) system prompt per model request, parallel to `requests`; the raw log above also keeps superseded snapshots. */
+const effective: string[] = [];
+
 function captureExtension(ai: any, requests: string[]) {
 	return (pi: any) => {
 		pi.registerProvider(CAPTURE, {
@@ -71,6 +75,7 @@ function captureExtension(ai: any, requests: string[]) {
 			models: [{ id: MODEL.id, name: MODEL.name, reasoning: false, input: ["text"], cost: MODEL.cost, contextWindow: MODEL.contextWindow, maxTokens: MODEL.maxTokens }],
 			streamSimple: (model: any, context: any) => {
 				requests.push(systemTextOf(context));
+				effective.push(ai.getCurrentSystemPrompt(ai.normalizeContext(context).messages)); // what a provider that replays system deltas ends up with
 				const stream = ai.createAssistantMessageEventStream();
 				const message = { role: "assistant", content: [{ type: "text", text: "ok" }], api: CAPTURE, provider: CAPTURE, model: model.id, usage: ZERO_USAGE, stopReason: "stop", timestamp: Date.now() };
 				void (async () => {
@@ -84,7 +89,7 @@ function captureExtension(ai: any, requests: string[]) {
 	};
 }
 
-type Files = { profile?: string; cwd?: string };
+type Files = { profile?: string; cwd?: string; settings?: Record<string, unknown>; extra?: (pi: any) => void };
 
 async function openSession(pi: any, ai: any, files: Files, requests: string[]) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "main-policy-activation-"));
@@ -94,14 +99,14 @@ async function openSession(pi: any, ai: any, files: Files, requests: string[]) {
 	fs.mkdirSync(cwd, { recursive: true });
 	if (files.profile !== undefined) fs.writeFileSync(path.join(agentDir, "AGENTS.md"), files.profile);
 	if (files.cwd !== undefined) fs.writeFileSync(path.join(cwd, "AGENTS.md"), files.cwd);
-	const settingsManager = pi.SettingsManager.inMemory();
+	const settingsManager = pi.SettingsManager.inMemory(files.settings ?? {});
 	const resourceLoader = new pi.DefaultResourceLoader({
 		cwd,
 		agentDir,
 		settingsManager,
 		additionalExtensionPaths: [EXTENSION],
 		additionalSkillPaths: [SKILLS_DIR],
-		extensionFactories: [captureExtension(ai, requests)],
+		extensionFactories: [captureExtension(ai, requests), ...(files.extra ? [files.extra] : [])],
 		disabledBuiltinExtensions: ["mcp", "codemode", "tool-search", "llama.cpp"],
 		noThemes: true,
 	});
@@ -130,7 +135,7 @@ async function turn(session: any, requests: string[], text: string) {
 	const piRoot = path.join(HOST_MODULES, "@earendil-works");
 	const pi: any = await import(pathToFileURL(path.join(piRoot, "pi-coding-agent", "dist", "index.js")).href);
 	const ai: any = await import(pathToFileURL(path.join(piRoot, "pi-ai", "dist", "index.js")).href);
-	const t = (name: string, body: () => Promise<void>) => test(`[${HOST_VERSION}] ${name}`, body, 60_000);
+	const t = (name: string, body: () => Promise<void>) => test(`[${HOST_VERSION}] ${name}`, { timeout: 60_000 }, body);
 
 	t("a native install gives the first request the installed policy once, with the absolute SKILL.md path", async () => {
 		const requests: string[] = [];
@@ -163,6 +168,67 @@ async function turn(session: any, requests: string[], text: string) {
 			expect(count(system, OPEN)).toBe(1);
 			expect(policyBlock(system)).toContain(POLICY);
 			expect(policyBlock(system)).toContain(SKILL_POSIX);
+		} finally {
+			cleanup();
+		}
+	});
+
+	// Real session.compact() through the SDK with the offline provider: the persisted CompactionEntry snapshots the current
+	// system message, so the policy section and absolute SKILL.md pointer survive in the entry itself (not only via next-run reinjection).
+	const TINY = { compaction: { enabled: false, keepRecentTokens: 1 } }; // manual compact only: auto-compaction would fire on the small test context window
+	const compactOnce = async (session: any, requests: string[]) => {
+		const before = requests.length;
+		await session.compact();
+		expect(requests.length).toBeGreaterThan(before); // the summary request reached the offline provider
+		const entry = session.sessionManager.getBranch().filter((e: any) => e.type === "compaction").at(-1);
+		if (!entry) throw new Error("no compaction entry persisted");
+		return entry;
+	};
+
+	t("session.compact() persists a compaction entry whose systemMessage keeps the engineering_policy section and SKILL.md pointer", async () => {
+		const requests: string[] = [];
+		const { session, cleanup } = await openSession(pi, ai, { settings: TINY }, requests);
+		try {
+			await turn(session, requests, "first");
+			await turn(session, requests, "second");
+			const entry = await compactOnce(session, requests);
+			const section = entry.systemMessage?.sections?.engineering_policy;
+			expect(typeof section).toBe("string");
+			expect(section).toContain(POLICY);
+			expect(section).toContain(SKILL_POSIX);
+			expect(section).toContain(`${AGENT_POSIX}/skills/`);
+			await turn(session, requests, "after real compaction");
+			const system = requests[requests.length - 1];
+			expect(count(system, OPEN)).toBe(1);
+			expect(count(system, "# Pi engineering policy")).toBe(1);
+		} finally {
+			cleanup();
+		}
+	});
+
+	t("a stale policy snapshot in the compaction entry is replaced by the current installed policy, not duplicated", async () => {
+		const requests: string[] = [];
+		let stale = true;
+		// Loads after the package extension, so while `stale` is set its section wins and gets snapshotted.
+		const staleSection = (pi2: any) => pi2.on("before_agent_start", (event: any) => {
+			if (stale) event.systemPromptOptions.sections.engineering_policy = "STALE-POLICY-SNAPSHOT";
+		});
+		const { session, cleanup } = await openSession(pi, ai, { settings: TINY, extra: staleSection }, requests);
+		try {
+			await turn(session, requests, "first");
+			await turn(session, requests, "second");
+			const entry = await compactOnce(session, requests);
+			expect(entry.systemMessage?.sections?.engineering_policy).toContain("STALE-POLICY-SNAPSHOT");
+			stale = false;
+			await turn(session, requests, "after drift");
+			const system = requests[requests.length - 1];
+			// The transcript keeps the old snapshot plus a later patch; the replayed prompt carries only the current section.
+			const current = effective[effective.length - 1];
+			expect(count(current, OPEN)).toBe(1);
+			expect(current).not.toContain("STALE-POLICY-SNAPSHOT");
+			expect(policyBlock(current)).toContain(POLICY);
+			expect(policyBlock(current)).toContain(SKILL_POSIX);
+			expect(system).toContain(SKILL_POSIX);
 		} finally {
 			cleanup();
 		}

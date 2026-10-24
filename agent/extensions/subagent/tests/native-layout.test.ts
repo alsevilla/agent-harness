@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, test } from "bun:test";
+import { after, test } from "node:test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../../../..");
@@ -19,13 +19,13 @@ const NATIVE_EXTENSIONS = ["./agent/extensions/subagent/index.ts", "./agent/exte
 const NATIVE_SKILLS = ["./agent/skills/engineering-harness", "./agent/skills/agent-creation"];
 const NATIVE_PROMPTS = ["./agent/prompts/learn.md"]; // the only prompt template the package exports
 
-// Cold probes (fresh copies, first module load) exceed bun's 5 s default; used for both the test timeout and the probe spawn.
+// Cold probes (fresh copies, first module load) exceed a short default timeout; used for both the test timeout and the probe spawn.
 const PROBE_TIMEOUT_MS = 60_000;
 const HOST_MODULES = hostModules(HOST_PACKAGES);
-const probeTest = (name: string, fn: () => void) => test(name, fn, PROBE_TIMEOUT_MS);
+const probeTest = (name: string, fn: () => void) => test(name, { timeout: PROBE_TIMEOUT_MS }, fn);
 
 const dirs: string[] = [];
-afterAll(() => {
+after(() => {
 	for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -126,19 +126,19 @@ test("the trust-boundary scan checks single-quoted and double-quoted imports ali
 	assert.deepEqual(undeclaredImports(`import { z } from '@earendil-works/unlisted-host';`), ["@earendil-works/unlisted-host"]);
 });
 
-probeTest("a fresh isolated profile resolves the 20 bundled roles from the native package and writes nothing", () => {
+probeTest("a fresh isolated profile resolves the 21 bundled roles from the native package and writes nothing", () => {
 	const profile = tmp("native-profile-");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"));
 	assert.equal(found.error, null);
 	assert.equal(found.packageRoot, path.join(REPO, "agent"));
 	const roles = JSON.parse(fs.readFileSync(path.join(REPO, "agent", "roles.json"), "utf8")) as { name: string }[];
-	assert.equal(roles.length, 20);
+	assert.equal(roles.length, 21);
 	assert.deepEqual(found.agents.map((agent) => agent.name).sort(), roles.map((role) => role.name).sort());
 	for (const agent of found.agents) {
 		assert.equal(agent.source, "package", agent.name);
 		assert.equal(agent.filePath, path.join(REPO, "agent", "agents", `${agent.name}.md`), agent.name);
 	}
-	assert.ok(fs.existsSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create_agent.py")), "agent-create CLI resolves under the package root");
+	assert.ok(fs.existsSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create-agent.mjs")), "agent-create CLI resolves under the package root");
 	assert.deepEqual(listFiles(profile), [], "fresh profile stays empty: no copy, no settings, no roles");
 });
 
@@ -158,7 +158,7 @@ for (const layout of ["direct", "linked", ...(process.platform === "win32" ? ["c
 		for (const scope of ["user", "both"]) {
 			const found = discover(agentsTs, profile, cwd, scope);
 			assert.equal(found.error, null);
-			assert.equal(found.agents.length, 20);
+			assert.equal(found.agents.length, 21);
 			for (const agent of found.agents) {
 				assert.equal(agent.source, "package", `${layout}/${scope}/${agent.name}`);
 				assert.equal(agent.filePath, path.join(packageAgentDir, "agents", `${agent.name}.md`));
@@ -177,7 +177,7 @@ probeTest("a project-local role overrides the bundled role and private project r
 	assert.equal(found.error, null);
 	assert.equal(found.agents.find((agent) => agent.name === "reviewer")?.source, "project");
 	assert.equal(found.agents.find((agent) => agent.name === "private-domain-role")?.source, "project");
-	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 19);
+	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 20);
 });
 
 probeTest("a renamed root manifest is inert: no package mode and no bundled roles", () => {
@@ -250,7 +250,7 @@ probeTest("a user agent file with a bundled role's name wins over the bundled de
 	fs.writeFileSync(path.join(profile, "agents", "general-worker.md"), "---\nname: general-worker\ndescription: user override\ntools: read\n---\nUser override body.\n");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user");
 	assert.equal(found.error, null);
-	assert.equal(found.agents.length, 20);
+	assert.equal(found.agents.length, 21);
 	const general = found.agents.find((agent) => agent.name === "general-worker");
 	assert.equal(general?.source, "user");
 	assert.deepEqual(general?.tools, ["read"]);
@@ -356,7 +356,7 @@ const packageTuple = (root: string, name: string) => {
 };
 const assertAllCanonical = (found: Discovery, root: string, label: string) => {
 	assert.equal(found.error, null, label);
-	assert.equal(found.agents.length, 20, label);
+	assert.equal(found.agents.length, 21, label);
 	for (const agent of found.agents) {
 		assert.equal(agent.source, "package", `${label}/${agent.name}`);
 		assert.equal(agent.filePath, path.join(root, "agent", "agents", `${agent.name}.md`), `${label}/${agent.name}`);
@@ -427,7 +427,7 @@ probeTest("distinct external copies and custom definitions stay legacy while a s
 	fs.writeFileSync(path.join(dir, "custom.md"), "---\nname: custom\ndescription: custom\nmodel: external/custom-model\n---\nCustom body.\n");
 	const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, "both");
 	assert.equal(found.error, null);
-	assert.equal(found.agents.length, 21);
+	assert.equal(found.agents.length, 22);
 	assert.equal(found.agents.find((agent) => agent.name === "scout")?.source, "package");
 	const reviewer = found.agents.find((agent) => agent.name === "reviewer");
 	assert.equal(reviewer?.source, "project");
@@ -615,7 +615,7 @@ test("the README states the two default native extensions, two native skills, ma
 
 test("the agent-creation skill names the bundled role paths and the refusal label the helper emits", () => {
 	const skill = fs.readFileSync(path.join(REPO, "agent", "skills", "agent-creation", "SKILL.md"), "utf8");
-	const helper = fs.readFileSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create_agent.py"), "utf8");
+	const helper = fs.readFileSync(path.join(REPO, "agent", "skills", "agent-creation", "scripts", "create-agent.mjs"), "utf8");
 	assert.doesNotMatch(skill, /defaults\/(roles\.json|agents)/);
 	assert.ok(skill.includes("agent/roles.json") && skill.includes("agent/agents/*.md"), "bundled role paths");
 	assert.ok(fs.existsSync(path.join(REPO, "agent", "roles.json")));

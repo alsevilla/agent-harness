@@ -1,4 +1,4 @@
-// D3a workspace-admission runtime regression (Node-only: registerHooks + native TS; named *.node.ts so Bun skips it).
+// D3a workspace-admission runtime regression (Node-only: registerHooks + native TS).
 // Real index.ts runSingleAgent and real background.ts BackgroundWorkers run every launch path; only the pi package, typebox/pi-ai,
 // the provider-cooldown entry, the monitor and child_process are doubled. The child double is offline and test-controlled:
 // nothing spawns a real Pi process or reaches a provider.

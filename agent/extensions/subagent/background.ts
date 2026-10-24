@@ -136,6 +136,7 @@ export class BackgroundWorkers {
   private waitingKeys = new Map<string, Set<string>>(); // per-DAG-node queued claims; the job shows waiting while any remains
   private generation = 0;
   usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
+  pendingNote?: () => string; // runtime-derived CLEANUP_PENDING text (never child text); empty when nothing is pending
   private sequence = 0;
   private slots = 0;
   private queue: {signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void; abort: () => void}[] = [];
@@ -190,6 +191,11 @@ export class BackgroundWorkers {
       this.settleDecisions(this.decisions.settleJob(id, "job-ended"));
       if (job.generation !== this.generation) return;
       const output = (job.result.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+      // Sent first and without a turn of its own: the completion below wakes main, which then sees both. Separate so completion bounding can never truncate it.
+      try {
+        const note = this.pendingNote?.() ?? "";
+        if (note) await this.pi.sendMessage({customType: "subagent-cleanup-pending", content: note, display: true, details: {jobId: id}}, {triggerTurn: false, deliverAs: "followUp"});
+      } catch { /* a failed read is not pending state */ }
       try {
         await this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
       } catch { /* Session can close while its completion is being delivered. */ }

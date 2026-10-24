@@ -1,21 +1,29 @@
 // Applicability matrix for assembled child prompts. Core guidance (shell, artifact bounds, shared build folder, relocation safety,
 // graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. Rust, Serena/QMD, graph and
 // package detail appear only with actual launch evidence: structural Cargo manifests, --tools names, real --extension/--skill paths and graph artifacts.
-import { afterAll, mock, test } from "bun:test";
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
+import { after, test } from "node:test";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 let agentDir = fileURLToPath(new URL("../../../", import.meta.url));
-mock.module("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => agentDir }));
+// Node equivalent of the former module mock: resolve the Pi package to a data: module exposing only getAgentDir.
+(globalThis as any).__piTestAgentDir = () => agentDir;
+registerHooks({
+  resolve(specifier: string, context: object, nextResolve: (s: string, c: object) => { url: string }) {
+    if (specifier === "@earendil-works/pi-coding-agent") return { url: "data:text/javascript," + encodeURIComponent("export const getAgentDir = () => globalThis.__piTestAgentDir();"), shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+} as never);
 const { assembleChildSystemPrompt, configureCodeIntegrations } = await import("../code-integrations.ts");
 
 const ROLE_BODY = "ROLE BODY";
 // Controlled global home: an empty directory, so no host ~/.graphify corpus can leak into any assertion.
 const EMPTY_GLOBAL = fs.mkdtempSync(join(tmpdir(), "applicability-empty-global-"));
-afterAll(() => fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }));
+after(() => fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }));
 const SHARED = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
 const CORE = {
   shell: "## Shell syntax",

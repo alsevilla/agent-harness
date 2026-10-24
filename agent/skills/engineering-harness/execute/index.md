@@ -7,12 +7,13 @@
 2. If a material decision or requirement is unresolved, stop affected writes and
    return the missing decision. Do not invent product/persistence/security semantics.
 3. Main session: launch the appropriate single writer: backend-worker for APIs/services/business logic, database-worker for all database implementation, frontend-worker for UI, platform-worker for accepted infrastructure, or general-worker for other tooling/docs/config. Main assigns file seams and one writer for mixed work; no automatic chain.
-   Only standalone T0 work outside assigned implementation/recovery may be edited
-   directly. Compiler/reviewer fixes and failed edits within delegated work remain
+   Standalone T0 work outside assigned implementation/recovery goes to
+   general-worker (main edits directly only when the host reports no usable
+   dispatch, and then only reads and such edits). Compiler/reviewer fixes and failed edits within delegated work remain
    worker-owned, even when mechanical. Inspect failures, then steer the active worker
    or dispatch a smaller evidence-based recovery packet to the same role. Partial
-   completion leaves authorized work to finish; no fixed retry count or renewed
-   approval is required. Unknown-cause failure returns to debugger; BLOCKED needs
+   completion leaves authorized work to finish; the AGENTS retry cap (2 fix rounds,
+   2 review cycles) triggers reassessment, not renewed approval or refusal. Unknown-cause failure returns to debugger; BLOCKED needs
    a concrete external dependency or evidenced impasse. Leaf worker: implement
    assigned scope directly; do not spawn agents or re-run orchestration.
 4. For meaningful behavior, establish a focused failing test/check before production
@@ -31,7 +32,7 @@
 
 ## Dispatch and completion checklist
 - Use one implementation worker per candidate; it owns the writes. Add independent Verify/Review or a specialist only for a justified risk under `references/routing.md`, and name that risk in the packet.
-- Packet brief: task, absolute candidate, role scope, authority and mutation boundary, essential restrictions, required checks, scratch/evidence paths. Use canonical references (governing plan, contract, REPORT path) instead of copied history or policy.
+- Packet brief: keep one compact shared brief as one shared artifact referenced by each packet, and send only the role-specific delta. It holds task, absolute candidate, accepted decisions and interfaces, role scope, file ownership, authority and mutation boundary, essential restrictions, required checks, completion criteria and scratch/evidence paths. Use canonical references (governing plan, contract, REPORT path) instead of copied history or policy.
 - Before dispatch and at completion, mark each required check as a result (command, exit code, outcome), NOT RUN with reason, or justified not-applicable with reason. UI focus/browser checks are not universal: require them only when UI is affected or assigned.
 - Reuse earlier evidence only for unchanged tested bytes, the same relevant environment and the same contract; otherwise rerun the affected checks. Details: `references/token-efficiency.md` ("Bounded checklist and evidence reuse", "Compaction batching").
 

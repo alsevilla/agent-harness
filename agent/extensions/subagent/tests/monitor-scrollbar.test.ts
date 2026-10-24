@@ -1,25 +1,14 @@
-// Subagent inspector scrollbar regression. Bun discovers this file and launches its body under Node,
-// where registerHooks maps bare Pi packages to the INSTALLED real pi-tui and pi-coding-agent builds.
+// Subagent inspector scrollbar regression.
+// registerHooks maps bare Pi packages to the INSTALLED real pi-tui and pi-coding-agent builds.
 // Only the host TUI handle (terminal rows and a render counter) is stubbed; every painted cell is real.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as pathModule from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { hostModules as resolveHostModules } from "./host-modules.ts";
 
-const thisFile = fileURLToPath(import.meta.url);
-const isBun = typeof (process.versions as Record<string, string>).bun === "string";
 const hostModules = resolveHostModules(["@earendil-works/pi-tui", "@earendil-works/pi-coding-agent"]);
 
-if (isBun) {
-	const { test } = await import("bun:test");
-	test("subagent scrollbar suite passes under Node native TypeScript transform", () => {
-		const run = spawnSync("node", ["--experimental-transform-types", "--test", thisFile], { encoding: "utf8", timeout: 180_000, windowsHide: true });
-		assert.equal(run.status, 0, run.stdout + run.stderr);
-	}, 200_000);
-} else {
-	await runNodeSuite();
-}
+await runNodeSuite();
 
 async function runNodeSuite() {
 	const { test, mock } = await import("node:test");

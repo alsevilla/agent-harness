@@ -182,6 +182,23 @@
     "tools": "read, grep, find, ls, bash, powershell, edit"
   },
   {
+    "name": "planner",
+    "defaultModelTier": "economy",
+    "modelTiers": {
+      "economy": {
+        "model": "anthropic/claude-haiku-5-5",
+        "fallbackModel": "openai-codex/gpt-6-luna",
+        "thinking": "high"
+      },
+      "capable": {
+        "model": "anthropic/claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol",
+        "thinking": "high"
+      }
+    },
+    "tools": "read, grep, find, ls, bash, powershell"
+  },
+  {
     "name": "platform-worker",
     "defaultModelTier": "economy",
     "modelTiers": {

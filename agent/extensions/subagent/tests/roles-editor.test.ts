@@ -1,29 +1,16 @@
-// /subagent roles editor regression. Bun cannot resolve Pi packages from this directory, so under Bun this file launches the
-// same body under the installed Node with registerHooks mapping bare Pi specifiers to the installed builds (monitor-scrollbar pattern).
+// /subagent roles editor regression. Host packages are not resolvable from this directory, so this file
+// uses registerHooks to map bare Pi specifiers to the installed builds (monitor-scrollbar pattern).
 // Every fixture lives in an owned os.tmpdir() root; the real profile is never the write target.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { hostModules as resolveHostModules } from "./host-modules.ts";
 
-const thisFile = fileURLToPath(import.meta.url);
-const isBun = typeof (process.versions as Record<string, string>).bun === "string";
 const hostModules = resolveHostModules();
 
-if (isBun) {
-	const { test } = await import("bun:test");
-	test("roles editor suite passes under Node native TypeScript transform", () => {
-		const env = { ...process.env };
-		delete env.NODE_TEST_CONTEXT;
-		const run = spawnSync("node", ["--experimental-transform-types", "--test", thisFile], { encoding: "utf8", timeout: 240_000, windowsHide: true, env });
-		assert.equal(run.status, 0, run.stdout + run.stderr);
-	}, 260_000);
-} else {
-	await runNodeSuite();
-}
+await runNodeSuite();
 
 async function runNodeSuite(): Promise<void> {
 	const { test, afterEach } = await import("node:test");
@@ -54,7 +41,7 @@ async function runNodeSuite(): Promise<void> {
 	// Deliberately nonexistent fixture ref (absent from the catalog): the resolver must flag it as not found and never map it onto a catalog model.
 	const UNRESOLVABLE = new Set(["openrouter/__pi_nonexistent_fixture_model__"]);
 	// Offered-but-mismatched picker fixture: its ref equals baseten's raw slash-ID model, so the resolver maps it to baseten and the picker must omit it.
-	const MISMATCH_FIXTURE = { ...CATALOG.find((m) => m.provider === "anthropic"), provider: "deepseek-ai", id: "DeepSeek-V4-Pro" };
+	const MISMATCH_FIXTURE = { ...CATALOG.find((m) => m.provider === "anthropic"), provider: "deepseek-ai", id: "DeepSeek-V4-Pro-0813" };
 	const MISMATCH_REF = `${MISMATCH_FIXTURE.provider}/${MISMATCH_FIXTURE.id}`;
 	const AUTHED = new Set(["anthropic", "openai-codex", "baseten", "amazon-bedrock"]);
 	const registry = () => ({
@@ -64,7 +51,7 @@ async function runNodeSuite(): Promise<void> {
 	});
 	const PLAIN = CATALOG.find((m) => m.reasoning !== true && /^[A-Za-z0-9._-]+$/.test(m.id));
 	const PLAIN_REF = `${PLAIN.provider}/${PLAIN.id}`;
-	const SLASH_REF = "baseten/deepseek-ai/DeepSeek-V4-Pro";
+	const SLASH_REF = "baseten/deepseek-ai/DeepSeek-V4-Pro-0813";
 	// Verified non-slash models of providers this fixture does not connect (levels: off).
 	const [DISCONNECTED_REF, DISCONNECTED_REF_2] = CATALOG.filter((m) => !AUTHED.has(m.provider) && !m.id.includes("/") && m.reasoning !== true).map((m) => `${m.provider}/${m.id}`);
 
@@ -212,11 +199,11 @@ async function runNodeSuite(): Promise<void> {
 		assert.ok(fixtureRegistry.getAvailable().some((m) => `${m.provider}/${m.id}` === MISMATCH_REF), "fixture must be connected, so only verification can exclude it");
 		const fixtureRefs = editor.catalogFromRegistry(fixtureRegistry).models().map((m: any) => `${m.provider}/${m.id}`);
 		assert.ok(!fixtureRefs.includes(MISMATCH_REF), "resolver-mismatched ref offered as a choice");
-		assert.ok(fixtureRefs.includes("baseten/deepseek-ai/DeepSeek-V4-Pro"), "the real baseten slash-ID choice must stay offered");
+		assert.ok(fixtureRefs.includes("baseten/deepseek-ai/DeepSeek-V4-Pro-0813"), "the real baseten slash-ID choice must stay offered");
 	});
 
 	test("loader formula keeps short model fields for plain IDs and full refs for slash IDs", () => {
-		assert.equal(editor.roleModelField("baseten", "deepseek-ai/DeepSeek-V4-Pro"), SLASH_REF);
+		assert.equal(editor.roleModelField("baseten", "deepseek-ai/DeepSeek-V4-Pro-0813"), SLASH_REF);
 		assert.equal(editor.roleModelField("anthropic", "claude-haiku-5-5"), "claude-haiku-5-5");
 		assert.equal(editor.effectiveModelRef({ provider: "baseten", model: SLASH_REF }), SLASH_REF);
 		assert.equal(editor.effectiveModelRef({ provider: "anthropic", model: "claude-haiku-5-5" }), "anthropic/claude-haiku-5-5");
@@ -340,7 +327,7 @@ async function runNodeSuite(): Promise<void> {
 	test("fallback that clamps the chosen thinking, uncredentialed primary, and missing catalog entries produce preview warnings", () => {
 		const fx = newFixture();
 		const snap = editor.readRoleSnapshot(fx.dir, "alpha");
-		const plan = editor.planRoleChange(snap, { primary: "baseten/deepseek-ai/DeepSeek-V4-Pro", fallbacks: [PLAIN_REF, DISCONNECTED_REF, "nope/none"], thinking: "high" }, editor.catalogFromRegistry(registry()));
+		const plan = editor.planRoleChange(snap, { primary: "baseten/deepseek-ai/DeepSeek-V4-Pro-0813", fallbacks: [PLAIN_REF, DISCONNECTED_REF, "nope/none"], thinking: "high" }, editor.catalogFromRegistry(registry()));
 		assert.equal(plan.changed, true);
 		assert.ok(plan.warnings.some((w: string) => w.includes(PLAIN_REF) && /clamp/.test(w)), JSON.stringify(plan.warnings));
 		assert.ok(plan.warnings.some((w: string) => /nope\/none.*not in installed catalog/.test(w)), JSON.stringify(plan.warnings));

@@ -18,7 +18,7 @@ export interface Fingerprint { head: string; value: string; unsupported: string[
 /** Test seams for deterministic fault and boundary injection; production uses the real lstat and git status. */
 export interface FingerprintIo { lstat?: (p: string) => fs.Stats; status?: Buffer; maxRecords?: number; maxBytes?: number }
 
-function git(repo: string, args: string[], maxBuffer = FINGERPRINT_MAX_BYTES, input?: Buffer): Buffer {
+export function git(repo: string, args: string[], maxBuffer = FINGERPRINT_MAX_BYTES, input?: Buffer): Buffer {
 	return childProcess.execFileSync("git", ["-C", repo, "-c", "core.fsmonitor=false", "--no-optional-locks", ...(args[0] === "check-ignore" ? [] : ["--literal-pathspecs"]), ...args], { cwd: NEUTRAL_CWD, timeout: GIT_TIMEOUT_MS, maxBuffer, windowsHide: true, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "ignore"], input });
 }
 const exitedOne = (error: unknown) => (error as { status?: number }).status === 1; // grep-style "no match" for config / check-ignore
@@ -26,11 +26,21 @@ const exitedOne = (error: unknown) => (error as { status?: number }).status === 
 const MAX_WALK_ENTRIES = 200_000;
 const WORKTREE_LINKS_TRAVERSED = process.platform === "win32"; // Git for Windows follows junctions (reproduced); POSIX Git lstat-s links and never enters them
 
+/** Refuses any repository-local/worktree core.fsmonitor (hook, bool, valueless, include, any casing) visible from `repo`: the helper disables it for its own calls, but the permitted `git worktree remove` does not and would run it. Callers: target preflight and the primary checkout (removal runs there). */
+export function assertNoRepoFsmonitor(repo: string): void {
+	try {
+		const fields = git(repo, ["config", "--show-scope", "-z", "--get-regexp", "^core\\.fsmonitor$"], FINGERPRINT_MAX_BYTES).toString("utf8").split("\0");
+		if (fields.pop() !== "" || fields.length % 2 !== 0) throw new RangeError("malformed fsmonitor configuration listing; unsupported");
+		for (let i = 0; i < fields.length; i += 2) if (!["system", "global", "command"].includes(fields[i])) throw new RangeError("repository-local fsmonitor configuration would run a candidate-controlled program during checkout removal; unsupported");
+	} catch (error) { if (!exitedOne(error)) throw error; }
+}
+
 /**
  * Runs before any Git command that reads the working tree. Fails closed (throws) when Git would execute candidate-controlled programs,
  * hide tracked edits, or read through a linked directory outside the candidate. Pathname checks only: the check-then-use race stays documented.
  */
-function preflight(repo: string, lstat: (p: string) => fs.Stats): void {
+export function preflight(repo: string, lstat: (p: string) => fs.Stats = fs.lstatSync): void {
+	assertNoRepoFsmonitor(repo); // step 0, before any Git command that reads the working tree
 	// 1. Repository-local content filters (filter.<name>.clean/process/smudge) would be run by `git status` to compare working bytes with the index.
 	try {
 		// -z --show-scope output: scope, NUL, key, newline, value, NUL (per entry).

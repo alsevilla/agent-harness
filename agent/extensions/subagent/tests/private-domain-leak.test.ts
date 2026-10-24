@@ -1,6 +1,6 @@
 // Domain-neutral leak contract (RED first): candidate text (tracked or untracked) carries no absolute user-home path. The retired pi-package tree
 // is no longer generated, so its separate scan was removed; the candidate scan covers any regenerated file. Private-domain terms are inventoried outside the harness; this file names none of them.
-import { test } from "bun:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";

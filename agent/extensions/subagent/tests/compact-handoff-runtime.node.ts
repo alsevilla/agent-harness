@@ -1,4 +1,4 @@
-// Runtime regressions for compact handoffs (Node-only: registerHooks + native TS; named *.node.ts so Bun skips it).
+// Runtime regressions for compact handoffs (Node-only: registerHooks + native TS).
 // background.ts runs real (bounded completion, lossless explicit result). index.ts runs with the pi/fixture doubles;
 // its background runtime and monitor are inline stubs, so nothing touches a live provider.
 import assert from "node:assert/strict";
