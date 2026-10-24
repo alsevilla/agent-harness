@@ -525,7 +525,7 @@ test("variant requirements survive dedup: oracle subscription guard, release-eng
 // Essential no-helper boundary for all 19 live roles (the fixture covers the 18 pre-platform generic roles): the leaf prohibition, the no-subagent-tool statement and the shell-launch prohibition remain, and the removed restatements stay absent.
 test("every live role keeps the no-helper boundary and no longer restates the removed phrases", () => {
 	const names = fs.readdirSync(new URL("../../../agents/", import.meta.url)).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)).sort();
-	assert.equal(names.length, 20, "live role count");
+	assert.equal(names.length, 21, "live role count (20 baseline + additive planner)");
 	const missing: string[] = [];
 	for (const role of names) {
 		const text = assembled("live", role).text;

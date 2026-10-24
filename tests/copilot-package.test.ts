@@ -125,8 +125,8 @@ test("all profiles expose native Copilot headers with unchanged native tools and
 
 test("native profiles have valid metadata, exact roles, and documented tools", () => {
   const names = agentNames();
-  expect(names).toHaveLength(20);
-  expect(new Set(names).size).toBe(20);
+  expect(names).toHaveLength(21); // 20 baseline + additive planner
+  expect(new Set(names).size).toBe(21);
   const files = readdirSync(nativeAgents).filter((f) => f.endsWith(".md")).map((f) => f.replace(/\.md$/, ""));
   expect(files.sort()).toEqual([...names].sort());
   expect(readdirSync(nativeAgents)).toEqual(expect.arrayContaining(names.map((name) => `${name}.md`)));

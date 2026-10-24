@@ -27,7 +27,7 @@ export const ROUTES = new Set([
 export const ROLES = new Set([
 	"api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist",
 	"debugger", "devops-specialist", "frontend-worker", "general-worker",
-	"observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
+	"observability-specialist", "oracle", "performance-specialist", "planner", "platform-worker", "release-engineer",
 	"reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
 	"test-engineer", "ui-ux-specialist",
 ]);
