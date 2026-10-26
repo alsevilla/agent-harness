@@ -13,6 +13,8 @@
  */
 
 import { BackgroundWorkers, formatUsageSummary, LogicalUsage, RpcWorker, type UsageScope } from "./background.ts";
+import { applyAdvice, dropConsultation, formatByRole, formatPlanner, formatTop, openConsultation, parseConsultationMeta, parseUsageArgs, type Advice, type ConsultationMeta, type UsageView } from "./usage-telemetry.ts";
+import { auxiliaryUsage, emptyMainState, formatMain, mainStateFromBranch, recordMainCompaction, recordMainTurn, type MainState } from "./main-usage.ts";
 import { WorkerMonitor } from "./monitor.ts";
 import { acquireWorkspace, releaseWorkspace, WorkspaceAdmissionError, type WorkspaceAccess, type WorkspaceLease } from "./workspace-admission.ts";
 import { spawn } from "node:child_process";
@@ -176,10 +178,20 @@ interface DispatchDefaults {
 	thinkingLevel?: ThinkingLevel;
 	prBase?: string; // validated per-entry trusted PR base; shared by every attempt (fallbacks, steering restarts) of this one launch
 	cleanupId?: string; // id of the main-minted cleanup scope of this one launch; only its first spawn claims it
+	consultationId?: string; // planner consultation this launch answers (usage telemetry only)
 }
 
 const WORKSPACE_WAITING = "Waiting for workspace";
 const withBase = (defaults: DispatchDefaults, prBase: string | undefined): DispatchDefaults => (prBase === undefined ? defaults : { ...defaults, prBase });
+
+// Ledger metadata of one settled task: role and selected tier provenance only (no prompt or message text).
+const taskMeta = (agents: SelectedAgent[], agentName: string, consultationId?: string) => {
+	const selected = agents.find((a) => a.name === agentName);
+	return { role: agentName, ...(selected?.modelTier !== undefined ? { tier: selected.modelTier } : {}), ...(selected?.modelSlot !== undefined ? { slot: selected.modelSlot } : {}), ...(consultationId !== undefined ? { consultationId } : {}) };
+};
+// Main-session branch entries for the telemetry rebuild; an unavailable branch is an empty history, not an error.
+const branchOf = (ctx: { sessionManager?: { getBranch?: () => unknown[] } }): unknown[] => { try { return ctx.sessionManager?.getBranch?.() ?? []; } catch { return []; } };
+const consultationNote = (id: string) => `\nConsultation ${id} recorded; record main's advice with subagent_control action advice.`;
 
 // Admission boundary for every launch path (single, chain, parallel, background, future DAG): the claim is registered before any await and held across declared fallbacks.
 async function runSingleAgent(
@@ -196,10 +208,10 @@ async function runSingleAgent(
 	access: WorkspaceAccess = "write",
 ): Promise<SingleResult> {
 	// One usage job per logical request, charged to the scope captured at dispatch; it settles exactly once here.
-	const logical = dispatchDefaults.usageScope ? new LogicalUsage(dispatchDefaults.usageScope, Boolean(dispatchDefaults.jobId)) : undefined;
+	const logical = dispatchDefaults.usageScope ? new LogicalUsage(dispatchDefaults.usageScope, Boolean(dispatchDefaults.jobId), taskMeta(agents, agentName, dispatchDefaults.consultationId)) : undefined;
 	try {
 		const result = await runSingleAgentJob(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, access, logical);
-		logical?.settle(result.stopReason === "aborted" ? "aborted" : isFailedResult(result) ? "failed" : "completed");
+		logical?.settle(result.stopReason === "aborted" ? "aborted" : isFailedResult(result) ? "failed" : "completed", result);
 		return result;
 	} catch (error) {
 		logical?.settle(signal?.aborted ? "aborted" : "failed");
@@ -621,6 +633,12 @@ const CLEANUP = Type.Optional(Type.Union([Type.Object({
 	quiescent: Type.Boolean({ description: "Main's declaration that no worker, service or process uses the checkout; must be true" }),
 }, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are never removed." }), Type.Null()]));
 
+// Planner consultation metadata (telemetry only): single planner launch; trigger and optional top-level taskId. Null is listed so the SDK keeps it for runtime refusal.
+const CONSULTATION = Type.Optional(Type.Union([Type.Object({
+	trigger: Type.String({ description: "Trigger token that caused the consultation, e.g. t3, debugger-unresolved, budget-rescope, dag-size, conflict" }),
+	taskId: Type.Optional(Type.String({ description: "Top-level task identifier; omit when the consultation belongs to no named task" })),
+}, { additionalProperties: false, description: "Telemetry metadata for one planner consultation; nothing is decided or inferred from it." }), Type.Null()]));
+
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
@@ -665,6 +683,7 @@ const SubagentParams = Type.Object({
 	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
 	prBase: PR_BASE,
 	cleanup: CLEANUP,
+	consultation: CONSULTATION,
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -877,6 +896,12 @@ export default function (pi: ExtensionAPI) {
     // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.
     const pendingText = () => { try { return formatCleanupPending(cleanupPending(safetyGrants, owners, (id) => runtime.jobs.get(id)?.state === "running")); } catch { return ""; } };
     runtime.pendingNote = pendingText;
+    // Main-session telemetry from native events only; child workers never load this extension. Turns and compactions are rebuilt from the branch on every session start (startup, reload, new, resume, fork).
+    let mainUsage: MainState = emptyMainState();
+    pi.on("session_start", (_event, ctx) => { mainUsage = mainStateFromBranch(branchOf(ctx)); });
+    pi.on("session_shutdown", () => { mainUsage = emptyMainState(); });
+    pi.on("turn_end", (event) => recordMainTurn(mainUsage, event.message));
+    pi.on("session_compact", (event) => recordMainCompaction(mainUsage, event.compactionEntry, event.reason));
     const subagentTool = {
 		name: "subagent",
 		label: "Subagent",
@@ -889,7 +914,7 @@ export default function (pi: ExtensionAPI) {
 		].join(" "),
 		parameters: SubagentParams,
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx, preparedDispatch?: { discovery: ReturnType<typeof discoverAgents>; selected: Map<number, SelectedAgent>; cleanupId?: string }) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx, preparedDispatch?: { discovery: ReturnType<typeof discoverAgents>; selected: Map<number, SelectedAgent>; cleanupId?: string; consultationId?: string }) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const dispatchDefaults: DispatchDefaults = {
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
@@ -958,6 +983,14 @@ export default function (pi: ExtensionAPI) {
 			const batchMode = hasChain || hasTasks || hasDag;
 			if (batchMode && (params.modelTier !== undefined || params.modelSlot !== undefined)) return { content: [{ type: "text", text: `Invalid ${params.modelTier !== undefined ? "modelTier" : "modelSlot"}: root selection is only valid for a single task.` }], details: makeDetails(mode)([]), isError: true };
 			if (batchMode && params.prBase !== undefined) return { content: [{ type: "text", text: "Invalid prBase: root selection is only valid for a single task." }], details: makeDetails(mode)([]), isError: true };
+			// Consultation metadata is parsed before any launch and only on the outer call; the background re-entry carries its ID instead.
+			let consultationMeta: ConsultationMeta | undefined;
+			if (params.consultation !== undefined && !preparedDispatch) {
+				const refuse = (why: string) => ({ content: [{ type: "text" as const, text: `Invalid consultation: ${why}; nothing was launched.` }], details: makeDetails(mode)([]), isError: true });
+				if (!hasSingle || batchMode || params.agent !== "planner") return refuse("only a single planner launch accepts consultation metadata");
+				if (params.consultation === null) return refuse("null is not a consultation");
+				try { consultationMeta = parseConsultationMeta(params.consultation); } catch (error) { return refuse(error instanceof Error ? error.message : String(error)); }
+			}
 			const tierRequests = hasDag ? dagNodes! : hasChain ? params.chain! : hasTasks ? params.tasks! : hasSingle ? [{ agent: params.agent!, modelTier: params.modelTier, modelSlot: params.modelSlot, prBase: params.prBase, cwd: params.cwd }] : [];
 			// prBase narrows only the trusted (user/package) release-engineer context; every entry is validated once, before any entry launches.
 			for (let i = 0; i < tierRequests.length; i++) {
@@ -1032,15 +1065,24 @@ export default function (pi: ExtensionAPI) {
                 owners.reserve(minted.grant.candidate, minted.grant.issuedAt + CLEANUP_TTL_MS, minted.grant.id);
                 dispatchDefaults.cleanupId = minted.grant.id;
             } else if (preparedDispatch?.cleanupId) dispatchDefaults.cleanupId = preparedDispatch.cleanupId;
+			if (preparedDispatch?.consultationId !== undefined) dispatchDefaults.consultationId = preparedDispatch.consultationId;
             if (params.background !== false) {
                 const requests = params.dag ?? params.chain ?? params.tasks ?? [{agent: params.agent!, task: params.task!, cwd: params.cwd}];
                 if (params.tasks && params.tasks.length > MAX_PARALLEL_TASKS) return {isError: true, content: [{type: "text", text: "Max parallel tasks is 8."}], details: makeDetails("parallel")([])};
                 const unknown = requests.filter(t => !agents.some(a => a.name === t.agent)).map(t => t.agent);
                 if (unknown.length) return {isError: true, content: [{type: "text", text: "Unknown agents: " + unknown.join(", ")}], details: makeDetails("single")([])};
                 if (signal?.aborted) throw new Error("Dispatch was aborted");
-                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected, cleanupId: dispatchDefaults.cleanupId }));
+                // The consultation is opened before the job starts (the re-entry needs its ID) and dropped if the start throws, so it never stays pending.
+                const consultationId = consultationMeta !== undefined ? openConsultation(runtime.usage, consultationMeta) : undefined;
+                let job: ReturnType<BackgroundWorkers["start"]>;
+                try {
+                    job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected, cleanupId: dispatchDefaults.cleanupId, consultationId }));
+                } catch (error) {
+                    if (consultationId !== undefined) dropConsultation(runtime.usage.consultations, consultationId);
+                    throw error;
+                }
                 if (dispatchDefaults.cleanupId) cleanupJobs.set(dispatchDefaults.cleanupId, job.id);
-                return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + ". This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop."}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
+                return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + ". This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop." + (consultationId !== undefined ? consultationNote(consultationId) : "")}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
             }
 
 			if (dagNodes) {
@@ -1220,6 +1262,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (params.agent && params.task) {
+				if (consultationMeta !== undefined) dispatchDefaults.consultationId = openConsultation(runtime.usage, consultationMeta);
 				const result = await runSingleAgent(
 					ctx.cwd,
 					withBase(dispatchDefaults, params.prBase ?? undefined),
@@ -1237,13 +1280,13 @@ export default function (pi: ExtensionAPI) {
 				if (isError) {
 					const errorMsg = getResultOutput(result);
 					return {
-						content: [{ type: "text", text: `Agent ${isIncompleteStop(result) ? incompleteLabel(result.stopReason) : result.stopReason || "failed"}: ${errorMsg}` }],
+						content: [{ type: "text", text: `Agent ${isIncompleteStop(result) ? incompleteLabel(result.stopReason) : result.stopReason || "failed"}: ${errorMsg}${dispatchDefaults.consultationId !== undefined ? consultationNote(dispatchDefaults.consultationId) : ""}` }],
 						details: makeDetails("single")([result]),
 						isError: true,
 					};
 				}
 				return {
-					content: [{ type: "text", text: getResultOutput(result) }],
+					content: [{ type: "text", text: getResultOutput(result) + (dispatchDefaults.consultationId !== undefined ? consultationNote(dispatchDefaults.consultationId) : "") }],
 					details: makeDetails("single")([result]),
 				};
 			}
@@ -1316,12 +1359,13 @@ export default function (pi: ExtensionAPI) {
     pi.registerTool({
         name: "subagent_control", label: "Subagent control",
         description: "Manage existing background jobs. list returns job/worker IDs and current activity. steer sends a new instruction to an active worker at its next tool boundary; use its unique worker ID when a job has multiple workers. pause enforces a hold after the current tool/model call; resume continues the same worker. Pause a job to hold all active workers and later chain steps. A steering message alone is model advice, not an enforced stop. cancel stops a worker or job. result retrieves a finished job. Completions arrive automatically, so do not busy-poll. Never restart or duplicate a running worker just to steer it. decisions lists worker decision requests; answer or decline a requestId only with its traceable basis or reason. Answers never resume a paused job; steer never answers a decision.",
-        parameters: Type.Object({action: StringEnum(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline"] as const), target: Type.Optional(Type.String({description: "Job ID bg-N, full worker ID, #N, or decision requestId dec-…"})), message: Type.Optional(Type.String()), answer: Type.Optional(Type.String({description: "Freeform answer text (action answer)"})), basis: Type.Optional(StringEnum(["user_answer", "existing_authorization"] as const)), reference: Type.Optional(Type.String({description: "Traceable source of the answer or authorization"})), reason: Type.Optional(Type.String({description: "Why the request is declined (action decline)"}))}),
+        parameters: Type.Object({action: StringEnum(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline", "advice"] as const), target: Type.Optional(Type.String({description: "Job ID bg-N, full worker ID, #N, or decision requestId dec-…"})), message: Type.Optional(Type.String()), answer: Type.Optional(Type.String({description: "Freeform answer text (action answer)"})), basis: Type.Optional(StringEnum(["user_answer", "existing_authorization"] as const)), reference: Type.Optional(Type.String({description: "Traceable source of the answer or authorization"})), reason: Type.Optional(Type.String({description: "Why the request is declined (action decline)"})), advice: Type.Optional(StringEnum(["accepted", "rejected"] as const, {description: "action advice: main's decision on a planner consultation cons-N (telemetry; last write wins)"}))}),
         async execute(_id, params) {
             try {
                 if (params.action === "list") { const note = pendingText(); return {content: [{type: "text", text: JSON.stringify(runtime.list())}, ...(note ? [{type: "text" as const, text: note}] : [])]}; }
                 if (params.action === "decisions") return {content: [{type: "text", text: JSON.stringify(decisions.list())}]};
                 if (!params.target) throw new Error("target is required");
+                if (params.action === "advice") { applyAdvice(runtime.usage.consultations, params.target, params.advice as Advice); return {content: [{type: "text", text: "Consultation " + params.target + " advice recorded: " + params.advice + "."}]}; }
                 if (params.action === "answer" || params.action === "decline") return {content: [{type: "text", text: await runtime.answerDecision(params.target, params.action === "answer" ? {kind: "answer", answer: params.answer, basis: params.basis, reference: params.reference} : {kind: "decline", reason: params.reason})}]};
                 if (params.action === "result") return runtime.result(params.target);
                 if (params.action === "steer" && !params.message?.trim()) throw new Error("A nonempty steering message is required");
@@ -1332,6 +1376,19 @@ export default function (pi: ExtensionAPI) {
     });
     monitor.control = async (args, ctx) => {
         if (args.trim() === "roles") { const { editRoleConfig } = await import("./roles-editor.ts"); await editRoleConfig(ctx); return; }
+        // /subagent usage [--by-role | --top N | --main | --planner]: plain usage keeps the existing summary text unchanged.
+        const usageArgs = /^usage(?:\s([\s\S]*))?$/.exec(args.trim());
+        if (usageArgs) {
+            try {
+                const view: UsageView = parseUsageArgs(usageArgs[1] ?? "");
+                ctx.ui.notify(view.kind === "summary" ? formatUsageSummary(runtime.usage)
+                    : view.kind === "by-role" ? formatByRole(runtime.usage.tasks)
+                    : view.kind === "top" ? formatTop(runtime.usage.tasks, view.n)
+                    : view.kind === "planner" ? formatPlanner(runtime.usage)
+                    : formatMain(mainUsage, auxiliaryUsage(branchOf(ctx)), { tokens: ctx.getContextUsage?.()?.tokens ?? null, window: ctx.model?.contextWindow }), "info");
+            } catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
+            return;
+        }
         const match = args.trim().match(/^(steer|pause|resume|stop|cancel|list|result|usage)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/);
         if (!match) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, roles, create, or /subagent to inspect", "warning"); return; }
         // Command operations use the same runtime without a model request.

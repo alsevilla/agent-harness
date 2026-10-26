@@ -1,8 +1,8 @@
 {
   "schema": "approved-user-presets/v1",
   "purpose": "Independent oracle for the user-approved preset update to agent/roles.json (supersedes the tier-only-baseline default tuples ONLY for the listed delta; tier-only-baseline.json stays immutable). Generated from the approved snapshot, never from the candidate file.",
-  "approvedSnapshotSha256": "5e236e57ad816d2c01806510d511cff10a7542b6502b6937e778e32abfb68ef7",
-  "approvedBy": "user request to include their edited ~/.pi/agent/roles.json; architecture-specialist default confirmed economy by the user",
+  "approvedSnapshotSha256": "da34020f3700b8feaf8397a97560b0edb46642cfba4c4963c6528b4dd69df73b",
+  "approvedBy": "user request to include their edited ~/.pi/agent/roles.json (capable-only Opus/high planner); architecture-specialist default confirmed economy by the user; backend-worker economy order (haiku primary, gpt-6-luna fallback, medium) is the committed 6323f33 value, kept per main's resolved decision D1 from existing authorization (not a new user approval). approvedSnapshotSha256 was re-derived by recovery-1 as the sha256 of the candidate agent/roles.json bytes = committed 6323f33 + the user planner edit + the one-space whitespace normalization on backend-worker line 218 (decision D2 C1; JSON deep-equal before and after). It is a content hash of that snapshot, not a user-approved hash. The earlier pin 5e236e57... could not be reproduced from commits ddda800, 3b17af4, 6323f33 or the profile roles.json 27d05ee5 and is not claimed as approved.",
   "changedFromBaseline": [
     "api-specialist.default",
     "api-specialist.economy",
@@ -30,6 +30,7 @@
     "reviewer.economy",
     "reviewer.capable",
     "backend-worker.default",
+    "backend-worker.economy",
     "security-specialist.default",
     "security-specialist.economy",
     "security-specialist.capable",
@@ -381,9 +382,9 @@
       "defaultModelTier": "economy",
       "tiers": {
         "economy": {
-          "model": "openai-codex/gpt-6-luna",
+          "model": "anthropic/claude-haiku-5-5",
           "fallbackModel": [
-            "anthropic/claude-haiku-5-5"
+            "openai-codex/gpt-6-luna"
           ],
           "thinking": "medium"
         },

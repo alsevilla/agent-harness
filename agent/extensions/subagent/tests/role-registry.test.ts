@@ -151,7 +151,7 @@ test("every generic role receives standard code navigation integrations", () => 
 
 test("registry contains the approved tier pairs without changing default role fields", () => {
   const expected: Record<string, { economy: [string, string]; capable?: [string, string] }> = {
-    "backend-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "backend-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
     "frontend-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
     "database-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"] },
     "general-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
@@ -195,7 +195,7 @@ test("written tier scenarios resolve through the real package registry to the co
       return found;
     };
     const scenarios: Array<[string, "economy" | "capable", string, string, string]> = [
-      ["backend-worker", "economy", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5", "medium"], // bounded backend change
+      ["backend-worker", "economy", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna", "medium"], // bounded backend change
       ["frontend-worker", "economy", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna", "medium"], // bounded presentational change
       ["database-worker", "capable", "openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5", "low"], // consequential migration
       ["platform-worker", "capable", "anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol", "low"], // consequential infrastructure
@@ -257,7 +257,7 @@ test("package discovery normalizes tier registry data and field-wise user tier o
     const role = result.agents.find((item) => item.name === "backend-worker");
     assert.ok(role);
     assert.equal(role.source, "package");
-    assert.equal(role.model, "openai-codex/gpt-6-luna", "the root model keeps the base default-tier projection (economy after the approved preset update)");
+    assert.equal(role.model, "anthropic/claude-haiku-5-5", "the root model keeps the base default-tier projection (economy after the approved preset update)");
     assert.deepEqual(role.modelTiers?.economy, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
     assert.equal(role.modelTiers?.capable, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
     fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: {} }]));
@@ -515,8 +515,8 @@ test("partial tier overlays inherit the base default and replace modelTiers atom
   const economy = inherited.agents.find((agent) => agent.name === "backend-worker");
   assert.ok(economy);
   assert.equal(economy.defaultModelTier, "economy");
-  assert.equal(economy.model, "openai-codex/gpt-6-luna");
-  assert.deepEqual(economy.fallbackModel, ["anthropic/claude-haiku-5-5"]);
+  assert.equal(economy.model, "anthropic/claude-haiku-5-5");
+  assert.deepEqual(economy.fallbackModel, ["openai-codex/gpt-6-luna"]);
   assert.equal(economy.thinking, "medium");
   assert.deepEqual(economy.tools, BACKEND_TOOLS);
 
@@ -544,7 +544,7 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   const tools = toolsOnly.agents.find((agent) => agent.name === "backend-worker");
   assert.ok(tools);
   assert.deepEqual(tools.tools, ["read"]);
-  assert.equal(tools.model, "openai-codex/gpt-6-luna");
+  assert.equal(tools.model, "anthropic/claude-haiku-5-5");
   assert.equal(tools.defaultModelTier, "economy", "a tools-only overlay inherits the base default tier");
 
   const legacy = discoverWithUserRoles([{ name: "backend-worker", provider: "fixture-provider", model: "legacy-model", thinking: "low" }]);
@@ -553,7 +553,7 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   assert.ok(scalar);
   assert.equal(scalar.model, "fixture-provider/legacy-model");
   assert.equal(scalar.thinking, "low");
-  assert.deepEqual(scalar.fallbackModel, ["anthropic/claude-haiku-5-5"]);
+  assert.deepEqual(scalar.fallbackModel, ["openai-codex/gpt-6-luna"]);
   assert.equal(scalar.defaultModelTier, undefined, "legacy omission projection carries no default tier");
 });
 
@@ -569,7 +569,7 @@ const fileSha256 = (file: URL) => createHash("sha256").update(Buffer.from(fs.rea
 const ORIGINAL_ROLES_SHA256 = "40381940f244381ae91f24ff7e467dedd88e9c071f2061cd106fc61db70c4219";
 // The user-approved preset update supersedes the tier-only-baseline default tuples for exactly the ledger in this independent oracle
 // (generated from the approved snapshot, never from the candidate roles.json). tier-only-baseline.json itself stays byte-immutable.
-const APPROVED_SNAPSHOT_SHA256 = "5e236e57ad816d2c01806510d511cff10a7542b6502b6937e778e32abfb68ef7";
+const APPROVED_SNAPSHOT_SHA256 = "da34020f3700b8feaf8397a97560b0edb46642cfba4c4963c6528b4dd69df73b"; // recovery-1: candidate roles.json bytes (6323f33 + user planner edit + C1 whitespace)
 type ApprovedTier = { model: string; fallbackModel: string[]; thinking: string };
 const approved = JSON.parse(fs.readFileSync(new URL("./fixtures/approved-user-presets.json", import.meta.url), "utf8")) as {
   approvedSnapshotSha256: string; changedFromBaseline: string[];
@@ -756,13 +756,13 @@ test("raw roles.json equals the approved preset oracle for every role: default t
   }
 });
 
-test("additive planner mirrors architecture-specialist tiers, models, thinking and tools exactly, read-only, and no baseline role changed", () => {
+test("additive planner is the approved capable-only Opus/high tier with architecture-specialist read-only tools, and no baseline role changed", () => {
   const raw = RAW_ROLES();
   for (const [added, source] of Object.entries(ADDED_ROLES)) {
     const a = raw.find((item) => item.name === added)!;
     const b = raw.find((item) => item.name === source)!;
     assert.ok(a && b);
-    assert.deepEqual({ ...a, name: source }, b, `${added} copies ${source} registry settings`);
+    assert.equal(a.defaultModelTier, "capable"); assert.deepEqual(a.modelTiers, { capable: { model: "anthropic/claude-opus-5-5", fallbackModel: "", thinking: "high" } }); assert.equal(a.tools, b.tools, `${added} tools mirror ${source}`); // approved user planner edit (economy tier removed)
     assert.deepEqual(a.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool === "edit" || tool === "write"), [], `${added}: read-only tools`);
     const text = fs.readFileSync(new URL(`../../../agents/${added}.md`, import.meta.url), "utf8");
     assert.ok(text.split(String.fromCharCode(10)).map((line) => line.trim()).includes("tools: read, search, execute"), `${added}: native read-only tools line`);
@@ -804,12 +804,12 @@ test("write is the one approved tool delta: only release-engineer gains it, pinn
 
 test("shipped tier census matches the approved data shape (informational; not a runtime eligibility gate)", () => {
   const roles = RAW_ROLES();
-  assert.equal(roles.length, 21); // 20 baseline + additive planner (economy default, both tiers)
+  assert.equal(roles.length, 21); // 20 baseline + additive planner (capable-only, approved user edit)
   const defaults = roles.map((role) => role.defaultModelTier);
-  assert.equal(defaults.filter((tier) => tier === "economy").length, 20);
-  assert.equal(defaults.filter((tier) => tier === "capable").length, 1, "only Oracle defaults to capable; it has no economy tier");
+  assert.equal(defaults.filter((tier) => tier === "economy").length, 19);
+  assert.equal(defaults.filter((tier) => tier === "capable").length, 2, "Oracle and the approved planner default to capable and have no economy tier");
   const entries = roles.flatMap((role) => Object.keys(role.modelTiers));
-  assert.equal(entries.length, 40);
-  assert.equal(entries.filter((tier) => tier === "economy").length, 20);
+  assert.equal(entries.length, 39);
+  assert.equal(entries.filter((tier) => tier === "economy").length, 19);
   assert.equal(entries.filter((tier) => tier === "capable").length, 20);
 });

@@ -87,6 +87,7 @@ const children = (): Child[] => (globalThis as { __piDagChildren: Child[] }).__p
 
 const PRIMARY = "openai-codex/gpt-6.1-sol";
 const LUNA = "openai-codex/gpt-6-luna";
+const HAIKU = "anthropic/claude-haiku-5-5"; // backend-worker economy primary (committed 6323f33 roles.json)
 const SONNET = "anthropic/claude-sonnet-5-5";
 const role = (name: string, extra: Partial<AgentConfig> = {}): AgentConfig => ({ name, description: name, systemPrompt: "", source: "user", filePath: "", ...extra });
 const AGENTS: AgentConfig[] = [role("writer"), role("reader"), role("chain-fallback", { model: PRIMARY, fallbackModel: [LUNA] })];
@@ -168,7 +169,7 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 				await waitFor(() => children().length === offset + i + 1, `${mode} ${backgroundMode} position-${i} spawn`);
 				const child = children()[offset + i];
 				await waitFor(() => child.received.some(m => m.type === "prompt"), `position-${i} prompt`);
-				assert.equal(child.model, tiers[i] === "economy" ? LUNA : SONNET);
+				assert.equal(child.model, tiers[i] === "economy" ? HAIKU : SONNET);
 				assert.ok(child.args.includes("--append-system-prompt"));
 				if (tiers[i] === "capable") assert.ok(child.args.includes(path.join(guardDir, "subscription-guard.ts")));
 				finish(child, `position-${i} tier result`); launches++;
@@ -184,7 +185,7 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 			assert.equal(result.details.results.length, tiers.length);
 			for (let i = 0; i < tiers.length; i++) {
 				const row = result.details.results[i];
-				assert.equal(row.agent, "backend-worker"); assert.equal(row.agentSource, "package"); assert.equal(row.model, tiers[i] === "economy" ? LUNA : SONNET); assert.equal(row.modelTier, tiers[i]); assert.equal(row.exitCode, 0);
+				assert.equal(row.agent, "backend-worker"); assert.equal(row.agentSource, "package"); assert.equal(row.model, tiers[i] === "economy" ? HAIKU : SONNET); assert.equal(row.modelTier, tiers[i]); assert.equal(row.exitCode, 0);
 				assert.match(finalText(row), new RegExp(`position-${i} tier result`));
 			}
 			dispatches++;
@@ -195,6 +196,9 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 
 // Explicit native modelSlot: "fallback" on a package role with an explicit tier starts on that tier's first usable fallback.
 check("modelSlot fallback runs in single, parallel, chain and dag, foreground and background, with per-entry provenance", async () => {
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
 	const sdk = await import(piAiUrl);
 	const call = (arguments_: any) => ({ type: "toolCall" as const, id: "slot", name: "subagent", arguments: arguments_ });
 	let dispatches = 0;
@@ -203,7 +207,7 @@ check("modelSlot fallback runs in single, parallel, chain and dag, foreground an
 		const tool = pi.tools.get("subagent")!, control = pi.tools.get("subagent_control")!;
 		const ctx = dagCtx(makeRepo(`slot-${mode}-${backgroundMode}`));
 		const items: any[] = [{ agent: "backend-worker", task: "slot-0", modelTier: "capable", modelSlot: "fallback" }, { agent: "backend-worker", task: "plain-1", modelTier: "economy" }];
-		const expected = [PRIMARY, LUNA]; // capable fallback (not the capable primary) and an ordinary economy primary
+		const expected = [PRIMARY, HAIKU]; // capable fallback (not the capable primary) and an ordinary economy primary
 		const used = mode === "single" ? items.slice(0, 1) : items;
 		const args: any = { background: backgroundMode, agentScope: "both" };
 		if (mode === "single") Object.assign(args, used[0]);
@@ -233,7 +237,7 @@ check("modelSlot fallback runs in single, parallel, chain and dag, foreground an
 		assert.equal(rows.length, used.length);
 		assert.equal(rows[0].model, PRIMARY); assert.equal(rows[0].modelTier, "capable"); assert.equal(rows[0].modelSlot, "fallback");
 		assert.doesNotMatch(rows[0].stderr, /retried|skipped/);
-		if (used.length > 1) { assert.equal(rows[1].model, LUNA); assert.equal(rows[1].modelTier, "economy"); assert.equal(Object.hasOwn(rows[1], "modelSlot"), false); }
+		if (used.length > 1) { assert.equal(rows[1].model, HAIKU); assert.equal(rows[1].modelTier, "economy"); assert.equal(Object.hasOwn(rows[1], "modelSlot"), false); }
 		dispatches++;
 	}
 	assert.equal(dispatches, 8);
@@ -346,6 +350,9 @@ check("accepted package role configuration survives a later user-registry change
 });
 
 check("package backend-worker tier failures never upgrade to capable", async () => {
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
 	const { discoverAgents } = await import(new URL("../agents.ts", import.meta.url).href);
 	const baseline = discoverAgents(userDir, "both").agents.find(a => a.name === "backend-worker")!;
 	assert.equal(baseline.source, "package");
@@ -497,12 +504,15 @@ check("api-specialist tiers follow shipped and overlaid roles.json: both configu
 });
 
 check("explicit package role tier selects configured model without changing role", async () => {
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
 	const pi = fakePi();
 	subagentExtension(pi);
 	const tool = pi.tools.get("subagent")!;
 	const launch = tool.execute("tier-package", { background: false, agentScope: "both", agent: "backend-worker", task: "tier probe", modelTier: "economy" }, undefined, undefined, dagCtx(makeRepo("tier-package")));
 	await waitFor(() => children().length === 1, "canonical package role launches");
-	assert.equal(children()[0].args[children()[0].args.indexOf("--model") + 1], "openai-codex/gpt-6-luna");
+	assert.equal(children()[0].args[children()[0].args.indexOf("--model") + 1], HAIKU);
 	finish(children()[0], "ok");
 	const result = await launch;
 	assert.equal(result.isError, undefined);

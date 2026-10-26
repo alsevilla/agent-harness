@@ -127,7 +127,7 @@ The `/refresh` rows apply only when the optional `agent/extensions/refresh` comp
 | --- | --- | --- |
 | `/subagent` | With a UI, opens the live worker inspector or a menu (Inspect workers, Edit roles, Create agent). Without a UI it prints the command hint. | [subagent README](agent/extensions/subagent/README.md) |
 | `/subagent list`, `steer #N <message>`, `pause bg-N`, `resume bg-N`, `stop #N`, `result bg-N` | Controls running or retained workers. These controls make no model call. `result` returns the full retained report for recent finished jobs. | [subagent README](agent/extensions/subagent/README.md#steering-pause-and-cancellation) |
-| `/subagent usage` | Prints counts of settled agent tasks in this Pi run. Costs are reported figures, not a bill. | [subagent README](agent/extensions/subagent/README.md) |
+| `/subagent usage` | Prints counts of settled agent tasks in this Pi run. Costs are reported figures, not a bill. `--by-role`, `--top N`, `--main` and `--planner` add per-role percentiles, the costliest tasks, main-session context and planner consultation views. | [subagent README](agent/extensions/subagent/README.md) |
 | `/subagent roles` | Opens native dialogs to change one user role's default tier model, fallbacks and thinking level; other tiers are kept. Nothing is written until you confirm Save. | [subagent README](agent/extensions/subagent/README.md) |
 | `/subagent create` | Operator-only. Previews project-local agent files and writes them only after you choose CREATE. It is not a model tool. | [subagent README](agent/extensions/subagent/README.md) |
 | `Ctrl+Shift+W` | Shortcut that opens the live subagent inspector directly. | [subagent README](agent/extensions/subagent/README.md) |

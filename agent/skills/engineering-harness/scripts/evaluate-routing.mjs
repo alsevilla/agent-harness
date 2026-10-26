@@ -53,7 +53,7 @@ export const SLOTS = set("fallback"); // optional per-entry modelSlot; requires 
 const NATIVE_ENTRY_KEYS = set("agent", "task", "cwd", "readOnly", "modelTier", "modelSlot", "prBase");
 const NATIVE_DAG_KEYS = new Set([...NATIVE_ENTRY_KEYS, "id", "dependsOn"]);
 const NATIVE_ROOT_KEYS = set("background", "modelTier", "modelSlot", "agent", "task", "tasks", "chain", "agentScope", "dag",
-	"readOnly", "confirmProjectAgents", "cwd", "prBase", "cleanup");
+	"readOnly", "confirmProjectAgents", "cwd", "prBase", "cleanup", "consultation");
 const NATIVE_CLEANUP_KEYS = set("checkout", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent"); // CLEANUP schema / CLEANUP_REQUEST_KEYS
 const NATIVE_CLEANUP_ROLE = "release-engineer"; // the only role whose single-mode launch accepts `cleanup` (LEASE_ROLE)
 const NATIVE_SHA = /^[0-9a-f]{40}$/; // BARE_SHA; `$` without the m flag matches only at the very end (no trailing-newline slack)

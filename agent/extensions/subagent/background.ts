@@ -4,6 +4,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
 import { servedReported } from "./provenance.ts";
 import { boundBackgroundCompletion, expandRetainedResult } from "./compact-handoff.ts";
+import { nextTaskId, type ConsultationRecord, type TaskUsageRecord } from "./usage-telemetry.ts";
+import type { ModelTier } from "./agents.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
 export class RpcWorker {
@@ -65,19 +67,31 @@ export class RpcWorker {
 // Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text, prompts or model roles). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
 export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number }
 export interface UsageSlice extends UsageTotals { completed: number; failed: number; aborted: number }
-export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice }
+export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; tasks: TaskUsageRecord[]; consultations: ConsultationRecord[] }
 const zeroTotals = (): UsageTotals => ({ attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0 });
 const zeroSlice = (): UsageSlice => ({ ...zeroTotals(), completed: 0, failed: 0, aborted: 0 });
-export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice() });
+export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), tasks: [], consultations: [] });
+// Prompt = provider input + cached context (cacheRead, cacheWrite); output is never part of it. Null when the input count is not a number.
+const promptOf = (usage: any): number | null => {
+  if (!Number.isFinite(usage?.input)) return null;
+  const n = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
+  return usage.input + n(usage.cacheRead) + n(usage.cacheWrite);
+};
+export interface TaskMeta { role: string; tier?: ModelTier; slot?: "fallback"; consultationId?: string }
+export interface SettleProvenance { requestedModel?: string; model?: string; modelSource?: string; attempts?: { requestedModel?: string }[] }
 // One logical job (one runSingleAgent request). Finalized message_end usage only; finalizes once; physical attempts counted at spawn.
 export class LogicalUsage {
   private totals = zeroTotals(); private open = true;
-  private scope: UsageScope; private slice: "foreground" | "background";
-  constructor(scope: UsageScope, background: boolean) { this.scope = scope; this.slice = background ? "background" : "foreground"; scope.running++; }
+  private scope: UsageScope; private slice: "foreground" | "background"; private meta: TaskMeta;
+  private firstPrompt: number | null | undefined; private peakPrompt: number | null = null; // undefined until the first turn
+  constructor(scope: UsageScope, background: boolean, meta: TaskMeta = { role: "unknown" }) { this.scope = scope; this.slice = background ? "background" : "foreground"; this.meta = meta; scope.running++; }
   attempt() { if (this.open) this.totals.attempts++; }
   turn(usage: any) {
     if (!this.open) return;
     const t = this.totals; t.turns++;
+    const prompt = promptOf(usage);
+    if (this.firstPrompt === undefined) this.firstPrompt = prompt;
+    if (prompt !== null && (this.peakPrompt === null || prompt > this.peakPrompt)) this.peakPrompt = prompt;
     if (!usage) { t.unpricedTurns++; return; }
     const n = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
     const input = n(usage.input), output = n(usage.output), cacheRead = n(usage.cacheRead), cacheWrite = n(usage.cacheWrite);
@@ -87,12 +101,25 @@ export class LogicalUsage {
     t.cost += cost;
     if (cost === 0 && input + output + cacheRead + cacheWrite > 0) t.zeroCostTurns++;
   }
-  settle(status: "completed" | "failed" | "aborted") {
+  // Settles once into the launch scope and appends one numeric task record. Provenance: configured = first attempt's request; observed only when the final attempt reported an identity.
+  settle(status: "completed" | "failed" | "aborted", provenance?: SettleProvenance) {
     if (!this.open) return;
     this.open = false; this.scope.running--;
     const slice = this.scope[this.slice]; const t = this.totals;
     for (const key of Object.keys(t) as (keyof UsageTotals)[]) slice[key] += t[key];
     slice[status]++;
+    const { meta } = this;
+    const configured = provenance?.attempts?.[0]?.requestedModel ?? provenance?.requestedModel;
+    const observed = provenance?.modelSource === "observed" ? provenance.model : undefined;
+    this.scope.tasks.push({
+      id: nextTaskId(), role: meta.role,
+      ...(meta.tier !== undefined ? { tier: meta.tier } : {}), ...(meta.slot !== undefined ? { slot: meta.slot } : {}),
+      background: this.slice === "background", status, attempts: t.attempts, turns: t.turns,
+      input: t.input, output: t.output, cacheRead: t.cacheRead, cacheWrite: t.cacheWrite, cost: t.cost, unpricedTurns: t.unpricedTurns,
+      firstTurnPromptTokens: this.firstPrompt ?? null, peakPromptTokens: this.peakPrompt,
+      ...(configured !== undefined ? { configuredModel: configured } : {}), ...(observed !== undefined ? { observedModel: observed } : {}),
+      ...(meta.consultationId !== undefined ? { consultationId: meta.consultationId } : {}),
+    });
   }
 }
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
