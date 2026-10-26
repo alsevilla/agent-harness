@@ -61,7 +61,7 @@ function world(spec: Spec) {
   if (spec.graphifyExtension) put(join(packages, "graphify-pi", "extensions", "graphify.ts"));
   if (spec.graphifySkill) put(join(dir, "skills", "graphify", "SKILL.md"));
   const qmdExtension = join(root, "qmd", "extensions", "qmd", "index.ts");
-  if (spec.qmd) put(qmdExtension);
+  if (spec.qmd) { put(qmdExtension); put(join(qmdExtension, "..", "config.json"), "{}"); }
   for (const rel of spec.cargoAt ?? []) put(join(candidate, rel, "Cargo.toml"), "[package]\nname = \"fixture\"\n");
   if (spec.projectGraph) { put(join(candidate, "graphify-out", "graph.json"), "{}"); put(join(candidate, "graphify-out", "GRAPH_REPORT.md"), "# report\n"); }
   if (spec.globalGraph) { put(join(home, ".graphify", "global-graph.json"), "{}"); put(join(home, ".graphify", "global-manifest.json"), JSON.stringify({ repos: { [spec.globalMatch ? "candidate-repo" : "unrelated-repo"]: { source_path: spec.globalMatch ? join(candidate, "graphify-out", "graph.json") : join(root, "elsewhere", "graphify-out", "graph.json") } } })); }

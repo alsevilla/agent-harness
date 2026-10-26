@@ -144,7 +144,9 @@ export function packageResourceGuidance(root: string | null): string {
 }
 
 const QMD_EXTENSION = fileURLToPath(new URL("../qmd/index.ts", import.meta.url));
-type Integration = { label: string; flag: string; file: string; toolPrefix?: string };
+// requires: extra files that must exist beside the entry for it to load (prerequisites only, not configuration).
+type Integration = { label: string; flag: string; file: string; toolPrefix?: string; requires?: string[] };
+const integrationPresent = (item: Integration) => [item.file, ...(item.requires ?? [])].every(file => fs.existsSync(file));
 
 function readIntegrationConfig(): IntegrationConfig {
   return JSON.parse(fs.readFileSync(new URL("./integrations.json", import.meta.url), "utf8")) as IntegrationConfig;
@@ -163,7 +165,7 @@ function ponytailIntegrations(): Integration[] {
 function optionalIntegrations(qmdExtension: string): Integration[] {
   const packages = path.join(getAgentDir(), "npm", "node_modules");
   return [
-    { label: "QMD extension", flag: "--extension", file: qmdExtension, toolPrefix: "qmd_" },
+    { label: "QMD extension", flag: "--extension", file: qmdExtension, toolPrefix: "qmd_", requires: [path.join(path.dirname(qmdExtension), "config.json")] },
     { label: "Serena extension", flag: "--extension", file: path.join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts"), toolPrefix: "serena_" },
     { label: "Graphify extension", flag: "--extension", file: path.join(packages, "graphify-pi", "extensions", "graphify.ts") },
     { label: "Graphify skill", flag: "--skill", file: path.join(getAgentDir(), "skills", "graphify", "SKILL.md") },
@@ -174,7 +176,7 @@ function optionalIntegrations(qmdExtension: string): Integration[] {
 export function unavailableIntegrationGuidance(agentName: string, qmdExtension = QMD_EXTENSION): string {
   if (!readIntegrationConfig().roles.includes(agentName)) return "";
   const items = [...(agentName === "reviewer" ? ponytailIntegrations() : []), ...optionalIntegrations(qmdExtension)];
-  const missing = items.filter(item => !fs.existsSync(item.file)).map(item => item.label);
+  const missing = items.filter(item => !integrationPresent(item)).map(item => item.label);
   if (!missing.length) return "";
   return `\n## Integrations not loaded in this launch\nNot loaded: ${missing.join(", ")}. The launch continued without them; any tools they would provide are not granted. Use the permitted read, grep and find fallback for the affected navigation; do not call them.\n`;
 }
@@ -196,7 +198,7 @@ export function configureCodeIntegrations(args: string[], agent: AgentConfig, ex
   const optional = [...(optionalPonytail ? [ponytailExtension, ponytailSkill] : []), ...optionalIntegrations(qmdExtension)];
   const omitted: string[] = [];
   for (const item of optional) {
-    if (fs.existsSync(item.file)) args.push(item.flag, item.file);
+    if (integrationPresent(item)) args.push(item.flag, item.file);
     else if (item.toolPrefix) omitted.push(item.toolPrefix);
   }
   // Exact names preserve role authority; never select all serena_* tools by wildcard.
