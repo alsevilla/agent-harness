@@ -61,3 +61,11 @@ test("checkpoint contract: 8-10 tasks, at least 3 T3 tasks and at least one debu
 	assert.ok(checkCheckpointContract(manifest(eight().map((t) => ({ ...t, tier: "T2" })))).some((e) => /T3/.test(e)));
 	assert.ok(checkCheckpointContract(manifest(eight().map((t) => ({ ...t, category: "feature" })))).some((e) => /debugging/.test(e)));
 });
+
+test("roundSettleTimeoutMs must be whole milliseconds >= 1 and a brief must be a non-empty string", () => {
+	const base = { schemaVersion: "harness-benchmark-manifest/1", name: "m", expectedWriter: "general-worker", tasks: [{ id: "H1", commit: "abcdef1", parent: "abcdef2", subject: "s", tier: "T1", category: "feature", riskRationale: "r", allowedFiles: ["agent/a.txt"], acceptanceTests: ["tests/a.test.mjs"] }] };
+	assert.deepEqual(manifestErrors(base), []);
+	for (const bad of [0, -1, 1.5, "5"]) assert.match(manifestErrors({ ...base, tasks: [{ ...base.tasks[0], roundSettleTimeoutMs: bad }] }).join(), /roundSettleTimeoutMs must be a whole number of milliseconds >= 1/, String(bad));
+	assert.deepEqual(manifestErrors({ ...base, tasks: [{ ...base.tasks[0], roundSettleTimeoutMs: 1000, brief: "Do the thing." }] }), []);
+	assert.match(manifestErrors({ ...base, tasks: [{ ...base.tasks[0], brief: "  " }] }).join(), /brief must be a non-empty string/);
+});

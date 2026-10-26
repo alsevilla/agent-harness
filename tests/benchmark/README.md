@@ -38,7 +38,11 @@ The reviewer session carries the full candidate role contract, `agent/agents/rev
 of the body, the declared registry tools and the read-only subset, the absolute installed review guidance path (with presence), and
 `execution: sdk-isolated-session-role-contract` with `nativeDispatch: false`. This is an isolated SDK session with the role contract, not the
 native named `reviewer` dispatch of the subagent tool: differences remain (no Pi child-process prompt assembly, no core guidance or
-integration sections, no skill injection beyond the referenced path, no bash or powershell). Compare does not yet gate on the contract digest.
+integration sections, no bash or powershell). The reviewer is told the same goal (the task brief, else the subject) and allowed-file scope as the implementer.
+Per cycle the adapter also records hashes only (no prompt text) of the effective session prompt and the loaded resources: `promptSha256` (raw, carries the
+replay cwd, audit only), `effectivePromptSha256` (the prompt with only its known `<cwd>` section removed; an unknown prompt shape leaves it null), and
+`resourcesSha256` (profile SYSTEM.md, context files, each skill's metadata and file bytes, every review guidance markdown file), re-hashed at close:
+a resource edited during the review makes `stable` false. An incomplete or unstable identity is INCONCLUSIVE.
 
 ## Candidate runtime and configured identities
 - Measured runtime: the candidate package's own `pi.extensions` (fingerprint over the declared extension files and their directories,
@@ -60,14 +64,20 @@ npm run benchmark -- run --mode long-compacted ...   # same flags; repeat per mo
 npm run benchmark -- run --mode fresh --adapter synthetic ...    # SYNTHETIC: not a baseline
 npm run benchmark -- compare <baseline.json> <candidate.json> [--out <file>]
 ```
-`compare` is only comparable across results of the same schema (`harness-benchmark-result/3`). Its reviewer guard requires the same
+`compare` is only comparable across results of the same schema (`harness-benchmark-result/4`). Its reviewer guard requires the same
 EFFECTIVE reviewer on matched tasks: each cycle records `evaluator` (selected and observed model, the reviewer contract file and body
-digests, session tools, guidance reference). The first cycle, the final cycle and the set of distinct evaluators must match per task;
+digests, session tools, guidance reference, effective prompt and resource hashes). The first cycle, the final cycle and the set of distinct evaluators must match per task;
 cycle counts may differ with rework. A fallback-selected reviewer, a changed contract, or an unknown identity is INCONCLUSIVE. The
 measured candidate runtime is not part of this guard; only the reviewer evaluator is.
 `validate-history` runs the ordinary historical node or bun tests in scratch against replayed trees. It starts no Pi session and no provider.
 `--adapter pi-sdk` loads the Pi SDK in-process and creates provider-backed sessions; it refuses to run without `--confirm-live`.
 Its extensions are the candidate's `package.json` `pi.extensions`; global extension discovery is off.
+
+`preflight` (operator-owned; add `--confirm-no-prompt-preflight`, `--scratch <dir outside the candidate>`, the Pi package root flag and optionally `--out <json>`) opens the main
+session exactly as a run does, requires both `subagent` and `subagent_control` active, sends NO prompt, opens no reviewer and no worker, and requires a confirmed
+shutdown. It reads local configuration only, but this code cannot prove the SDK makes no provider call while opening; hence the explicit operator confirmation. A
+child-argv probe (`get_state` over RPC for each expected role) is NOT implemented: the exact native child argv is assembled inside the dispatch path (per-job guard and
+prompt files), so a standalone reproduction would not be the native one. Supported fallback: run the preflight, then the single-task smoke.
 
 Whether a parent can run the live baseline without user interaction is **not verified**. The bash tool can run this CLI from the
 main session, but a safety guard blocks Pi package launches from leaf sessions and may also block the live run. The live run needs an
@@ -82,13 +92,35 @@ explicit operator grant or a main-owned shell.
   the `general-worker` role's `diagnosticChars` in `agent/roles.json` (300). Precedence: manifest task override > run flag
   `--diagnostic-chars` > roles.json default. The run flag needs an explicit whole number >= 0; an invalid value refuses the run.
 - `expectedWriter` (manifest metadata, `general-worker`): every task's implementation must be delegated to a measured child of that
-  role through the native subagent tool. The main session has only read, grep, find, ls and subagent (no edit or write).
+  role through the native subagent tool. The main session has only read, grep, find, ls, subagent and subagent_control (no edit or write).
 - Method validity, checked after each main round before review: a launch with no child turn or a main turn with no assistant message is
   `infrastructure`; a direct main edit or write, or no measured writer launch, is `methodinvalid`. Either stops the task before review,
   rework and the next task, records the partial results, and makes the run `invalid` (CLI exit 1). A healthy writer whose check fails
   is scored normally (not accepted). Other launches, such as debugger, are optional and recorded with their actual role.
+- `roundSettleTimeoutMs` (default 1200000) and `shutdownGraceMs` (default 60000): whole milliseconds >= 1, the `general-worker` role keys in `agent/roles.json`.
+  Precedence for the settlement timeout: manifest task `roundSettleTimeoutMs` > run flag `--round-timeout-ms` > roles.json default; the shutdown grace takes
+  `--shutdown-grace-ms` > roles.json. Every task records the winning `{value, source}`. A bare, zero, signed or fractional flag refuses the run; there is no literal fallback.
+- Round lifecycle. Pi runs background workers by default, so a subagent call returns a receipt (`background` and `jobId`) and the worker result arrives later as a
+  completion notice. The adapter keeps `isError`, the (redacted, bounded) text and the `background`, `jobId` and `mode` marks of every subagent call, so four things stay
+  distinct: a pending receipt, a refused call (an error with nothing launched: a recorded main tool error, recoverable by a later valid launch), an unreported result
+  (a bare empty result with no error: infrastructure), and a measured terminal child. Worker usage comes from the completion's per-result metadata
+  (non-model-visible `details.results`; the notice text is untouched, 4000 code unit cap) and is counted exactly once per job (a duplicate event, a later
+  `subagent_control result`, or a retry never counts twice). After each prompt the adapter waits event-driven (no polling) until Pi is idle and no job is pending, repeating
+  while a completion turn launches another job; only then is the workspace snapshotted, accepted or reviewed. A receipt that never completes, or a timeout, stops the
+  run as infrastructure `background_unsettled` (the pending cost is unknown, never zero); a failed or aborted job is a terminal worker failure (infrastructure); a worker
+  that finished with a failing acceptance is a scoreable quality failure.
+- Lifecycle. The adapter binds each session through `bindExtensions()` (the only `session_start` emitter) and closes it through `AgentSessionRuntime.dispose()`, which emits
+  `session_shutdown` before disposing; the subagent extension awaits every owning background worker there. `closeSession` returns `{confirmed, ms, pendingJobs}`; an
+  unconfirmed shutdown is never a valid task, and a stopped round closes its session before the workspace can be reused. Foreground (non-background) child processes of an
+  aborted run are stopped through the run's abort signal, not tracked separately.
+- Main controls: the main has `read, grep, find, ls, subagent, subagent_control`; both native controls must be active at open (no edit or write).
 - `--task H1,H2` runs only the named tasks in manifest order (an unknown id is refused before any run).
-- No wall-clock timeout is imposed (no artificial limit). Task count follows the manifest; the 8-10 contract is a validation check only.
+- Task count follows the manifest; the 8-10 contract is a validation check only.
+- Resources (`mode: profile-installed`). The supported Pi loaders read `AGENTS.md`, skills and same-named role prompts from the profile agent directory, with no
+  candidate-root override, so the candidate's copies are measured only when byte-identical. A live `run` and `preflight` compare the candidate's `agent/AGENTS.md`,
+  `agent/skills/**/*.md` and `agent/agents/*.md` with the profile's and REFUSE on any difference or a missing skill (a Phase 2 measurement blocker: install the
+  candidate resources into the profile, then rerun; the benchmark copies nothing and never writes the profile). The main session open also verifies the loader's actually
+  loaded AGENTS.md and skill bytes, and records them (`models.main.opened.resources`). `roles.json` is the exception: the user's overlay is legitimate and carried with its source.
 
 ## Harness-only scope and exclusions
 - Replays use only the harness roots: `agent/`, `docs/`, `tests/`, `scripts/`, `package.json`, `README.md`. Commits are read with
@@ -96,7 +128,9 @@ explicit operator grant or a main-owned shell.
 - RFID-named paths are excluded from every replay by name (never read or written). Ten exist in the 5ed9fe3 ancestry: one test file
   (`agent/extensions/subagent/tests/rfid-role-overlay.test.ts`) and nine files under `agent/skills/rfid-attendance/`. None exist at HEAD.
   The per-task exclusion list is recorded in each `validate-history` report (`excludedRfidNamed`).
-- Commit bodies are not used as prompts; the commit subject is the task goal.
+- Commit bodies are not used as prompts. Each task has an explicit `brief`, the prompt goal: a reconstructed contract written from the commit's held-out acceptance behavior
+  (`briefProvenance`), NOT the original user request, with no implementation. H10 and H12 describe implementing and testing harness behavior only (no real knowledge is
+  saved, nothing is released or published). The held-out tests are unchanged objective checks.
 - Excluded candidates and reasons are in `manifest.json` (`excludedCandidates`). Environment-bound acceptance (missing Pi packages,
   installed model catalogs, third-party integrations) is excluded rather than passed.
 - Domain coverage: this is a harness-only substitution. Application backend, frontend and database work is NOT represented.

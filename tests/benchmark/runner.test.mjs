@@ -136,7 +136,7 @@ test("start context is captured before each task's first main prompt, so a share
 
 test("the result records schema, mode, order, config, environment, manifest digest, synthetic flag", async () => {
 	const r = await run({ tasks: [task("H1"), task("H2")], adapter: fakeAdapter({ mainScript: fixMain }), mode: "long-fixed" });
-	assert.equal(r.schemaVersion, "harness-benchmark-result/3");
+	assert.equal(r.schemaVersion, "harness-benchmark-result/4");
 	assert.equal(r.expectedWriter, "general-worker");
 	assert.equal(r.mode, "long-fixed");
 	assert.deepEqual(r.order, ["H1", "H2"]);

@@ -250,21 +250,21 @@ test("tool activity during a fallback stops the chain at that fallback", async (
 	assert.equal(result.exitCode, 1);
 });
 
-test("an external abort during the primary rejects without launching fallbacks", async () => {
+test("an external abort during the primary returns an aborted result without launching fallbacks", async () => {
 	const fx = setupRoots();
 	writeRole(fx.userAgents, "abortable", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
 	const controller = new AbortController();
 	spawnPlan = () => ({ events: [], hang: true, afterSpawn: () => controller.abort() });
-	await assert.rejects(run(fx.nested, discover(fx.nested), "abortable", controller.signal), /Subagent was aborted/);
+	assert.equal((await run(fx.nested, discover(fx.nested), "abortable", controller.signal)).stopReason, "aborted", "a started child's abort is a terminal result, not a thrown refusal");
 	assert.deepEqual(attempts, [PRIMARY]);
 });
 
-test("an external abort during a fallback rejects and launches no further fallback", async () => {
+test("an external abort during a fallback returns an aborted result and launches no further fallback", async () => {
 	const fx = setupRoots();
 	writeRole(fx.userAgents, "abortMid", { model: PRIMARY, fallbackModel: `"${LUNA} || ${COPILOT_LUNA}"` });
 	const controller = new AbortController();
 	spawnPlan = (model) => (model === LUNA ? { events: [], hang: true, afterSpawn: () => controller.abort() } : unavailable());
-	await assert.rejects(run(fx.nested, discover(fx.nested), "abortMid", controller.signal), /Subagent was aborted/);
+	assert.equal((await run(fx.nested, discover(fx.nested), "abortMid", controller.signal)).stopReason, "aborted", "a started child's abort is a terminal result, not a thrown refusal");
 	assert.deepEqual(attempts, [PRIMARY, LUNA]);
 });
 
@@ -323,7 +323,7 @@ test("modelSlot fallback: quota, task, tool-activity and abort outcomes never re
 	attempts = [];
 	const controller = new AbortController();
 	spawnPlan = () => ({ events: [], hang: true, afterSpawn: () => controller.abort() });
-	await assert.rejects(run(fx.nested, slotted(), "slot-role", controller.signal), /Subagent was aborted/);
+	assert.equal((await run(fx.nested, slotted(), "slot-role", controller.signal)).stopReason, "aborted", "a started child's abort is a terminal result, not a thrown refusal");
 	assert.deepEqual(attempts, [LUNA]);
 });
 
@@ -628,7 +628,9 @@ test("usage: a foreground abort keeps the finalized turn and settles as aborted"
 	const controller = new AbortController();
 	const scope = bg.newUsageScope();
 	spawnPlan = () => ({ events: [assistant("stop", "partial", undefined, usage(4, 1, 5, 0.1))], hang: true, afterSpawn: () => controller.abort() });
-	await assert.rejects(scoped(fx.nested, discover(fx.nested), "usage-abort", { usageScope: scope }, controller.signal), /Subagent was aborted/);
+	const aborted = await scoped(fx.nested, discover(fx.nested), "usage-abort", { usageScope: scope }, controller.signal);
+	assert.equal(aborted.stopReason, "aborted");
+	assert.equal(aborted.usage.turns, 1);
 	assert.equal(scope.running, 0);
 	assert.deepEqual(scope.foreground, { ...ZERO_SLICE, attempts: 1, turns: 1, input: 4, output: 1, cost: 0.1, aborted: 1 });
 });

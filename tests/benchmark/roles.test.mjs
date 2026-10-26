@@ -36,6 +36,8 @@ const workerEntry = (extra = {}) => ({
 	modelTiers: { economy: { model: "anthropic/claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna", thinking: "medium" } },
 	tools: "read, grep, find, ls, bash, powershell, edit",
 	diagnosticChars: 300,
+	roundSettleTimeoutMs: 1200000,
+	shutdownGraceMs: 60000,
 	...extra,
 });
 
@@ -132,7 +134,20 @@ test("resolveBenchmarkRoles records the main spec, reviewer spec, writer cap and
 	const r = resolveBenchmarkRoles({ candidateRoot, agentDir, main });
 	assert.equal(r.main.model, "anthropic/claude-sonnet-5-5");
 	assert.equal(r.reviewer.model, "openai-codex/gpt-6-luna");
-	assert.deepEqual(r.writer, { role: "general-worker", value: 2, source: "package roles.json role general-worker", diagnosticChars: { value: 300, source: "package roles.json role general-worker" } });
+	assert.deepEqual(r.writer, { role: "general-worker", value: 2, source: "package roles.json role general-worker", diagnosticChars: { value: 300, source: "package roles.json role general-worker" }, roundSettleTimeoutMs: { value: 1200000, source: "package roles.json role general-worker" }, shutdownGraceMs: { value: 60000, source: "package roles.json role general-worker" } });
 	assert.match(r.files.package.sha256, /^[0-9a-f]{64}$/);
 	assert.equal(r.files.user, null);
+});
+
+// Oracle R4: the round settlement timeout and shutdown grace come from roles.json (user overlay wins, with provenance); no literal fallback.
+test("writer time limits come from roles.json with the user overlay winning and its source recorded; a missing or invalid value is refused", () => {
+	const main = { model: "anthropic/claude-sonnet-5-5", fallbacks: [], thinking: "high", source: "profile default" };
+	const over = fixtureRoots({ packageRoles: [reviewerEntry(), workerEntry({ maxReworkRounds: 2 })], userRoles: [{ name: "general-worker", roundSettleTimeoutMs: 90000 }] });
+	const r = resolveBenchmarkRoles({ candidateRoot: over.candidateRoot, agentDir: over.agentDir, main });
+	assert.deepEqual(r.writer.roundSettleTimeoutMs, { value: 90000, source: "user roles.json role general-worker" });
+	assert.deepEqual(r.writer.shutdownGraceMs, { value: 60000, source: "package roles.json role general-worker" });
+	for (const bad of [undefined, 0, -5, 1.5, "9"]) {
+		const f = fixtureRoots({ packageRoles: [reviewerEntry(), workerEntry({ maxReworkRounds: 2, roundSettleTimeoutMs: bad })] });
+		assert.throws(() => resolveBenchmarkRoles({ candidateRoot: f.candidateRoot, agentDir: f.agentDir, main }), /roundSettleTimeoutMs must be a whole number of milliseconds > 0/, String(bad));
+	}
 });

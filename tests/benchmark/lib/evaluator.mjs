@@ -1,6 +1,8 @@
 // Effective reviewer evaluator identity, recorded per reviewer cycle (schema harness-benchmark-result/2).
 // Compare uses only this record. An unknown part stays null and makes the cycle incomplete (INCONCLUSIVE), never a guessed value.
-const FIELDS = ["method", "nativeDispatch", "selectedModel", "observedModel", "observedThinking", "contractFileSha256", "contractBodySha256", "sessionTools", "guidancePath", "guidancePresent"];
+const FIELDS = ["method", "nativeDispatch", "selectedModel", "observedModel", "observedThinking", "contractFileSha256", "contractBodySha256", "sessionTools", "guidancePath", "guidancePresent", "effectivePromptSha256", "resourcesSha256"];
+// effectivePromptSha256: the session prompt with only its known cwd section removed; resourcesSha256: loaded SYSTEM/append/context files, skills and review guidance bytes.
+// The raw prompt digest (it carries the replay cwd) stays in the identity for audit and is never compared. A resource that changed during the review is not an identity.
 
 // Returns the evaluator record for a session identity, or null when any part is unknown or the contract did not reach the session.
 export function evaluatorOf(identity) {
@@ -16,6 +18,8 @@ export function evaluatorOf(identity) {
 		sessionTools: Array.isArray(c?.tools?.session) ? [...c.tools.session].sort() : null,
 		guidancePath: c?.moduleReference?.path ?? null,
 		guidancePresent: typeof c?.moduleReference?.present === "boolean" ? c.moduleReference.present : null,
+		effectivePromptSha256: c?.resources?.stable === true ? c.resources.effectivePromptSha256 ?? null : null,
+		resourcesSha256: c?.resources?.stable === true ? c.resources.resourcesSha256 ?? null : null,
 	};
 	return c?.appendLoaded === true && FIELDS.every((f) => e[f] !== null) ? e : null;
 }

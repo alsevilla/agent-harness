@@ -363,6 +363,15 @@ async function runNodeSuite(): Promise<void> {
 		for (const bad of [-1, 1.5, "2", null]) assert.match(agents.roleRegistryViolation([{ ...base, maxReworkRounds: bad }]), /entry 0 maxReworkRounds/, JSON.stringify(bad));
 	});
 
+	test("roles.json roundSettleTimeoutMs and shutdownGraceMs are optional whole milliseconds >= 1; other values are refused", () => {
+		const base = { ...DEFAULT_ROLES[0] } as any;
+		for (const key of ["roundSettleTimeoutMs", "shutdownGraceMs"]) {
+			assert.strictEqual(agents.roleRegistryViolation([{ ...base, [key]: 1200000 }]), null);
+			assert.strictEqual(agents.roleRegistryViolation([{ ...base, [key]: 1 }]), null);
+			for (const bad of [0, -1, 1.5, "5", null]) assert.match(agents.roleRegistryViolation([{ ...base, [key]: bad }]), new RegExp(`entry 0 ${key}`), `${key} ${JSON.stringify(bad)}`);
+		}
+	});
+
 	test("invalid registry and definition data refuse with a thrown RoleEditError and no writes", async () => {
 		const cases: Array<[string, () => void, RegExp]> = [
 			["malformed roles.json", () => newFixture({ registryText: "[{" }), /roles\.json/],
@@ -1852,6 +1861,13 @@ async function runNodeSuite(): Promise<void> {
 		const overlay = overlayFixture([{ name: "alpha", tools: "read", maxReworkRounds: 4 }]);
 		await editor.editRoleConfig(fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true }).ctx, { packageRoot: pkg });
 		assert.equal(fs.readFileSync(overlay.registryPath, "utf8"), formatJson([{ name: "alpha", defaultModelTier: "capable", modelTiers: { economy: TIER_ROLES[0].modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } }, tools: "read", maxReworkRounds: 4 }], "\n"));
+	});
+
+	test("tier overlay edit keeps the user's roundSettleTimeoutMs and shutdownGraceMs (editor round trip; no silent drop)", async () => {
+		const pkg = tierPackage();
+		const overlay = overlayFixture([{ name: "alpha", tools: "read", roundSettleTimeoutMs: 90000, shutdownGraceMs: 5000 }]);
+		await editor.editRoleConfig(fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true }).ctx, { packageRoot: pkg });
+		assert.equal(fs.readFileSync(overlay.registryPath, "utf8"), formatJson([{ name: "alpha", defaultModelTier: "capable", modelTiers: { economy: TIER_ROLES[0].modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } }, tools: "read", roundSettleTimeoutMs: 90000, shutdownGraceMs: 5000 }], "\n"));
 	});
 
 	test("tier registry refusals: invalid defaultModelTier, malformed tier fallbackModel and mixed legacy fields refuse with no fallback to the package and no writes", async () => {

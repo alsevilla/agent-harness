@@ -3,6 +3,7 @@
 //   validate         schema + checkpoint contract of the manifest (offline)
 //   validate-history commit/parent/subject identity, declared files, RED/GREEN acceptance in scratch (runs node tests)
 //   run              one benchmark mode over the manifest; --adapter pi-sdk needs --pi-package-root and --confirm-live
+//   preflight        operator-owned, no prompt: open the main session, prove both native controls and a confirmed shutdown; --confirm-no-prompt-preflight
 //   compare          side-by-side comparison of two result files
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +16,7 @@ import { createWorkspace } from "./lib/workspace.mjs";
 import { createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
 import { createSyntheticAdapter } from "./lib/synthetic-adapter.mjs";
 import { compareResults } from "./lib/compare.mjs";
-import { candidateRuntime } from "./lib/runtime.mjs";
+import { candidateRuntime, resourceShadowing } from "./lib/runtime.mjs";
 import { resolveBenchmarkRoles } from "./lib/roles.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -65,6 +66,23 @@ function diagnosticCharsFlag(flags) {
 	return { value, source: `run flag --diagnostic-chars ${raw}` };
 }
 
+// --round-timeout-ms / --shutdown-grace-ms: whole milliseconds >= 1 (an explicit typed value; a bare flag, zero, signed or fractional value is refused).
+function millisFlag(flags, name) {
+	const raw = flags[name];
+	if (raw === undefined) return null;
+	if (typeof raw !== "string" || !/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error(`--${name} requires an explicit whole number of milliseconds >= 1, got ${typeof raw === "string" ? JSON.stringify(raw) : "no value (bare flag)"}`);
+	return { value: Number(raw), source: `run flag --${name} ${raw}` };
+}
+
+// The resource mode of a live run is "profile-installed": sessions load AGENTS.md, skills and role prompts from the profile agent directory, so a candidate edit
+// that a profile copy shadows is not what would be measured. Such a run is refused (a Phase 2 measurement blocker), never labelled as the candidate.
+function resourcesFor(adapterName, repo, agentDir) {
+	if (adapterName !== "pi-sdk") return { mode: "synthetic-not-measured", fingerprint: null, files: 0, shadowed: [] };
+	const resources = resourceShadowing({ candidateRoot: repo, agentDir });
+	if (resources.shadowed.length) throw new Error(`candidate prompt resources are shadowed by the profile installation (mode profile-installed); this run would not measure the candidate. Install the candidate resources into the profile first, then rerun. Blocker (Phase 2 measurement): ${resources.shadowed.map((f) => `${f.path} [${f.state}]`).join(", ")}`);
+	return resources;
+}
+
 // --task H1,H2 selects named tasks (manifest order kept); an empty or unknown selection is refused before any run.
 function selectTasks(manifest, flags) {
 	if (flags.task === undefined) return manifest;
@@ -98,6 +116,30 @@ function writeJson(file, value) {
 	fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// Operator-owned no-prompt preflight: opens the main session exactly as a run does (candidate extensions, native lifecycle bound), proves both native controls
+// are active, never sends a prompt, then closes it and requires the shutdown to be confirmed. It opens no reviewer and no child worker. Opening a session reads
+// local configuration only (no model request is made by this code); it cannot prove the SDK makes no provider call while opening, so the operator confirms the check.
+export async function preflightMain({ adapter, repo, scratch, roles, limits }) {
+	const cwd = path.join(scratch, "preflight-main");
+	fs.mkdirSync(cwd, { recursive: true });
+	const out = { ok: false, prompted: false, controls: { required: ["subagent", "subagent_control"], active: [] }, shutdown: null, resources: null, error: null };
+	let session = null;
+	try {
+		session = await adapter.openSession({ cwd, role: "main", compactionEnabled: false, taskId: "preflight", runtime: candidateRuntime({ candidateRoot: repo }), roleSpec: roles.main, limits });
+		out.controls.active = (await adapter.startContext(session)).activeTools;
+		out.resources = session.identity?.resources ?? null;
+	} catch (e) {
+		out.error = `${e.kind ?? "open_failed"}: ${e.message}`;
+	} finally {
+		if (session) out.shutdown = await adapter.closeSession(session);
+	}
+	const missing = out.controls.required.filter((t) => !out.controls.active.includes(t));
+	if (!out.error && missing.length) out.error = `native controls not active: ${missing.join(", ")}`;
+	if (!out.error && out.shutdown?.confirmed !== true) out.error = "shutdown was not confirmed";
+	out.ok = out.error === null;
+	return out;
+}
+
 async function main(argv) {
 	const { command, flags, positional } = parseArgs(argv);
 	const repo = flags.repo ? path.resolve(flags.repo) : DEFAULT_REPO;
@@ -123,6 +165,8 @@ async function main(argv) {
 		if (!MODES[mode]) throw new Error(`--mode must be one of ${Object.keys(MODES).join(", ")}`);
 		const reworkFlag = reworkCapFlag(flags);
 		const diagFlag = diagnosticCharsFlag(flags);
+		const roundFlag = millisFlag(flags, "round-timeout-ms");
+		const graceFlag = millisFlag(flags, "shutdown-grace-ms");
 		const adapterName = requireFlag(flags, "adapter");
 		const scratch = scratchFor(flags, repo);
 		const out = requireFlag(flags, "out");
@@ -139,11 +183,27 @@ async function main(argv) {
 		const roles = resolveBenchmarkRoles({ candidateRoot: repo, agentDir: await adapter.agentDir(), main: await adapter.resolveMainSpec({ candidateRoot: repo }) });
 		const maxReworkRounds = reworkFlag ?? { value: roles.writer.value, source: roles.writer.source };
 		const diagnosticChars = diagFlag ?? { value: roles.writer.diagnosticChars.value, source: roles.writer.diagnosticChars.source };
-		const config = { maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
+		const limits = { roundSettleTimeoutMs: roundFlag ?? roles.writer.roundSettleTimeoutMs, shutdownGraceMs: graceFlag ?? roles.writer.shutdownGraceMs };
+		const resources = resourcesFor(adapterName, repo, await adapter.agentDir());
+		const config = { limits, resources, maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
 		const selection = { tasks: manifest.tasks.map((t) => t.id), fullTaskCount: fullManifest.tasks.length };
 		const result = await runBenchmark({ manifest, mode, adapter, workspace: createWorkspace({ repo, scratchRoot: scratch }), config, writeResult: (r) => writeJson(out, { ...r, candidate, selection }) });
 		console.log(JSON.stringify({ status: result.status, error: result.error ?? null, invalid: result.invalid ?? null, expectedWriter: result.expectedWriter, mode, order: result.order, maxReworkRounds: result.config.maxReworkRounds, reviewer: result.config.roles.reviewer.model, accepted: result.totals.acceptance, endToEndCost: result.totals.endToEnd.cost, runtime: result.config.runtime.fingerprint, out }, null, 2));
 		return result.status === "complete" ? 0 : 1;
+	}
+	if (command === "preflight") {
+		if (!flags["confirm-no-prompt-preflight"]) throw new Error("preflight opens and closes a main session with the candidate extensions (no prompt, no worker); pass --confirm-no-prompt-preflight from the operator shell");
+		const scratch = scratchFor(flags, repo);
+		const adapter = createPiSdkAdapter({ piPackageRoot: requireFlag(flags, "pi-package-root") });
+		const roles = resolveBenchmarkRoles({ candidateRoot: repo, agentDir: await adapter.agentDir(), main: await adapter.resolveMainSpec({ candidateRoot: repo }) });
+		const limits = { roundSettleTimeoutMs: millisFlag(flags, "round-timeout-ms") ?? roles.writer.roundSettleTimeoutMs, shutdownGraceMs: millisFlag(flags, "shutdown-grace-ms") ?? roles.writer.shutdownGraceMs };
+		const report = { candidate: candidateIdentity(repo), limits, resources: null, blocker: null, check: null };
+		try { report.resources = resourcesFor("pi-sdk", repo, await adapter.agentDir()); } catch (e) { report.blocker = e.message; }
+		if (report.blocker === null) report.check = await preflightMain({ adapter, repo, scratch, roles, limits });
+		const ok = report.blocker === null && report.check.ok === true;
+		if (flags.out) writeJson(flags.out, report);
+		console.log(JSON.stringify({ ok, blocker: report.blocker, check: report.check && { ok: report.check.ok, controls: report.check.controls, shutdown: report.check.shutdown, error: report.check.error } }, null, 2));
+		return ok ? 0 : 1;
 	}
 	if (command === "compare") {
 		const files = positional;
@@ -153,7 +213,7 @@ async function main(argv) {
 		console.log(JSON.stringify({ verdict: report.verdict, reasons: report.reasons, inconclusive: report.inconclusive, allAccepted: report.allAccepted, unacceptedTasks: report.unacceptedTasks, caveat: report.caveat }, null, 2));
 		return report.verdict === "REGRESSION" ? 1 : 0;
 	}
-	console.error("usage: cli.mjs validate | validate-history | run | compare  (see tests/benchmark/README.md)");
+	console.error("usage: cli.mjs validate | validate-history | run | preflight | compare  (see tests/benchmark/README.md)");
 	return 2;
 }
 
@@ -161,4 +221,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 	main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (e) => { console.error(e.message); process.exitCode = 1; });
 }
 
-export { main, parseArgs };
+export { main, parseArgs, resourcesFor };

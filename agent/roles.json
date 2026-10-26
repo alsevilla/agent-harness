@@ -181,7 +181,9 @@
     },
     "tools": "read, grep, find, ls, bash, powershell, edit",
     "maxReworkRounds": 2,
-    "diagnosticChars": 300
+    "diagnosticChars": 300,
+    "roundSettleTimeoutMs": 1200000,
+    "shutdownGraceMs": 60000
   },
   {
     "name": "planner",

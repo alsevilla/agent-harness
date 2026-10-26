@@ -136,7 +136,10 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
 			results[current] = await fn(items[current], current);
 		}
 	});
-	await Promise.all(workers);
+	// Every started worker settles before this returns or rejects: an aborted queued entry must not report the call finished while a sibling child is still closing.
+	const settled = await Promise.allSettled(workers);
+	const failed = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+	if (failed) throw failed.reason;
 	return results;
 }
 
@@ -564,8 +567,8 @@ async function runAgentAttempt(
         currentResult.exitCode = exitCode;
         cleanExit = exitCode === 0 && !wasAborted;
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, wasAborted ? "aborted" : isFailedResult(currentResult) ? "failed" : "completed", wasAborted ? "Subagent was aborted" : isFailedResult(currentResult) ? getResultOutput(currentResult) : undefined);
-        if (wasAborted && dispatchDefaults.jobId) { currentResult.stopReason = "aborted"; currentResult.errorMessage = "Subagent was stopped"; return currentResult; }
-		if (wasAborted) throw new Error("Subagent was aborted");
+        // A started child's terminal outcome (messages, usage) is returned, never thrown: Pi turns a throw into an empty-details refusal that drops the charged turns.
+        if (wasAborted) { currentResult.stopReason = "aborted"; currentResult.errorMessage = dispatchDefaults.jobId ? "Subagent was stopped" : "Subagent was aborted"; return currentResult; }
 		const remainingFallbacks = fallbackModels ?? getFallbackSequence(model, agent.fallbackModel);
 		const retryResult = {
 			...currentResult,
@@ -1239,10 +1242,9 @@ export default function (pi: ExtensionAPI) {
 						makeDetails("parallel"),
 						t.readOnly ? "read" : "write",
 					).catch((error): SingleResult => {
-						// Per-task fail closed: a launch that throws (e.g. missing Claude subscription guard) is one failed task; siblings keep their evidence. Abort still rejects.
-						if (signal?.aborted) throw error;
+						// Per-task fail closed: a launch that throws (e.g. missing Claude subscription guard) is one failed task; siblings keep their evidence. An abort before any spawn is a not-started aborted entry (attempts: [] = no child), so it cannot replace the started siblings' results.
 						const message = error instanceof Error ? error.message : String(error);
-						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: "error", errorMessage: message, ...tierFields(selected.get(index)) };
+						return { agent: t.agent, agentSource: agents.find((a) => a.name === t.agent)?.source ?? "unknown", task: t.task, exitCode: 1, messages: [], stderr: message, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, stopReason: signal?.aborted ? "aborted" : "error", errorMessage: message, ...(signal?.aborted ? { attempts: [] } : {}), ...tierFields(selected.get(index)) };
 					});
 					allResults[index] = result;
 					emitParallelUpdate();

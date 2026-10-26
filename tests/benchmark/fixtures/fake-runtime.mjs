@@ -23,7 +23,13 @@ export const fixtureRoles = () => ({
 	reviewer: { role: "reviewer", tier: "economy", model: "fake/review-model", fallbacks: ["fake/review-fallback"], thinking: "high", source: "fixture reviewer tier economy" },
 });
 export const fixtureRuntime = () => ({ root: "fixture-candidate", extensions: ["fixture-extension.ts"], fingerprint: "fixture-runtime-1" });
-export const fixtureConfig = (over = {}) => ({ maxReworkRounds: { value: 2, source: "fixture roles default" }, diagnosticChars: { value: 300, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), ...over });
+// The SDK's AgentSessionRuntime as the adapter uses it: dispose() emits session_shutdown to the extensions, then disposes the session.
+export class FakeAgentSessionRuntime {
+	constructor(session, services) { this.session = session; this.services = services; }
+	async dispose() { await this.session.emitShutdown?.(); this.session.dispose(); }
+}
+export const fixtureLimits = () => ({ roundSettleTimeoutMs: { value: 600000, source: "fixture roles default" }, shutdownGraceMs: { value: 30000, source: "fixture roles default" } });
+export const fixtureConfig = (over = {}) => ({ limits: fixtureLimits(), maxReworkRounds: { value: 2, source: "fixture roles default" }, diagnosticChars: { value: 300, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), ...over });
 
 // Parent state: work.txt "broken", gate "red". Held-out content (post-task) is "green".
 export function fakeWorkspace(base) {
@@ -50,11 +56,13 @@ export async function gate({ cwd }) {
 
 // The reviewer contract as the SDK adapter records it (digests of the file and body; the fixture never reads agent/agents/reviewer.md).
 const sha = (text) => crypto.createHash("sha256").update(text).digest("hex");
-export const reviewerContractFixture = (body = "FIXTURE REVIEWER CONTRACT") => ({ role: "reviewer", file: "fixture/agents/reviewer.md", sha256: sha(`---\nname: reviewer\n---\n${body}`), bodySha256: sha(body), execution: "sdk-isolated-session-role-contract", nativeDispatch: false, tools: { declared: ["read", "grep", "find", "ls", "bash", "powershell"], session: ["read", "grep", "find", "ls"], excluded: ["bash", "powershell"] }, moduleReference: { path: "fixture/review/index.md", present: true }, appendLoaded: true });
+// Effective reviewer resource identity as the SDK adapter records it (semantic hashes; the raw prompt digest only audits and is never compared).
+export const reviewerResourcesFixture = (over = {}) => ({ promptSha256: sha("raw prompt"), effectivePromptSha256: sha("effective prompt"), resourcesSha256: sha("resources"), endResourcesSha256: sha("resources"), stable: true, ...over });
+export const reviewerContractFixture = (body = "FIXTURE REVIEWER CONTRACT", resources = reviewerResourcesFixture()) => ({ resources,  role: "reviewer", file: "fixture/agents/reviewer.md", sha256: sha(`---\nname: reviewer\n---\n${body}`), bodySha256: sha(body), execution: "sdk-isolated-session-role-contract", nativeDispatch: false, tools: { declared: ["read", "grep", "find", "ls", "bash", "powershell"], session: ["read", "grep", "find", "ls"], excluded: ["bash", "powershell"] }, moduleReference: { path: "fixture/review/index.md", present: true }, appendLoaded: true });
 
 // Scripted adapter: mainScript(session, text) returns { events, text }; reviewer returns reviewText.
 // reviewSelected: the effective (e.g. fallback) reviewer model; contractBody: the reviewer contract body the session carries.
-export function fakeAdapter({ mainScript, reviewText = "FINDING low: nit\nNO FINDINGS", compactFails = false, synthetic = true, reviewSelected, contractBody } = {}) {
+export function fakeAdapter({ mainScript, reviewText = "FINDING low: nit\nNO FINDINGS", compactFails = false, synthetic = true, reviewSelected, contractBody, reviewResources } = {}) {
 	const log = []; let n = 0;
 	return {
 		log,
@@ -65,7 +73,7 @@ export function fakeAdapter({ mainScript, reviewText = "FINDING low: nit\nNO FIN
 			const configuredModel = o.roleSpec?.model;
 			const model = o.role === "review" && reviewSelected ? reviewSelected : configuredModel;
 			s.identity = { configured: o.roleSpec, selected: { model }, attempts: [{ model, status: "selected" }], observed: { model, thinking: o.roleSpec?.thinking ?? null }, servedThinking: "unknown" };
-			if (o.role === "review") s.identity.contract = reviewerContractFixture(contractBody);
+			if (o.role === "review") s.identity.contract = reviewerContractFixture(contractBody, reviewerResourcesFixture(reviewResources));
 			return s;
 		},
 		async startContext(s) { log.push(["context", s.id]); return { contextTokens: 10 * (s.calls + 1), contextWindow: 1000, systemPromptChars: 500, activeTools: ["read"], messageCount: s.calls }; },

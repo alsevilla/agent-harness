@@ -15,7 +15,7 @@ async function runNodeSuite() {
 	const { EventEmitter } = await import("node:events");
 	const doublesUrl = new URL("./fixtures/runtime-doubles.mjs", import.meta.url).href;
 	const dataModule = (source: string) => "data:text/javascript," + encodeURIComponent(source);
-	const childUrl = dataModule("export function spawn(command, args, options) { return globalThis.__piDecisionSpawn(command, args, options); }");
+	const childUrl = dataModule("export function spawn(command, args, options) { return globalThis.__piDecisionSpawn(command, args, options); } export function execFileSync() { throw new Error(\"no real process allowed\"); } export function spawnSync() { throw new Error(\"no real process allowed\"); }");
 	const monitorUrl = dataModule("export class WorkerMonitor { constructor() { this.store = globalThis.__piDecisionStore; this.control = undefined; } }");
 	const indexUrl = new URL("../index.ts", import.meta.url).href;
 	const entryUrl = new URL("../provider-cooldown-entry.ts", import.meta.url).href;
@@ -112,6 +112,8 @@ async function runNodeSuite() {
 			registerCommand() {},
 			sendMessage(msg: any, opts: any) { messages.push({ msg, opts }); return Promise.resolve(); },
 			emit(name: string) { for (const fn of handlers.get(name) ?? []) fn(); },
+			// Pi awaits session handlers: the returned promise settles when every handler of the event has.
+			emitAsync(name: string) { return Promise.all((handlers.get(name) ?? []).map((fn) => fn())); },
 		};
 		pis.push(pi);
 		return pi;
@@ -678,6 +680,154 @@ async function runNodeSuite() {
 		assert.match(result.content[0].text, /settled \(worker-exited\)/);
 		assert.equal(entryOf(await decisionList(pi)).reason, "worker-exited");
 		assert.equal(answersFor(child, "dlg-1").length, 1, "exit adds no second response");
+	});
+
+	const finishWith = (child: any, text: string, usage: object) => {
+		child.emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], usage, model: "fake/model", provider: "fake", stopReason: "stop" } });
+		child.emit({ type: "agent_settled" });
+		child.exit(0);
+	};
+	const completionOf = (pi: any, jobId: string) => pi.messages.find((m: any) => m.msg.customType === "subagent-completion" && m.msg.details.jobId === jobId)?.msg;
+
+	test("E1 the completion carries per-worker usage and outcome in its details only; the notice content is the bounded text and states no usage", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const jobId = await startJob(pi, "Measure me", true);
+		finishWith(children[0], "WORKER-REPORT", { input: 11, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 19, cost: { total: 0.0234 } });
+		await waitFor(() => completionOf(pi, jobId) !== undefined, "completion");
+		const msg = completionOf(pi, jobId);
+		assert.match(msg.content, /^Subagent job bg-\d+ completed\. Workers: /);
+		assert.match(msg.content, /WORKER-REPORT/);
+		assert.doesNotMatch(msg.content, /0\.0234|cacheRead|"usage"/, "usage is never model-visible text");
+		const [r] = msg.details.results;
+		assert.deepEqual([msg.details.jobId, msg.details.state, r.agent, r.exitCode, r.stopReason, r.model], [jobId, "completed", "test-worker", 0, "stop", "fake/model"]);
+		assert.deepEqual(r.usage, { input: 11, output: 5, cacheRead: 2, cacheWrite: 1, cost: 0.0234, turns: 1, contextTokens: 19 });
+	});
+
+	test("E2 an oversized report keeps the 4000 code unit notice bound byte for byte while the metadata still reports usage", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const jobId = await startJob(pi, "Long report", true);
+		finishWith(children[0], "L".repeat(9000), { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.5 } });
+		await waitFor(() => completionOf(pi, jobId) !== undefined, "completion");
+		const msg = completionOf(pi, jobId);
+		assert.ok(msg.content.length <= 4000, `notice ${msg.content.length}`);
+		assert.equal(msg.details.results[0].usage.cost, 0.5);
+		assert.doesNotMatch(msg.content, /"cost"/);
+	});
+
+	test("E3 session_shutdown aborts a running background worker and resolves only after that worker closed", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await startJob(pi, "Still running at shutdown", true);
+		const child = children[0];
+		let closedAt = 0;
+		const originalExit = child.exit.bind(child);
+		child.exit = (code?: number | null) => { setTimeout(() => { closedAt = Date.now(); originalExit(code); }, 40); }; // a slow close: the handler must wait for it
+		const settled = await Promise.race([pi.emitAsync("session_shutdown").then(() => "settled"), new Promise((r) => setTimeout(() => r("hung"), 2000))]);
+		assert.equal(settled, "settled");
+		assert.ok(closedAt > 0, "the worker process was closed before the shutdown handlers resolved");
+		assert.equal(pi.messages.some((m: any) => m.msg.customType === "subagent-completion"), false, "no completion is delivered into a closed session");
+	});
+
+	// Fills the three other global slots, then a two-task parallel call: task 0 runs (slot 4), task 1 waits for a slot. Abort rejects the queued entry at once while the running one closes late.
+	async function slotsFullThenParallel(pi: any, background: boolean, signal?: AbortSignal) {
+		for (let i = 0; i < 3; i++) await startJob(pi, "Slot holder " + i, true);
+		const before = children.length;
+		const tasks = [{ agent: "test-worker", task: "Running sibling", readOnly: true }, { agent: "test-worker", task: "Queued sibling", readOnly: true }];
+		const call = tool(pi, "subagent").execute("par", { tasks, background }, signal, undefined, { cwd: candidate, hasUI: false });
+		await waitFor(() => children.length > before, "running sibling spawn");
+		const sibling = children[before];
+		const state = { closedAt: 0 };
+		const originalExit = sibling.exit.bind(sibling);
+		sibling.exit = (code?: number | null) => { setTimeout(() => { state.closedAt = Date.now(); originalExit(code); }, 60); }; // slow close of the running sibling
+		return { call, sibling, state };
+	}
+
+	test("E4 shutdown with a parallel job whose queued entry rejects on abort still waits for the running sibling to close", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const { call, state } = await slotsFullThenParallel(pi, true);
+		await call;
+		const settled = await Promise.race([pi.emitAsync("session_shutdown").then(() => "settled"), new Promise((r) => setTimeout(() => r("hung"), 3000))]);
+		assert.equal(settled, "settled");
+		assert.ok(state.closedAt > 0, "the running sibling was closed before shutdown resolved");
+	});
+
+	test("E5 a second shutdown while the first is still draining does not resolve before the outstanding worker closed", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const { call, state } = await slotsFullThenParallel(pi, true);
+		await call;
+		const first = pi.emitAsync("session_shutdown");
+		await pi.emitAsync("session_shutdown"); // tracking survives the first reset
+		assert.ok(state.closedAt > 0, "the second shutdown waited for the sibling the first one aborted");
+		await first;
+	});
+
+	test("E6 a foreground parallel call aborted with a queued entry settles only after the running sibling closed", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const controller = new AbortController();
+		const { call, state } = await slotsFullThenParallel(pi, false, controller.signal);
+		call.catch(() => undefined);
+		controller.abort();
+		await call.then(() => undefined, () => undefined);
+		assert.ok(state.closedAt > 0, "the foreground call returned only after its started child closed");
+	});
+
+	const chargedTurn = { type: "message_end", message: { role: "assistant", api: "fixture", provider: "fixture", model: "fixture", content: [{ type: "text", text: "partial work" }], stopReason: "toolUse", timestamp: 1, usage: { input: 5, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 8, cost: { input: .03, output: .02, cacheRead: 0, cacheWrite: 0, total: .05 } } } };
+
+	test("F2a an aborted foreground child keeps its charged turn as a terminal result, never a prelaunch refusal", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		(globalThis as any).__piDecisionSpawn = (_command: string, args: string[], options: any) => { const proc = makeChild(args, options); children.at(-1).foreground = false; return proc; };
+		const controller = new AbortController();
+		const call = tool(pi, "subagent").execute("charged-fg", { agent: "test-worker", task: "Offline charged child", background: false, readOnly: true }, controller.signal, undefined, { cwd: candidate, hasUI: false });
+		const outcome = call.then((result: any) => ({ result }), (error: any) => ({ error: error.message }));
+		await waitFor(() => children.length === 1, "mock foreground spawn");
+		children[0].emit(chargedTurn);
+		controller.abort();
+		const native: any = await outcome;
+		assert.equal(children[0].closed, true, "the child closed before the call resolved");
+		assert.ok(native.result, "the abort is returned as a terminal result, not thrown (Pi turns a throw into empty details)");
+		assert.equal(native.result.isError, true, "an abort is never success");
+		const [row] = native.result.details.results;
+		assert.equal(row.stopReason, "aborted");
+		assert.equal(row.usage.turns, 1);
+		assert.ok(Math.abs(row.usage.cost - .05) < 1e-9);
+		// Composed with the benchmark ledger: the actual details, as Pi delivers them, charge both children exactly once.
+		const f = await import("../../../../tests/benchmark/fixtures/fake-runtime.mjs");
+		const { runBenchmark } = await import("../../../../tests/benchmark/lib/runner.mjs");
+		const event = { type: "subagent", toolCallId: "charged-fg", isError: true, text: "", details: native.result.details };
+		const ad = f.fakeAdapter({ mainScript: (session: any) => { fs.writeFileSync(path.join(session.cwd, "agent/work.txt"), "fixed"); return { events: [f.assistant(f.u(1, 1)), { ...f.writerLaunch(.04), toolCallId: "healthy-writer" }, event], text: "main ended" }; } });
+		const result = await runBenchmark({ manifest: f.manifest([f.task("H1")]), mode: "fresh", adapter: ad, workspace: f.fakeWorkspace(f.root()), acceptance: f.gate, config: f.fixtureConfig() });
+		const t = result.tasks[0];
+		assert.equal(t.status, "infrastructure", "an actually aborted charged child is not a recoverable prelaunch refusal");
+		assert.ok(Math.abs(t.worker.cost.total - .09) < 1e-9, "both child costs are retained once");
+		assert.equal(t.worker.turns, 2);
+	});
+
+	test("F2b a cancelled parallel background job keeps the charged sibling and marks the queued entry honestly not started", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		for (let i = 0; i < 3; i++) await startJob(pi, "slot holder " + i, true);
+		const receipt = await tool(pi, "subagent").execute("parallel", { tasks: [{ agent: "test-worker", task: "charged sibling", readOnly: true }, { agent: "test-worker", task: "queued sibling", readOnly: true }], background: true }, undefined, undefined, { cwd: candidate, hasUI: false });
+		await waitFor(() => children.length === 4, "parallel active sibling");
+		children[3].emit(chargedTurn);
+		const id = receipt.details.jobId;
+		await control(pi, { action: "cancel", target: id });
+		await waitFor(() => pi.messages.some((m: any) => m.msg.customType === "subagent-completion" && m.msg.details.jobId === id), "completion");
+		assert.equal(children[3].closed, true, "the started sibling closed before the job completed");
+		const done = pi.messages.find((m: any) => m.msg.customType === "subagent-completion" && m.msg.details.jobId === id).msg.details;
+		assert.equal(done.state, "aborted");
+		assert.equal(done.results.length, 2);
+		const charged = done.results.filter((r: any) => r.usage?.turns === 1 && Math.abs(r.usage.cost - .05) < 1e-9);
+		assert.equal(charged.length, 1, "the charged sibling's usage is retained exactly once");
+		assert.equal(charged[0].stopReason, "aborted");
+		const queued = done.results.find((r: any) => r !== charged[0]);
+		assert.equal(queued.usage.turns, 0, "a never-started entry invents no usage");
+		assert.equal(queued.stopReason, "aborted");
 	});
 
 	test("D9 ordinary UI auto-cancel with a failing stdin: cleanup runs, no unhandled error, the job still ends", async () => {

@@ -7,7 +7,8 @@ import { evaluatorOf, summarizeEvaluators } from "./evaluator.mjs";
 
 // v2: each reviewer cycle records its effective evaluator (compare requires it); totals.evaluator summarises it. v1 results are not comparable.
 // v3: method validity (infrastructure and methodinvalid stops, delegation and main diagnostics, per-round held-out baseline). v2 results are not comparable.
-export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/3";
+// v4: background receipts, refusals and completions are distinct; worker usage is counted once from completions; rounds settle before any snapshot; shutdown is confirmed. v3 results are not comparable.
+export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/4";
 // No literal rework default: config.maxReworkRounds is resolved from roles.json (general-worker) or a run flag, with its source.
 export const MODES = {
 	fresh: { sessionPolicy: "new-per-task", compaction: "none" },
@@ -32,7 +33,7 @@ export function parseReviewOutput(text) {
 export function taskPrompt(task) {
 	return [
 		`Harness task ${task.id} (${task.tier}, ${task.category}).`,
-		`Goal: ${task.subject}`,
+		`Goal: ${task.brief ?? task.subject}`,
 		`Edit only these files: ${task.allowedFiles.join(", ")}.`,
 		"Work only inside this workspace. Finish with a short statement of what you changed.",
 	].join("\n");
@@ -51,7 +52,8 @@ export function reworkPrompt(task, round, gate, review, unrelated) {
 export function reviewPrompt(task, changed, gate) {
 	return [
 		`REVIEW ${task.id}: read-only review of a harness change. Do not edit files.`,
-		`Goal: ${task.subject}`,
+		`Goal: ${task.brief ?? task.subject}`,
+		`Edit scope (the only files the task may change): ${task.allowedFiles.join(", ")}.`,
 		`Changed files: ${changed.join(", ") || "none"}`,
 		`Acceptance: ${gate.accepted ? "passed" : "not passed"}`,
 		"Output one line per finding in the form: FINDING <critical|high|medium|low>: <text>",
@@ -63,6 +65,12 @@ export function reviewPrompt(task, changed, gate) {
 const assertCap = (cap, name) => {
 	if (!cap || typeof cap !== "object" || !Number.isInteger(cap.value) || cap.value < 0) throw new Error(`${name} must be {value: whole number >= 0, source}`);
 	if (typeof cap.source !== "string" || cap.source.trim() === "") throw new Error(`${name} source is required`);
+};
+
+// A time limit is a whole number of milliseconds > 0 with a source; there is no literal fallback (the default comes from roles.json).
+const assertLimit = (cap, name) => {
+	assertCap(cap, name);
+	if (cap.value < 1) throw new Error(`${name} must be a whole number of milliseconds > 0`);
 };
 
 const contextOf = (raw) => {
@@ -96,37 +104,59 @@ class RoundStop extends Error {
 
 const WRITE_TOOLS = ["edit", "write"];
 
-// Each child result of one subagent call: role, outcome and bounded diagnostics. A child with no assistant turn is a failed attempt, not a measured workload.
-function launchRecords(details, limit) {
-	const results = Array.isArray(details?.results) ? details.results : [];
-	if (results.length === 0) return [{ agent: null, status: "unreported", turns: null }];
-	return results.map((r) => {
+// Each child result of one subagent call or background completion: role, outcome and bounded diagnostics. A child with no assistant turn is a failed
+// attempt, not a measured workload. terminal: the job itself ended failed or aborted, an actual terminal worker failure (never a quality score).
+function launchRecords(results, limit, { terminal = false, jobId = null } = {}) {
+	const list = Array.isArray(results) ? results : [];
+	if (list.length === 0) return [{ agent: null, status: "unreported", turns: null, jobId }];
+	return list.map((r) => {
 		const turns = Number.isFinite(r?.usage?.turns) ? r.usage.turns : null;
+		// A child that errored, exited nonzero or stopped by error/abort is a terminal failure whatever it was charged for; usage is still counted once by the caller.
+		const failed = terminal || r?.isError === true || (Number.isInteger(r?.exitCode) && r.exitCode !== 0) || r?.stopReason === "error" || r?.stopReason === "aborted";
 		return {
 			agent: typeof r?.agent === "string" ? r.agent : null,
-			status: turns === null ? "unreported" : turns === 0 ? "no-child-turn" : "measured",
+			status: turns === null ? "unreported" : turns === 0 ? "no-child-turn" : failed ? "terminal-failure" : "measured",
 			turns, exitCode: Number.isInteger(r?.exitCode) ? r.exitCode : null,
 			stopReason: typeof r?.stopReason === "string" ? r.stopReason : null,
 			errorMessage: boundedDiagnostic(r?.errorMessage, limit).text,
 			stderrTail: boundedDiagnostic(r?.stderr, limit, { tail: true }).text,
 			model: typeof r?.model === "string" ? r.model : null,
-			modelTier: r?.modelTier ?? null, modelSlot: r?.modelSlot ?? null,
+			modelTier: r?.modelTier ?? null, modelSlot: r?.modelSlot ?? null, jobId,
 		};
 	});
 }
 
-// One main round from its own events: assistant turns, tool names, counts and errors (never arguments), and subagent launches.
+// A subagent call is one of: a background receipt (pending until its completion), a refusal (an error with no launch), results (foreground), or unreported.
+export function callKind(ev) {
+	const d = ev?.details;
+	if (d?.background === true && typeof d?.jobId === "string") return "receipt";
+	if (Array.isArray(d?.results) && d.results.length > 0) return "results";
+	if (ev?.isError === true) return "refused";
+	return "unreported";
+}
+
+// One main round from its own events: assistant turns, tool names, counts and errors (never arguments), subagent receipts/refusals/completions and launches.
 function observeRound(events, limit) {
-	const tools = {}; const launches = []; let assistantTurns = 0;
+	const tools = {}; const launches = []; const receipts = []; const refusals = []; const completed = new Set(); let assistantTurns = 0;
 	for (const ev of events ?? []) {
 		if (ev?.type === "assistant") assistantTurns++;
 		else if (ev?.type === "tool") {
 			const t = (tools[ev.name] ??= { calls: 0, errors: 0 });
 			t.calls++;
 			if (ev.isError) { t.errors++; const e = boundedDiagnostic(ev.errorText, limit).text; if (e !== null && t.firstError === undefined) t.firstError = e; }
-		} else if (ev?.type === "subagent") launches.push(...launchRecords(ev.details, limit));
+		} else if (ev?.type === "subagent") {
+			const kind = callKind(ev);
+			if (kind === "receipt") receipts.push({ jobId: ev.details.jobId, mode: typeof ev.details.mode === "string" ? ev.details.mode : null });
+			else if (kind === "results") launches.push(...launchRecords(ev.details.results, limit));
+			else if (kind === "refused") refusals.push({ text: boundedDiagnostic(ev.text, limit).text });
+			else launches.push(...launchRecords([], limit));
+		} else if (ev?.type === "completion") {
+			completed.add(ev.jobId);
+			launches.push(...launchRecords(ev.results, limit, { terminal: ev.state === "failed" || ev.state === "aborted", jobId: ev.jobId ?? null }));
+		}
 	}
-	return { assistantTurns, tools, launches };
+	const pendingJobs = [...new Set(receipts.map((r) => r.jobId))].filter((id) => !completed.has(id));
+	return { assistantTurns, tools, launches, receipts: receipts.map((r) => ({ ...r, completed: completed.has(r.jobId) })), refusals, pendingJobs };
 }
 
 // Method validity of one round, in order. Infrastructure (a launch with no child turn, or no assistant turn) stops the run and nothing is scored.
@@ -135,6 +165,9 @@ function observeRound(events, limit) {
 export function classifyRound(diag, expectedWriter) {
 	const failed = diag.launches.find((l) => l.status !== "measured");
 	if (failed) return { class: "infrastructure", kind: "launch_failed", agent: failed.agent, launchStatus: failed.status };
+	// A receipt never matched by its completion, or a settlement that timed out, means a worker may still be running: nothing is snapshotted, reviewed or scored.
+	const pending = [...new Set([...diag.pendingJobs, ...(diag.settlement?.pendingJobs ?? [])])];
+	if (pending.length || diag.settlement?.settled === false) return { class: "infrastructure", kind: "background_unsettled", pendingJobs: pending, timedOut: diag.settlement?.timedOut === true };
 	if (diag.assistantTurns === 0) return { class: "infrastructure", kind: "no_assistant_turn" };
 	const writes = WRITE_TOOLS.reduce((s, n) => s + (diag.tools[n]?.calls ?? 0), 0);
 	if (writes > 0) return { class: "methodinvalid", kind: "direct_main_write", writes };
@@ -153,18 +186,35 @@ function noteRound(rec, diag, round, text, limit, expectedWriter) {
 	}
 	md.finalText = boundedDiagnostic(text ?? "", limit);
 	rec.delegation.launches.push(...diag.launches.map((l) => ({ round, ...l })));
+	rec.delegation.receipts.push(...diag.receipts.map((r) => ({ round, ...r })));
+	rec.delegation.refusals.push(...diag.refusals.map((r) => ({ round, ...r })));
+	if (diag.settlement) rec.delegation.settlements.push({ round, settled: diag.settlement.settled === true, timedOut: diag.settlement.timedOut === true, waitedMs: diag.settlement.waitedMs ?? null, pendingJobs: diag.settlement.pendingJobs ?? [] });
 	rec.delegation.writerLaunches += diag.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length;
 }
 
-// Assistant turns feed the main ledger (and the rework ledger during a rework prompt); subagent results feed the worker ledger.
-function absorb(events, { main, rework, worker, isRework, served }) {
+// Assistant turns feed the main ledger (and the rework ledger during a rework prompt). Worker usage is counted exactly once per launch: a foreground
+// subagent call by its toolCallId, a background job by its completion (never by its receipt or a later control result), and a pending receipt that never
+// completed counts as an unreported launch, so its cost is unknown rather than silently omitted. A refusal launched nothing.
+function absorb(events, { main, rework, worker, isRework, served, seen }, diag) {
 	for (const ev of events ?? []) {
 		if (ev?.type === "assistant") {
 			addUsage(main, ev.message?.usage);
 			if (isRework) addUsage(rework, ev.message?.usage);
 			noteServed(served, ev);
-		} else if (ev?.type === "subagent") addWorkerUsage(worker, ev.details);
+		} else if (ev?.type === "subagent") {
+			const kind = callKind(ev);
+			if (kind === "receipt" || kind === "refused") continue;
+			const key = `call:${ev.toolCallId ?? ""}`;
+			if (ev.toolCallId !== undefined) { if (seen.has(key)) continue; seen.add(key); }
+			addWorkerUsage(worker, ev.details);
+		} else if (ev?.type === "completion") {
+			const key = `job:${ev.jobId}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			addWorkerUsage(worker, { results: ev.results });
+		}
 	}
+	for (const jobId of diag?.pendingJobs ?? []) worker.unreportedLaunches++;
 }
 
 // Served provider/model as reported by the assistant message; a missing value stays absent, never guessed.
@@ -189,12 +239,14 @@ async function runReview({ adapter, dir, task, changed, gate, ledger, runtime, r
 	}
 }
 
-async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, shared, compactionBefore }) {
+async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, limits, shared, compactionBefore }) {
 	const started = Date.now();
 	const dir = workspace.dirFor(mode, task);
 	// Diagnostic cap precedence: manifest task override > run cap (role default unless a run flag). The winning source is recorded.
 	const diagnostics = task.diagnosticChars !== undefined ? { value: task.diagnosticChars, source: `manifest task ${task.id}` } : diagnosticsRun;
-	const raw = { main: emptyLedger("model"), rework: emptyLedger("model"), worker: emptyLedger("worker"), review: emptyLedger("model"), served: new Map() };
+	// Round settlement timeout precedence: manifest task (packet) override > run flag > roles.json default; the winning source is recorded.
+	const settleTimeout = task.roundSettleTimeoutMs !== undefined ? { value: task.roundSettleTimeoutMs, source: `manifest task ${task.id}` } : limits.roundSettleTimeoutMs;
+	const raw = { main: emptyLedger("model"), rework: emptyLedger("model"), worker: emptyLedger("worker"), review: emptyLedger("model"), served: new Map(), seen: new Set() };
 	const rec = {
 		id: task.id, order, tier: task.tier, category: task.category, subject: task.subject, commit: task.commit, parent: task.parent,
 		maxReworkRounds: task.maxReworkRounds !== undefined ? { value: task.maxReworkRounds, source: `manifest task ${task.id}` } : cap, status: "running", accepted: false, compactionBefore,
@@ -202,14 +254,14 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		startContext: null, reworkRounds: 0, reworkTurns: null, main: null, worker: null,
 		reviewer: { cycles: [], usage: null }, acceptance: { cycles: [] },
 		changedFiles: { changed: [], unrelated: [], missing: [] }, heldOutOverwritten: [], durationMs: null,
-		delegation: { expectedWriter, diagnosticChars: diagnostics, writerLaunches: 0, launches: [] }, mainDiagnostics: { tools: {}, assistantTurns: 0, finalText: null },
+		delegation: { expectedWriter, diagnosticChars: diagnostics, roundSettleTimeoutMs: settleTimeout, shutdownGraceMs: limits.shutdownGraceMs, writerLaunches: 0, launches: [], receipts: [], refusals: [], settlements: [] }, mainDiagnostics: { tools: {}, assistantTurns: 0, finalText: null },
 	};
 	let session = null;
 	try {
 		await workspace.prepare(task, dir);
 		const before = await workspace.snapshot(dir);
 		if (spec.sessionPolicy === "new-per-task" || shared.session === null) {
-			session = await adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main });
+			session = await adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main, limits });
 			if (spec.sessionPolicy !== "new-per-task") shared.session = session;
 		} else session = shared.session;
 		rec.models.main.opened = session.identity ?? null;
@@ -219,9 +271,10 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		for (;;) {
 			// Held-out baseline: the state this round's main session receives (the previous round's restored tests), reset every round.
 			const prePrompt = await workspace.snapshot(dir);
-			const out = await adapter.prompt(session, prompt);
-			absorb(out?.events, { ...raw, isRework: round > 0 });
+			const out = await adapter.prompt(session, prompt, { settle: { timeoutMs: settleTimeout.value } });
 			const diag = observeRound(out?.events, diagnostics.value);
+			diag.settlement = out?.settlement ?? null;
+			absorb(out?.events, { ...raw, isRework: round > 0 }, diag);
 			noteRound(rec, diag, round, out?.text, diagnostics.value, expectedWriter);
 			const stop = classifyRound(diag, expectedWriter);
 			if (stop) throw new RoundStop({ ...stop, round });
@@ -250,11 +303,18 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		rec.status = "completed";
 	} catch (e) {
 		if (e instanceof RoundStop) { rec.status = e.info.class === "infrastructure" ? "infrastructure" : "method_invalid"; rec.invalid = e.info; }
-		else if (e.infrastructure === true) { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "native_dispatch_unavailable" }; }
+		else if (e.infrastructure === true) { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: e.kind ?? "native_dispatch_unavailable" }; }
 		else rec.status = "error";
 		rec.error = e.message;
 	} finally {
-		if (session && spec.sessionPolicy === "new-per-task") await adapter.closeSession(session);
+		// A stopped round closes its session at once (even a shared one): shutdown cancels and awaits every owning worker before the workspace can be reused.
+		const stopped = rec.status === "infrastructure" || rec.status === "method_invalid" || rec.status === "error";
+		if (session && (spec.sessionPolicy === "new-per-task" || stopped)) {
+			if (shared.session === session) shared.session = null;
+			const closed = await closeRecorded(adapter, session);
+			rec.shutdown = closed;
+			if (closed.confirmed === false && rec.status === "completed") { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "shutdown_unconfirmed" }; }
+		}
 		rec.models.main.served = [...raw.served.values()];
 		rec.reworkTurns = ledgerTotals(raw.rework).turns;
 		rec.main = ledgerTotals(raw.main);
@@ -263,6 +323,16 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		rec.durationMs = Date.now() - started;
 	}
 	return { rec, raw };
+}
+
+// Closes a session and records whether shutdown confirmed that every owning background worker ended; an adapter without the report is unconfirmed-by-report only when it throws.
+async function closeRecorded(adapter, session) {
+	try {
+		const r = await adapter.closeSession(session);
+		return { confirmed: r?.confirmed !== false, ms: r?.ms ?? null, pendingJobs: r?.pendingJobs ?? [] };
+	} catch (e) {
+		return { confirmed: false, ms: null, pendingJobs: [], error: boundedDiagnostic(e.message, 300).text };
+	}
 }
 
 // Manual compaction between tasks: the only compaction in the compacted arm (auto-compaction is disabled in every arm).
@@ -321,6 +391,8 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 	validateManifest(manifest);
 	assertCap(config.maxReworkRounds, "config.maxReworkRounds");
 	assertCap(config.diagnosticChars, "config.diagnosticChars");
+	assertLimit(config.limits?.roundSettleTimeoutMs, "config.limits.roundSettleTimeoutMs");
+	assertLimit(config.limits?.shutdownGraceMs, "config.limits.shutdownGraceMs");
 	if (!config.roles?.main || !config.roles?.reviewer) throw new Error("config.roles.main and config.roles.reviewer are required (the configured identities)");
 	if (!config.runtime?.fingerprint) throw new Error("config.runtime is required: the candidate runtime identity");
 	const desc = adapter.describe();
@@ -328,7 +400,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 		schemaVersion: RESULT_SCHEMA_VERSION, mode, order: manifest.tasks.map((t) => t.id), manifestDigest: manifestDigest(manifest), expectedWriter: manifest.expectedWriter,
 		synthetic: desc.synthetic === true,
 		config: {
-			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
+			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, limits: config.limits, resources: config.resources ?? null, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
 			roles: { main: config.roles.main, reviewer: config.roles.reviewer },
 			registry: config.registry ?? null,
 			runtime: { root: config.runtime.root ?? null, extensions: config.runtime.extensions ?? null, fingerprint: config.runtime.fingerprint, endFingerprint: null },
@@ -351,7 +423,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 					throw e;
 				}
 			}
-			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, shared, compactionBefore });
+			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, limits: config.limits, shared, compactionBefore });
 			result.tasks.push(rec);
 			raws.push(raw);
 			writeResult(result);
@@ -369,8 +441,11 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 		result.status = "failed";
 		result.error = e.message;
 	} finally {
-		if (shared.session) await adapter.closeSession(shared.session);
-		shared.session = null;
+		if (shared.session) {
+			const closed = await closeRecorded(adapter, shared.session);
+			shared.session = null;
+			if (closed.confirmed === false) { result.status = "failed"; result.error = "shutdown_unconfirmed: a background worker may still be running"; }
+		}
 	}
 	result.notRun = manifest.tasks.slice(result.tasks.length).map((t) => t.id);
 	result.totals = computeTotals(result.tasks, raws, compactionLedger);

@@ -138,6 +138,26 @@ test("a changed reviewer contract body with the same configured model is INCONCL
 	assert.ok(evaluatorReason(c, "contractBodySha256"), c.inconclusive.join("\n"));
 });
 
+// Oracle F3: the fixed reviewer's effective prompt and resource bytes are part of its identity; only the raw (cwd/time bearing) prompt digest is not.
+test("changed reviewer guidance, base prompt or skills (resource or effective prompt hash) are INCONCLUSIVE, never NO_REGRESSION", async () => {
+	const base = await run([task("H1")]);
+	for (const field of ["resourcesSha256", "effectivePromptSha256"]) {
+		const changed = await run([task("H1")], { adapter: fakeAdapter({ mainScript: fixMain, reviewText: "NO FINDINGS", synthetic: false, reviewResources: { [field]: "f".repeat(64), endResourcesSha256: "f".repeat(64) } }) });
+		const c = compareResults(base, changed);
+		assert.equal(c.verdict, "INCONCLUSIVE", field);
+		assert.ok(evaluatorReason(c, field), c.inconclusive.join("\n"));
+	}
+});
+
+test("a differing raw prompt digest alone (cwd/time variation) stays comparable; a resource edited during the review is INCONCLUSIVE", async () => {
+	const base = await run([task("H1")]);
+	const raw = await run([task("H1")], { adapter: fakeAdapter({ mainScript: fixMain, reviewText: "NO FINDINGS", synthetic: false, reviewResources: { promptSha256: "a".repeat(64) } }) });
+	assert.equal(compareResults(base, raw).verdict, "NO_REGRESSION");
+	const moved = await run([task("H1")], { adapter: fakeAdapter({ mainScript: fixMain, reviewText: "NO FINDINGS", synthetic: false, reviewResources: { stable: false, endResourcesSha256: "b".repeat(64) } }) });
+	assert.equal(compareResults(base, moved).verdict, "INCONCLUSIVE");
+	assert.equal(moved.totals.evaluator.unidentifiedCycles, 1);
+});
+
 test("a fully matching reviewer evaluator is comparable: NO_REGRESSION, recorded per cycle and summarised in totals", async () => {
 	const base = await run([task("H1"), task("H2")]);
 	const cand = await run([task("H1"), task("H2")]);

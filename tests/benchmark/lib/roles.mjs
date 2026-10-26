@@ -86,6 +86,15 @@ export function writerDiagnosticDefault(effective, role = "general-worker") {
 	return { value: v, source: `${r.origin("diagnosticChars")} roles.json role ${role}` };
 }
 
+// Time limits (whole milliseconds > 0) for the writer-role benchmark policy: round settlement timeout and shutdown grace. Config only; never a literal.
+export function writerLimitDefault(effective, key, role = "general-worker") {
+	const r = effective.role(role);
+	if (!r) throw new Error(`role "${role}" is not in roles.json`);
+	const v = r.entry[key];
+	if (!Number.isInteger(v) || v < 1) throw new Error(`role "${role}" ${key} must be a whole number of milliseconds > 0 in roles.json, got ${JSON.stringify(v ?? null)}`);
+	return { value: v, source: `${r.origin(key)} roles.json role ${role}` };
+}
+
 // Precedence (most specific wins) for any benchmark cap: manifest task override > run flag > roles.json default. The winning source is returned.
 export function resolveCap(key, { taskOverride, runFlag, roleDefault } = {}) {
 	if (roleDefault === undefined) throw new Error(`roleDefault is required: the ${key} cap has no literal default`);
@@ -103,7 +112,7 @@ export function resolveBenchmarkRoles({ candidateRoot, agentDir, main }) {
 	return {
 		main,
 		reviewer: resolveReviewerSpec(effective),
-		writer: { role: "general-worker", ...writerReworkDefault(effective), diagnosticChars: writerDiagnosticDefault(effective) },
+		writer: { role: "general-worker", ...writerReworkDefault(effective), diagnosticChars: writerDiagnosticDefault(effective), roundSettleTimeoutMs: writerLimitDefault(effective, "roundSettleTimeoutMs"), shutdownGraceMs: writerLimitDefault(effective, "shutdownGraceMs") },
 		files: effective.files,
 	};
 }

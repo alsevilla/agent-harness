@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { main } from "./cli.mjs";
+import { main, preflightMain, resourcesFor } from "./cli.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REAL = JSON.parse(fs.readFileSync(path.join(HERE, "manifest.json"), "utf8"));
@@ -85,3 +85,81 @@ for (const v of ["0", "3"]) {
 		assert.equal(r.synthetic, true);
 	});
 }
+
+// Oracle R4: the settlement timeout and shutdown grace are explicit whole milliseconds >= 1 (refused before any run), recorded with their source.
+for (const flag of ["round-timeout-ms", "shutdown-grace-ms"]) {
+	for (const [label, tokens] of [["bare flag", [`--${flag}`]], ["zero", [`--${flag}`, "0"]], ["negative", [`--${flag}`, "-5"]], ["fraction", [`--${flag}`, "1.5"]]]) {
+		test(`refuses --${flag} ${label} before any run starts`, async () => {
+			const d = dir("refuse-ms");
+			const out = path.join(d, "result.json");
+			const argv = ["run", "--mode", "fresh", "--adapter", "synthetic", ...tokens, "--scratch", path.join(d, "work"), "--out", out, "--manifest", path.join(d, "absent.json")];
+			await assert.rejects(quiet(() => main(argv)), (e) => e.message.includes(`--${flag}`) && !/ENOENT/.test(e.message));
+			assert.equal(fs.existsSync(out), false);
+		});
+	}
+}
+
+test("--round-timeout-ms and --shutdown-grace-ms override the roles.json defaults with a source that shows the typed value", async () => {
+	const d = dir("ms");
+	const out = path.join(d, "result.json");
+	const manifest = path.join(d, "one.json");
+	fs.writeFileSync(manifest, JSON.stringify({ schemaVersion: REAL.schemaVersion, name: "cli-ms", expectedWriter: REAL.expectedWriter, tasks: [REAL.tasks[0]] }));
+	await quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--round-timeout-ms", "7000", "--shutdown-grace-ms", "250", "--max-rework-rounds", "0", "--scratch", path.join(d, "work"), "--out", out, "--manifest", manifest]));
+	const r = JSON.parse(fs.readFileSync(out, "utf8"));
+	assert.deepEqual(r.config.limits.roundSettleTimeoutMs, { value: 7000, source: "run flag --round-timeout-ms 7000" });
+	assert.deepEqual(r.config.limits.shutdownGraceMs, { value: 250, source: "run flag --shutdown-grace-ms 250" });
+	await quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--max-rework-rounds", "0", "--scratch", path.join(d, "work2"), "--out", out, "--manifest", manifest]));
+	const def = JSON.parse(fs.readFileSync(out, "utf8"));
+	assert.equal(def.config.limits.roundSettleTimeoutMs.source, "package roles.json role general-worker");
+	assert.equal(def.config.resources.mode, "synthetic-not-measured");
+});
+
+test("a live run refuses when the profile installation shadows candidate prompt resources (profile-installed mode, Phase 2 blocker); identical copies pass", () => {
+	const cand = dir("cand");
+	const agentDir = dir("profile");
+	fs.mkdirSync(path.join(cand, "agent"), { recursive: true });
+	fs.writeFileSync(path.join(cand, "agent", "AGENTS.md"), "policy v2");
+	fs.writeFileSync(path.join(agentDir, "AGENTS.md"), "policy v1");
+	assert.throws(() => resourcesFor("pi-sdk", cand, agentDir), /shadowed by the profile installation.*profile-installed.*Phase 2 measurement.*agent\/AGENTS\.md \[differs\]/s);
+	fs.writeFileSync(path.join(agentDir, "AGENTS.md"), "policy v2");
+	const ok = resourcesFor("pi-sdk", cand, agentDir);
+	assert.equal(ok.mode, "profile-installed");
+	assert.deepEqual(ok.shadowed, []);
+	assert.match(ok.fingerprint, /^[0-9a-f]{64}$/);
+});
+
+// P2: the preflight opens and closes the main session only; it never prompts and never opens a reviewer.
+const preflightAdapter = ({ active = ["read", "subagent", "subagent_control"], closed = { confirmed: true, ms: 3, pendingJobs: [] }, openError } = {}) => {
+	const log = [];
+	return { log, async openSession(o) { log.push(["open", o.role, o.taskId]); if (openError) throw openError; return { identity: { resources: { agentsFiles: [], skills: [], extensionErrors: [] } } }; }, async startContext() { return { activeTools: active }; }, async prompt() { log.push(["prompt"]); throw new Error("preflight must never prompt"); }, async closeSession() { log.push(["close"]); return closed; } };
+};
+const pfRoles = { main: { model: "fake/main", fallbacks: [], thinking: "high", source: "fixture" } };
+const pfLimits = { roundSettleTimeoutMs: { value: 1000, source: "t" }, shutdownGraceMs: { value: 1000, source: "t" } };
+const REPO = path.resolve(HERE, "..", "..");
+
+test("preflight passes only with both native controls active and a confirmed shutdown, and never prompts", async () => {
+	const ad = preflightAdapter();
+	const r = await preflightMain({ adapter: ad, repo: REPO, scratch: dir("pf"), roles: pfRoles, limits: pfLimits });
+	assert.equal(r.ok, true);
+	assert.equal(r.prompted, false);
+	assert.deepEqual(ad.log, [["open", "main", "preflight"], ["close"]]);
+});
+
+test("preflight fails when a native control is missing, the shutdown is unconfirmed or the open fails; the session is still closed", async () => {
+	const base = { repo: REPO, roles: pfRoles, limits: pfLimits };
+	const noControl = await preflightMain({ ...base, adapter: preflightAdapter({ active: ["read", "subagent"] }), scratch: dir("pf") });
+	assert.equal(noControl.ok, false);
+	assert.match(noControl.error, /subagent_control/);
+	const hung = await preflightMain({ ...base, adapter: preflightAdapter({ closed: { confirmed: false, ms: 9, pendingJobs: [] } }), scratch: dir("pf") });
+	assert.equal(hung.ok, false);
+	assert.match(hung.error, /shutdown was not confirmed/);
+	const failed = preflightAdapter({ openError: Object.assign(new Error("shadowed"), { kind: "resource_shadowing" }) });
+	const r = await preflightMain({ ...base, adapter: failed, scratch: dir("pf") });
+	assert.equal(r.ok, false);
+	assert.match(r.error, /resource_shadowing: shadowed/);
+	assert.equal(failed.log.some((e) => e[0] === "close"), false, "nothing to close when no session opened");
+});
+
+test("the preflight command needs the explicit no-prompt confirmation before it touches the SDK", async () => {
+	await assert.rejects(quiet(() => main(["preflight", "--scratch", dir("pf"), "--pi-package-root", "/pi"])), /--confirm-no-prompt-preflight/);
+});

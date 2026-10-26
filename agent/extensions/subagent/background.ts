@@ -154,6 +154,18 @@ export function formatUsageSummary(scope: UsageScope): string {
 interface Job {
   id: string; generation: number; state: "running" | "completed" | "failed" | "aborted";
   controller: AbortController; workerIds: string[]; nodes: Map<string, string>; result?: any; pendingSteers: string[]; paused?: boolean; waiting?: string;
+  done?: Promise<void>; // settles after the job's workers ended and its completion was handed over; shutdown awaits it
+}
+// Per-worker metadata of a settled job, carried in the completion message details only. Custom message details are never sent to the model, so this adds
+// no model-visible text: the notice content stays exactly the bounded completion. Numbers and role/model labels only (no task text, prompts or output).
+export function completionResults(result: any) {
+  const list = Array.isArray(result?.details?.results) ? result.details.results : [];
+  const num = (v: unknown) => (Number.isFinite(v) ? (v as number) : undefined);
+  return list.map((r: any) => ({
+    agent: typeof r?.agent === "string" ? r.agent : undefined, exitCode: num(r?.exitCode), stopReason: typeof r?.stopReason === "string" ? r.stopReason : undefined,
+    model: typeof r?.model === "string" ? r.model : undefined, modelTier: r?.modelTier, modelSlot: r?.modelSlot,
+    usage: r?.usage ? { input: num(r.usage.input), output: num(r.usage.output), cacheRead: num(r.usage.cacheRead), cacheWrite: num(r.usage.cacheWrite), cost: num(r.usage.cost), turns: num(r.usage.turns), contextTokens: num(r.usage.contextTokens) } : undefined,
+  }));
 }
 export class BackgroundWorkers {
   jobs = new Map<string, Job>();
@@ -165,6 +177,7 @@ export class BackgroundWorkers {
   usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
   pendingNote?: () => string; // runtime-derived CLEANUP_PENDING text (never child text); empty when nothing is pending
   private sequence = 0;
+  private draining = new Set<Promise<void>>(); // job.done of every job still closing its workers; survives reset so a repeated shutdown waits too
   private slots = 0;
   private queue: {signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void; abort: () => void}[] = [];
   private pi: ExtensionAPI;
@@ -173,16 +186,20 @@ export class BackgroundWorkers {
   // Explicit fields, not parameter properties (strip-only Node must load this file).
   constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay()) {
     this.pi = pi; this.monitor = monitor; this.decisions = decisions;
-    pi.on("session_start", () => this.reset());
+    pi.on("session_start", () => { void this.reset(); });
+    // Awaited by Pi: shutdown completes only after every owning background worker ended, so none can write after the workspace is reused.
     pi.on("session_shutdown", () => this.reset());
   }
-  reset() {
+  // Aborts every job and worker; resolves once the aborted jobs finished (children closed). Never rejects.
+  reset(): Promise<unknown> {
     this.settleDecisions(this.decisions.clear("session-reset"));
     this.generation++;
     this.usage = newUsageScope();
+    const settling = [...this.draining]; // every job not yet drained, including ones an earlier reset already aborted
     for (const job of this.jobs.values()) job.controller.abort();
     for (const controller of this.controllers.values()) controller.abort();
     this.jobs.clear(); this.clients.clear(); this.controllers.clear(); this.steering.clear(); this.waitingKeys.clear();
+    return Promise.allSettled(settling);
   }
   async acquire(limit: number, signal?: AbortSignal): Promise<() => void> {
     if (signal?.aborted) throw new Error("Subagent was aborted");
@@ -206,7 +223,7 @@ export class BackgroundWorkers {
     const id = `bg-${++this.sequence}`;
     const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: []};
     this.jobs.set(id, job);
-    void (async () => {
+    job.done = (async () => {
       try {
         job.result = await run(job.controller.signal, id);
         job.state = job.controller.signal.aborted ? "aborted" : job.result.isError ? "failed" : "completed";
@@ -224,13 +241,14 @@ export class BackgroundWorkers {
         if (note) await this.pi.sendMessage({customType: "subagent-cleanup-pending", content: note, display: true, details: {jobId: id}}, {triggerTurn: false, deliverAs: "followUp"});
       } catch { /* a failed read is not pending state */ }
       try {
-        await this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
+        await this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state, results: completionResults(job.result)}}, {triggerTurn: true, deliverAs: "followUp"});
       } catch { /* Session can close while its completion is being delivered. */ }
       const finished = [...this.jobs.values()].filter(j => j.state !== "running");
       for (const old of finished.slice(0, Math.max(0, finished.length - 64))) {
         this.jobs.delete(old.id); for (const workerId of old.workerIds) this.steering.delete(workerId);
       }
     })();
+    this.draining.add(job.done); void job.done.finally(() => this.draining.delete(job.done!));
     return job;
   }
   assertCanLaunch(roles: string[]) {

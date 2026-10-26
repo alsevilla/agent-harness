@@ -8,7 +8,7 @@ import test from "node:test";
 import { candidateRuntime } from "./lib/runtime.mjs";
 import { createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
 import { runBenchmark } from "./lib/runner.mjs";
-import { task, manifest, root, fakeWorkspace, gate } from "./fixtures/fake-runtime.mjs";
+import { task, manifest, root, fakeWorkspace, gate, fixtureLimits, FakeAgentSessionRuntime } from "./fixtures/fake-runtime.mjs";
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `bench-rt-${name}-`));
 const EXT = ["./agent/extensions/subagent/index.ts", "./agent/extensions/ask-user/index.ts"];
@@ -34,6 +34,7 @@ function fakeSdk(rec) {
 		SessionManager: { inMemory: (cwd) => ({ cwd }) },
 		DefaultResourceLoader: class { constructor(o) { rec.loaders.push(o); this.o = o; } async reload() {} getAppendSystemPrompt() { return this.o.appendSystemPrompt ?? []; } },
 		getAgentDir: () => "/agent-dir",
+		AgentSessionRuntime: FakeAgentSessionRuntime,
 		async createAgentSession(opts) {
 			rec.sessions.push(opts);
 			const listeners = [];
@@ -41,6 +42,8 @@ function fakeSdk(rec) {
 			const session = {
 				model: opts.model, thinkingLevel: opts.thinkingLevel ?? "medium", systemPrompt: "sys", messages: [],
 				subscribe(l) { listeners.push(l); return () => {}; },
+				async bindExtensions() {},
+				async waitForIdle() {},
 				getActiveToolNames: () => opts.tools ?? ["read", "bash", "edit", "write"],
 				getContextUsage: () => ({ tokens: 1, contextWindow: 10 }),
 				async prompt(text) {
@@ -82,7 +85,7 @@ for (const mode of ["fresh", "long-fixed", "long-compacted"]) {
 		const result = await runBenchmark({
 			manifest: manifest([task("H1"), task("H2")]), mode, adapter: createPiSdkAdapter({ loadPi: async () => fakeSdk(rec), piPackageRoot: "/pi" }),
 			workspace: sentinelWorkspace(scratch), acceptance: gate,
-			config: { maxReworkRounds: { value: 0, source: "fixture" }, diagnosticChars: { value: 300, source: "fixture" }, roles, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: cand }).fingerprint },
+			config: { limits: fixtureLimits(), maxReworkRounds: { value: 0, source: "fixture" }, diagnosticChars: { value: 300, source: "fixture" }, roles, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: cand }).fingerprint },
 		});
 		assert.equal(result.status, "complete", result.error);
 		const absExt = EXT.map((e) => path.join(cand, e));
@@ -120,4 +123,40 @@ test("an extension path that escapes the candidate root is refused", () => {
 	const cand = candidate();
 	fs.writeFileSync(path.join(cand, "package.json"), JSON.stringify({ pi: { extensions: ["../outside.ts"] } }));
 	assert.throws(() => candidateRuntime({ candidateRoot: cand }), /outside the candidate/);
+});
+
+// Oracle R7: prompt resources the profile can shadow are compared byte for byte; a difference is reported, nothing is copied or written.
+import { resourceShadowing, verifyLoadedResources } from "./lib/runtime.mjs";
+const put = (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
+
+test("resourceShadowing reports a profile AGENTS.md, skill or role prompt that differs; a missing profile skill is shadowed, a missing role prompt is not", () => {
+	const cand = tmp("sh-cand");
+	const prof = tmp("sh-prof");
+	put(path.join(cand, "agent", "AGENTS.md"), "A");
+	put(path.join(cand, "agent", "skills", "alpha", "SKILL.md"), "S");
+	put(path.join(cand, "agent", "skills", "alpha", "scripts", "tool.mjs"), "not a prompt resource");
+	put(path.join(cand, "agent", "agents", "worker.md"), "W");
+	for (const [f, t] of [["AGENTS.md", "A"], ["skills/alpha/SKILL.md", "S"]]) put(path.join(prof, f), t);
+	const same = resourceShadowing({ candidateRoot: cand, agentDir: prof });
+	assert.deepEqual(same.shadowed, [], "identical copies and a missing role prompt do not shadow");
+	assert.equal(same.files, 3, "AGENTS.md, one skill file and one role prompt; scripts are not prompt resources");
+	put(path.join(prof, "AGENTS.md"), "A changed in the profile");
+	fs.rmSync(path.join(prof, "skills", "alpha", "SKILL.md"));
+	put(path.join(prof, "agents", "worker.md"), "W profile override");
+	const r = resourceShadowing({ candidateRoot: cand, agentDir: prof });
+	assert.deepEqual(r.shadowed.map((f) => [f.path, f.state]), [["agent/AGENTS.md", "differs"], ["agent/agents/worker.md", "differs"], ["agent/skills/alpha/SKILL.md", "profile-missing"]]);
+	assert.notEqual(r.fingerprint, same.fingerprint);
+	assert.equal(fs.existsSync(path.join(cand, "agent", "AGENTS.md")), true);
+});
+
+test("verifyLoadedResources proves candidate AGENTS.md and skills are what the loader carries, byte for byte", () => {
+	const cand = tmp("vl-cand");
+	const prof = tmp("vl-prof");
+	put(path.join(cand, "agent", "AGENTS.md"), "A");
+	put(path.join(cand, "agent", "skills", "alpha", "SKILL.md"), "S");
+	put(path.join(prof, "skills", "alpha", "SKILL.md"), "S");
+	const loaded = { agentsFiles: [{ path: path.join(prof, "AGENTS.md"), content: "A" }], skills: [{ name: "alpha", filePath: path.join(prof, "skills", "alpha", "SKILL.md") }] };
+	assert.deepEqual(verifyLoadedResources({ candidateRoot: cand, loaded }), []);
+	assert.equal(verifyLoadedResources({ candidateRoot: cand, loaded: { ...loaded, agentsFiles: [] } }).length, 1);
+	assert.equal(verifyLoadedResources({ candidateRoot: cand, loaded: { ...loaded, skills: [] } }).length, 1);
 });

@@ -380,7 +380,8 @@ check("package backend-worker tier failures never upgrade to capable", async () 
 		}
 		await waitFor(() => settled, `${scenario} foreground execute settles`);
 		const [result] = await outcome;
-		assert.equal(result.status, scenario === "abort" ? "rejected" : "fulfilled");
+		assert.equal(result.status, "fulfilled"); // an abort is a terminal isError result, never a throw that drops the child's usage
+		if (scenario === "abort") assert.equal((result as PromiseFulfilledResult<any>).value.isError, true);
 		assert.equal(children().length, offset + 1, `${scenario} cannot launch a fallback or automatically upgrade to capable`);
 	}
 });
@@ -1620,7 +1621,9 @@ check("usage command: foreground parallel mixes completion, failure and partial 
 	await settle(); // the completed and failed tasks settle before the abort, so only the cut task is aborted
 	controller.abort(); // after the partial turn is finalized, so the cut task keeps it
 	children()[2].exit(1); // the test double records SIGTERM but does not close the child itself
-	await assert.rejects(mixed, /Subagent was aborted/, "a parallel abort rejects the call, as before");
+	const mixedResult = await mixed;
+	assert.equal(mixedResult.isError, true, "a parallel abort is an error result that keeps every started task");
+	assert.equal(mixedResult.details.results.length, 3);
 	const text = await h.usageText();
 	assert.match(text, /Foreground: 3 settled agent tasks \(1 completed, 1 failed, 1 aborted\); 3 attempts; 3 turns/);
 	assert.match(text, /input 6 \| output 9 \| cacheRead 0 \| cacheWrite 0/);
