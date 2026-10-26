@@ -355,6 +355,14 @@ async function runNodeSuite(): Promise<void> {
 		assert.deepEqual(loaded.fallbackModel, []);
 	});
 
+	test("roles.json maxReworkRounds is an optional whole number >= 0 on a role; other values are refused and no other semantics change", () => {
+		const base = { ...DEFAULT_ROLES[0] } as any;
+		assert.strictEqual(agents.roleRegistryViolation([base]), null);
+		assert.strictEqual(agents.roleRegistryViolation([{ ...base, maxReworkRounds: 2 }]), null);
+		assert.strictEqual(agents.roleRegistryViolation([{ ...base, maxReworkRounds: 0 }]), null);
+		for (const bad of [-1, 1.5, "2", null]) assert.match(agents.roleRegistryViolation([{ ...base, maxReworkRounds: bad }]), /entry 0 maxReworkRounds/, JSON.stringify(bad));
+	});
+
 	test("invalid registry and definition data refuse with a thrown RoleEditError and no writes", async () => {
 		const cases: Array<[string, () => void, RegExp]> = [
 			["malformed roles.json", () => newFixture({ registryText: "[{" }), /roles\.json/],
@@ -1837,6 +1845,13 @@ async function runNodeSuite(): Promise<void> {
 		const atomic = overlayFixture([{ name: "alpha", modelTiers: { capable: { model: "openai-codex/gpt-6.1-sol", fallbackModel: "", thinking: "high" } } }]);
 		await editor.editRoleConfig(fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true }).ctx, { packageRoot: pkg });
 		assert.equal(fs.readFileSync(atomic.registryPath, "utf8"), formatJson([{ name: "alpha", defaultModelTier: "capable", modelTiers: { capable: { model: SLASH_REF, fallbackModel: "", thinking: "high" } } }], "\n"));
+	});
+
+	test("tier overlay edit keeps the user's maxReworkRounds policy value alongside tools (round trip; no silent drop)", async () => {
+		const pkg = tierPackage();
+		const overlay = overlayFixture([{ name: "alpha", tools: "read", maxReworkRounds: 4 }]);
+		await editor.editRoleConfig(fakeCtx(["alpha", choose(SLASH_REF), choose("Done"), choose("high"), SAVE], true, { custom: true }).ctx, { packageRoot: pkg });
+		assert.equal(fs.readFileSync(overlay.registryPath, "utf8"), formatJson([{ name: "alpha", defaultModelTier: "capable", modelTiers: { economy: TIER_ROLES[0].modelTiers.economy, capable: { model: SLASH_REF, fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" } }, tools: "read", maxReworkRounds: 4 }], "\n"));
 	});
 
 	test("tier registry refusals: invalid defaultModelTier, malformed tier fallbackModel and mixed legacy fields refuse with no fallback to the package and no writes", async () => {

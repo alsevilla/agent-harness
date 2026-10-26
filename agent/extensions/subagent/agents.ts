@@ -88,7 +88,7 @@ interface RoleOverride {
 	legacy?: boolean;
 }
 
-const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools"];
+const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools", "maxReworkRounds"];
 const ROLE_TEXT_KEYS = ["provider", "model", "fallbackModel", "thinking"];
 const LEGACY_ROLE_KEYS = ["provider", "model", "fallbackModel", "thinking"];
 const TIER_KEYS = ["economy", "capable"];
@@ -190,6 +190,8 @@ export function roleRegistryViolation(registry: unknown, complete = false, newFo
 		if (violation) return violation;
 		const tools = role.tools;
 		if (tools !== undefined && typeof tools !== "string" && !(Array.isArray(tools) && tools.every((t) => typeof t === "string"))) return `entry ${index} has invalid tools (a string or a list of strings)`;
+		// Optional benchmark policy value (rework cap default for the writer role); validated here, read only by the benchmark.
+		if (role.maxReworkRounds !== undefined && !(Number.isInteger(role.maxReworkRounds) && (role.maxReworkRounds as number) >= 0)) return `entry ${index} maxReworkRounds must be a whole number >= 0`;
 		if (names.has(role.name)) return `duplicate role name: ${role.name}`;
 		names.add(role.name);
 	}

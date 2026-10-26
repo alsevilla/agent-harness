@@ -332,13 +332,13 @@ function currentSettings(entry: RegistryEntry): RoleSettings {
 	return { primary: slot.model, fallbacks: parseFallbackModels(slot.fallbackModel), thinking: slot.thinking };
 }
 
-/** Writes the complete effective modelTiers map with the default tier replaced; other tiers and the user's own tools keep their values. */
+/** Writes the complete effective modelTiers map with the default tier replaced; other tiers, the user's own tools and maxReworkRounds keep their values. */
 function tierEntries(snap: RoleSnapshot, slot: TierSlot): Array<Record<string, unknown>> {
 	const defaultTier = snap.base.defaultModelTier as string;
 	const map: Record<string, unknown> = { ...(snap.base.modelTiers as Record<string, unknown>), [defaultTier]: slot };
 	const modelTiers = Object.fromEntries(TIER_ORDER.filter((tier) => tier in map).map((tier) => [tier, map[tier]]));
 	const user = snap.entries.find((e) => e.name === snap.name);
-	const row = { name: snap.name, defaultModelTier: defaultTier, modelTiers, ...(user?.tools !== undefined ? { tools: user.tools } : {}) };
+	const row = { name: snap.name, defaultModelTier: defaultTier, modelTiers, ...(user?.tools !== undefined ? { tools: user.tools } : {}), ...(user?.maxReworkRounds !== undefined ? { maxReworkRounds: user.maxReworkRounds } : {}) };
 	return user ? snap.entries.map((e) => (e === user ? row : e)) : [...snap.entries, row];
 }
 

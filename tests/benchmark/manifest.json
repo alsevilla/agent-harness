@@ -1,0 +1,79 @@
+{
+	"schemaVersion": "harness-benchmark-manifest/1",
+	"name": "harness-checkpoint-v1",
+	"description": "Fixed-order harness-only benchmark tasks replayed from candidate git history. Each task starts at its parent's harness state and is judged by held-out acceptance tests from the commit.",
+	"source": {
+		"repository": "alsevilla/agent-harness",
+		"candidateBranch": "feat/subagent-token-efficiency",
+		"selection": "benchmark-harness-discovery.md candidates, reselected where acceptance was environment-bound (see excludedCandidates); H11 and H12 added from the same harness lineage. Commit subjects and changed paths only; commit bodies are not used as prompts.",
+		"domainCoverage": "Harness-only substitution for the user's backend/frontend/database mix. Application backend, frontend and database work is NOT represented and must not be reported as covered."
+	},
+	"excludedCandidates": [
+		{ "id": "H1", "commit": "a34e74f", "reason": "Acceptance monitor-scrollbar.test.ts imports @earendil-works/pi-tui from a historical agent/install/releases/1.1.0 path that is absent from the replay (environment-bound; not a benchmark pass)." },
+		{ "id": "H2", "commit": "b7aa6ad", "reason": "Same monitor-scrollbar.test.ts environment gap as H1." },
+		{ "id": "H3", "commit": "9a955ce", "reason": "code-integrations.test.ts needs third-party integrations under agent/npm/node_modules that are not tracked in git; GREEN is impossible in a clean replay." },
+		{ "id": "H7", "commit": "ddda800", "reason": "Reference commit fails its own role-registry and roles-editor tests in a clean replay (expects installed Pi model-catalog entries; one test times out at 5 s)." },
+		{ "id": "1db32db", "commit": "1db32db", "reason": "Touches code-integrations.test.ts (third-party integration prerequisite) and Bun-only suites." },
+		{ "id": "5ed9fe3", "commit": "5ed9fe3", "reason": "Not a candidate. Ancestor of H5-H9 and H11-H12 only; its RFID-named test path is excluded from every replay by name (not read)." }
+	],
+	"tasks": [
+		{
+			"id": "H4", "commit": "6a36ea7", "parent": "9a955ce", "subject": "fix(subagent): share Cargo build output per checkout (#3)",
+			"tier": "T1", "category": "runtime",
+			"riskRationale": "New build-env module and wiring in index and code-integrations; the held-out test imports a module the parent lacks, so RED is a missing-module failure.",
+			"allowedFiles": ["agent/AGENTS.md", "agent/extensions/subagent/build-env.ts", "agent/extensions/subagent/code-integrations.ts", "agent/extensions/subagent/index.ts"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/build-env.test.ts"]
+		},
+		{
+			"id": "H5", "commit": "a0ae48e", "parent": "5ed9fe3", "subject": "fix(subagent): preserve literal Sonnet 5.5 routing (#5)",
+			"tier": "T2", "category": "debugging",
+			"riskRationale": "Routing literals guarded by model-routing and fallback-runtime tests; a wrong literal changes which model a role launches. The fallback-runtime wrapper launches the .node.ts suite, so that suite is held out too.",
+			"allowedFiles": ["agent/agents/debugger.md", "agent/extensions/subagent/README.md", "agent/extensions/subagent/agents.ts", "agent/extensions/subagent/index.ts", "agent/extensions/subagent/model-routing.ts", "agent/roles.json", "agent/skills/engineering-harness/references/runtime.md"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/model-routing.test.ts", "agent/extensions/subagent/tests/fallback-runtime.test.ts", "agent/extensions/subagent/tests/fallback-runtime.node.ts"]
+		},
+		{
+			"id": "H6", "commit": "1ecc43c", "parent": "ddda800", "subject": "fix(harness): harden retirement policy and recorded tier scoring",
+			"tier": "T3", "category": "safety",
+			"riskRationale": "Retirement policy and tier scoring span the role registry, prompts and routing evaluation; a wrong policy can retire active roles. Acceptance is the Bun suite role-prompt-dedup; the registry suite is declared but not run (its GREEN depends on the installed model catalog). The Python evaluator test is declared but not run.",
+			"acceptanceRunner": "bun",
+			"allowedFiles": ["README.md", "agent/AGENTS.md", "agent/agents/release-engineer.md", "agent/extensions/subagent/tests/role-registry.test.ts", "agent/skills/engineering-harness/examples/routing-cases.json", "agent/skills/engineering-harness/references/skill-evaluation.md", "agent/skills/engineering-harness/scripts/evaluate-routing.py", "agent/skills/engineering-harness/ship/index.md", "agent/skills/engineering-harness/tests/test_evaluate_routing.py", "agent/skills/engineering-harness/worktree/index.md"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/role-prompt-dedup.test.ts"]
+		},
+		{
+			"id": "H8", "commit": "a850ea7", "parent": "a0ae48e", "subject": "feat(subagent): relay worker decisions and inspect monitor (#6)",
+			"tier": "T3", "category": "runtime",
+			"riskRationale": "New decision-relay state and runtime relay between workers and the main session. Acceptance is decision-relay only; monitor-scrollbar.test.ts is declared but not held out because it needs the absent Pi TUI install.",
+			"allowedFiles": ["agent/AGENTS.md", "agent/extensions/ask-user/README.md", "agent/extensions/subagent/README.md", "agent/extensions/subagent/background.ts", "agent/extensions/subagent/code-integrations.ts", "agent/extensions/subagent/decision-relay-state.ts", "agent/extensions/subagent/decision-relay.ts", "agent/extensions/subagent/index.ts", "agent/extensions/subagent/monitor.ts", "agent/extensions/subagent/tests/monitor-scrollbar.test.ts"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/decision-relay.test.ts"]
+		},
+		{
+			"id": "H9", "commit": "98b8f02", "parent": "a34e74f", "subject": "fix(harness): stabilize delegation and reuse PR push approval",
+			"tier": "T3", "category": "safety",
+			"riskRationale": "Delegation stability and PR push approval reuse touch the safety core and the delivery approval path; a wrong approval reuse is a release-safety defect. Acceptance is safety-core (50 tests); workspace-admission expects a real git checkout root and is declared but not held out.",
+			"allowedFiles": ["README.md", "agent/README.md", "agent/VALIDATION.md", "agent/extensions/subagent/README.md", "agent/extensions/subagent/index.ts", "agent/extensions/subagent/safety-core.ts", "agent/extensions/subagent/safety-guard-entry.ts", "agent/skills/engineering-harness/references/token-efficiency.md", "agent/extensions/subagent/tests/build-env.test.ts", "agent/extensions/subagent/tests/dag-runtime.node.ts", "agent/extensions/subagent/tests/dag.test.ts", "agent/extensions/subagent/tests/provider-cooldown-guard.test.ts", "agent/extensions/subagent/tests/provider-cooldown-integration.node.ts", "agent/extensions/subagent/tests/safety-guard-runtime.node.ts", "agent/extensions/subagent/tests/workspace-admission.test.ts"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/safety-core.test.ts"]
+		},
+		{
+			"id": "H10", "commit": "4ceb4d4", "parent": "d68c9f6", "subject": "Save learned lessons as focused Markdown records",
+			"tier": "T2", "category": "feature",
+			"riskRationale": "Learned-lessons record format and learn prompt. Acceptance is the Bun suite learn-prompt; safety-config-scan needs an installed pi-coding-agent package and is declared but not held out.",
+			"acceptanceRunner": "bun",
+			"allowedFiles": ["agent/agents/release-engineer.md", "agent/prompts/learn.md", "agent/roles.json", "agent/skills/engineering-harness/learn/index.md", "docs/knowledge/README.md", "agent/extensions/subagent/tests/safety-config-scan.test.ts", "agent/extensions/subagent/tests/role-prompt-dedup.test.ts", "agent/extensions/subagent/tests/role-registry.test.ts"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/learn-prompt.test.ts"]
+		},
+		{
+			"id": "H11", "commit": "651d72d", "parent": "98b8f02", "subject": "docs(harness): consolidate guides and add opt-in compaction safeguards",
+			"tier": "T3", "category": "compaction",
+			"riskRationale": "Opt-in compaction safeguards and external compaction entry: this is the compaction behaviour the benchmark exists to measure. Acceptance is the held-out node suites compact-handoff and external-compaction; Bun suites and the runtime suite are declared but not held out.",
+			"allowedFiles": ["README.md", "agent/README.md", "agent/VALIDATION.md", "agent/agents/reviewer.md", "agent/extensions/external-compaction/index.ts", "agent/extensions/subagent/README.md", "agent/extensions/subagent/code-integrations.ts", "agent/extensions/subagent/compact-handoff.ts", "agent/extensions/subagent/external-compaction-entry.ts", "agent/extensions/subagent/index.ts", "agent/extensions/subagent/tests/code-integrations.test.ts", "agent/extensions/subagent/tests/compact-handoff-runtime.node.ts", "agent/extensions/subagent/tests/docs-durable-state.test.ts", "agent/extensions/subagent/tests/fallback-runtime.node.ts", "agent/extensions/subagent/tests/fixtures/runtime-doubles.mjs", "agent/extensions/subagent/tests/package-layout.test.ts", "agent/skills/engineering-harness/SKILL.md", "agent/skills/engineering-harness/plan/index.md", "agent/skills/engineering-harness/references/recovery.md", "agent/skills/engineering-harness/references/run-manifest.md", "agent/skills/engineering-harness/references/runtime.md", "agent/skills/engineering-harness/references/token-efficiency.md", "scripts/build-pi-package.mjs"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/compact-handoff.test.ts", "agent/extensions/subagent/tests/external-compaction.test.ts"]
+		},
+		{
+			"id": "H12", "commit": "da57440", "parent": "efe2773", "subject": "Release v1.9.1",
+			"tier": "T3", "category": "delivery-safety",
+			"riskRationale": "Delivery candidate fingerprint, grant and PR workflow authorisation: a wrong binding lets an unreviewed candidate ship. Acceptance is the held-out node suites for delivery-bound, delivery-grant, pr-workflow-auth and safety-core; Bun suites and the delivery runtime are declared but not held out.",
+			"allowedFiles": ["README.md", "agent/AGENTS.md", "agent/agents/release-engineer.md", "agent/extensions/subagent/README.md", "agent/extensions/subagent/candidate-fingerprint.ts", "agent/extensions/subagent/index.ts", "agent/extensions/subagent/safety-core.ts", "agent/extensions/subagent/tests/candidate-fingerprint.test.ts", "agent/extensions/subagent/tests/delivery-runtime.node.ts", "agent/extensions/subagent/tests/role-prompt-dedup.test.ts", "agent/extensions/subagent/tests/role-registry.test.ts", "agent/skills/engineering-harness/references/run-manifest.md", "agent/skills/engineering-harness/ship/index.md", "package.json", "tests/copilot-package.test.ts"],
+			"acceptanceTests": ["agent/extensions/subagent/tests/delivery-bound.test.ts", "agent/extensions/subagent/tests/delivery-grant.test.ts", "agent/extensions/subagent/tests/pr-workflow-auth.test.ts", "agent/extensions/subagent/tests/safety-core.test.ts"]
+		}
+	]
+}

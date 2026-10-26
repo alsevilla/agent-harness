@@ -722,7 +722,9 @@ test("shipped roles.json is tier-only: exact entry keys, no root provider/model/
   assert.equal(roles.length, 21);
   for (const entry of roles) {
     const name = String(entry.name);
-    assert.deepEqual(Object.keys(entry).sort(), ["defaultModelTier", "modelTiers", "name", "tools"], `${name}: entry keys`);
+    // The only optional key is the writer's rework-cap policy value (general-worker); tiers, tools and thinking stay pinned below.
+    const keys = name === "general-worker" ? ["defaultModelTier", "maxReworkRounds", "modelTiers", "name", "tools"] : ["defaultModelTier", "modelTiers", "name", "tools"];
+    assert.deepEqual(Object.keys(entry).sort(), keys, `${name}: entry keys`);
     assert.ok(entry.defaultModelTier === "economy" || entry.defaultModelTier === "capable", `${name}: defaultModelTier`);
     const tiers = entry.modelTiers as Record<string, Record<string, unknown>>;
     assert.ok(Object.keys(tiers).includes(entry.defaultModelTier as string), `${name}: default tier is configured`);
