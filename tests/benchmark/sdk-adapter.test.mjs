@@ -8,7 +8,7 @@ import test from "node:test";
 import { createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
 
 // catalog: qualified ids that exist; withAuth: providers with usable credentials; settings: profile defaults.
-function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], withAuth = ["anthropic", "openai-codex"], settings = { provider: "anthropic", model: "claude-main", thinking: "high" } } = {}) {
+function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], withAuth = ["anthropic", "openai-codex"], settings = { provider: "anthropic", model: "claude-main", thinking: "high" }, dropSubagent = false } = {}) {
 	const session = {
 		listeners: [],
 		subscribe(l) { this.listeners.push(l); return () => {}; },
@@ -25,7 +25,7 @@ function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-
 		async compact() { calls.compact++; return { summary: "S", tokensBefore: 123, usage: { input: 9, output: 9, cacheRead: 0, cacheWrite: 0, totalTokens: 18, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 } } }; },
 		getContextUsage: () => ({ tokens: 5, contextWindow: 1000, percent: 0.5 }),
 		systemPrompt: "abc",
-		getActiveToolNames: () => ["read", "bash"],
+		getActiveToolNames() { return this.active; },
 		messages: [],
 		dispose() { calls.disposed++; },
 	};
@@ -38,7 +38,7 @@ function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-
 		ModelRuntime: { create: async () => ({ getModel: (p, id) => (catalog.includes(`${p}/${id}`) ? { provider: p, id } : undefined), hasConfiguredAuth: (p) => withAuth.includes(p) }) },
 		DefaultResourceLoader: class { constructor(o) { calls.loader.push(o); this.o = o; } async reload() { calls.reloaded++; } getAppendSystemPrompt() { return this.o.appendSystemPrompt ?? []; } },
 		getAgentDir: () => "/agent-dir",
-		async createAgentSession(opts) { calls.create.push(opts); return { session: Object.assign(session, { model: opts.model, thinkingLevel: opts.thinkingLevel ?? "medium" }) }; },
+		async createAgentSession(opts) { calls.create.push(opts); const active = (opts.tools ?? ["read", "bash"]).filter((t) => !(dropSubagent && t === "subagent")); return { session: Object.assign(session, { model: opts.model, thinkingLevel: opts.thinkingLevel ?? "medium", active }) }; },
 	};
 }
 
@@ -78,6 +78,20 @@ test("the main session uses the configured profile model and thinking, the candi
 	assert.equal(c.disposed, 1);
 });
 
+// C6: the main session is read-only plus native subagent dispatch (no edit or write); it refuses to open without active dispatch.
+test("the main session is read-only plus native subagent dispatch; without an active subagent tool it refuses to open (infrastructure)", async () => {
+	const c = calls();
+	const ad = createPiSdkAdapter({ loadPi: async () => fakeSdk(c), piPackageRoot: "/pi" });
+	const s = await ad.openSession({ cwd: workspace(), role: "main", compactionEnabled: false, taskId: "H1", runtime: RUNTIME, roleSpec: MAIN });
+	assert.deepEqual(c.create[0].tools, [...READ_ONLY, "subagent"]);
+	assert.deepEqual((await ad.startContext(s)).activeTools, [...READ_ONLY, "subagent"]);
+	await ad.closeSession(s);
+	const d = calls();
+	const ad2 = createPiSdkAdapter({ loadPi: async () => fakeSdk(d, { dropSubagent: true }), piPackageRoot: "/pi" });
+	await assert.rejects(ad2.openSession({ cwd: workspace(), role: "main", compactionEnabled: false, taskId: "H1", runtime: RUNTIME, roleSpec: MAIN }), (e) => /subagent/.test(e.message) && e.infrastructure === true);
+	assert.equal(d.disposed, 1, "the session is disposed when dispatch is not active");
+});
+
 test("a reviewer session is read-only and loads no extensions; its prompt returns normalised events and the last assistant text", async () => {
 	const c = calls();
 	const ad = createPiSdkAdapter({ loadPi: async () => fakeSdk(c), piPackageRoot: "/pi" });
@@ -86,7 +100,8 @@ test("a reviewer session is read-only and loads no extensions; its prompt return
 	assert.deepEqual(c.loader[0].additionalExtensionPaths, []);
 	const r = await ad.prompt(s, "review it");
 	assert.equal(r.text, "FINDING high: x");
-	assert.deepEqual(r.events.map((e) => e.kind ?? e.type), ["assistant", "subagent"]);
+	assert.deepEqual(r.events.map((e) => e.kind ?? e.type), ["assistant", "subagent", "tool"]);
+	assert.deepEqual(r.events.at(-1), { type: "tool", name: "read", isError: false, errorText: null });
 	assert.equal(r.events[0].message.usage.cost.total, 0.2);
 	assert.equal(r.events[1].details.results[0].agent, "debugger");
 	assert.ok(!JSON.stringify(r.events).includes("PRIVATE"), "no message text leaves the adapter");
@@ -96,7 +111,7 @@ test("start context and manual compaction come from the SDK's public session mem
 	const c = calls();
 	const ad = createPiSdkAdapter({ loadPi: async () => fakeSdk(c), piPackageRoot: "/pi" });
 	const s = await ad.openSession({ cwd: workspace(), role: "main", compactionEnabled: false, taskId: "H1", runtime: RUNTIME, roleSpec: MAIN });
-	assert.deepEqual(await ad.startContext(s), { contextTokens: 5, contextWindow: 1000, systemPromptChars: 3, activeTools: ["read", "bash"], messageCount: 0 });
+	assert.deepEqual(await ad.startContext(s), { contextTokens: 5, contextWindow: 1000, systemPromptChars: 3, activeTools: ["read", "grep", "find", "ls", "subagent"], messageCount: 0 });
 	const k = await ad.compact(s);
 	assert.equal(c.compact, 1);
 	assert.equal(k.tokensBefore, 123);

@@ -71,19 +71,30 @@ export function writerReworkDefault(effective, role = "general-worker") {
 	return { value: v, source: `${r.origin("maxReworkRounds")} roles.json role ${role}` };
 }
 
-const checkCap = (cap, label) => {
-	if (!isObject(cap) || !Number.isInteger(cap.value) || cap.value < 0) throw new Error(`${label} maxReworkRounds must be {value: whole number >= 0, source}`);
-	if (typeof cap.source !== "string" || cap.source.trim() === "") throw new Error(`${label} maxReworkRounds source is required`);
+const checkCap = (cap, label, key) => {
+	if (!isObject(cap) || !Number.isInteger(cap.value) || cap.value < 0) throw new Error(`${label} ${key} must be {value: whole number >= 0, source}`);
+	if (typeof cap.source !== "string" || cap.source.trim() === "") throw new Error(`${label} ${key} source is required`);
 	return cap;
 };
 
-// Precedence (most specific wins): manifest task override > run flag > roles.json default. The winning source is returned.
-export function resolveReworkCap({ taskOverride, runFlag, roleDefault } = {}) {
-	if (roleDefault === undefined) throw new Error("roleDefault is required: the rework cap has no literal default");
-	if (taskOverride !== undefined) return checkCap(taskOverride, "task");
-	if (runFlag !== undefined) return checkCap(runFlag, "run");
-	return checkCap(roleDefault, "roles.json");
+// Diagnostic text cap default: the general-worker role's diagnosticChars (config only), validated, never a literal.
+export function writerDiagnosticDefault(effective, role = "general-worker") {
+	const r = effective.role(role);
+	if (!r) throw new Error(`role "${role}" is not in roles.json`);
+	const v = r.entry.diagnosticChars;
+	if (!Number.isInteger(v) || v < 0) throw new Error(`role "${role}" diagnosticChars must be a whole number >= 0 in roles.json, got ${JSON.stringify(v ?? null)}`);
+	return { value: v, source: `${r.origin("diagnosticChars")} roles.json role ${role}` };
 }
+
+// Precedence (most specific wins) for any benchmark cap: manifest task override > run flag > roles.json default. The winning source is returned.
+export function resolveCap(key, { taskOverride, runFlag, roleDefault } = {}) {
+	if (roleDefault === undefined) throw new Error(`roleDefault is required: the ${key} cap has no literal default`);
+	if (taskOverride !== undefined) return checkCap(taskOverride, "task", key);
+	if (runFlag !== undefined) return checkCap(runFlag, "run", key);
+	return checkCap(roleDefault, "roles.json", key);
+}
+export const resolveReworkCap = (args = {}) => resolveCap("maxReworkRounds", args);
+export const resolveDiagnosticChars = (args = {}) => resolveCap("diagnosticChars", args);
 
 // The configured identities for one benchmark run. main is supplied by the adapter (profile default registry).
 export function resolveBenchmarkRoles({ candidateRoot, agentDir, main }) {
@@ -92,7 +103,7 @@ export function resolveBenchmarkRoles({ candidateRoot, agentDir, main }) {
 	return {
 		main,
 		reviewer: resolveReviewerSpec(effective),
-		writer: { role: "general-worker", ...writerReworkDefault(effective) },
+		writer: { role: "general-worker", ...writerReworkDefault(effective), diagnosticChars: writerDiagnosticDefault(effective) },
 		files: effective.files,
 	};
 }

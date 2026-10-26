@@ -39,13 +39,46 @@ for (const [label, flagTokens] of [
 	});
 }
 
+// C2: --diagnostic-chars is an explicit whole number >= 0, refused before any run starts (same rule as --max-rework-rounds).
+for (const [label, flagTokens] of [
+	["bare flag (followed by another flag)", ["--diagnostic-chars"]],
+	["negative value", ["--diagnostic-chars", "-1"]],
+	["fraction", ["--diagnostic-chars", "1.5"]],
+]) {
+	test(`refuses --diagnostic-chars ${label} before any run starts`, async () => {
+		const d = dir("refuse-diag");
+		const out = path.join(d, "result.json");
+		const scratch = path.join(d, "work");
+		const argv = ["run", "--mode", "fresh", "--adapter", "synthetic", ...flagTokens, "--scratch", scratch, "--out", out, "--manifest", path.join(d, "absent.json")];
+		await assert.rejects(quiet(() => main(argv)), (e) => /--diagnostic-chars/.test(e.message) && !/ENOENT/.test(e.message), `${label}: expected the flag refusal`);
+		assert.equal(fs.existsSync(out), false, "no result file");
+	});
+}
+
+// C5/C6: --task selects named tasks in manifest order; an unknown id is refused before any run; an invalid run exits nonzero.
+test("--task selects the named tasks in manifest order and records the selection; an unknown id is refused before any run", async () => {
+	const d = dir("task");
+	const manifest = path.join(d, "two.json");
+	fs.writeFileSync(manifest, JSON.stringify({ schemaVersion: REAL.schemaVersion, name: "cli-two", expectedWriter: REAL.expectedWriter, tasks: [REAL.tasks[0], REAL.tasks[1]] }));
+	const out = path.join(d, "result.json");
+	await assert.rejects(quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--task", "NOPE", "--scratch", path.join(d, "work"), "--out", out, "--manifest", manifest])), /unknown task NOPE/);
+	assert.equal(fs.existsSync(out), false, "no result file for an unknown task");
+	const code = await quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--task", REAL.tasks[1].id, "--max-rework-rounds", "0", "--scratch", path.join(d, "work2"), "--out", out, "--manifest", manifest]));
+	const r = JSON.parse(fs.readFileSync(out, "utf8"));
+	assert.deepEqual(r.order, [REAL.tasks[1].id]);
+	assert.deepEqual(r.selection, { tasks: [REAL.tasks[1].id], fullTaskCount: 2 });
+	assert.deepEqual(r.config.diagnosticChars, { value: 300, source: "package roles.json role general-worker" });
+	assert.equal(r.status, "invalid", "the synthetic main never delegates: method invalid, not complete");
+	assert.equal(code, 1, "a non-complete run exits nonzero");
+});
+
 // Valid values: explicit 0 and a positive integer are kept, and the recorded source shows the typed value.
 for (const v of ["0", "3"]) {
 	test(`--max-rework-rounds ${v} is kept as the typed value with a source that shows it`, async () => {
 		const d = dir("valid");
 		const out = path.join(d, "result.json");
 		const manifest = path.join(d, "one-task.json");
-		fs.writeFileSync(manifest, JSON.stringify({ schemaVersion: REAL.schemaVersion, name: "cli-one-task", tasks: [REAL.tasks[0]] }));
+		fs.writeFileSync(manifest, JSON.stringify({ schemaVersion: REAL.schemaVersion, name: "cli-one-task", expectedWriter: REAL.expectedWriter, tasks: [REAL.tasks[0]] }));
 		await quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--max-rework-rounds", v, "--scratch", path.join(d, "work"), "--out", out, "--manifest", manifest]));
 		const r = JSON.parse(fs.readFileSync(out, "utf8"));
 		assert.deepEqual(r.config.maxReworkRounds, { value: Number(v), source: `run flag --max-rework-rounds ${v}` });

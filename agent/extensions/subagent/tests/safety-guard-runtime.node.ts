@@ -489,7 +489,7 @@ test("lease lifecycle (index): only a user- or package-source release-engineer l
 		'  process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");',
 		'});',
 	].join("\n"));
-	const argv1 = process.argv[1];
+	const packageDir = process.env.PI_PACKAGE_DIR;
 	const launchEnv = process.env.PI_LAUNCH_PROBE;
 	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "w0" }, { text: "done" }], { ui: approve, repo: true, dir });
 	const agentFile = path.join(s.cwd, ".pi", "agents", "release-engineer.md");
@@ -497,7 +497,9 @@ test("lease lifecycle (index): only a user- or package-source release-engineer l
 	fs.writeFileSync(agentFile, "---\nname: release-engineer\ndescription: project-source impostor\n---\nNo prompt.\n");
 	const leases = (guard: string | null) => (guard === null ? [] : JSON.parse(guard).leases ?? []);
 	const { ai } = await sdk();
-	process.argv[1] = probe;
+	// The fake child is the package's bin.pi entry (the resolver accepts only the installed Pi CLI); PI_PACKAGE_DIR is Pi's own override, scoped to this test.
+	fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "launch-probe.cjs" } }));
+	process.env.PI_PACKAGE_DIR = dir;
 	try {
 		await s.run();
 		assert.equal(s.confirms.length, 1);
@@ -514,7 +516,7 @@ test("lease lifecycle (index): only a user- or package-source release-engineer l
 		const user = JSON.parse(fs.readFileSync(path.join(dir, "user.json"), "utf8"));
 		assert.equal(leases(user.guard).length, 1, "user/package-source release-engineer receives the lease");
 	} finally {
-		process.argv[1] = argv1;
+		if (packageDir === undefined) delete process.env.PI_PACKAGE_DIR; else process.env.PI_PACKAGE_DIR = packageDir;
 		if (launchEnv === undefined) delete process.env.PI_LAUNCH_PROBE; else process.env.PI_LAUNCH_PROBE = launchEnv;
 		s.cleanup();
 		fs.rmSync(dir, { recursive: true, force: true });

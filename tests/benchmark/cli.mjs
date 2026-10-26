@@ -55,6 +55,27 @@ function reworkCapFlag(flags) {
 	return { value, source: `run flag --max-rework-rounds ${raw}` };
 }
 
+// --diagnostic-chars: the same explicit whole-number rule (>= 0) for the diagnostic text cap; the source shows the typed value.
+function diagnosticCharsFlag(flags) {
+	const raw = flags["diagnostic-chars"];
+	if (raw === undefined) return null;
+	if (typeof raw !== "string" || !/^(0|[1-9]\d*)$/.test(raw)) throw new Error(`--diagnostic-chars requires an explicit whole number >= 0, got ${typeof raw === "string" ? JSON.stringify(raw) : "no value (bare flag)"}`);
+	const value = Number(raw);
+	if (!Number.isSafeInteger(value)) throw new Error(`--diagnostic-chars must be a safe integer, got ${raw}`);
+	return { value, source: `run flag --diagnostic-chars ${raw}` };
+}
+
+// --task H1,H2 selects named tasks (manifest order kept); an empty or unknown selection is refused before any run.
+function selectTasks(manifest, flags) {
+	if (flags.task === undefined) return manifest;
+	if (typeof flags.task !== "string" || flags.task === "") throw new Error("--task requires one or more task ids, comma-separated");
+	const wanted = flags.task.split(",").map((s) => s.trim()).filter(Boolean);
+	const known = manifest.tasks.map((t) => t.id);
+	const unknown = wanted.filter((id) => !known.includes(id));
+	if (unknown.length) throw new Error(`unknown task ${unknown.join(", ")} (manifest tasks: ${known.join(", ")})`);
+	return { ...manifest, tasks: manifest.tasks.filter((t) => wanted.includes(t.id)) };
+}
+
 function requireFlag(flags, name) {
 	if (typeof flags[name] !== "string" || flags[name] === "") throw new Error(`--${name} is required`);
 	return flags[name];
@@ -101,10 +122,12 @@ async function main(argv) {
 		const mode = requireFlag(flags, "mode");
 		if (!MODES[mode]) throw new Error(`--mode must be one of ${Object.keys(MODES).join(", ")}`);
 		const reworkFlag = reworkCapFlag(flags);
+		const diagFlag = diagnosticCharsFlag(flags);
 		const adapterName = requireFlag(flags, "adapter");
 		const scratch = scratchFor(flags, repo);
 		const out = requireFlag(flags, "out");
-		const { manifest } = loadManifest(flags);
+		const { manifest: fullManifest } = loadManifest(flags);
+		const manifest = selectTasks(fullManifest, flags);
 		let adapter;
 		if (adapterName === "pi-sdk") {
 			if (!flags["confirm-live"]) throw new Error("--adapter pi-sdk starts provider-backed sessions; pass --confirm-live from the operator shell");
@@ -115,9 +138,11 @@ async function main(argv) {
 		const runtime = candidateRuntime({ candidateRoot: repo });
 		const roles = resolveBenchmarkRoles({ candidateRoot: repo, agentDir: await adapter.agentDir(), main: await adapter.resolveMainSpec({ candidateRoot: repo }) });
 		const maxReworkRounds = reworkFlag ?? { value: roles.writer.value, source: roles.writer.source };
-		const config = { maxReworkRounds, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
-		const result = await runBenchmark({ manifest, mode, adapter, workspace: createWorkspace({ repo, scratchRoot: scratch }), config, writeResult: (r) => writeJson(out, { ...r, candidate }) });
-		console.log(JSON.stringify({ status: result.status, error: result.error ?? null, mode, order: result.order, maxReworkRounds: result.config.maxReworkRounds, reviewer: result.config.roles.reviewer.model, accepted: result.totals.acceptance, endToEndCost: result.totals.endToEnd.cost, runtime: result.config.runtime.fingerprint, out }, null, 2));
+		const diagnosticChars = diagFlag ?? { value: roles.writer.diagnosticChars.value, source: roles.writer.diagnosticChars.source };
+		const config = { maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
+		const selection = { tasks: manifest.tasks.map((t) => t.id), fullTaskCount: fullManifest.tasks.length };
+		const result = await runBenchmark({ manifest, mode, adapter, workspace: createWorkspace({ repo, scratchRoot: scratch }), config, writeResult: (r) => writeJson(out, { ...r, candidate, selection }) });
+		console.log(JSON.stringify({ status: result.status, error: result.error ?? null, invalid: result.invalid ?? null, expectedWriter: result.expectedWriter, mode, order: result.order, maxReworkRounds: result.config.maxReworkRounds, reviewer: result.config.roles.reviewer.model, accepted: result.totals.acceptance, endToEndCost: result.totals.endToEnd.cost, runtime: result.config.runtime.fingerprint, out }, null, 2));
 		return result.status === "complete" ? 0 : 1;
 	}
 	if (command === "compare") {

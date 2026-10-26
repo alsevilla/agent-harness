@@ -8,6 +8,7 @@ export const HARNESS_ROOTS = ["agent", "docs", "tests", "scripts", "package.json
 const TIERS = ["T1", "T2", "T3"];
 const SHA = /^[0-9a-f]{7,40}$/;
 const TASK_ID = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+const ROLE_NAME = /^[a-z][a-z0-9-]*$/;
 
 export function assertHarnessPath(p) {
 	if (typeof p !== "string" || p === "") throw new Error("path must be a non-empty string");
@@ -25,6 +26,8 @@ export function manifestErrors(manifest) {
 	if (typeof manifest !== "object" || manifest === null) return ["manifest must be an object"];
 	if (manifest.schemaVersion !== SCHEMA_VERSION) errors.push(`schemaVersion must be "${SCHEMA_VERSION}", got ${JSON.stringify(manifest.schemaVersion)}`);
 	if (!nonEmpty(manifest.name)) errors.push("name is required");
+	// The writer role every task is expected to delegate implementation to (benchmark method metadata; recorded per task).
+	if (typeof manifest.expectedWriter !== "string" || !ROLE_NAME.test(manifest.expectedWriter)) errors.push(`expectedWriter must be a role name (lowercase letters, digits, hyphens), got ${JSON.stringify(manifest.expectedWriter ?? null)}`);
 	if (!Array.isArray(manifest.tasks) || manifest.tasks.length === 0) return [...errors, "tasks must be a non-empty array"];
 	const seen = new Set();
 	manifest.tasks.forEach((t, i) => {
@@ -44,6 +47,7 @@ export function manifestErrors(manifest) {
 			for (const p of t[key]) { try { assertHarnessPath(p); } catch (e) { errors.push(`${at}.${key}: ${e.message}`); } }
 		}
 		if (t.maxReworkRounds !== undefined && !(Number.isInteger(t.maxReworkRounds) && t.maxReworkRounds >= 0)) errors.push(`${at}.maxReworkRounds must be a whole number >= 0`);
+		if (t.diagnosticChars !== undefined && !(Number.isInteger(t.diagnosticChars) && t.diagnosticChars >= 0)) errors.push(`${at}.diagnosticChars must be a whole number >= 0`);
 		if (t.acceptanceRunner !== undefined && t.acceptanceRunner !== "node" && t.acceptanceRunner !== "bun") errors.push(`${at}.acceptanceRunner must be node or bun`);
 	});
 	return errors;

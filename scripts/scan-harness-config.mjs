@@ -14,7 +14,7 @@ const SENSITIVE = ["auth.json", "settings.json"];
 const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 const ROLE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 // Shape constants mirror the house reader (agents.ts): new-format keys, legacy flat keys, tier names, effort vocabulary and qualified IDs.
-const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools", "maxReworkRounds"];
+const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools", "maxReworkRounds", "diagnosticChars"];
 const LEGACY_ROLE_KEYS = ["provider", "model", "fallbackModel", "thinking"];
 const TIER_NAMES = ["economy", "capable"];
 const TIER_KEYS = ["model", "fallbackModel", "thinking"];
@@ -133,6 +133,7 @@ function checkRole(r) {
 		if (unknown) problems.push(`${r.name} has ${unknown} unknown key(s)`);
 		if (typeof r.tools !== "string" || !r.tools.trim()) problems.push(`${r.name}.tools must be a non-empty string`);
 		if (r.maxReworkRounds !== undefined && !(Number.isInteger(r.maxReworkRounds) && r.maxReworkRounds >= 0)) problems.push(`${r.name}.maxReworkRounds must be a whole number >= 0`);
+		if (r.diagnosticChars !== undefined && !(Number.isInteger(r.diagnosticChars) && r.diagnosticChars >= 0)) problems.push(`${r.name}.diagnosticChars must be a whole number >= 0`);
 		slot = format === "tier" ? tierSlot(r, problems) : legacySlot(r, problems);
 	}
 	return { problems, slot: problems.length ? null : slot };

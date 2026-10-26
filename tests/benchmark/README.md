@@ -60,7 +60,7 @@ npm run benchmark -- run --mode long-compacted ...   # same flags; repeat per mo
 npm run benchmark -- run --mode fresh --adapter synthetic ...    # SYNTHETIC: not a baseline
 npm run benchmark -- compare <baseline.json> <candidate.json> [--out <file>]
 ```
-`compare` is only comparable across results of the same schema (`harness-benchmark-result/2`). Its reviewer guard requires the same
+`compare` is only comparable across results of the same schema (`harness-benchmark-result/3`). Its reviewer guard requires the same
 EFFECTIVE reviewer on matched tasks: each cycle records `evaluator` (selected and observed model, the reviewer contract file and body
 digests, session tools, guidance reference). The first cycle, the final cycle and the set of distinct evaluators must match per task;
 cycle counts may differ with rework. A fallback-selected reviewer, a changed contract, or an unknown identity is INCONCLUSIVE. The
@@ -78,6 +78,16 @@ explicit operator grant or a main-owned shell.
   rework; the user policy value is 2). Precedence, most specific first: manifest task override > run flag `--max-rework-rounds` >
   roles.json default. Each task records `{value, source}`. The run flag needs an explicit whole number >= 0 (`0` is valid); a bare,
   empty, signed, fractional or unsafe value refuses the run before it starts. An invalid or missing value never falls back to a literal.
+- `diagnosticChars`: the cap on stored launch and main diagnostics (sanitized, then bounded; the tail is kept for stderr). Sanitizing is pattern-based (PEM blocks, Bearer and Basic auth, AWS access key IDs, URL userinfo, key/token/secret/password fields in key=value or JSON form, and sk-/ghp_-style tokens); it is not a complete secret scanner. Default is
+  the `general-worker` role's `diagnosticChars` in `agent/roles.json` (300). Precedence: manifest task override > run flag
+  `--diagnostic-chars` > roles.json default. The run flag needs an explicit whole number >= 0; an invalid value refuses the run.
+- `expectedWriter` (manifest metadata, `general-worker`): every task's implementation must be delegated to a measured child of that
+  role through the native subagent tool. The main session has only read, grep, find, ls and subagent (no edit or write).
+- Method validity, checked after each main round before review: a launch with no child turn or a main turn with no assistant message is
+  `infrastructure`; a direct main edit or write, or no measured writer launch, is `methodinvalid`. Either stops the task before review,
+  rework and the next task, records the partial results, and makes the run `invalid` (CLI exit 1). A healthy writer whose check fails
+  is scored normally (not accepted). Other launches, such as debugger, are optional and recorded with their actual role.
+- `--task H1,H2` runs only the named tasks in manifest order (an unknown id is refused before any run).
 - No wall-clock timeout is imposed (no artificial limit). Task count follows the manifest; the 8-10 contract is a validation check only.
 
 ## Harness-only scope and exclusions

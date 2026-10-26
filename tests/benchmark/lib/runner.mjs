@@ -6,7 +6,8 @@ import { addUsage, addWorkerUsage, emptyLedger, ledgerTotals, addLedgers, sumCos
 import { evaluatorOf, summarizeEvaluators } from "./evaluator.mjs";
 
 // v2: each reviewer cycle records its effective evaluator (compare requires it); totals.evaluator summarises it. v1 results are not comparable.
-export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/2";
+// v3: method validity (infrastructure and methodinvalid stops, delegation and main diagnostics, per-round held-out baseline). v2 results are not comparable.
+export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/3";
 // No literal rework default: config.maxReworkRounds is resolved from roles.json (general-worker) or a run flag, with its source.
 export const MODES = {
 	fresh: { sessionPolicy: "new-per-task", compaction: "none" },
@@ -69,6 +70,92 @@ const contextOf = (raw) => {
 	return { measured: typeof raw.contextTokens === "number", contextTokens: raw.contextTokens ?? null, contextWindow: raw.contextWindow ?? null, systemPromptChars: raw.systemPromptChars ?? null, activeTools: raw.activeTools ?? [], messageCount: raw.messageCount ?? null };
 };
 
+// Diagnostic text is redacted of credentials first, then bounded to the cap (tail keeps the end, e.g. stderr). Reasoning and packet text are never stored.
+const SECRET_PATTERNS = [
+	[/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED KEY]"],
+	[/\bBearer\s+[A-Za-z0-9._~+\/=-]+/gi, "Bearer [REDACTED]"],
+	[/(\bAuthorization\s*:\s*Basic\s+)[A-Za-z0-9+\/=._~-]+/gi, "$1[REDACTED]"],
+	[/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s\/@]+(?::[^\s\/@]*)?@/gi, "$1[REDACTED]@"],
+	[/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "[REDACTED]"],
+	[/(\b[A-Za-z0-9_]*(?:api[_-]?key|token|secret|password|passwd|credential)[A-Za-z0-9_]*\s*[:=]\s*)\S+/gi, "$1[REDACTED]"],
+	[/("[A-Za-z0-9_-]*(?:api[_-]?key|token|secret|password|passwd|credential)[A-Za-z0-9_-]*"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[REDACTED]"'],
+	[/\b(?:sk|pk|ghp|gho|ghu|ghs|ghr|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{8,}/g, "[REDACTED]"],
+];
+export function boundedDiagnostic(value, limit, { tail = false } = {}) {
+	if (value === undefined || value === null) return { text: null, truncated: false };
+	let s = String(value);
+	for (const [re, rep] of SECRET_PATTERNS) s = s.replace(re, rep);
+	if (s.length <= limit) return { text: s, truncated: false };
+	return { text: tail ? s.slice(s.length - limit) : s.slice(0, limit), truncated: true };
+}
+
+// Thrown when a main round is invalid: the run stops before review, rework or the next task.
+class RoundStop extends Error {
+	constructor(info) { super(`${info.class}: ${info.kind}`); this.info = info; }
+}
+
+const WRITE_TOOLS = ["edit", "write"];
+
+// Each child result of one subagent call: role, outcome and bounded diagnostics. A child with no assistant turn is a failed attempt, not a measured workload.
+function launchRecords(details, limit) {
+	const results = Array.isArray(details?.results) ? details.results : [];
+	if (results.length === 0) return [{ agent: null, status: "unreported", turns: null }];
+	return results.map((r) => {
+		const turns = Number.isFinite(r?.usage?.turns) ? r.usage.turns : null;
+		return {
+			agent: typeof r?.agent === "string" ? r.agent : null,
+			status: turns === null ? "unreported" : turns === 0 ? "no-child-turn" : "measured",
+			turns, exitCode: Number.isInteger(r?.exitCode) ? r.exitCode : null,
+			stopReason: typeof r?.stopReason === "string" ? r.stopReason : null,
+			errorMessage: boundedDiagnostic(r?.errorMessage, limit).text,
+			stderrTail: boundedDiagnostic(r?.stderr, limit, { tail: true }).text,
+			model: typeof r?.model === "string" ? r.model : null,
+			modelTier: r?.modelTier ?? null, modelSlot: r?.modelSlot ?? null,
+		};
+	});
+}
+
+// One main round from its own events: assistant turns, tool names, counts and errors (never arguments), and subagent launches.
+function observeRound(events, limit) {
+	const tools = {}; const launches = []; let assistantTurns = 0;
+	for (const ev of events ?? []) {
+		if (ev?.type === "assistant") assistantTurns++;
+		else if (ev?.type === "tool") {
+			const t = (tools[ev.name] ??= { calls: 0, errors: 0 });
+			t.calls++;
+			if (ev.isError) { t.errors++; const e = boundedDiagnostic(ev.errorText, limit).text; if (e !== null && t.firstError === undefined) t.firstError = e; }
+		} else if (ev?.type === "subagent") launches.push(...launchRecords(ev.details, limit));
+	}
+	return { assistantTurns, tools, launches };
+}
+
+// Method validity of one round, in order. Infrastructure (a launch with no child turn, or no assistant turn) stops the run and nothing is scored.
+// A direct main edit or write, or no measured launch of the expected writer, is methodinvalid: it stops before review and never scores as success.
+// Other launches (for example debugger) are optional and recorded with their actual role.
+export function classifyRound(diag, expectedWriter) {
+	const failed = diag.launches.find((l) => l.status !== "measured");
+	if (failed) return { class: "infrastructure", kind: "launch_failed", agent: failed.agent, launchStatus: failed.status };
+	if (diag.assistantTurns === 0) return { class: "infrastructure", kind: "no_assistant_turn" };
+	const writes = WRITE_TOOLS.reduce((s, n) => s + (diag.tools[n]?.calls ?? 0), 0);
+	if (writes > 0) return { class: "methodinvalid", kind: "direct_main_write", writes };
+	if (!diag.launches.some((l) => l.agent === expectedWriter && l.status === "measured")) return { class: "methodinvalid", kind: "missing_delegation", expectedWriter, launchedAgents: [...new Set(diag.launches.map((l) => l.agent))] };
+	return null;
+}
+
+// Records one round on the task: tool counts, bounded final text, launch outcomes (with their round) and the writer count.
+function noteRound(rec, diag, round, text, limit, expectedWriter) {
+	const md = rec.mainDiagnostics;
+	md.assistantTurns += diag.assistantTurns;
+	for (const [name, t] of Object.entries(diag.tools)) {
+		const acc = (md.tools[name] ??= { calls: 0, errors: 0 });
+		acc.calls += t.calls; acc.errors += t.errors;
+		if (t.firstError !== undefined && acc.firstError === undefined) acc.firstError = t.firstError;
+	}
+	md.finalText = boundedDiagnostic(text ?? "", limit);
+	rec.delegation.launches.push(...diag.launches.map((l) => ({ round, ...l })));
+	rec.delegation.writerLaunches += diag.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length;
+}
+
 // Assistant turns feed the main ledger (and the rework ledger during a rework prompt); subagent results feed the worker ledger.
 function absorb(events, { main, rework, worker, isRework, served }) {
 	for (const ev of events ?? []) {
@@ -102,9 +189,11 @@ async function runReview({ adapter, dir, task, changed, gate, ledger, runtime, r
 	}
 }
 
-async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, runtime, roles, shared, compactionBefore }) {
+async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, shared, compactionBefore }) {
 	const started = Date.now();
 	const dir = workspace.dirFor(mode, task);
+	// Diagnostic cap precedence: manifest task override > run cap (role default unless a run flag). The winning source is recorded.
+	const diagnostics = task.diagnosticChars !== undefined ? { value: task.diagnosticChars, source: `manifest task ${task.id}` } : diagnosticsRun;
 	const raw = { main: emptyLedger("model"), rework: emptyLedger("model"), worker: emptyLedger("worker"), review: emptyLedger("model"), served: new Map() };
 	const rec = {
 		id: task.id, order, tier: task.tier, category: task.category, subject: task.subject, commit: task.commit, parent: task.parent,
@@ -113,6 +202,7 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		startContext: null, reworkRounds: 0, reworkTurns: null, main: null, worker: null,
 		reviewer: { cycles: [], usage: null }, acceptance: { cycles: [] },
 		changedFiles: { changed: [], unrelated: [], missing: [] }, heldOutOverwritten: [], durationMs: null,
+		delegation: { expectedWriter, diagnosticChars: diagnostics, writerLaunches: 0, launches: [] }, mainDiagnostics: { tools: {}, assistantTurns: 0, finalText: null },
 	};
 	let session = null;
 	try {
@@ -124,22 +214,27 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		} else session = shared.session;
 		rec.models.main.opened = session.identity ?? null;
 		rec.startContext = contextOf(await adapter.startContext(session));
-		const overwritten = new Set();
 		let prompt = taskPrompt(task);
 		let round = 0;
 		for (;;) {
+			// Held-out baseline: the state this round's main session receives (the previous round's restored tests), reset every round.
+			const prePrompt = await workspace.snapshot(dir);
 			const out = await adapter.prompt(session, prompt);
 			absorb(out?.events, { ...raw, isRework: round > 0 });
+			const diag = observeRound(out?.events, diagnostics.value);
+			noteRound(rec, diag, round, out?.text, diagnostics.value, expectedWriter);
+			const stop = classifyRound(diag, expectedWriter);
+			if (stop) throw new RoundStop({ ...stop, round });
 			const afterMain = await workspace.snapshot(dir);
 			await workspace.heldOut(task, dir);
 			const afterHeld = await workspace.snapshot(dir);
-			for (const p of task.acceptanceTests) if (afterMain.get(p) !== afterHeld.get(p)) overwritten.add(p);
+			const overwritten = task.acceptanceTests.filter((p) => afterMain.get(p) !== prePrompt.get(p)).sort();
 			const d = workspace.diff(before, afterHeld);
 			const changed = [...d.added, ...d.modified, ...d.removed].filter((p) => !task.acceptanceTests.includes(p)).sort();
 			const unrelated = changed.filter((p) => !task.allowedFiles.includes(p));
 			const gate = await acceptance({ cwd: dir, files: task.acceptanceTests, runner: task.acceptanceRunner ?? "node" });
 			const testsPassed = gate.accepted === true;
-			rec.acceptance.cycles.push({ round, testsPassed, exitCode: gate.exitCode ?? null, pass: gate.pass ?? null, fail: gate.fail ?? null, reason: gate.reason, outputTail: gate.outputTail });
+			rec.acceptance.cycles.push({ round, testsPassed, exitCode: gate.exitCode ?? null, pass: gate.pass ?? null, fail: gate.fail ?? null, reason: gate.reason, outputTail: gate.outputTail, heldOutOverwritten: overwritten });
 			const review = await runReview({ adapter, dir, task, changed, gate: { accepted: testsPassed }, ledger: raw.review, runtime, roleSpec: roles.reviewer });
 			rec.reviewer.cycles.push({ round, status: review.status, findings: review.findings, highCount: review.highCount, text: review.text, identity: review.identity, evaluator: evaluatorOf(review.identity), served: review.served });
 			rec.changedFiles = { changed, unrelated, missing: task.allowedFiles.filter((p) => !changed.includes(p)) };
@@ -148,12 +243,15 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 			const needRework = !rec.accepted || (review.status === "ok" && review.highCount > 0);
 			if (!needRework || round >= rec.maxReworkRounds.value) break;
 			round++;
+			rec.reworkRounds = round;
 			prompt = reworkPrompt(task, round, { ...gate, accepted: testsPassed }, review, unrelated);
 		}
 		rec.reworkRounds = round;
 		rec.status = "completed";
 	} catch (e) {
-		rec.status = "error";
+		if (e instanceof RoundStop) { rec.status = e.info.class === "infrastructure" ? "infrastructure" : "method_invalid"; rec.invalid = e.info; }
+		else if (e.infrastructure === true) { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "native_dispatch_unavailable" }; }
+		else rec.status = "error";
 		rec.error = e.message;
 	} finally {
 		if (session && spec.sessionPolicy === "new-per-task") await adapter.closeSession(session);
@@ -222,14 +320,15 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 	if (!spec) throw new Error(`unknown mode "${mode}"; use one of ${Object.keys(MODES).join(", ")}`);
 	validateManifest(manifest);
 	assertCap(config.maxReworkRounds, "config.maxReworkRounds");
+	assertCap(config.diagnosticChars, "config.diagnosticChars");
 	if (!config.roles?.main || !config.roles?.reviewer) throw new Error("config.roles.main and config.roles.reviewer are required (the configured identities)");
 	if (!config.runtime?.fingerprint) throw new Error("config.runtime is required: the candidate runtime identity");
 	const desc = adapter.describe();
 	const result = {
-		schemaVersion: RESULT_SCHEMA_VERSION, mode, order: manifest.tasks.map((t) => t.id), manifestDigest: manifestDigest(manifest),
+		schemaVersion: RESULT_SCHEMA_VERSION, mode, order: manifest.tasks.map((t) => t.id), manifestDigest: manifestDigest(manifest), expectedWriter: manifest.expectedWriter,
 		synthetic: desc.synthetic === true,
 		config: {
-			maxReworkRounds: config.maxReworkRounds, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
+			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
 			roles: { main: config.roles.main, reviewer: config.roles.reviewer },
 			registry: config.registry ?? null,
 			runtime: { root: config.runtime.root ?? null, extensions: config.runtime.extensions ?? null, fingerprint: config.runtime.fingerprint, endFingerprint: null },
@@ -252,13 +351,20 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 					throw e;
 				}
 			}
-			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, runtime: config.runtime, roles: config.roles, shared, compactionBefore });
+			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, shared, compactionBefore });
 			result.tasks.push(rec);
 			raws.push(raw);
 			writeResult(result);
+			// Infrastructure or methodinvalid: stop here (no further tasks), keep the partial results, and the run is not complete.
+			if (rec.status === "infrastructure" || rec.status === "method_invalid") {
+				result.status = "invalid";
+				result.error = `task ${task.id} ${rec.status}: ${rec.invalid.kind}`;
+				result.invalid = { task: task.id, class: rec.invalid.class, kind: rec.invalid.kind };
+				break;
+			}
 			if (rec.status !== "completed") throw new Error(`task ${task.id} ${rec.status}: ${rec.error}`);
 		}
-		result.status = "complete";
+		if (result.status === "running") result.status = "complete";
 	} catch (e) {
 		result.status = "failed";
 		result.error = e.message;

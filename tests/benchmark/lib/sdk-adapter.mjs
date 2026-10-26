@@ -12,6 +12,8 @@ import { runtimeExtensionPaths } from "./runtime.mjs";
 import { loadReviewerContract } from "./reviewer-contract.mjs";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
+// The main session delegates implementation through native subagent dispatch and never edits or writes the task directly (C6).
+const MAIN_TOOLS = [...READ_ONLY_TOOLS, "subagent"];
 const REVIEW_CONTRACT = "You are the reviewer role of the Pi harness benchmark: a fresh, read-only review session. Do not edit files; report findings only in the requested line format.";
 // How the reviewer contract reaches the session: an isolated SDK session carrying the candidate role body. Not native named dispatch.
 export const REVIEWER_EXECUTION = "sdk-isolated-session-role-contract";
@@ -54,6 +56,11 @@ function normalise(ev) {
 		return { type: "assistant", message: { role: "assistant", usage: m.usage, provider: m.provider, model: m.model } };
 	}
 	if (ev?.type === "tool_execution_end" && ev.toolName === "subagent") return { type: "subagent", details: ev.result?.details };
+	// Tool name and outcome only (no arguments, no packet text); error text is kept only for a failed call.
+	if (ev?.type === "tool_execution_end") {
+		const text = (ev.result?.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
+		return { type: "tool", name: ev.toolName ?? null, isError: ev.isError === true, errorText: ev.isError === true && text ? text : null };
+	}
 	return null;
 }
 
@@ -97,8 +104,12 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
 			if (isReview && appendLoaded !== true) throw new Error("reviewer contract did not reach the loaded system prompt; refusing to open the session");
 			const options = { cwd, sessionManager: m.SessionManager.inMemory(cwd), settingsManager, resourceLoader: loader, modelRuntime, model: resolved.model };
 			if (roleSpec.thinking) options.thinkingLevel = roleSpec.thinking;
-			if (isReview) options.tools = review.tools;
+			options.tools = isReview ? review.tools : MAIN_TOOLS;
 			const { session } = await m.createAgentSession(options);
+			if (!isReview && !(session.getActiveToolNames?.() ?? []).includes("subagent")) {
+				session.dispose();
+				throw Object.assign(new Error("native subagent dispatch is not active in the main session; refusing to open (main must delegate, not write)"), { infrastructure: true });
+			}
 			const state = { session, role, taskId, buffer: [] };
 			state.identity = {
 				configured: { ...roleSpec },

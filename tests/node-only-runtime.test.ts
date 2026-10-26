@@ -21,13 +21,13 @@ const { WorkerStore } = await import("../agent/extensions/subagent/monitor.ts");
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("child launch detection recognises only the Node executable and no Bun virtual script", () => {
+test("child launch self-execution is proven only by Pi's compiled virtual-root marker, never a Bun runtime probe", () => {
 	const source = read("agent/extensions/subagent/index.ts");
 	const start = source.indexOf("function getPiInvocation");
 	const body = source.slice(start, source.indexOf("\n}\n", start));
 	assert.ok(start > 0 && body.length > 0, "getPiInvocation found");
-	assert.match(body, /\^node\(\\.exe\)\?\$/); // Node paths are preserved
-	assert.doesNotMatch(body, /bun/i);
+	assert.match(body, /BUN_VIRTUAL_ROOT\.test\(host\.argv1/); // the only self-execute proof
+	assert.doesNotMatch(body, /process\.versions|isBunRuntime|\bbunx?\b/i); // a Bun runtime is not Pi itself
 });
 
 test("provider cooldown comment no longer describes Bun behavior", () => {

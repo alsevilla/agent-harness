@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadEffectiveRoles, resolveReviewerSpec, resolveReworkCap, writerReworkDefault, resolveBenchmarkRoles } from "./lib/roles.mjs";
+import { loadEffectiveRoles, resolveReviewerSpec, resolveReworkCap, writerReworkDefault, resolveBenchmarkRoles, writerDiagnosticDefault, resolveDiagnosticChars } from "./lib/roles.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `bench-roles-${name}-`));
@@ -35,6 +35,7 @@ const workerEntry = (extra = {}) => ({
 	name: "general-worker", defaultModelTier: "economy",
 	modelTiers: { economy: { model: "anthropic/claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna", thinking: "medium" } },
 	tools: "read, grep, find, ls, bash, powershell, edit",
+	diagnosticChars: 300,
 	...extra,
 });
 
@@ -98,13 +99,40 @@ test("rework cap precedence is manifest task > run flag > roles.json default, an
 	assert.throws(() => resolveReworkCap({}), /roleDefault/);
 });
 
+// C2: the diagnostic text cap is a role default (general-worker diagnosticChars), overridable per run and per task; never a literal.
+test("the diagnostic text cap default comes from general-worker diagnosticChars in roles.json (shipped 300), user overlay wins", () => {
+	const real = writerDiagnosticDefault(loadEffectiveRoles({ candidateRoot: REPO, agentDir: tmp("none") }));
+	assert.deepEqual(real, { value: 300, source: "package roles.json role general-worker" });
+	const f = fixtureRoots({ packageRoles: [reviewerEntry(), workerEntry({ diagnosticChars: 120 })] });
+	assert.deepEqual(writerDiagnosticDefault(loadEffectiveRoles(f)), { value: 120, source: "package roles.json role general-worker" });
+	const o = fixtureRoots({ packageRoles: [reviewerEntry(), workerEntry({ diagnosticChars: 120 })], userRoles: [{ name: "general-worker", diagnosticChars: 80 }] });
+	assert.deepEqual(writerDiagnosticDefault(loadEffectiveRoles(o)), { value: 80, source: "user roles.json role general-worker" });
+});
+
+test("an invalid or missing diagnostic cap in roles.json is refused, never replaced by a default", () => {
+	for (const v of [-1, 1.5, "300", null, undefined]) {
+		const f = fixtureRoots({ packageRoles: [reviewerEntry(), workerEntry({ diagnosticChars: v })] });
+		assert.throws(() => writerDiagnosticDefault(loadEffectiveRoles(f)), /diagnosticChars/, `value ${JSON.stringify(v)}`);
+	}
+});
+
+test("diagnostic cap precedence is manifest task > run flag > roles.json default, with the winning source", () => {
+	const roleDefault = { value: 300, source: "package roles.json role general-worker" };
+	const runFlag = { value: 40, source: "run flag --diagnostic-chars 40" };
+	assert.deepEqual(resolveDiagnosticChars({ taskOverride: { value: 5, source: "manifest task H1" }, runFlag, roleDefault }), { value: 5, source: "manifest task H1" });
+	assert.deepEqual(resolveDiagnosticChars({ runFlag, roleDefault }), runFlag);
+	assert.deepEqual(resolveDiagnosticChars({ roleDefault }), roleDefault);
+	assert.throws(() => resolveDiagnosticChars({ runFlag: { value: -1, source: "run" }, roleDefault }), /diagnosticChars/);
+	assert.throws(() => resolveDiagnosticChars({}), /roleDefault/);
+});
+
 test("resolveBenchmarkRoles records the main spec, reviewer spec, writer cap and the registry file digests", () => {
 	const { candidateRoot, agentDir } = fixtureRoots({ packageRoles: [reviewerEntry(), workerEntry({ maxReworkRounds: 2 })] });
 	const main = { model: "anthropic/claude-sonnet-5-5", fallbacks: [], thinking: "high", source: "profile default" };
 	const r = resolveBenchmarkRoles({ candidateRoot, agentDir, main });
 	assert.equal(r.main.model, "anthropic/claude-sonnet-5-5");
 	assert.equal(r.reviewer.model, "openai-codex/gpt-6-luna");
-	assert.deepEqual(r.writer, { role: "general-worker", value: 2, source: "package roles.json role general-worker" });
+	assert.deepEqual(r.writer, { role: "general-worker", value: 2, source: "package roles.json role general-worker", diagnosticChars: { value: 300, source: "package roles.json role general-worker" } });
 	assert.match(r.files.package.sha256, /^[0-9a-f]{64}$/);
 	assert.equal(r.files.user, null);
 });

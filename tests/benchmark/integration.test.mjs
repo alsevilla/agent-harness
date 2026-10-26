@@ -47,9 +47,11 @@ test("synthetic offline run: git replay, held-out gate via node --test, per-task
 	// Synthetic behaviour: S1 is fixed by the main pass; S2 is never fixed, so the per-task cap (1 round) must stop it.
 	const adapter = createSyntheticAdapter({ script: (session) => {
 		if (session.taskId === "S1") fs.writeFileSync(path.join(session.cwd, "agent/work.txt"), "fixed\n");
-		return { events: [{ type: "assistant", message: { role: "assistant", usage: { input: 100, output: 10, cacheRead: 200, cacheWrite: 0, totalTokens: 310, cost: { input: 0.001, output: 0.001, cacheRead: 0.0001, cacheWrite: 0, total: 0.0021 } } } }], text: "done" };
+		// The delegated writer's completed launch (method validity: the writer role, not a direct main write).
+		const writer = { type: "subagent", details: { mode: "single", results: [{ agent: "general-worker", exitCode: 0, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 1, turns: 1 } }] } };
+		return { events: [writer, { type: "assistant", message: { role: "assistant", usage: { input: 100, output: 10, cacheRead: 200, cacheWrite: 0, totalTokens: 310, cost: { input: 0.001, output: 0.001, cacheRead: 0.0001, cacheWrite: 0, total: 0.0021 } } } }], text: "done" };
 	} });
-	const result = await runBenchmark({ manifest: { schemaVersion: "harness-benchmark-manifest/1", name: "synthetic", tasks }, mode: "fresh", adapter, workspace, acceptance: ({ cwd, files }) => runAcceptance({ cwd, files }), config: fixtureConfig({ maxReworkRounds: { value: 2, source: "integration fixture" } }) });
+	const result = await runBenchmark({ manifest: { schemaVersion: "harness-benchmark-manifest/1", name: "synthetic", expectedWriter: "general-worker", tasks }, mode: "fresh", adapter, workspace, acceptance: ({ cwd, files }) => runAcceptance({ cwd, files }), config: fixtureConfig({ maxReworkRounds: { value: 2, source: "integration fixture" } }) });
 	assert.equal(result.synthetic, true);
 	assert.equal(result.status, "complete");
 	const [s1, s2] = result.tasks;

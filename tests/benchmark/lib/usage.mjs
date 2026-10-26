@@ -4,7 +4,7 @@
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 
 export function emptyLedger(kind = "model") {
-	return { kind, calls: 0, unreported: 0, unpriced: 0, reported: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheCost: 0, launches: 0, unreportedLaunches: 0, workerTurns: 0 };
+	return { kind, calls: 0, unreported: 0, unpriced: 0, reported: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheCost: 0, launches: 0, failedLaunches: 0, unreportedLaunches: 0, workerTurns: 0 };
 }
 
 // One model call (assistant turn, review call or compaction summary). usage may be absent.
@@ -34,7 +34,9 @@ export function addWorkerUsage(l, details) {
 	if (!details || !Array.isArray(details.results)) { l.unreportedLaunches++; return l; }
 	for (const r of details.results) {
 		const u = r?.usage;
-		if (!u) { l.unreportedLaunches++; continue; }
+		if (!u || !finite(u.turns)) { l.unreportedLaunches++; continue; }
+		// No child assistant turn: a failed attempt, kept apart from measured usage (never a measured zero workload).
+		if (u.turns === 0) { l.failedLaunches++; continue; }
 		l.launches++;
 		l.workerTurns += finite(u.turns) ? u.turns : 0;
 		l.input += finite(u.input) ? u.input : 0;
@@ -52,18 +54,20 @@ export function addLedgers(a, b) {
 	return out;
 }
 
-// Totals for reporting. status: none (worker only, no launches), unavailable (nothing measured), partial, measured.
+// Totals for reporting. status: none (worker only, no launches), failed (worker attempts with no child turn), unavailable (nothing measured), partial, measured.
 export function ledgerTotals(l) {
 	const isWorker = l.kind === "worker";
 	const turns = isWorker ? l.workerTurns : l.calls;
 	const missing = l.unreported + l.unreportedLaunches;
 	let status;
-	if (isWorker && l.launches === 0 && missing === 0) status = "none";
+	if (isWorker && l.launches === 0 && l.failedLaunches === 0 && missing === 0) status = "none";
+	else if (isWorker && l.launches === 0 && l.failedLaunches > 0) status = "failed";
 	else if (l.reported === 0 && l.launches === 0) status = "unavailable";
-	else if (missing > 0 || l.unpriced > 0) status = "partial";
+	else if (missing > 0 || l.unpriced > 0 || l.failedLaunches > 0) status = "partial";
 	else status = "measured";
 	const tokensKnown = l.reported > 0 || (isWorker && l.launches > 0);
-	const costKnown = status === "measured" || status === "none" || (status !== "unavailable" && l.unpriced === 0 && missing === 0);
+	// Cost is known only for a complete measurement; a failed or partial worker total is unknown (null), never a zero.
+	const costKnown = status === "measured" || status === "none";
 	const costTotal = status === "none" ? 0 : costKnown ? l.cost : null;
 	let cacheTier;
 	let cacheTierNote;
@@ -76,7 +80,7 @@ export function ledgerTotals(l) {
 	return {
 		kind: l.kind, status,
 		calls: l.calls, turns: isWorker ? l.workerTurns : l.calls, unreportedTurns: l.unreported, unpricedTurns: l.unpriced,
-		launches: l.launches, unreportedLaunches: l.unreportedLaunches,
+		launches: l.launches, failedLaunches: l.failedLaunches, unreportedLaunches: l.unreportedLaunches,
 		input: tokensKnown && !isWorker ? l.input : tokensKnown ? l.input : null,
 		output: tokensKnown ? l.output : null,
 		cacheRead: tokensKnown ? l.cacheRead : null,

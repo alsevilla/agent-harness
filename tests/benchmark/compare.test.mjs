@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runBenchmark } from "./lib/runner.mjs";
 import { compareResults } from "./lib/compare.mjs";
-import { assistant, task, manifest, root, fakeWorkspace, gate, fakeAdapter, fixMain, u, fixtureConfig, fixtureRoles } from "./fixtures/fake-runtime.mjs";
+import { assistant, writerLaunch, task, manifest, root, fakeWorkspace, gate, fakeAdapter, fixMain, u, fixtureConfig, fixtureRoles } from "./fixtures/fake-runtime.mjs";
 
 // The fake adapter stands in for the SDK here: synthetic:false so the offline comparison logic is exercised, not the SYNTHETIC gate.
 const run = (tasks, opts = {}) => runBenchmark({ manifest: manifest(tasks), mode: opts.mode ?? "fresh", adapter: opts.adapter ?? fakeAdapter({ mainScript: fixMain, reviewText: opts.review ?? "NO FINDINGS", synthetic: false, reviewSelected: opts.reviewSelected, contractBody: opts.contractBody }), workspace: fakeWorkspace(root()), acceptance: gate, config: opts.config ?? fixtureConfig({ maxReworkRounds: { value: 0, source: "fixture" } }) });
-const failing = (s, text) => ({ events: [assistant(u(1, 1))], text: "no fix" });
+// A delegated writer that did not fix the task: a healthy child, a failing check (scored, not infrastructure).
+const failing = (s, text) => ({ events: [writerLaunch(), assistant(u(1, 1))], text: "no fix" });
 
 test("identical runs show no regression and report side-by-side acceptance, rework and cost fields", async () => {
 	const a = await run([task("H1"), task("H2")]);

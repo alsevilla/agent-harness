@@ -9,10 +9,12 @@ import { snapshot, diffSnapshots } from "../lib/workspace.mjs";
 
 export const u = (input, output, cacheRead = 0, cacheWrite = 0, total = 0.01) => ({ input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite, cost: { input: total / 2, output: total / 4, cacheRead: total / 8, cacheWrite: total / 8, total } });
 export const assistant = (usage) => ({ type: "assistant", message: { role: "assistant", usage, provider: "fake", model: "fake-model", content: [{ type: "text", text: "PRIVATE text" }] } });
-export const subagent = (cost) => ({ type: "subagent", details: { mode: "single", results: [{ agent: "debugger", usage: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0, cost, turns: 1, contextTokens: 4 } }] } });
+export const subagent = (cost, agent = "debugger") => ({ type: "subagent", details: { mode: "single", results: [{ agent, exitCode: 0, usage: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0, cost, turns: 1, contextTokens: 4 } }] } });
+// The delegated writer's completed launch (expectedWriter general-worker): a measured child turn.
+export const writerLaunch = (cost = 0) => subagent(cost, "general-worker");
 const hexOf = (id, fill) => [...id].map((ch) => ch.charCodeAt(0).toString(16).padStart(2, "0")).join("").padEnd(40, fill);
 export const task = (id, over = {}) => ({ id, commit: hexOf(id, "c"), parent: hexOf(id, "d"), subject: `subject ${id}`, tier: "T1", category: "feature", riskRationale: "fixture", allowedFiles: ["agent/work.txt"], acceptanceTests: ["tests/gate.txt"], ...over });
-export const manifest = (tasks) => ({ schemaVersion: "harness-benchmark-manifest/1", name: "fixture", tasks });
+export const manifest = (tasks) => ({ schemaVersion: "harness-benchmark-manifest/1", name: "fixture", expectedWriter: "general-worker", tasks });
 export const root = () => fs.mkdtempSync(path.join(os.tmpdir(), "bench-run-"));
 
 // Resolved configuration as the CLI builds it (fixture values; the real defaults are read from roles.json in roles.test.mjs).
@@ -21,7 +23,7 @@ export const fixtureRoles = () => ({
 	reviewer: { role: "reviewer", tier: "economy", model: "fake/review-model", fallbacks: ["fake/review-fallback"], thinking: "high", source: "fixture reviewer tier economy" },
 });
 export const fixtureRuntime = () => ({ root: "fixture-candidate", extensions: ["fixture-extension.ts"], fingerprint: "fixture-runtime-1" });
-export const fixtureConfig = (over = {}) => ({ maxReworkRounds: { value: 2, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), ...over });
+export const fixtureConfig = (over = {}) => ({ maxReworkRounds: { value: 2, source: "fixture roles default" }, diagnosticChars: { value: 300, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), ...over });
 
 // Parent state: work.txt "broken", gate "red". Held-out content (post-task) is "green".
 export function fakeWorkspace(base) {
@@ -82,5 +84,5 @@ export function fakeAdapter({ mainScript, reviewText = "FINDING low: nit\nNO FIN
 // Main pass that fixes the allowed file and produces one priced turn.
 export function fixMain(s, text, usage = u(100, 20, 1000, 0, 0.1)) {
 	fs.writeFileSync(path.join(s.cwd, "agent/work.txt"), "fixed");
-	return { events: [assistant(usage)], text: "done" };
+	return { events: [writerLaunch(), assistant(usage)], text: "done" };
 }

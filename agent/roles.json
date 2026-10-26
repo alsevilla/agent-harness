@@ -180,7 +180,8 @@
       }
     },
     "tools": "read, grep, find, ls, bash, powershell, edit",
-    "maxReworkRounds": 2
+    "maxReworkRounds": 2,
+    "diagnosticChars": 300
   },
   {
     "name": "planner",

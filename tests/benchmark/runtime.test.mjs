@@ -49,6 +49,8 @@ function fakeSdk(rec) {
 					rec.prompts.push({ cwd: opts.cwd, role: isReview ? "review" : "main", text: text.slice(0, 12), declared: pkg.pi?.extensions ?? [] });
 					if (!isReview) fs.mkdirSync(path.join(opts.cwd, "agent"), { recursive: true }), fs.writeFileSync(path.join(opts.cwd, "agent", "work.txt"), "fixed");
 					last = isReview ? "NO FINDINGS" : "done";
+					// The main session delegates implementation to the writer role (native subagent event), as the method requires.
+					if (!isReview) for (const l of listeners) l({ type: "tool_execution_end", toolName: "subagent", toolCallId: "w", isError: false, result: { details: { mode: "single", results: [{ agent: "general-worker", exitCode: 0, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, contextTokens: 1 } }] } } });
 					for (const l of listeners) l({ type: "message_end", message: { role: "assistant", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.01, cacheRead: 0, cacheWrite: 0 } }, provider: opts.model.provider, model: opts.model.id } });
 				},
 				getLastAssistantText: () => last,
@@ -80,7 +82,7 @@ for (const mode of ["fresh", "long-fixed", "long-compacted"]) {
 		const result = await runBenchmark({
 			manifest: manifest([task("H1"), task("H2")]), mode, adapter: createPiSdkAdapter({ loadPi: async () => fakeSdk(rec), piPackageRoot: "/pi" }),
 			workspace: sentinelWorkspace(scratch), acceptance: gate,
-			config: { maxReworkRounds: { value: 0, source: "fixture" }, roles, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: cand }).fingerprint },
+			config: { maxReworkRounds: { value: 0, source: "fixture" }, diagnosticChars: { value: 300, source: "fixture" }, roles, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: cand }).fingerprint },
 		});
 		assert.equal(result.status, "complete", result.error);
 		const absExt = EXT.map((e) => path.join(cand, e));

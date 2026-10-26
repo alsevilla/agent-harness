@@ -1,6 +1,7 @@
 {
 	"schemaVersion": "harness-benchmark-manifest/1",
 	"name": "harness-checkpoint-v1",
+	"expectedWriter": "general-worker",
 	"description": "Fixed-order harness-only benchmark tasks replayed from candidate git history. Each task starts at its parent's harness state and is judged by held-out acceptance tests from the commit.",
 	"source": {
 		"repository": "alsevilla/agent-harness",

@@ -31,6 +31,7 @@ import {
 	CONFIG_DIR_NAME,
 	type ExtensionAPI,
 	getAgentDir,
+	getPackageDir,
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -149,19 +150,26 @@ async function writePromptToTempFile(agentName: string, prompt: string): Promise
 	return { dir: tmpDir, filePath };
 }
 
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
-	const currentScript = process.argv[1];
-	if (currentScript && fs.existsSync(currentScript)) {
-		return { command: process.execPath, args: [currentScript, ...args] };
-	}
+// The child is the installed Pi CLI from package.json bin.pi, never the host's argv[1] (a benchmark or SDK host is not Pi). Only a Bun-compiled Pi runs itself: its argv[1] is the anchored Bun virtual entry (B:/~BUN/root/<exe> probed on Windows; /$bunfs/root/<exe> on POSIX, not probed); ordinary paths containing a marker fragment, and any other host, run the installed CLI.
+const BUN_VIRTUAL_ROOT = /^(?:B:\/~BUN|\/\$bunfs)\/root\/[^/]+$/;
+export function getPiInvocation(args: string[], host: { argv1?: string; execPath: string; packageDir: string } = { argv1: process.argv[1], execPath: process.execPath, packageDir: getPackageDir() }): { command: string; args: string[] } {
+	if (BUN_VIRTUAL_ROOT.test(host.argv1 ?? "")) return { command: host.execPath, args };
+	return { command: host.execPath, args: [piCliEntry(host.packageDir), ...args] };
+}
 
-	const execName = path.basename(process.execPath).toLowerCase();
-	const isGenericRuntime = /^node(\.exe)?$/.test(execName);
-	if (!isGenericRuntime) {
-		return { command: process.execPath, args };
-	}
-
-	return { command: "pi", args };
+function piCliEntry(packageDir: string): string {
+	const root = path.resolve(packageDir);
+	let meta: { name?: unknown; bin?: { pi?: unknown } };
+	try { meta = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")); }
+	catch (error) { throw new Error(`Pi package metadata unreadable at ${root}: ${(error as Error).message}`); }
+	if (meta?.name !== "@earendil-works/pi-coding-agent") throw new Error(`Pi package metadata at ${root} names ${String(meta?.name)}, not @earendil-works/pi-coding-agent`);
+	const bin = meta.bin?.pi;
+	if (typeof bin !== "string" || !bin) throw new Error(`Pi package at ${root} declares no pi bin`);
+	const entry = path.resolve(root, bin);
+	const rel = path.relative(root, entry);
+	if (!rel || rel.split(path.sep)[0] === ".." || path.isAbsolute(rel)) throw new Error(`Pi bin ${bin} escapes its package root ${root}`);
+	if (!fs.statSync(entry, { throwIfNoEntry: false })?.isFile()) throw new Error(`Pi CLI entry missing at ${entry}; reinstall @earendil-works/pi-coding-agent`);
+	return entry;
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;

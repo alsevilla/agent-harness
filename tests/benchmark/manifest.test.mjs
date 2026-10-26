@@ -12,12 +12,20 @@ const task = (over = {}) => ({
 	acceptanceTests: ["agent/extensions/subagent/tests/monitor-scrollbar.test.ts"],
 	...over,
 });
-const manifest = (tasks) => ({ schemaVersion: SCHEMA_VERSION, name: "t", tasks });
+const manifest = (tasks) => ({ schemaVersion: SCHEMA_VERSION, name: "t", expectedWriter: "general-worker", tasks });
 const eight = (n = 8) => Array.from({ length: n }, (_, i) => task({ id: `H${i + 1}`, commit: `${"a".repeat(6)}${i}${"0".repeat(33)}`, parent: `${"b".repeat(6)}${i}${"0".repeat(33)}`, tier: i < 3 ? "T3" : "T1", category: i === 0 ? "debugging" : "feature" }));
 
 test("a well-formed harness task is accepted and keeps its array order as the fixed order", () => {
 	const m = validateManifest(manifest([task(), task({ id: "H2", commit: "b7aa6ad1234", parent: "a850ea71234" })]));
 	assert.deepEqual(m.tasks.map((t) => t.id), ["H1", "H2"]);
+});
+
+// C6: the expected writer role is manifest metadata (a role name); a per-task diagnostic cap override must be a whole number >= 0.
+test("expectedWriter is required manifest metadata; a per-task diagnosticChars override must be a whole number >= 0", () => {
+	assert.ok(manifestErrors({ ...manifest([task()]), expectedWriter: undefined }).some((e) => /expectedWriter/.test(e)));
+	assert.ok(manifestErrors({ ...manifest([task()]), expectedWriter: "Not A Role" }).some((e) => /expectedWriter/.test(e)));
+	assert.deepEqual(manifestErrors(manifest([task({ diagnosticChars: 0 })])), []);
+	assert.ok(manifestErrors(manifest([task({ diagnosticChars: -1 })])).some((e) => /diagnosticChars/.test(e)));
 });
 
 test("unknown schema version, malformed lineage and duplicate ids are refused with every problem listed", () => {

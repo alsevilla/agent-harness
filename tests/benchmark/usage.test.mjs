@@ -56,3 +56,26 @@ test("ledgers add without losing unavailable markers; sumCosts propagates null",
 	assert.equal(sumCosts([0.1, 0.2]), 0.30000000000000004);
 	assert.equal(sumCosts([0.1, null]), null);
 });
+
+// C2: a launch with no child assistant turn is a failed attempt, never a measured zero-cost workload.
+test("a launch with no child turn is a failed attempt: not measured, cost and tokens unknown (null), never zero", () => {
+	const details = { mode: "single", results: [{ agent: "general-worker", exitCode: 1, stopReason: "error", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 } }] };
+	const t = ledgerTotals(addWorkerUsage(emptyLedger(), details));
+	assert.equal(t.launches, 0);
+	assert.equal(t.failedLaunches, 1);
+	assert.equal(t.status, "failed");
+	assert.equal(t.cost.total, null);
+	assert.equal(t.input, null);
+});
+
+test("a measured child is counted; a failed sibling is listed separately and makes the worker total partial (cost unknown)", () => {
+	const details = { mode: "single", results: [
+		{ agent: "general-worker", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0.02, turns: 1, contextTokens: 3 } },
+		{ agent: "debugger", exitCode: 1, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 } },
+	] };
+	const t = ledgerTotals(addWorkerUsage(emptyLedger(), details));
+	assert.equal(t.launches, 1);
+	assert.equal(t.failedLaunches, 1);
+	assert.equal(t.status, "partial");
+	assert.equal(t.cost.total, null);
+});
