@@ -64,7 +64,7 @@ npm run benchmark -- run --mode long-compacted ...   # same flags; repeat per mo
 npm run benchmark -- run --mode fresh --adapter synthetic ...    # SYNTHETIC: not a baseline
 npm run benchmark -- compare <baseline.json> <candidate.json> [--out <file>]
 ```
-`compare` is only comparable across results of the same schema (`harness-benchmark-result/4`). Its reviewer guard requires the same
+`compare` is only comparable across results of the same schema (`harness-benchmark-result/5`). Its reviewer guard requires the same
 EFFECTIVE reviewer on matched tasks: each cycle records `evaluator` (selected and observed model, the reviewer contract file and body
 digests, session tools, guidance reference, effective prompt and resource hashes). The first cycle, the final cycle and the set of distinct evaluators must match per task;
 cycle counts may differ with rework. A fallback-selected reviewer, a changed contract, or an unknown identity is INCONCLUSIVE. The
@@ -94,9 +94,10 @@ explicit operator grant or a main-owned shell.
 - `expectedWriter` (manifest metadata, `general-worker`): every task's implementation must be delegated to a measured child of that
   role through the native subagent tool. The main session has only read, grep, find, ls, subagent and subagent_control (no edit or write).
 - Method validity, checked after each main round before review: a launch with no child turn or a main turn with no assistant message is
-  `infrastructure`; a direct main edit or write, or no measured writer launch, is `methodinvalid`. Either stops the task before review,
+  `infrastructure`; a direct main edit or write, or no measured writer launch for the task, is `methodinvalid`. The writer is required once per task, cumulatively: round 0 must launch a measured writer (`missing_delegation` otherwise), and a later rework round with an idle turn, a debugger-only launch or only refusals stays valid after an earlier measured writer and gets normal acceptance and review; no extra dispatch or permission is forced, and a genuinely unfixed failure at the rework cap is scored not accepted while the next task runs. A direct main write, a failed or unreported child, a missing assistant turn and unsettled background work still stop the task in any round. Either stops the task before review,
   rework and the next task, records the partial results, and makes the run `invalid` (CLI exit 1). A healthy writer whose check fails
-  is scored normally (not accepted). Other launches, such as debugger, are optional and recorded with their actual role.
+  is scored normally (not accepted). Other launches, such as debugger, are optional and recorded with their actual role. `mainDiagnostics.rounds` records per round `round`, `assistantTurns`, `writerLaunches`, `toolCalls` and per-tool `calls`/`errors` (counts only, no arguments or reasoning).
+- Measurement exclusion policy (`config.measurementPolicy.toolState`, schema 5): a generated, untracked root `.serena/` backend state file is not implementation output. Only an added file under root `.serena/` that is neither materialized from the parent commit nor in the pre-session baseline snapshot is excluded from scored `changed`/`unrelated`; it is reported in `changedFiles.toolStateChanges` (path and sha256) and stays in the raw `changedFiles.inventory`. Tracked or preexisting `.serena/` files, `.serena2/`, nested `.serena/` and every other path (for example `.h4-checks/`, `parse.out`) still fail as unrelated. `compare` is INCONCLUSIVE when the policies differ or one side lacks it.
 - `roundSettleTimeoutMs` (default 1200000) and `shutdownGraceMs` (default 60000): whole milliseconds >= 1, the `general-worker` role keys in `agent/roles.json`.
   Precedence for the settlement timeout: manifest task `roundSettleTimeoutMs` > run flag `--round-timeout-ms` > roles.json default; the shutdown grace takes
   `--shutdown-grace-ms` > roles.json. Every task records the winning `{value, source}`. A bare, zero, signed or fractional flag refuses the run; there is no literal fallback.

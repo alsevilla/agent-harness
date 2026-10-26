@@ -7,8 +7,9 @@ import { evaluatorOf, summarizeEvaluators } from "./evaluator.mjs";
 
 // v2: each reviewer cycle records its effective evaluator (compare requires it); totals.evaluator summarises it. v1 results are not comparable.
 // v3: method validity (infrastructure and methodinvalid stops, delegation and main diagnostics, per-round held-out baseline). v2 results are not comparable.
+// v5: per-round telemetry, cumulative per-task writer rule (classifyRound), and a recorded measurement exclusion policy for generated tool state. v4 results are not comparable.
 // v4: background receipts, refusals and completions are distinct; worker usage is counted once from completions; rounds settle before any snapshot; shutdown is confirmed. v3 results are not comparable.
-export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/4";
+export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/5";
 // No literal rework default: config.maxReworkRounds is resolved from roles.json (general-worker) or a run flag, with its source.
 export const MODES = {
 	fresh: { sessionPolicy: "new-per-task", compaction: "none" },
@@ -162,7 +163,9 @@ function observeRound(events, limit) {
 // Method validity of one round, in order. Infrastructure (a launch with no child turn, or no assistant turn) stops the run and nothing is scored.
 // A direct main edit or write, or no measured launch of the expected writer, is methodinvalid: it stops before review and never scores as success.
 // Other launches (for example debugger) are optional and recorded with their actual role.
-export function classifyRound(diag, expectedWriter) {
+// The writer is required once per TASK: cumulativeWriterLaunches (measured expected-writer launches so far, this round included) lets a rework round without a new
+// writer stay valid after an earlier one; omitted, only this round counts. Round 0 has no earlier launches, so the first-round guard is unchanged.
+export function classifyRound(diag, expectedWriter, { cumulativeWriterLaunches } = {}) {
 	const failed = diag.launches.find((l) => l.status !== "measured");
 	if (failed) return { class: "infrastructure", kind: "launch_failed", agent: failed.agent, launchStatus: failed.status };
 	// A receipt never matched by its completion, or a settlement that timed out, means a worker may still be running: nothing is snapshotted, reviewed or scored.
@@ -171,7 +174,7 @@ export function classifyRound(diag, expectedWriter) {
 	if (diag.assistantTurns === 0) return { class: "infrastructure", kind: "no_assistant_turn" };
 	const writes = WRITE_TOOLS.reduce((s, n) => s + (diag.tools[n]?.calls ?? 0), 0);
 	if (writes > 0) return { class: "methodinvalid", kind: "direct_main_write", writes };
-	if (!diag.launches.some((l) => l.agent === expectedWriter && l.status === "measured")) return { class: "methodinvalid", kind: "missing_delegation", expectedWriter, launchedAgents: [...new Set(diag.launches.map((l) => l.agent))] };
+	if (!(cumulativeWriterLaunches > 0) && !diag.launches.some((l) => l.agent === expectedWriter && l.status === "measured")) return { class: "methodinvalid", kind: "missing_delegation", expectedWriter, launchedAgents: [...new Set(diag.launches.map((l) => l.agent))] };
 	return null;
 }
 
@@ -189,7 +192,10 @@ function noteRound(rec, diag, round, text, limit, expectedWriter) {
 	rec.delegation.receipts.push(...diag.receipts.map((r) => ({ round, ...r })));
 	rec.delegation.refusals.push(...diag.refusals.map((r) => ({ round, ...r })));
 	if (diag.settlement) rec.delegation.settlements.push({ round, settled: diag.settlement.settled === true, timedOut: diag.settlement.timedOut === true, waitedMs: diag.settlement.waitedMs ?? null, pendingJobs: diag.settlement.pendingJobs ?? [] });
-	rec.delegation.writerLaunches += diag.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length;
+	const writerLaunches = diag.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length;
+	rec.delegation.writerLaunches += writerLaunches;
+	// Per-round telemetry from counts only (no arguments, no reasoning), so nothing is inferred from task totals.
+	md.rounds.push({ round, assistantTurns: diag.assistantTurns, writerLaunches, toolCalls: Object.values(diag.tools).reduce((s, t) => s + t.calls, 0), tools: Object.fromEntries(Object.entries(diag.tools).map(([n, t]) => [n, { calls: t.calls, errors: t.errors }])) });
 }
 
 // Assistant turns feed the main ledger (and the rework ledger during a rework prompt). Worker usage is counted exactly once per launch: a foreground
@@ -254,12 +260,14 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		startContext: null, reworkRounds: 0, reworkTurns: null, main: null, worker: null,
 		reviewer: { cycles: [], usage: null }, acceptance: { cycles: [] },
 		changedFiles: { changed: [], unrelated: [], missing: [] }, heldOutOverwritten: [], durationMs: null,
-		delegation: { expectedWriter, diagnosticChars: diagnostics, roundSettleTimeoutMs: settleTimeout, shutdownGraceMs: limits.shutdownGraceMs, writerLaunches: 0, launches: [], receipts: [], refusals: [], settlements: [] }, mainDiagnostics: { tools: {}, assistantTurns: 0, finalText: null },
+		delegation: { expectedWriter, diagnosticChars: diagnostics, roundSettleTimeoutMs: settleTimeout, shutdownGraceMs: limits.shutdownGraceMs, writerLaunches: 0, launches: [], receipts: [], refusals: [], settlements: [] }, mainDiagnostics: { tools: {}, assistantTurns: 0, rounds: [], finalText: null },
 	};
 	let session = null;
 	try {
-		await workspace.prepare(task, dir);
+		const prepared = await workspace.prepare(task, dir);
 		const before = await workspace.snapshot(dir);
+		const tracked = new Set(prepared?.paths ?? []);
+		const policy = workspace.toolStatePolicy ?? null;
 		if (spec.sessionPolicy === "new-per-task" || shared.session === null) {
 			session = await adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main, limits });
 			if (spec.sessionPolicy !== "new-per-task") shared.session = session;
@@ -276,21 +284,23 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 			diag.settlement = out?.settlement ?? null;
 			absorb(out?.events, { ...raw, isRework: round > 0 }, diag);
 			noteRound(rec, diag, round, out?.text, diagnostics.value, expectedWriter);
-			const stop = classifyRound(diag, expectedWriter);
+			const stop = classifyRound(diag, expectedWriter, { cumulativeWriterLaunches: rec.delegation.writerLaunches });
 			if (stop) throw new RoundStop({ ...stop, round });
 			const afterMain = await workspace.snapshot(dir);
 			await workspace.heldOut(task, dir);
 			const afterHeld = await workspace.snapshot(dir);
 			const overwritten = task.acceptanceTests.filter((p) => afterMain.get(p) !== prePrompt.get(p)).sort();
 			const d = workspace.diff(before, afterHeld);
-			const changed = [...d.added, ...d.modified, ...d.removed].filter((p) => !task.acceptanceTests.includes(p)).sort();
+			const everyChanged = [...d.added, ...d.modified, ...d.removed].filter((p) => !task.acceptanceTests.includes(p)).sort();
+			const toolState = policy ? d.added.filter((p) => everyChanged.includes(p) && policy.isToolState(p, { tracked, before })) : [];
+			const changed = everyChanged.filter((p) => !toolState.includes(p));
 			const unrelated = changed.filter((p) => !task.allowedFiles.includes(p));
 			const gate = await acceptance({ cwd: dir, files: task.acceptanceTests, runner: task.acceptanceRunner ?? "node" });
 			const testsPassed = gate.accepted === true;
 			rec.acceptance.cycles.push({ round, testsPassed, exitCode: gate.exitCode ?? null, pass: gate.pass ?? null, fail: gate.fail ?? null, reason: gate.reason, outputTail: gate.outputTail, heldOutOverwritten: overwritten });
 			const review = await runReview({ adapter, dir, task, changed, gate: { accepted: testsPassed }, ledger: raw.review, runtime, roleSpec: roles.reviewer });
 			rec.reviewer.cycles.push({ round, status: review.status, findings: review.findings, highCount: review.highCount, text: review.text, identity: review.identity, evaluator: evaluatorOf(review.identity), served: review.served });
-			rec.changedFiles = { changed, unrelated, missing: task.allowedFiles.filter((p) => !changed.includes(p)) };
+			rec.changedFiles = { changed, unrelated, missing: task.allowedFiles.filter((p) => !changed.includes(p)), toolStateChanges: toolState.map((p) => ({ path: p, sha256: afterHeld.get(p) })), inventory: { added: d.added, modified: d.modified, removed: d.removed } };
 			rec.heldOutOverwritten = [...overwritten].sort();
 			rec.accepted = testsPassed && unrelated.length === 0;
 			const needRework = !rec.accepted || (review.status === "ok" && review.highCount > 0);
@@ -403,6 +413,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, limits: config.limits, resources: config.resources ?? null, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
 			roles: { main: config.roles.main, reviewer: config.roles.reviewer },
 			registry: config.registry ?? null,
+			measurementPolicy: { toolState: workspace.toolStatePolicy ? { id: workspace.toolStatePolicy.id, roots: workspace.toolStatePolicy.roots, rule: workspace.toolStatePolicy.rule } : null },
 			runtime: { root: config.runtime.root ?? null, extensions: config.runtime.extensions ?? null, fingerprint: config.runtime.fingerprint, endFingerprint: null },
 		},
 		environment: { node: process.version, platform: process.platform, arch: process.arch, adapter: desc },

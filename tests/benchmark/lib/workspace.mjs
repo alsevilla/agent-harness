@@ -102,9 +102,21 @@ export function diffSnapshots(before, after) {
 	return { added: added.sort(byName), modified: modified.sort(byName), removed: removed.sort(byName) };
 }
 
+// Measurement policy for generated backend tool state (Serena writes an untracked root .serena/ into the workspace). It is not implementation output:
+// only a file at the root .serena/ that is neither materialized from the parent commit (tracked) nor in the pre-session baseline snapshot qualifies.
+// A tracked or preexisting file, a sibling (.serena2/), a nested .serena/ and every other path stay scored. Qualifying files are reported, never hidden.
+const SERENA_ROOT = ".serena/";
+export const TOOL_STATE_POLICY = {
+	id: "untracked-root-serena-v1",
+	roots: [SERENA_ROOT],
+	rule: "added files under a root tool-state directory that are not materialized tracked paths and absent from the pre-session baseline snapshot",
+	isToolState: (p, { tracked, before } = {}) => tracked instanceof Set && before instanceof Map && p.startsWith(SERENA_ROOT) && !tracked.has(p) && !before.has(p),
+};
+
 // The runner's workspace: one stable directory per mode (shared) or per task (fresh), always under the scratch root.
 export function createWorkspace({ repo, scratchRoot, roots = HARNESS_ROOTS }) {
 	return {
+		toolStatePolicy: TOOL_STATE_POLICY,
 		dirFor: (mode, task) => assertInside(path.join(scratchRoot, mode, mode === "fresh" ? task.id : "shared"), scratchRoot),
 		prepare: async (task, dir) => materializeHarness({ repo, commit: task.parent, dest: dir, scratchRoot, roots }),
 		heldOut: async (task, dir) => writeCommitFiles({ repo, commit: task.commit, paths: task.acceptanceTests, dest: dir, scratchRoot }),

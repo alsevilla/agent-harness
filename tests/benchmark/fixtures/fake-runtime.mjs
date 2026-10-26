@@ -5,7 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MODES } from "../lib/runner.mjs";
-import { snapshot, diffSnapshots } from "../lib/workspace.mjs";
+import * as realWorkspace from "../lib/workspace.mjs";
+const { snapshot, diffSnapshots } = realWorkspace;
 
 export const u = (input, output, cacheRead = 0, cacheWrite = 0, total = 0.01) => ({ input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite, cost: { input: total / 2, output: total / 4, cacheRead: total / 8, cacheWrite: total / 8, total } });
 export const assistant = (usage) => ({ type: "assistant", message: { role: "assistant", usage, provider: "fake", model: "fake-model", content: [{ type: "text", text: "PRIVATE text" }] } });
@@ -32,8 +33,10 @@ export const fixtureLimits = () => ({ roundSettleTimeoutMs: { value: 600000, sou
 export const fixtureConfig = (over = {}) => ({ limits: fixtureLimits(), maxReworkRounds: { value: 2, source: "fixture roles default" }, diagnosticChars: { value: 300, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), ...over });
 
 // Parent state: work.txt "broken", gate "red". Held-out content (post-task) is "green".
-export function fakeWorkspace(base) {
+// tracked: extra materialized (tracked) files {path: text} that the parent commit carries; the policy is the real workspace's tool-state policy.
+export function fakeWorkspace(base, { tracked = {} } = {}) {
 	return {
+		toolStatePolicy: realWorkspace.TOOL_STATE_POLICY,
 		dirFor: (mode, t) => path.join(base, mode, MODES[mode].sessionPolicy === "shared-fixed-order" ? "shared" : t.id),
 		async prepare(t, dir) {
 			fs.rmSync(dir, { recursive: true, force: true });
@@ -41,6 +44,8 @@ export function fakeWorkspace(base) {
 			fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
 			fs.writeFileSync(path.join(dir, "agent/work.txt"), "broken");
 			fs.writeFileSync(path.join(dir, "tests/gate.txt"), "red");
+			for (const [p, text] of Object.entries(tracked)) { fs.mkdirSync(path.dirname(path.join(dir, p)), { recursive: true }); fs.writeFileSync(path.join(dir, p), text); }
+			return { files: 2 + Object.keys(tracked).length, paths: ["agent/work.txt", "tests/gate.txt", ...Object.keys(tracked)] };
 		},
 		async heldOut(t, dir) { fs.writeFileSync(path.join(dir, "tests/gate.txt"), "green"); },
 		snapshot,

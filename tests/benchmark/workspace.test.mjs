@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { listHarnessTree, materializeHarness, writeCommitFiles, snapshot, diffSnapshots, assertInside } from "./lib/workspace.mjs";
+import { listHarnessTree, materializeHarness, writeCommitFiles, snapshot, diffSnapshots, assertInside, createWorkspace, TOOL_STATE_POLICY } from "./lib/workspace.mjs";
 
 const git = (cwd, ...args) => execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=bench", "-c", "user.email=bench@example.invalid", ...args], { cwd, encoding: "utf8" }).trim();
 const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
@@ -76,4 +76,23 @@ test("assertInside accepts only descendants of the scratch root", () => {
 	assert.doesNotThrow(() => assertInside("C:/s/x/y", "C:/s"));
 	assert.throws(() => assertInside("C:/other/y", "C:/s"), /outside/);
 	assert.throws(() => assertInside("C:/s/../other", "C:/s"), /outside/);
+});
+
+test("the real workspace exposes the tool-state policy and prepare reports the materialized tracked paths it is judged against", async () => {
+	const { repo, parent } = fixtureRepo();
+	const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "bench-scratch-"));
+	const ws = createWorkspace({ repo, scratchRoot: scratch });
+	assert.equal(ws.toolStatePolicy, TOOL_STATE_POLICY);
+	const prepared = await ws.prepare({ parent }, path.join(scratch, "fresh", "H1"));
+	assert.ok(prepared.paths.includes("agent/a.ts"));
+	assert.ok(!prepared.paths.some((p) => p.startsWith(".serena")), "the generated root .serena/ state is not materialized");
+});
+
+test("the policy is the untracked, newly generated root .serena/ only: tracked, baseline, sibling, nested and look-alike paths are never tool state", () => {
+	const { isToolState } = TOOL_STATE_POLICY;
+	const ctx = { tracked: new Set([".serena/tracked.yml"]), before: new Map([[".serena/tracked.yml", "h"], [".serena/pre.txt", "h"]]) };
+	assert.equal(isToolState(".serena/cache/x.pkl", ctx), true);
+	for (const p of [".serena/tracked.yml", ".serena/pre.txt", ".serena2/x", ".serena", ".serenax/x", "sub/.serena/x", "agent/work.txt", "parse.out", ".h4-checks/build-env.test.ts"]) assert.equal(isToolState(p, ctx), false, p);
+	assert.equal(isToolState(".serena/y", { tracked: new Set(), before: undefined }), false, "no trusted baseline, no exclusion");
+	assert.equal(isToolState(".serena/y", { tracked: undefined, before: new Map() }), false, "no trusted tracked set, no exclusion");
 });

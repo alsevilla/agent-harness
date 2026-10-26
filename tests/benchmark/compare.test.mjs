@@ -208,3 +208,23 @@ test("results from the previous schema are not comparable with this schema", asy
 	assert.equal(c.verdict, "INCONCLUSIVE");
 	assert.ok(c.inconclusive.some((r) => /schemaVersion/.test(r)));
 });
+
+test("a different measurement exclusion policy (or one side lacking it) is INCONCLUSIVE: policies are never silently mixed", async () => {
+	const base = await run([task("H1")]);
+	const cand = await run([task("H1")]);
+	const withPolicy = (r, tool) => ({ ...r, config: { ...r.config, measurementPolicy: { toolState: tool } } });
+	const pol = { id: "p", roots: [".serena/"] };
+	for (const [a, b] of [[pol, null], [null, pol], [pol, { ...pol, roots: [".other/"] }]]) {
+		const c = compareResults(withPolicy(base, a), withPolicy(cand, b));
+		assert.equal(c.verdict, "INCONCLUSIVE");
+		assert.ok(c.inconclusive.some((r) => /measurement exclusion policy/.test(r)), c.inconclusive.join("\n"));
+	}
+	assert.ok(!compareResults(withPolicy(base, pol), withPolicy(cand, pol)).inconclusive.some((r) => /measurement exclusion policy/.test(r)));
+});
+
+test("a schema 4 result is INCONCLUSIVE against a schema 5 result", async () => {
+	const base = await run([task("H1")]);
+	const c = compareResults({ ...base, schemaVersion: "harness-benchmark-result/4" }, await run([task("H1")]));
+	assert.equal(c.verdict, "INCONCLUSIVE");
+	assert.ok(c.inconclusive.some((r) => /schemaVersion/.test(r)));
+});

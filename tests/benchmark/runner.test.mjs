@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runBenchmark, parseReviewOutput, boundedDiagnostic } from "./lib/runner.mjs";
 import { assistant, subagent, writerLaunch, u, task, manifest, root, fakeWorkspace, gate, fakeAdapter, fixMain, fixtureConfig } from "./fixtures/fake-runtime.mjs";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -136,7 +137,7 @@ test("start context is captured before each task's first main prompt, so a share
 
 test("the result records schema, mode, order, config, environment, manifest digest, synthetic flag", async () => {
 	const r = await run({ tasks: [task("H1"), task("H2")], adapter: fakeAdapter({ mainScript: fixMain }), mode: "long-fixed" });
-	assert.equal(r.schemaVersion, "harness-benchmark-result/4");
+	assert.equal(r.schemaVersion, "harness-benchmark-result/5");
 	assert.equal(r.expectedWriter, "general-worker");
 	assert.equal(r.mode, "long-fixed");
 	assert.deepEqual(r.order, ["H1", "H2"]);
@@ -356,4 +357,66 @@ test("the diagnostic cap is required config: a missing or invalid cap is refused
 	await assert.rejects(runWith({ tasks: [task("H1")], adapter: ad, config: noCap }), /diagnosticChars/);
 	await assert.rejects(runWith({ tasks: [task("H1")], adapter: ad, config: fixtureConfig({ diagnosticChars: { value: -1, source: "x" } }) }), /diagnosticChars/);
 	assert.equal(ad.log.length, 0);
+});
+
+// --- H4 method fix: per-round telemetry and the generated tool-state measurement policy ---
+test("each round records its index, assistant turns, writer launches and tool call counts (no arguments, no inference from totals)", async () => {
+	const ad = fakeAdapter({ mainScript: (s, text) => text.startsWith("REWORK")
+		? { events: [{ type: "tool", name: "read", isError: false }, { type: "tool", name: "read", isError: true, errorText: "nope" }, assistant(u(1, 1)), assistant(u(1, 1))], text: "r1" }
+		: { events: [{ type: "tool", name: "subagent", isError: false }, writerLaunch(), writerLaunch(), assistant(u(1, 1))], text: "r0" } });
+	const r = await runWith({ tasks: [task("H1", { maxReworkRounds: 1 })], adapter: ad });
+	assert.deepEqual(r.tasks[0].mainDiagnostics.rounds, [
+		{ round: 0, assistantTurns: 1, writerLaunches: 2, toolCalls: 1, tools: { subagent: { calls: 1, errors: 0 } } },
+		{ round: 1, assistantTurns: 2, writerLaunches: 0, toolCalls: 2, tools: { read: { calls: 2, errors: 1 } } },
+	]);
+});
+
+const serenaRun = async ({ files, workspace, adapterFix = true }) => {
+	const ad = fakeAdapter({ mainScript: (s) => {
+		if (adapterFix) fs.writeFileSync(path.join(s.cwd, "agent/work.txt"), "fixed");
+		for (const [p, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(s.cwd, p)), { recursive: true }); fs.writeFileSync(path.join(s.cwd, p), text); }
+		return { events: [writerLaunch(), assistant(u(1, 1))], text: "done" };
+	} });
+	return runWith({ tasks: [task("H1", { maxReworkRounds: 0 })], adapter: ad, workspace });
+};
+const sha256 = (t) => crypto.createHash("sha256").update(t).digest("hex");
+
+test("generated untracked root .serena/ state is excluded from scored changes but reported with paths and hashes and kept in the raw inventory", async () => {
+	const r = await serenaRun({ files: { ".serena/cache/a.pkl": "A", ".serena/project.local.yml": "B" }, workspace: fakeWorkspace(root()) });
+	const t = r.tasks[0];
+	assert.equal(t.accepted, true);
+	assert.deepEqual(t.changedFiles.unrelated, []);
+	assert.deepEqual(t.changedFiles.changed, ["agent/work.txt"]);
+	assert.deepEqual(t.changedFiles.toolStateChanges, [{ path: ".serena/cache/a.pkl", sha256: sha256("A") }, { path: ".serena/project.local.yml", sha256: sha256("B") }]);
+	assert.deepEqual(t.changedFiles.inventory.added, [".serena/cache/a.pkl", ".serena/project.local.yml"], "every raw path stays visible");
+	assert.deepEqual(r.config.measurementPolicy.toolState.roots, [".serena/"], "the exclusion policy is part of the comparable config");
+});
+
+test("real out-of-scope artifacts and look-alike paths are never excluded: they fail the task as unrelated beside .serena state", async () => {
+	const files = { ".serena/x": "x", ".h4-checks/build-env.test.ts": "1", "parse.out": "2", "parse.err": "3", ".serena2/x": "4", "sub/.serena/x": "5", ".serenax": "6", "random.log": "7" };
+	const r = await serenaRun({ files, workspace: fakeWorkspace(root()) });
+	const t = r.tasks[0];
+	assert.equal(t.accepted, false);
+	assert.deepEqual(t.changedFiles.unrelated, [".h4-checks/build-env.test.ts", ".serena2/x", ".serenax", "parse.err", "parse.out", "random.log", "sub/.serena/x"]);
+	assert.deepEqual(t.changedFiles.toolStateChanges.map((x) => x.path), [".serena/x"]);
+	assert.equal(t.changedFiles.inventory.added.length, 8);
+});
+
+test("a tracked or preexisting .serena file cannot hide: a modified or removed one is an unrelated change, not tool state", async () => {
+	for (const act of [(p) => fs.writeFileSync(p, "edited"), (p) => fs.rmSync(p)]) {
+		const ws = fakeWorkspace(root(), { tracked: { ".serena/project.yml": "tracked" } });
+		const ad = fakeAdapter({ mainScript: (s) => { fs.writeFileSync(path.join(s.cwd, "agent/work.txt"), "fixed"); act(path.join(s.cwd, ".serena/project.yml")); return { events: [writerLaunch(), assistant(u(1, 1))], text: "d" }; } });
+		const r = await runWith({ tasks: [task("H1", { maxReworkRounds: 0 })], adapter: ad, workspace: ws });
+		assert.deepEqual(r.tasks[0].changedFiles.unrelated, [".serena/project.yml"]);
+		assert.deepEqual(r.tasks[0].changedFiles.toolStateChanges, []);
+		assert.equal(r.tasks[0].accepted, false);
+	}
+});
+
+test("a workspace without a tool-state policy excludes nothing and records no exclusion", async () => {
+	const ws = fakeWorkspace(root());
+	delete ws.toolStatePolicy;
+	const r = await serenaRun({ files: { ".serena/x": "x" }, workspace: ws });
+	assert.deepEqual(r.tasks[0].changedFiles.unrelated, [".serena/x"]);
+	assert.equal(r.config.measurementPolicy.toolState, null);
 });

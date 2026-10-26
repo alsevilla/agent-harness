@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { runBenchmark } from "./lib/runner.mjs";
-import { assistant, u, task, manifest, root, fakeWorkspace, gate, fakeAdapter, fixtureConfig, writerLaunch } from "./fixtures/fake-runtime.mjs";
+import { assistant, u, task, manifest, root, fakeWorkspace, gate, fakeAdapter, fixtureConfig, writerLaunch, subagent } from "./fixtures/fake-runtime.mjs";
 
 const run = (opts) => runBenchmark({ manifest: manifest(opts.tasks), mode: opts.mode ?? "fresh", adapter: opts.adapter, workspace: fakeWorkspace(root()), acceptance: gate, config: opts.config ?? fixtureConfig() });
 const fix = (s) => fs.writeFileSync(path.join(s.cwd, "agent/work.txt"), "fixed");
@@ -184,4 +184,92 @@ test("a stopped round closes its session at once (even a shared one) and records
 	const r3 = await run({ tasks: [task("H1")], adapter: bad, mode: "long-fixed" });
 	assert.equal(r3.status, "failed");
 	assert.match(r3.error, /shutdown_unconfirmed/);
+});
+
+// --- C6 (cumulative writer): the measured expected writer is required once per TASK, not once per round ---
+const runTasks = (tasks, adapter, workspace = fakeWorkspace(root())) => runBenchmark({ manifest: manifest(tasks), mode: "fresh", adapter, workspace, acceptance: gate, config: fixtureConfig() });
+const rework = (text) => text.startsWith("REWORK");
+// H1 never gets fixed (the writer ran in round 0 only); H2 is fixed by its own writer.
+const reworkScript = (round1) => (s, text) => {
+	if (s.taskId === "H2") { fix(s); return { events: [writerLaunch(0.02), assistant(u(1, 1, 0, 0, 0.01))], text: "h2" }; }
+	return rework(text) ? round1(s) : { events: [writerLaunch(0.03), assistant(u(10, 2, 0, 0, 0.1))], text: "tried" };
+};
+async function noWriterRework(round1) {
+	const ad = fakeAdapter({ mainScript: reworkScript(round1) });
+	return { r: await runTasks([task("H1", { maxReworkRounds: 1 }), task("H2")], ad), ad };
+}
+const assertScoredFalseAndNextRuns = (r) => {
+	assert.equal(r.status, "complete");
+	const t = r.tasks[0];
+	assert.equal(t.status, "completed");
+	assert.equal(t.accepted, false, "a genuinely unfixed quality failure at the cap is scored false");
+	assert.equal(t.invalid, undefined);
+	assert.equal(t.reworkRounds, 1);
+	assert.equal(t.acceptance.cycles.length, 2);
+	assert.equal(t.reviewer.cycles.length, 2);
+	assert.equal(r.tasks.length, 2, "the next task runs");
+	assert.equal(r.tasks[1].accepted, true);
+	assert.deepEqual(r.notRun, []);
+	assert.equal(t.delegation.writerLaunches, 1, "the writer ledger is the round 0 launch only: nothing is added or invented");
+	assert.equal(t.worker.launches, 1);
+	assert.ok(Math.abs(t.worker.cost.total - 0.03) < 1e-12);
+};
+
+test("writer in round 0 then an idle rework turn is valid: completed, scored false at the cap, next task runs, counted exactly", async () => {
+	const { r } = await noWriterRework(() => ({ events: [assistant(u(4, 1, 0, 0, 0.04))], text: "nothing to do" }));
+	assertScoredFalseAndNextRuns(r);
+	const t = r.tasks[0];
+	assert.equal(t.main.turns, 2);
+	assert.ok(Math.abs(t.main.cost.total - 0.14) < 1e-12, `main 0.10 + idle rework 0.04, got ${t.main.cost.total}`);
+	assert.equal(t.reworkTurns, 1, "the idle rework turn is the rework ledger");
+	assert.deepEqual(t.mainDiagnostics.rounds.map((x) => [x.round, x.assistantTurns, x.writerLaunches]), [[0, 1, 1], [1, 1, 0]]);
+	const sumTurns = r.tasks.reduce((s, x) => s + x.main.turns + x.worker.turns + x.reviewer.usage.turns, 0);
+	assert.equal(r.totals.endToEnd.turns, sumTurns, "end to end sums exactly the recorded parts");
+});
+
+test("writer in round 0 then a debugger-only rework is valid and the debugger launch is recorded with its actual role", async () => {
+	const { r } = await noWriterRework(() => ({ events: [subagent(0.01, "debugger"), assistant(u(4, 1, 0, 0, 0.04))], text: "diagnosed" }));
+	// the debugger is a measured child (worker ledger) but not the writer
+	assert.equal(r.status, "complete");
+	const t = r.tasks[0];
+	assert.equal(t.status, "completed");
+	assert.equal(t.accepted, false);
+	assert.equal(t.delegation.writerLaunches, 1);
+	assert.deepEqual(t.delegation.launches.map((l) => [l.round, l.agent]), [[0, "general-worker"], [1, "debugger"]]);
+	assert.equal(r.tasks.length, 2);
+	assert.equal(t.reviewer.cycles.length, 2);
+});
+
+test("writer in round 0 then a refusal-only rework is valid (a refusal launched nothing); the refusal is recorded and nothing is forced", async () => {
+	const { r } = await noWriterRework(() => ({ events: [refusal("blocked by guard: deletion needs the operator"), assistant(u(4, 1, 0, 0, 0.04))], text: "cannot delete" }));
+	assertScoredFalseAndNextRuns(r);
+	assert.equal(r.tasks[0].delegation.refusals.length, 1);
+	assert.equal(r.tasks[0].delegation.refusals[0].round, 1);
+});
+
+test("round 0 without a measured writer stays missing_delegation even if a later round would launch one", async () => {
+	const ad = fakeAdapter({ mainScript: (s) => ({ events: [subagent(0, "debugger"), assistant(u(1, 1))], text: "no writer" }) });
+	const r = await runTasks([task("H1", { maxReworkRounds: 1 })], ad);
+	assert.equal(r.tasks[0].invalid.kind, "missing_delegation");
+	assert.equal(r.tasks[0].reviewer.cycles.length, 0);
+	assert.equal(ad.log.filter((e) => e[3] === "rework").length, 0);
+});
+
+test("safeguards still apply in a rework round after an earlier writer: direct main write, failed child, no assistant turn, unsettled background", async () => {
+	const cases = [
+		["direct_main_write", () => ({ events: [{ type: "tool", name: "write", isError: false }, assistant(u(1, 1))], text: "x" })],
+		["launch_failed", () => ({ events: [{ type: "subagent", details: { mode: "single", results: [{ agent: "general-worker", exitCode: 1, stopReason: "error", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 } }] } }, assistant(u(1, 1))], text: "x" })],
+		["launch_failed", () => ({ events: [{ type: "subagent", toolCallId: "c", isError: false, text: "", details: { mode: "single", results: [] } }, assistant(u(1, 1))], text: "x" })],
+		["no_assistant_turn", () => ({ events: [], text: "" })],
+		["background_unsettled", () => ({ events: [receipt("bg-7"), assistant(u(1, 1))], text: "x" })],
+	];
+	for (const [kind, round1] of cases) {
+		const { r } = await noWriterRework(round1);
+		const t = r.tasks[0];
+		assert.equal(t.invalid.kind, kind, kind);
+		assert.equal(t.invalid.round, 1);
+		assert.equal(r.status, "invalid");
+		assert.deepEqual(r.notRun, ["H2"]);
+		assert.equal(t.reviewer.cycles.length, 1, "no review for the stopped round");
+	}
 });

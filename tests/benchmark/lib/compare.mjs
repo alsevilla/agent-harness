@@ -41,6 +41,7 @@ export function compareResults(base, cand) {
 		if (ids.length !== (r.order ?? []).length || JSON.stringify(ids) !== JSON.stringify(r.order ?? [])) inconclusive.push(`${name} has ${ids.length} task result(s) for ${(r.order ?? []).length} ordered task(s): tasks do not match the order`);
 		if (r.totals?.reviewer?.unavailableCycles > 0) inconclusive.push(`${name} has ${r.totals.reviewer.unavailableCycles} unavailable reviewer cycle(s)`);
 	}
+	if (sig(base.config?.measurementPolicy ?? null) !== sig(cand.config?.measurementPolicy ?? null)) inconclusive.push("measurement exclusion policy differs or is missing on one side");
 	const cap = (r) => r.config?.maxReworkRounds?.value ?? null;
 	if (cap(base) === null || cap(base) !== cap(cand)) inconclusive.push(`rework cap differs or is missing (${cap(base)} vs ${cap(cand)})`);
 	for (const role of ["main", "reviewer"]) {
