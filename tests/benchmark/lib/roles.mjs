@@ -112,7 +112,7 @@ export function resolveBenchmarkRoles({ candidateRoot, agentDir, main }) {
 	return {
 		main,
 		reviewer: resolveReviewerSpec(effective),
-		writer: { role: "general-worker", ...writerReworkDefault(effective), diagnosticChars: writerDiagnosticDefault(effective), roundSettleTimeoutMs: writerLimitDefault(effective, "roundSettleTimeoutMs"), shutdownGraceMs: writerLimitDefault(effective, "shutdownGraceMs") },
+		writer: { role: "general-worker", ...writerReworkDefault(effective), diagnosticChars: writerDiagnosticDefault(effective), roundSettleTimeoutMs: writerLimitDefault(effective, "roundSettleTimeoutMs"), shutdownGraceMs: writerLimitDefault(effective, "shutdownGraceMs"), taskTimeoutMs: writerLimitDefault(effective, "taskTimeoutMs") },
 		files: effective.files,
 	};
 }

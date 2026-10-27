@@ -1,6 +1,6 @@
 // Objective acceptance: the named test files run in the replay workspace with the suite's own toolchain (node or bun).
 // A missing file, a non-zero exit, any failing test or zero passing tests is NOT accepted.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -41,4 +41,35 @@ export function runAcceptance({ cwd, files, runner = "node", timeoutMs }) {
 		reason: accepted ? undefined : r.error ? `acceptance did not run: ${r.error.message}` : r.status !== 0 ? `exit ${r.status}` : fail > 0 ? `${fail} failing` : "no passing tests",
 		outputTail: out.slice(-3000),
 	};
+}
+
+// Async, owned acceptance run: killed (process tree) and drained when timeoutMs expires, so a hung suite cannot block the task deadline.
+export function runAcceptanceAsync({ cwd, files, runner = "node", timeoutMs, signal }) {
+	if (!Array.isArray(files) || files.length === 0 || files.some((f) => !fs.existsSync(path.join(cwd, f)))) return Promise.resolve(runAcceptance({ cwd, files, runner }));
+	const cmd = acceptanceCommand(runner, files);
+	const env = { ...process.env };
+	delete env.NODE_TEST_CONTEXT;
+	const started = Date.now();
+	return new Promise((resolve) => {
+		const child = spawn(cmd.exe, cmd.args, { cwd, env, windowsHide: true, detached: process.platform !== "win32" });
+		let out = ""; let timedOut = false; let spawnError = null;
+		const keep = (d) => { out = (out + d).slice(-(64 << 20)); };
+		child.stdout.on("data", keep); child.stderr.on("data", keep);
+		child.on("error", (e) => { spawnError = e; });
+		const killTree = () => {
+			if (process.platform === "win32") spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+			else try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+		};
+		// The task abort signal kills the same process tree; the promise still resolves only when the child has closed.
+		const onAbort = () => { timedOut = true; killTree(); };
+		if (signal?.aborted) onAbort(); else signal?.addEventListener("abort", onAbort, { once: true });
+		const timer = timeoutMs === undefined ? null : setTimeout(() => { timedOut = true; killTree(); }, Math.max(0, timeoutMs));
+		child.on("close", (status) => {
+			if (timer) clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			const pass = count(out, "pass", runner), fail = count(out, "fail", runner);
+			const accepted = !timedOut && !spawnError && status === 0 && fail === 0 && pass > 0;
+			resolve({ accepted, exitCode: status, pass, fail, runner, timedOut, durationMs: Date.now() - started, reason: accepted ? undefined : timedOut ? "acceptance timed out at the task deadline" : spawnError ? `acceptance did not run: ${spawnError.message}` : status !== 0 ? `exit ${status}` : fail > 0 ? `${fail} failing` : "no passing tests", outputTail: out.slice(-3000) });
+		});
+	});
 }

@@ -87,8 +87,8 @@ for (const v of ["0", "3"]) {
 }
 
 // Oracle R4: the settlement timeout and shutdown grace are explicit whole milliseconds >= 1 (refused before any run), recorded with their source.
-for (const flag of ["round-timeout-ms", "shutdown-grace-ms"]) {
-	for (const [label, tokens] of [["bare flag", [`--${flag}`]], ["zero", [`--${flag}`, "0"]], ["negative", [`--${flag}`, "-5"]], ["fraction", [`--${flag}`, "1.5"]]]) {
+for (const flag of ["round-timeout-ms", "shutdown-grace-ms", "task-timeout-ms"]) {
+	for (const [label, tokens] of [["bare flag", [`--${flag}`]], ["empty value", [`--${flag}`, ""]], ["zero", [`--${flag}`, "0"]], ["negative", [`--${flag}`, "-5"]], ["fraction", [`--${flag}`, "1.5"]], ["exponent", [`--${flag}`, "1e3"]], ["unsafe integer", [`--${flag}`, "9007199254740993"]]]) {
 		test(`refuses --${flag} ${label} before any run starts`, async () => {
 			const d = dir("refuse-ms");
 			const out = path.join(d, "result.json");
@@ -162,4 +162,38 @@ test("preflight fails when a native control is missing, the shutdown is unconfir
 
 test("the preflight command needs the explicit no-prompt confirmation before it touches the SDK", async () => {
 	await assert.rejects(quiet(() => main(["preflight", "--scratch", dir("pf"), "--pi-package-root", "/pi"])), /--confirm-no-prompt-preflight/);
+});
+
+// A3: the task deadline (20 minutes by default, grace reserved inside) with manifest task > run flag > roles.json default; synthetic adapter only, never a quality baseline.
+const oneTask = (d, over = {}) => { const file = path.join(d, "one.json"); fs.writeFileSync(file, JSON.stringify({ schemaVersion: REAL.schemaVersion, name: "cli-deadline", expectedWriter: REAL.expectedWriter, tasks: [{ ...REAL.tasks[0], ...over }] })); return file; };
+const runCli = async (d, extra, manifest) => { const out = path.join(d, "result.json"); await quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--max-rework-rounds", "0", ...extra, "--scratch", path.join(d, "work"), "--out", out, "--manifest", manifest])); return JSON.parse(fs.readFileSync(out, "utf8")); };
+
+test("the task deadline defaults to the 20 minute roles.json value with the 60 s grace reserved inside, and the source is recorded", async () => {
+	const d = dir("deadline-default");
+	const r = await runCli(d, [], oneTask(d));
+	assert.deepEqual(r.config.limits.taskTimeoutMs, { value: 1200000, source: "package roles.json role general-worker" });
+	assert.equal(r.synthetic, true);
+	const b = r.tasks[0].budget;
+	assert.deepEqual([b.taskTimeoutMs, b.graceMs, b.workCutoffOffsetMs, b.deadlineOffsetMs, b.source], [1200000, 60000, 1140000, 1200000, "package roles.json role general-worker"]);
+});
+
+test("--task-timeout-ms overrides the default and a manifest task override wins over the run flag, each with its source", async () => {
+	const flagDir = dir("deadline-flag");
+	const flagged = await runCli(flagDir, ["--task-timeout-ms", "777000"], oneTask(flagDir));
+	assert.deepEqual(flagged.config.limits.taskTimeoutMs, { value: 777000, source: "run flag --task-timeout-ms 777000" });
+	assert.deepEqual([flagged.tasks[0].budget.taskTimeoutMs, flagged.tasks[0].budget.source], [777000, "run flag --task-timeout-ms 777000"]);
+	const manDir = dir("deadline-manifest");
+	const won = await runCli(manDir, ["--task-timeout-ms", "777000"], oneTask(manDir, { taskTimeoutMs: 123456 }));
+	assert.deepEqual([won.tasks[0].budget.taskTimeoutMs, won.tasks[0].budget.source], [123456, `manifest task ${REAL.tasks[0].id}`]);
+	assert.equal(won.tasks[0].budget.workCutoffOffsetMs, 123456 - 60000);
+});
+
+test("an override with no work window after the grace, or an invalid manifest task limit, is refused before any scratch or result is written", async () => {
+	for (const [label, extra, over] of [["flag equal to the grace", ["--task-timeout-ms", "60000"], {}], ["manifest value below the grace", [], { taskTimeoutMs: 1000 }], ["manifest zero", [], { taskTimeoutMs: 0 }], ["manifest fraction", [], { taskTimeoutMs: 1.5 }], ["manifest string", [], { taskTimeoutMs: "1200000" }]]) {
+		const d = dir("deadline-refuse");
+		const out = path.join(d, "result.json");
+		await assert.rejects(quiet(() => main(["run", "--mode", "fresh", "--adapter", "synthetic", "--max-rework-rounds", "0", ...extra, "--scratch", path.join(d, "work"), "--out", out, "--manifest", oneTask(d, over)])), /taskTimeoutMs|task-timeout-ms|work window/, label);
+		assert.equal(fs.existsSync(out), false, `${label}: no result file`);
+		assert.equal(fs.existsSync(path.join(d, "work")), false, `${label}: no scratch work`);
+	}
 });

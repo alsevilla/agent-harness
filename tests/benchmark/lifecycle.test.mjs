@@ -23,7 +23,7 @@ test("a receipt plus its matching completion is a measured writer launch; worker
 	assert.equal(t.delegation.writerLaunches, 1);
 	assert.equal(t.worker.launches, 1);
 	assert.equal(t.worker.cost.total, 0.03);
-	assert.deepEqual(t.delegation.receipts, [{ round: 0, jobId: "bg-1", mode: "single", completed: true }]);
+	assert.deepEqual(t.delegation.receipts, [{ round: 0, jobId: "bg-1", mode: "single", roles: null, atMs: null, completed: true }], "requested roles and the offset are absent (null), not guessed, when the native receipt did not carry them");
 });
 
 test("duplicate completion events and a control-tool result for the same job never double count worker cost", async () => {
@@ -156,7 +156,7 @@ test("the round settlement timeout and shutdown grace are recorded with their so
 	ad.prompt = async (s, text, opts) => { if (s.role === "main") seen.push(opts?.settle?.timeoutMs); return prompt(s, text, opts); };
 	const r = await run({ tasks: [task("H1"), task("H2", { roundSettleTimeoutMs: 4321 })], adapter: ad });
 	assert.deepEqual(seen, [600000, 4321]);
-	assert.deepEqual(r.config.limits, { roundSettleTimeoutMs: { value: 600000, source: "fixture roles default" }, shutdownGraceMs: { value: 30000, source: "fixture roles default" } });
+	assert.deepEqual(r.config.limits, { roundSettleTimeoutMs: { value: 600000, source: "fixture roles default" }, shutdownGraceMs: { value: 30000, source: "fixture roles default" }, taskTimeoutMs: { value: 1200000, source: "fixture roles default" } });
 	assert.deepEqual(r.tasks[0].delegation.roundSettleTimeoutMs, { value: 600000, source: "fixture roles default" });
 	assert.deepEqual(r.tasks[1].delegation.roundSettleTimeoutMs, { value: 4321, source: "manifest task H2" });
 });
@@ -173,7 +173,7 @@ test("a stopped round closes its session at once (even a shared one) and records
 	const ad = fakeAdapter({ mainScript: () => ({ events: [receipt("bg-1"), assistant(u(1, 1))], text: "x" }) });
 	const r = await run({ tasks: [task("H1")], adapter: ad, mode: "long-fixed" });
 	assert.equal(r.tasks[0].status, "infrastructure");
-	assert.deepEqual(r.tasks[0].shutdown, { confirmed: true, ms: null, pendingJobs: [] });
+	assert.deepEqual(r.tasks[0].shutdown, { confirmed: true, ms: null, pendingJobs: [], pendingOperations: [] });
 	assert.equal(ad.log.filter((e) => e[0] === "close").length, 1, "the shared main closed at the stop, once");
 	const bad = fakeAdapter({ mainScript: (s) => { fix(s); return { events: [writerLaunch(), assistant(u(1, 1))], text: "done" }; } });
 	bad.closeSession = async () => ({ confirmed: false, ms: 5, pendingJobs: ["bg-3"] });
@@ -182,7 +182,9 @@ test("a stopped round closes its session at once (even a shared one) and records
 	assert.equal(r2.tasks[0].invalid.kind, "shutdown_unconfirmed");
 	assert.equal(r2.status, "invalid");
 	const r3 = await run({ tasks: [task("H1")], adapter: bad, mode: "long-fixed" });
-	assert.equal(r3.status, "failed");
+	// The final shared close is the final task's own: an unconfirmed one invalidates that task (same as fresh mode) instead of failing later in an outer cleanup.
+	assert.equal(r3.status, "invalid");
+	assert.equal(r3.tasks[0].invalid.kind, "shutdown_unconfirmed");
 	assert.match(r3.error, /shutdown_unconfirmed/);
 });
 
@@ -272,4 +274,61 @@ test("safeguards still apply in a rework round after an earlier writer: direct m
 		assert.deepEqual(r.notRun, ["H2"]);
 		assert.equal(t.reviewer.cycles.length, 1, "no review for the stopped round");
 	}
+});
+
+// F5: the final shared-session close belongs to the FINAL task: it is bounded by the remaining ORIGINAL task budget (not a fresh shutdown grace), its terminal audits
+// are folded into the owning task before totals are computed, and a close that hangs or overruns makes the task unfinished, never complete.
+const closeAudit = (cost) => ({ type: "audit", jobId: "bg-1", jobKey: "sess-A/bg-1", ownerSession: "sess-A", state: "completed", results: [{ agent: "general-worker", position: 0, exitCode: 0, usage: { input: 2, output: 1, turns: 1, cost } }] });
+const longConfig = (clock) => fixtureConfig({ clock: () => clock.now, limits: { taskTimeoutMs: { value: 200, source: "test" }, shutdownGraceMs: { value: 50, source: "test" }, roundSettleTimeoutMs: { value: 1000, source: "test" } } });
+const finalCloseAdapter = (clock, mainClose) => {
+	const ad = fakeAdapter({ mainScript: (s) => { fix(s); return { events: [writerLaunch(0), assistant(u(1, 1))], text: "done" }; } });
+	ad.mainCloseBudgets = [];
+	ad.closeSession = async (s, o) => { if (s.role === "review") { clock.now = 199; return { confirmed: true }; } ad.mainCloseBudgets.push(o?.budgetMs); return mainClose(clock); };
+	return ad;
+};
+for (const mode of ["long-fixed", "long-compacted"]) {
+	test(`${mode}: a final shared close that overruns the original deadline is unfinished (not complete) and its shutdown-only audit is still counted once`, async () => {
+		const clock = { now: 0 };
+		const ad = finalCloseAdapter(clock, (c) => { c.now += 49; return { confirmed: true, audits: [closeAudit(0.5)] }; }); // ignores its budget: 199 + 49 = 248 > 200
+		const r = await run({ tasks: [task("H1")], adapter: ad, mode, config: longConfig(clock) });
+		assert.ok(ad.mainCloseBudgets.every((b) => b <= 1 && b >= 0), `close budget is the remaining original budget, not a fresh grace: ${ad.mainCloseBudgets}`);
+		assert.equal(ad.mainCloseBudgets.length, 1);
+		assert.equal(r.status, "unfinished");
+		assert.equal(r.tasks[0].status, "budget_exhausted");
+		assert.equal(r.tasks[0].budget.stage, "session_close");
+		assert.equal(r.tasks[0].accepted, false);
+		assert.equal(r.tasks[0].worker.cost.total, 0.5);
+		assert.equal(r.totals.worker.cost.total, 0.5);
+	});
+	test(`${mode}: a final shared close that never returns is unconfirmed and unfinished; nothing restarts`, async () => {
+		const clock = { now: 0 };
+		const ad = finalCloseAdapter(clock, () => new Promise(() => {}));
+		const r = await run({ tasks: [task("H1")], adapter: ad, mode, config: longConfig(clock) });
+		assert.ok(ad.mainCloseBudgets[0] <= 1);
+		assert.equal(r.status, "unfinished");
+		assert.equal(r.tasks[0].status, "budget_exhausted");
+		assert.equal(r.tasks[0].shutdown.confirmed, false);
+		assert.equal(ad.log.filter((l) => l[0] === "open").length, 2, "one main and one reviewer session; no restart");
+	});
+	test(`${mode}: a final close inside the remaining budget completes and its shutdown-only audit lands on the owner`, async () => {
+		const clock = { now: 0 };
+		const ad = finalCloseAdapter(clock, (c) => { c.now += 0.5; return { confirmed: true, audits: [closeAudit(0.5)] }; });
+		const r = await run({ tasks: [task("H1")], adapter: ad, mode, config: longConfig(clock) });
+		assert.equal(r.status, "complete");
+		assert.equal(r.tasks[0].status, "completed");
+		assert.equal(r.tasks[0].worker.cost.total, 0.5);
+		assert.equal(r.totals.worker.cost.total, 0.5);
+		assert.equal(r.tasks[0].delegation.audits.length, 1);
+	});
+}
+
+test("an outer emergency close (a failure between tasks) is bounded by the active task's original deadline, never a fresh grace", async () => {
+	const clock = { now: 0 };
+	const ad = fakeAdapter({ mainScript: (s) => { fix(s); return { events: [writerLaunch(0), assistant(u(1, 1))], text: "done" }; } });
+	ad.compact = async () => { clock.now = 400; throw new Error("compaction boom"); }; // the second task's own deadline (clock start 0 + 200) has passed
+	const budgets = [];
+	ad.closeSession = async (s, o) => { if (s.role !== "review") budgets.push(o?.budgetMs); return { confirmed: true }; };
+	const r = await run({ tasks: [task("H1"), task("H2")], adapter: ad, mode: "long-compacted", config: longConfig(clock) });
+	assert.equal(r.status, "failed");
+	assert.deepEqual(budgets, [0]);
 });

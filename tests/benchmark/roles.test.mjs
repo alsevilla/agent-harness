@@ -38,6 +38,7 @@ const workerEntry = (extra = {}) => ({
 	diagnosticChars: 300,
 	roundSettleTimeoutMs: 1200000,
 	shutdownGraceMs: 60000,
+	taskTimeoutMs: 1200000,
 	...extra,
 });
 
@@ -134,7 +135,7 @@ test("resolveBenchmarkRoles records the main spec, reviewer spec, writer cap and
 	const r = resolveBenchmarkRoles({ candidateRoot, agentDir, main });
 	assert.equal(r.main.model, "anthropic/claude-sonnet-5-5");
 	assert.equal(r.reviewer.model, "openai-codex/gpt-6-luna");
-	assert.deepEqual(r.writer, { role: "general-worker", value: 2, source: "package roles.json role general-worker", diagnosticChars: { value: 300, source: "package roles.json role general-worker" }, roundSettleTimeoutMs: { value: 1200000, source: "package roles.json role general-worker" }, shutdownGraceMs: { value: 60000, source: "package roles.json role general-worker" } });
+	assert.deepEqual(r.writer, { role: "general-worker", value: 2, source: "package roles.json role general-worker", diagnosticChars: { value: 300, source: "package roles.json role general-worker" }, roundSettleTimeoutMs: { value: 1200000, source: "package roles.json role general-worker" }, shutdownGraceMs: { value: 60000, source: "package roles.json role general-worker" }, taskTimeoutMs: { value: 1200000, source: "package roles.json role general-worker" } });
 	assert.match(r.files.package.sha256, /^[0-9a-f]{64}$/);
 	assert.equal(r.files.user, null);
 });

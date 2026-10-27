@@ -19,6 +19,7 @@ function candidate() {
 	for (const rel of EXT) fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }), fs.writeFileSync(path.join(dir, rel), `// ${rel}\n`);
 	fs.mkdirSync(path.join(dir, "agent", "agents"), { recursive: true });
 	fs.writeFileSync(path.join(dir, "agent", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: fixture\n---\n\nFixture reviewer contract.\n");
+	fs.writeFileSync(path.join(dir, "agent", "agents", "general-worker.md"), "---\nname: general-worker\ndescription: fixture\n---\n\nFixture writer.\n"); // the registered writer role the fake foreground result names
 	return dir;
 }
 

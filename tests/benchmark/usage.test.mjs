@@ -79,3 +79,53 @@ test("a measured child is counted; a failed sibling is listed separately and mak
 	assert.equal(t.status, "partial");
 	assert.equal(t.cost.total, null);
 });
+
+test("an incomplete cost keeps total null but retains the known priced subtotal", async () => {
+	const { emptyLedger, addUsage, ledgerTotals } = await import("./lib/usage.mjs");
+	const l = emptyLedger("model");
+	addUsage(l, { input: 1, output: 1, cost: { total: 0.1 } });
+	addUsage(l, undefined);
+	const c = ledgerTotals(l).cost;
+	assert.equal(c.total, null);
+	assert.equal(c.knownPricedSubtotal, 0.1);
+});
+
+// --- Scope B: exactly-once terminal accounting with stable identity and honest unknowns ---
+import { addAuditUsage, markUnknown } from "./lib/usage.mjs";
+const res = (position, cost, turns = 1) => ({ position, agent: "general-worker", usage: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0, cost, turns } });
+const audit = (jobKey, results, state = "completed") => ({ type: "audit", jobKey, state, results });
+
+test("a measured 0.1 worker plus an unknown one keeps total null, the 0.1 subtotal, and names the unresolved ids with a reason", () => {
+	let l = addAuditUsage(emptyLedger("worker"), audit("s1/bg-1", [res(0, 0.1)]));
+	markUnknown(l, "s1/bg-2", "completion_not_received");
+	const t = ledgerTotals(l);
+	assert.equal(t.cost.total, null);
+	assert.equal(t.cost.knownPricedSubtotal, 0.1);
+	assert.deepEqual(t.cost.unresolved, [{ id: "s1/bg-2", reason: "completion_not_received" }]);
+});
+
+test("two identical roles in one job are distinct positions and both count; the same job id in another session is a different job", () => {
+	let l = emptyLedger("worker");
+	addAuditUsage(l, audit("s1/bg-1", [res(0, 0.1), res(1, 0.1)]));
+	addAuditUsage(l, audit("s2/bg-1", [res(0, 0.25)]));
+	const t = ledgerTotals(l);
+	assert.equal(t.launches, 3);
+	assert.ok(Math.abs(t.cost.total - 0.45) < 1e-9);
+});
+
+test("an audit resolves the unknown that its own job left pending, and a terminal audit of an aborted job keeps its in-flight turn unknown", () => {
+	const l = emptyLedger("worker");
+	markUnknown(l, "s1/bg-1", "completion_not_received");
+	l.unreportedLaunches = 1;
+	addAuditUsage(l, audit("s1/bg-1", [res(0, 0.1)], "aborted"));
+	const t = ledgerTotals(l);
+	assert.equal(t.unreportedLaunches, 0, "the pending launch is replaced by its audited numbers, not kept as a second launch");
+	assert.equal(t.cost.knownPricedSubtotal, 0.1);
+	assert.equal(t.cost.total, null, "an aborted stream may hold unreported usage: never invented, never a complete total");
+	assert.deepEqual(t.cost.unresolved.map((u) => [u.id, u.reason]), [["s1/bg-1#0", "aborted_in_flight_usage_unknown"]]);
+});
+
+test("addLedgers keeps every unresolved entry", () => {
+	const a = markUnknown(emptyLedger("worker"), "a", "x"); const b = markUnknown(emptyLedger("worker"), "b", "y");
+	assert.deepEqual(ledgerTotals(addLedgers(a, b)).cost.unresolved.map((u) => u.id), ["a", "b"]);
+});

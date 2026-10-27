@@ -49,6 +49,7 @@ export function manifestErrors(manifest) {
 		if (t.maxReworkRounds !== undefined && !(Number.isInteger(t.maxReworkRounds) && t.maxReworkRounds >= 0)) errors.push(`${at}.maxReworkRounds must be a whole number >= 0`);
 		if (t.diagnosticChars !== undefined && !(Number.isInteger(t.diagnosticChars) && t.diagnosticChars >= 0)) errors.push(`${at}.diagnosticChars must be a whole number >= 0`);
 		if (t.roundSettleTimeoutMs !== undefined && !(Number.isInteger(t.roundSettleTimeoutMs) && t.roundSettleTimeoutMs >= 1)) errors.push(`${at}.roundSettleTimeoutMs must be a whole number of milliseconds >= 1`);
+		if (t.taskTimeoutMs !== undefined && !(Number.isInteger(t.taskTimeoutMs) && t.taskTimeoutMs >= 1)) errors.push(`${at}.taskTimeoutMs must be a whole number of milliseconds >= 1`);
 		// The brief is the task prompt's goal (a reconstructed contract, never the original request); when present it must say something.
 		if (t.brief !== undefined && !nonEmpty(t.brief)) errors.push(`${at}.brief must be a non-empty string`);
 		if (t.acceptanceRunner !== undefined && t.acceptanceRunner !== "node" && t.acceptanceRunner !== "bun") errors.push(`${at}.acceptanceRunner must be node or bun`);

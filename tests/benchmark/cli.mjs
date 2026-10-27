@@ -167,6 +167,7 @@ async function main(argv) {
 		const diagFlag = diagnosticCharsFlag(flags);
 		const roundFlag = millisFlag(flags, "round-timeout-ms");
 		const graceFlag = millisFlag(flags, "shutdown-grace-ms");
+		const taskFlag = millisFlag(flags, "task-timeout-ms");
 		const adapterName = requireFlag(flags, "adapter");
 		const scratch = scratchFor(flags, repo);
 		const out = requireFlag(flags, "out");
@@ -183,7 +184,7 @@ async function main(argv) {
 		const roles = resolveBenchmarkRoles({ candidateRoot: repo, agentDir: await adapter.agentDir(), main: await adapter.resolveMainSpec({ candidateRoot: repo }) });
 		const maxReworkRounds = reworkFlag ?? { value: roles.writer.value, source: roles.writer.source };
 		const diagnosticChars = diagFlag ?? { value: roles.writer.diagnosticChars.value, source: roles.writer.diagnosticChars.source };
-		const limits = { roundSettleTimeoutMs: roundFlag ?? roles.writer.roundSettleTimeoutMs, shutdownGraceMs: graceFlag ?? roles.writer.shutdownGraceMs };
+		const limits = { roundSettleTimeoutMs: roundFlag ?? roles.writer.roundSettleTimeoutMs, shutdownGraceMs: graceFlag ?? roles.writer.shutdownGraceMs, taskTimeoutMs: taskFlag ?? roles.writer.taskTimeoutMs };
 		const resources = resourcesFor(adapterName, repo, await adapter.agentDir());
 		const config = { limits, resources, maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
 		const selection = { tasks: manifest.tasks.map((t) => t.id), fullTaskCount: fullManifest.tasks.length };

@@ -1,15 +1,72 @@
 // Benchmark runner: fixed-order manifest, three session policies, per-task accounting.
 // It drives an injected adapter (Pi SDK or synthetic) and a workspace; all session creation goes through that adapter.
-import { runAcceptance } from "./acceptance.mjs";
+import { runAcceptanceAsync } from "./acceptance.mjs";
 import { validateManifest, manifestDigest } from "./manifest.mjs";
-import { addUsage, addWorkerUsage, emptyLedger, ledgerTotals, addLedgers, sumCosts } from "./usage.mjs";
+import { addUsage, addWorkerUsage, addJobUsage, newJob, observeJob, markUnknown, emptyLedger, ledgerTotals, addLedgers, sumCosts } from "./usage.mjs";
 import { evaluatorOf, summarizeEvaluators } from "./evaluator.mjs";
 
 // v2: each reviewer cycle records its effective evaluator (compare requires it); totals.evaluator summarises it. v1 results are not comparable.
 // v3: method validity (infrastructure and methodinvalid stops, delegation and main diagnostics, per-round held-out baseline). v2 results are not comparable.
 // v5: per-round telemetry, cumulative per-task writer rule (classifyRound), and a recorded measurement exclusion policy for generated tool state. v4 results are not comparable.
 // v4: background receipts, refusals and completions are distinct; worker usage is counted once from completions; rounds settle before any snapshot; shutdown is confirmed. v3 results are not comparable.
-export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/5";
+// v6: one monotonic task deadline (config.limits.taskTimeoutMs, grace reserved inside), budget_exhausted tasks and the unfinished run status; task-relative native timeline, structured
+// receipt roles, hidden terminal audits folded into the worker ledger (total null + known subtotal + unresolved ids when any part is unknown). v5 results are not comparable.
+// Job identity is the owning session plus the native job id; each worker result keeps its position, so duplicate roles and reused job ids never merge.
+const keyOf = (session, jobId) => `${session ?? ""}/${jobId}`;
+// Run-level execution ownership (not task-local): every background job belongs to the task whose round first showed it (receipt or completion), whichever task later
+// receives its completion, audit or close record. Keys are namespaced by the session object, so the same job id in two fresh sessions is two jobs. A record of a job no
+// task can be proven to own is never charged to the current task: it is kept as an explicitly unattributed unknown.
+let sessionSeq = 0;
+const sessionNs = new WeakMap();
+const nsOf = (session) => { if (!session || typeof session !== "object") return "0"; if (!sessionNs.has(session)) sessionNs.set(session, String(++sessionSeq)); return sessionNs.get(session); };
+const sessionUsers = new WeakMap(); // session object -> task ids that prompted it
+const sendErrorsFolded = new WeakMap(); // session object -> adapter send_message error count already folded
+function createRegistry() {
+	const owners = new Map(); const tasks = new Map(); const orphan = emptyLedger("worker"); const orphans = []; const orphanJobs = new Map();
+	const registry = {
+		orphan, orphans, tasks,
+		enroll(taskId, rec, raw) { tasks.set(taskId, { rec, raw }); },
+		ownerOf: (ns, key) => owners.get(`${ns}|${key}`) ?? null,
+		knows: (taskId) => tasks.has(taskId),
+		claim(ns, key, taskId) {
+			const k = `${ns}|${key}`;
+			if (!owners.has(k)) { owners.set(k, taskId); tasks.get(taskId).raw.jobs.set(k, newJob(key)); }
+			return owners.get(k);
+		},
+		// One observation of a job, merged into the owning task's job (never summed) and its record refreshed when that task already finished.
+		observe(ns, key, taskId, obs, { completion = false, partial = false } = {}) {
+			const owner = registry.claim(ns, key, taskId);
+			const t = tasks.get(owner); const job = t.raw.jobs.get(`${ns}|${key}`);
+			observeJob(job, obs, { partial });
+			if (completion) job.completionSeen = true;
+			if (obs.type === "audit") noteHidden(t.rec, { audits: [obs] });
+			registry.refresh(owner);
+			return owner;
+		},
+		// The record's known child usage is kept (never any task's); the run total stays unknown because the owner is.
+		unattributed(key, reason, what, obs) {
+			markUnknown(orphan, key, reason);
+			if (!orphans.some((o) => o.jobKey === key && o.kind === what)) orphans.push({ jobKey: key, kind: what });
+			if (Array.isArray(obs?.results) && obs.results.length) { if (!orphanJobs.has(key)) orphanJobs.set(key, newJob(key)); observeJob(orphanJobs.get(key), obs, { partial: true }); }
+		},
+		orphanLedger() { const l = addLedgers(emptyLedger("worker"), orphan); for (const j of orphanJobs.values()) addJobUsage(l, j); return l; },
+		refresh(taskId) {
+			const t = tasks.get(taskId);
+			if (!t?.rec.worker) return; // the task is still running; its own finalization computes it
+			t.rec.worker = ledgerTotals(workerLedger(t.raw));
+			const seen = new Set([...t.raw.jobs.values()].filter((j) => j.completionSeen).map((j) => j.key));
+			for (const a of t.rec.delegation.audits) a.completionObserved = seen.has(a.jobKey);
+		},
+	};
+	return registry;
+}
+// A task's worker ledger: its foreground results plus every background job it owns. Built fresh each time, so a late record of an owned job replaces rather than adds.
+function workerLedger(raw) {
+	const l = addLedgers(emptyLedger("worker"), raw.worker);
+	for (const job of raw.jobs.values()) addJobUsage(l, job);
+	return l;
+}
+export const RESULT_SCHEMA_VERSION = "harness-benchmark-result/6";
 // No literal rework default: config.maxReworkRounds is resolved from roles.json (general-worker) or a run flag, with its source.
 export const MODES = {
 	fresh: { sessionPolicy: "new-per-task", compaction: "none" },
@@ -102,6 +159,38 @@ export function boundedDiagnostic(value, limit, { tail = false } = {}) {
 class RoundStop extends Error {
 	constructor(info) { super(`${info.class}: ${info.kind}`); this.info = info; }
 }
+// The task deadline's work cutoff passed during a stage; the owned session is then closed (abort and drain) and nothing further is scored.
+class BudgetStop extends Error {
+	constructor(stage) { super(`task budget exhausted during ${stage}`); this.stage = stage; }
+}
+
+// Resolves {value}, {error} or {timedOut: true} once ms elapse (timer always cleared). A timeout is not cancellation: callers abort and drain the owner.
+const race = (promise, ms) => new Promise((resolve) => {
+	const timer = setTimeout(() => resolve({ timedOut: true }), Math.max(0, ms));
+	Promise.resolve(promise).then((value) => { clearTimeout(timer); resolve({ value }); }, (error) => { clearTimeout(timer); resolve({ error }); });
+});
+// Owns every operation the runner abandoned at the cutoff. A lost Promise.race does not stop the underlying work, so each abandoned promise is kept here;
+// a value it produces late is disposed (late), and drain() waits for it only until the task deadline. An operation still pending then is reported (never
+// "closed"): the shutdown is unconfirmed and nothing further runs. A late rejection is swallowed after it settles.
+function createOwner() {
+	const ops = []; const noted = [];
+	return {
+		track(name, promise, late) {
+			const op = { name, settled: false, unconfirmed: false };
+			op.done = Promise.resolve(promise).then(async (value) => { try { const r = await late?.(value); if (r?.confirmed === false) op.unconfirmed = true; } catch { op.unconfirmed = true; } }, (e) => { if (e?.unconfirmed === true) op.unconfirmed = true; }).finally(() => { op.settled = true; });
+			ops.push(op);
+		},
+		note: (name) => { noted.push(name); },
+		async drain(ms) {
+			await race(Promise.all(ops.map((o) => o.done)), ms);
+			return [...ops.filter((o) => !o.settled || o.unconfirmed).map((o) => o.name), ...noted];
+		},
+	};
+}
+// A subprocess timeout must be a whole number of milliseconds (the monotonic clock is fractional).
+const wholeMs = (ms) => Math.max(1, Math.floor(ms));
+// Task budget precedence: manifest task override > run limit. The winning source is recorded.
+const taskBudgetOf = (task, limits) => (task.taskTimeoutMs !== undefined ? { value: task.taskTimeoutMs, source: `manifest task ${task.id}` } : limits.taskTimeoutMs);
 
 const WRITE_TOOLS = ["edit", "write"];
 
@@ -138,26 +227,39 @@ export function callKind(ev) {
 
 // One main round from its own events: assistant turns, tool names, counts and errors (never arguments), subagent receipts/refusals/completions and launches.
 function observeRound(events, limit) {
-	const tools = {}; const launches = []; const receipts = []; const refusals = []; const completed = new Set(); let assistantTurns = 0;
+	const tools = {}; const launches = []; const receipts = []; const refusals = []; const completed = new Set(); const completedKeys = new Set(); const timeline = []; const audits = []; const diagnostics = []; const ignoredAudits = []; let assistantTurns = 0;
+	const at = (ev) => (Number.isFinite(ev?.atMs) ? ev.atMs : null);
 	for (const ev of events ?? []) {
 		if (ev?.type === "assistant") assistantTurns++;
 		else if (ev?.type === "tool") {
 			const t = (tools[ev.name] ??= { calls: 0, errors: 0 });
 			t.calls++;
 			if (ev.isError) { t.errors++; const e = boundedDiagnostic(ev.errorText, limit).text; if (e !== null && t.firstError === undefined) t.firstError = e; }
+			if (ev.control) timeline.push({ type: "control", action: ev.control.action, target: ev.control.target ?? null, atMs: at(ev) });
 		} else if (ev?.type === "subagent") {
 			const kind = callKind(ev);
-			if (kind === "receipt") receipts.push({ jobId: ev.details.jobId, mode: typeof ev.details.mode === "string" ? ev.details.mode : null });
-			else if (kind === "results") launches.push(...launchRecords(ev.details.results, limit));
-			else if (kind === "refused") refusals.push({ text: boundedDiagnostic(ev.text, limit).text });
+			// Only the adapter's registry-validated roles; the raw details.roles is untrusted caller text and is never read here. rolesInvalid is a count.
+			const roles = Array.isArray(ev.roles) ? ev.roles : null;
+			if (kind === "receipt") { receipts.push({ jobId: ev.details.jobId, mode: typeof ev.details.mode === "string" ? ev.details.mode : null, roles, ...(Number.isInteger(ev.rolesInvalid) ? { rolesInvalid: ev.rolesInvalid } : {}), key: keyOf(ev.session, ev.details.jobId), atMs: at(ev) }); timeline.push({ type: "receipt", jobId: ev.details.jobId, roles, atMs: at(ev) }); }
+			else if (kind === "results") { launches.push(...launchRecords(ev.details.results, limit)); timeline.push({ type: "foreground", roles, atMs: at(ev) }); }
+			else if (kind === "refused") {
+				// A refusal that named a role the registry does not know quotes untrusted caller text: only the count is kept, never the text (the redactor cannot know what a name is).
+				const invalid = Number.isInteger(ev.rolesInvalid) && ev.rolesInvalid > 0 ? ev.rolesInvalid : 0;
+				refusals.push(invalid ? { text: null, rolesInvalid: invalid, reason: "unknown_role" } : { text: boundedDiagnostic(ev.text, limit).text }); timeline.push({ type: "refusal", atMs: at(ev) }); }
 			else launches.push(...launchRecords([], limit));
-		} else if (ev?.type === "completion") {
-			completed.add(ev.jobId);
+		} else if (ev?.type === "decision") timeline.push({ type: "decision", state: ev.state ?? null, requestId: ev.requestId ?? null, jobId: ev.jobId ?? null, atMs: at(ev) });
+		else if (ev?.type === "audit") { audits.push(ev); timeline.push({ type: "audit", jobId: ev.jobId ?? null, state: ev.state ?? null, atMs: at(ev) }); }
+		else if (ev?.type === "diagnostic") { diagnostics.push(ev); timeline.push({ type: "diagnostic", code: ev.code, jobId: ev.jobId ?? null, atMs: at(ev) }); }
+		else if (ev?.type === "audit_ignored") ignoredAudits.push({ jobId: ev.jobId ?? null, reason: ev.reason ?? null });
+		else if (ev?.type === "completion") {
+			completed.add(ev.jobId); completedKeys.add(ev.jobKey ?? keyOf(ev.session, ev.jobId));
+			timeline.push({ type: "completion", jobId: ev.jobId ?? null, state: ev.state ?? null, atMs: at(ev) });
 			launches.push(...launchRecords(ev.results, limit, { terminal: ev.state === "failed" || ev.state === "aborted", jobId: ev.jobId ?? null }));
 		}
 	}
 	const pendingJobs = [...new Set(receipts.map((r) => r.jobId))].filter((id) => !completed.has(id));
-	return { assistantTurns, tools, launches, receipts: receipts.map((r) => ({ ...r, completed: completed.has(r.jobId) })), refusals, pendingJobs };
+	const pendingKeys = [...new Set(receipts.map((r) => r.key))].filter((k) => !completedKeys.has(k));
+	return { assistantTurns, tools, launches, receipts: receipts.map(({ key, ...r }) => ({ ...r, completed: completed.has(r.jobId) })), refusals, pendingJobs, pendingKeys, timeline, audits, diagnostics, ignoredAudits };
 }
 
 // Method validity of one round, in order. Infrastructure (a launch with no child turn, or no assistant turn) stops the run and nothing is scored.
@@ -191,17 +293,87 @@ function noteRound(rec, diag, round, text, limit, expectedWriter) {
 	rec.delegation.launches.push(...diag.launches.map((l) => ({ round, ...l })));
 	rec.delegation.receipts.push(...diag.receipts.map((r) => ({ round, ...r })));
 	rec.delegation.refusals.push(...diag.refusals.map((r) => ({ round, ...r })));
-	if (diag.settlement) rec.delegation.settlements.push({ round, settled: diag.settlement.settled === true, timedOut: diag.settlement.timedOut === true, waitedMs: diag.settlement.waitedMs ?? null, pendingJobs: diag.settlement.pendingJobs ?? [] });
+	// The settlement keeps its task-relative offsets, the wait phase it ended in and what was pending (roles, last event) at the moment it gave up; absent values stay null.
+	if (diag.settlement) {
+		const s = diag.settlement;
+		rec.delegation.settlements.push({ round, settled: s.settled === true, timedOut: s.timedOut === true, waitedMs: s.waitedMs ?? null, pendingJobs: s.pendingJobs ?? [], startedAtMs: s.startedAtMs ?? null, endedAtMs: s.endedAtMs ?? null, snapshotAtMs: s.snapshotAtMs ?? null, lastPhase: s.lastPhase ?? null, phases: s.phases ?? [], pending: s.pending ?? [] });
+	}
+	rec.delegation.timeline.push(...diag.timeline.map((e) => ({ round, ...e })));
+	noteHidden(rec, { audits: diag.audits, diagnostics: diag.diagnostics, ignoredAudits: diag.ignoredAudits });
 	const writerLaunches = diag.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length;
 	rec.delegation.writerLaunches += writerLaunches;
 	// Per-round telemetry from counts only (no arguments, no reasoning), so nothing is inferred from task totals.
 	md.rounds.push({ round, assistantTurns: diag.assistantTurns, writerLaunches, toolCalls: Object.values(diag.tools).reduce((s, t) => s + t.calls, 0), tools: Object.fromEntries(Object.entries(diag.tools).map(([n, t]) => [n, { calls: t.calls, errors: t.errors }])) });
 }
 
-// Assistant turns feed the main ledger (and the rework ledger during a rework prompt). Worker usage is counted exactly once per launch: a foreground
-// subagent call by its toolCallId, a background job by its completion (never by its receipt or a later control result), and a pending receipt that never
-// completed counts as an unreported launch, so its cost is unknown rather than silently omitted. A refusal launched nothing.
-function absorb(events, { main, rework, worker, isRework, served, seen }, diag) {
+// Hidden-entry facts of a task: terminal audits (owner, state, and what the producer did with the completion: suppressed, submitted or submit_failed; submitted is an attempt,
+// delivery is proven only by an observed completion, completionObserved), delivery failures and ignored old-owner audits. Ids and codes only.
+function noteHidden(rec, { audits = [], diagnostics = [], ignoredAudits = [] }) {
+	const d = rec.delegation;
+	for (const a of audits) if (!d.audits.some((x) => x.jobKey === a.jobKey)) d.audits.push({ jobKey: a.jobKey, jobId: a.jobId ?? null, state: a.state ?? null, completionSuppressed: a.completionSuppressed === true, completion: a.completion ?? null, completionObserved: false, results: Array.isArray(a.results) ? a.results.length : 0 });
+	for (const f of diagnostics) if (!d.deliveryFailures.some((x) => x.jobId === f.jobId && x.code === f.code)) d.deliveryFailures.push({ jobId: f.jobId ?? null, code: f.code });
+	for (const i of ignoredAudits) if (!d.ignoredAudits.some((x) => x.jobId === i.jobId && x.reason === i.reason)) d.ignoredAudits.push({ jobId: i.jobId, reason: i.reason });
+}
+
+// After the session closed and every abandoned operation drained: each close record is routed to the task that OWNS its job (registry, then the adapter's originating-task stamp,
+// then the only task that ever prompted the session); a record no task can be proven to own is an explicit unknown, never the closing task's usage. A hidden audit (the only record of a
+// worker whose completion was suppressed by the shutdown generation) merges into its job. Runs before the closing task's totals are computed.
+function foldClose(registry, task, session, rec, closed) {
+	const ns = nsOf(session);
+	const users = sessionUsers.get(session);
+	const valid = (id) => (typeof id === "string" && registry.knows(id) ? id : null);
+	const resolve = (key, stamp) => registry.ownerOf(ns, key) ?? valid(stamp) ?? valid(closed.jobTasks?.[key]) ?? (users?.size === 1 ? valid([...users][0]) : null);
+	for (const key of closed.pendingKeys ?? (closed.pendingJobs ?? []).map((id) => keyOf(null, id))) {
+		const o = resolve(key);
+		if (o) registry.claim(ns, key, o); else registry.unattributed(key, "owner_unattributed", "pending");
+	}
+	for (const a of closed.audits ?? []) {
+		const o = resolve(a.jobKey, a.taskId);
+		if (o) registry.observe(ns, a.jobKey, o, a); else registry.unattributed(a.jobKey, "owner_unattributed", "audit", a);
+	}
+	for (const f of closed.diagnostics ?? []) {
+		const o = resolve(f.jobKey ?? keyOf(null, f.jobId), f.taskId);
+		if (o) noteHidden(registry.tasks.get(o).rec, { diagnostics: [f] }); else registry.orphans.push({ jobKey: f.jobKey ?? f.jobId, kind: "diagnostic" });
+	}
+	noteHidden(rec, { ignoredAudits: closed.ignoredAudits });
+	// The adapter's count is cumulative per session: only the part not yet folded is added, so a repeated close never counts the same error twice.
+	if (Number.isInteger(closed.sendMessageErrors) && closed.sendMessageErrors > 0) {
+		const prior = session ? (sendErrorsFolded.get(session) ?? 0) : 0;
+		if (session) sendErrorsFolded.set(session, Math.max(prior, closed.sendMessageErrors));
+		rec.delegation.uncorrelatedSendErrors += Math.max(0, closed.sendMessageErrors - prior);
+	}
+	if (closed.abortSnapshot) rec.budget.pendingAtAbort = closed.abortSnapshot;
+}
+
+// Routes one round's events by job ownership before anything is counted. A receipt or a first-seen completion claims its job for this task; a completion, audit or delivery
+// diagnostic of a job another task owns is merged into that task's job (its usage and launches are not this task's) and removed from this round's own events.
+function routeEvents(registry, task, ns, events, users) {
+	const own = [];
+	// Observation during this task is no ownership proof. The only fallback is exclusivity: a session that only one task ever prompted (same rule as foldClose).
+	const sole = users?.size === 1 && registry.knows([...users][0]) ? [...users][0] : null;
+	for (const ev of events ?? []) {
+		if (ev?.type === "tool" && ev.controlResults && ev.control?.target) {
+			// A retrieved result is not a launch or a delivery: its children are merged (partial evidence) into the owning job, once.
+			const k = keyOf(ev.session, ev.control.target); const o = registry.ownerOf(ns, k) ?? sole;
+			if (o) registry.observe(ns, k, o, { results: ev.controlResults }, { partial: true }); else registry.unattributed(k, "owner_unattributed", "control_result", { results: ev.controlResults });
+			own.push(ev); continue;
+		}
+		if (ev?.type === "subagent" && callKind(ev) === "receipt") { registry.claim(ns, keyOf(ev.session, ev.details.jobId), task.id); own.push(ev); continue; }
+		if (ev?.type !== "completion" && ev?.type !== "audit" && ev?.type !== "diagnostic") { own.push(ev); continue; }
+		const key = ev.jobKey ?? keyOf(ev.session, ev.jobId);
+		const owner = registry.ownerOf(ns, key) ?? (registry.knows(ev.taskId) ? ev.taskId : sole);
+		if (!owner) { if (ev.type === "diagnostic") registry.orphans.push({ jobKey: key, kind: "diagnostic" }); else registry.unattributed(key, "owner_unattributed", ev.type, ev); continue; }
+		if (ev.type === "diagnostic") { if (owner === task.id) own.push(ev); else noteHidden(registry.tasks.get(owner).rec, { diagnostics: [ev] }); continue; }
+		registry.observe(ns, key, owner, ev, { completion: ev.type === "completion" });
+		if (owner === task.id) own.push(ev);
+	}
+	return own;
+}
+
+// Assistant turns feed the main ledger (and the rework ledger during a rework prompt). Worker usage is counted exactly once per launch: a foreground subagent call by its
+// toolCallId; a background job is reconciled per child in the run registry (routeEvents), never by its receipt or a later control result, and a receipt that never
+// reported is an unknown job there, not an omitted one. A refusal launched nothing.
+function absorb(events, { main, rework, worker, isRework, served, seen }) {
 	for (const ev of events ?? []) {
 		if (ev?.type === "assistant") {
 			addUsage(main, ev.message?.usage);
@@ -213,14 +385,8 @@ function absorb(events, { main, rework, worker, isRework, served, seen }, diag) 
 			const key = `call:${ev.toolCallId ?? ""}`;
 			if (ev.toolCallId !== undefined) { if (seen.has(key)) continue; seen.add(key); }
 			addWorkerUsage(worker, ev.details);
-		} else if (ev?.type === "completion") {
-			const key = `job:${ev.jobId}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			addWorkerUsage(worker, { results: ev.results });
 		}
 	}
-	for (const jobId of diag?.pendingJobs ?? []) worker.unreportedLaunches++;
 }
 
 // Served provider/model as reported by the assistant message; a missing value stays absent, never guessed.
@@ -229,30 +395,58 @@ function noteServed(served, ev) {
 	if (served && (provider || model)) served.set(`${provider ?? "?"}/${model ?? "?"}`, { provider: provider ?? null, model: model ?? null });
 }
 
-// A fresh reviewer session per review, read-only tools, no extensions (see sdk-adapter).
-async function runReview({ adapter, dir, task, changed, gate, ledger, runtime, roleSpec }) {
-	const session = await adapter.openSession({ cwd: dir, role: "review", compactionEnabled: false, taskId: task.id, runtime, roleSpec });
+// A fresh reviewer session per review, read-only tools, no extensions (see sdk-adapter). Open, prompt and close all run under the task clock; a session that
+// opens after the cutoff is disposed by the owner, never prompted.
+async function runReview({ adapter, dir, task, changed, gate, ledger, runtime, roleSpec, stage, owner, closeMs }) {
+	const session = await stage("review_open", (ms, signal) => adapter.openSession({ cwd: dir, role: "review", compactionEnabled: false, taskId: task.id, runtime, roleSpec, signal }), { strict: true, late: (s) => adapter.closeSession(s, { budgetMs: closeMs() }) });
 	const served = new Map();
 	try {
-		const out = await adapter.prompt(session, reviewPrompt(task, changed, gate));
-		for (const ev of out?.events ?? []) {
-			if (ev?.type === "assistant") addUsage(ledger, ev.message?.usage);
-			noteServed(served, ev);
-		}
+		// Usage is counted inside the owned operation, so a turn that completes after the cutoff is still charged to the review.
+		const out = await stage("review", async (ms, signal) => {
+			const o = await adapter.prompt(session, reviewPrompt(task, changed, gate), { budgetMs: ms, signal });
+			for (const ev of o?.events ?? []) { if (ev?.type === "assistant") addUsage(ledger, ev.message?.usage); noteServed(served, ev); }
+			return o;
+		});
 		return { ...parseReviewOutput(out?.text), text: out?.text ?? "", identity: session.identity ?? null, served: [...served.values()] };
 	} finally {
-		await adapter.closeSession(session);
+		const closed = await closeRecorded(adapter, session, closeMs());
+		if (closed.confirmed === false) owner.note("review_close");
 	}
 }
 
-async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, limits, shared, compactionBefore }) {
+async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal }) {
 	const started = Date.now();
+	const budget = taskBudgetOf(task, limits);
+	const cutoffAt = startedAt + budget.value - limits.shutdownGraceMs.value;
+	const left = () => cutoffAt - clock();
+	const budgetRec = { taskTimeoutMs: budget.value, source: budget.source, graceMs: limits.shutdownGraceMs.value, workCutoffOffsetMs: budget.value - limits.shutdownGraceMs.value, deadlineOffsetMs: budget.value, exhausted: false, stage: null, stages: [] };
+	const deadlineLeft = () => Math.max(0, startedAt + budget.value - clock());
+	// Runs one stage under the shared task clock and the task abort signal. On the cutoff the signal fires and the still-running operation is handed to the
+	// owner (drained and its late value disposed before the task can be called closed); nothing here claims the timer stopped the work. strict: an operation
+	// that returns after the cutoff (for example synchronous work that overran) has its value disposed too, because nothing may continue from it.
+	const stage = async (name, fn, { late, strict = false } = {}) => {
+		const ms = left();
+		if (ms <= 0) throw new BudgetStop(name);
+		const from = clock() - startedAt;
+		progress?.({ task: task.id, round, stage: name, lastEvent: null });
+		const p = Promise.resolve().then(() => fn(ms, ac.signal));
+		const r = await race(p, ms);
+		budgetRec.stages.push({ stage: name, startOffsetMs: from, endOffsetMs: clock() - startedAt });
+		if (r.timedOut) { ac.abort(); owner.track(name, p, late); throw new BudgetStop(name); }
+		// A bounded subprocess (execFileSync timeout) that expired is the deadline, not a failure of the task.
+		if (r.error?.code === "ETIMEDOUT") { ac.abort(); throw new BudgetStop(name); }
+		if (r.error) throw r.error;
+		if (strict && left() <= 0) { ac.abort(); owner.track(name, Promise.resolve(r.value), late); throw new BudgetStop(name); }
+		return r.value;
+	};
+	let round = 0;
 	const dir = workspace.dirFor(mode, task);
+	const snap = () => stage("workspace_snapshot", () => workspace.snapshot(dir, { stop: () => left() <= 0 }), { strict: true });
 	// Diagnostic cap precedence: manifest task override > run cap (role default unless a run flag). The winning source is recorded.
 	const diagnostics = task.diagnosticChars !== undefined ? { value: task.diagnosticChars, source: `manifest task ${task.id}` } : diagnosticsRun;
 	// Round settlement timeout precedence: manifest task (packet) override > run flag > roles.json default; the winning source is recorded.
 	const settleTimeout = task.roundSettleTimeoutMs !== undefined ? { value: task.roundSettleTimeoutMs, source: `manifest task ${task.id}` } : limits.roundSettleTimeoutMs;
-	const raw = { main: emptyLedger("model"), rework: emptyLedger("model"), worker: emptyLedger("worker"), review: emptyLedger("model"), served: new Map(), seen: new Set() };
+	const raw = { main: emptyLedger("model"), rework: emptyLedger("model"), worker: emptyLedger("worker"), review: emptyLedger("model"), served: new Map(), seen: new Set(), jobs: new Map() };
 	const rec = {
 		id: task.id, order, tier: task.tier, category: task.category, subject: task.subject, commit: task.commit, parent: task.parent,
 		maxReworkRounds: task.maxReworkRounds !== undefined ? { value: task.maxReworkRounds, source: `manifest task ${task.id}` } : cap, status: "running", accepted: false, compactionBefore,
@@ -260,45 +454,63 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		startContext: null, reworkRounds: 0, reworkTurns: null, main: null, worker: null,
 		reviewer: { cycles: [], usage: null }, acceptance: { cycles: [] },
 		changedFiles: { changed: [], unrelated: [], missing: [] }, heldOutOverwritten: [], durationMs: null,
-		delegation: { expectedWriter, diagnosticChars: diagnostics, roundSettleTimeoutMs: settleTimeout, shutdownGraceMs: limits.shutdownGraceMs, writerLaunches: 0, launches: [], receipts: [], refusals: [], settlements: [] }, mainDiagnostics: { tools: {}, assistantTurns: 0, rounds: [], finalText: null },
+		budget: budgetRec,
+		delegation: { expectedWriter, diagnosticChars: diagnostics, roundSettleTimeoutMs: settleTimeout, shutdownGraceMs: limits.shutdownGraceMs, writerLaunches: 0, launches: [], receipts: [], refusals: [], settlements: [], timeline: [], audits: [], deliveryFailures: [], ignoredAudits: [], uncorrelatedSendErrors: 0 }, mainDiagnostics: { tools: {}, assistantTurns: 0, rounds: [], finalText: null },
 	};
+	// Task-relative native timeline: offsets on the shared task clock, and a compact event hook (ids, codes and offsets only) that updates the written progress.
+	const timeline = { startedAt };
+	const onEvent = (e) => progress?.({ task: task.id, round, lastEvent: { type: e.type, atMs: Number.isFinite(e.atMs) ? e.atMs : null, jobId: e.jobId ?? e.details?.jobId ?? null, ...(e.control ? { action: e.control.action } : {}), ...(e.state ? { state: e.state } : {}), ...(e.code ? { code: e.code } : {}) } });
+	registry.enroll(task.id, rec, raw);
 	let session = null;
 	try {
-		const prepared = await workspace.prepare(task, dir);
-		const before = await workspace.snapshot(dir);
+		if (preStop) { session = shared.session; throw new BudgetStop(preStop); }
+		const prepared = await stage("workspace_prepare", (ms, signal) => workspace.prepare(task, dir, { timeoutMs: wholeMs(ms), remainingMs: left, signal }), { strict: true });
+		const before = await snap();
 		const tracked = new Set(prepared?.paths ?? []);
 		const policy = workspace.toolStatePolicy ?? null;
 		if (spec.sessionPolicy === "new-per-task" || shared.session === null) {
-			session = await adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main, limits });
+			session = await stage("session_open", (ms, signal) => adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main, limits, signal, timeline, onEvent }), { strict: true, late: (s) => adapter.closeSession(s, { budgetMs: deadlineLeft() }) });
 			if (spec.sessionPolicy !== "new-per-task") shared.session = session;
 		} else session = shared.session;
+		if (!sessionUsers.has(session)) sessionUsers.set(session, new Set());
+		sessionUsers.get(session).add(task.id);
 		rec.models.main.opened = session.identity ?? null;
-		rec.startContext = contextOf(await adapter.startContext(session));
+		rec.startContext = contextOf(await stage("start_context", () => adapter.startContext(session)));
 		let prompt = taskPrompt(task);
-		let round = 0;
 		for (;;) {
 			// Held-out baseline: the state this round's main session receives (the previous round's restored tests), reset every round.
-			const prePrompt = await workspace.snapshot(dir);
-			const out = await adapter.prompt(session, prompt, { settle: { timeoutMs: settleTimeout.value } });
-			const diag = observeRound(out?.events, diagnostics.value);
-			diag.settlement = out?.settlement ?? null;
-			absorb(out?.events, { ...raw, isRework: round > 0 }, diag);
+			const prePrompt = await snap();
+			// Usage is absorbed inside the owned operation: a turn that completes after the cutoff is still counted, and never scored.
+			const { out, diag } = await stage("main_prompt", async (ms, signal) => {
+				// The settle round takes whole ms only; under one whole ms left is budget exhaustion, never a new 1 ms grant (wholeMs would grant one).
+				const whole = Math.floor(ms);
+				if (whole < 1) throw new BudgetStop("main_prompt");
+				const o = await adapter.prompt(session, prompt, { settle: { timeoutMs: Math.min(settleTimeout.value, whole) }, budgetMs: whole, signal, timeline, onEvent, taskId: task.id });
+				// Ownership first: another task's job is merged into that task, and only this task's own events are observed and counted below.
+				const events = routeEvents(registry, task, nsOf(session), o?.events, sessionUsers.get(session));
+				const d = observeRound(events, diagnostics.value);
+				d.settlement = o?.settlement ?? null;
+				absorb(events, { ...raw, isRework: round > 0 });
+				return { out: o, diag: d };
+			});
 			noteRound(rec, diag, round, out?.text, diagnostics.value, expectedWriter);
+			if ((diag.settlement?.timedOut === true || diag.settlement?.budgetExhausted === true) && left() <= 0) throw new BudgetStop("main_settlement");
 			const stop = classifyRound(diag, expectedWriter, { cumulativeWriterLaunches: rec.delegation.writerLaunches });
 			if (stop) throw new RoundStop({ ...stop, round });
-			const afterMain = await workspace.snapshot(dir);
-			await workspace.heldOut(task, dir);
-			const afterHeld = await workspace.snapshot(dir);
+			const afterMain = await snap();
+			await stage("held_out", (ms) => workspace.heldOut(task, dir, { timeoutMs: wholeMs(ms), remainingMs: left }), { strict: true });
+			const afterHeld = await snap();
 			const overwritten = task.acceptanceTests.filter((p) => afterMain.get(p) !== prePrompt.get(p)).sort();
 			const d = workspace.diff(before, afterHeld);
 			const everyChanged = [...d.added, ...d.modified, ...d.removed].filter((p) => !task.acceptanceTests.includes(p)).sort();
 			const toolState = policy ? d.added.filter((p) => everyChanged.includes(p) && policy.isToolState(p, { tracked, before })) : [];
 			const changed = everyChanged.filter((p) => !toolState.includes(p));
 			const unrelated = changed.filter((p) => !task.allowedFiles.includes(p));
-			const gate = await acceptance({ cwd: dir, files: task.acceptanceTests, runner: task.acceptanceRunner ?? "node" });
+			const gate = await stage("acceptance", (ms, signal) => acceptance({ cwd: dir, files: task.acceptanceTests, runner: task.acceptanceRunner ?? "node", timeoutMs: ms, signal }));
+			if (gate?.timedOut === true) throw new BudgetStop("acceptance");
 			const testsPassed = gate.accepted === true;
 			rec.acceptance.cycles.push({ round, testsPassed, exitCode: gate.exitCode ?? null, pass: gate.pass ?? null, fail: gate.fail ?? null, reason: gate.reason, outputTail: gate.outputTail, heldOutOverwritten: overwritten });
-			const review = await runReview({ adapter, dir, task, changed, gate: { accepted: testsPassed }, ledger: raw.review, runtime, roleSpec: roles.reviewer });
+			const review = await runReview({ adapter, dir, task, changed, gate: { accepted: testsPassed }, ledger: raw.review, runtime, roleSpec: roles.reviewer, stage, owner, closeMs: deadlineLeft });
 			rec.reviewer.cycles.push({ round, status: review.status, findings: review.findings, highCount: review.highCount, text: review.text, identity: review.identity, evaluator: evaluatorOf(review.identity), served: review.served });
 			rec.changedFiles = { changed, unrelated, missing: task.allowedFiles.filter((p) => !changed.includes(p)), toolStateChanges: toolState.map((p) => ({ path: p, sha256: afterHeld.get(p) })), inventory: { added: d.added, modified: d.modified, removed: d.removed } };
 			rec.heldOutOverwritten = [...overwritten].sort();
@@ -312,42 +524,65 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		rec.reworkRounds = round;
 		rec.status = "completed";
 	} catch (e) {
-		if (e instanceof RoundStop) { rec.status = e.info.class === "infrastructure" ? "infrastructure" : "method_invalid"; rec.invalid = e.info; }
+		if (e instanceof BudgetStop) {
+			rec.status = "budget_exhausted"; rec.accepted = false;
+			budgetRec.exhausted = true; budgetRec.stage = e.stage; budgetRec.exhaustedAtOffsetMs = clock() - startedAt;
+			// A review cut by the deadline is unknown, never zero findings; a stale pre-edit review is not carried forward as current.
+			if (e.stage === "review" || e.stage === "review_open") rec.reviewer.cycles.push({ round, status: "unknown", findings: [], highCount: null, text: "", identity: null, evaluator: evaluatorOf(null), served: [] });
+		} else if (e instanceof RoundStop) { rec.status = e.info.class === "infrastructure" ? "infrastructure" : "method_invalid"; rec.invalid = e.info; }
 		else if (e.infrastructure === true) { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: e.kind ?? "native_dispatch_unavailable" }; }
 		else rec.status = "error";
 		rec.error = e.message;
 	} finally {
 		// A stopped round closes its session at once (even a shared one): shutdown cancels and awaits every owning worker before the workspace can be reused.
-		const stopped = rec.status === "infrastructure" || rec.status === "method_invalid" || rec.status === "error";
-		if (session && (spec.sessionPolicy === "new-per-task" || stopped)) {
+		// Close is bounded by the task deadline, and every abandoned operation is then drained to that same deadline: only a session that closed AND an empty
+		// owner make the shutdown confirmed. Anything still pending is reported, never assumed stopped.
+		const stopped = rec.status === "infrastructure" || rec.status === "method_invalid" || rec.status === "error" || rec.status === "budget_exhausted";
+		if (stopped) ac.abort();
+		let closed = { confirmed: true, ms: null, pendingJobs: [] };
+		// The final task of a shared-session run closes its session HERE, under its own original deadline and ownership (not later in an outer cleanup with a fresh grace), so its
+		// terminal audits are folded before the task and run totals are final.
+		if (session && (spec.sessionPolicy === "new-per-task" || stopped || isFinal)) {
 			if (shared.session === session) shared.session = null;
-			const closed = await closeRecorded(adapter, session);
-			rec.shutdown = closed;
-			if (closed.confirmed === false && rec.status === "completed") { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "shutdown_unconfirmed" }; }
+			closed = await closeRecorded(adapter, session, deadlineLeft());
+			// A close that timed out or returned after the task deadline (an adapter that ignored its budget) is an overrun: unfinished, never a pass. Its audits are still folded below.
+			if (rec.status === "completed" && (closed.timedOut === true || clock() - startedAt > budget.value)) {
+				rec.status = "budget_exhausted"; rec.accepted = false;
+				budgetRec.exhausted = true; budgetRec.stage = "session_close"; budgetRec.exhaustedAtOffsetMs = clock() - startedAt;
+				rec.error = "task budget exhausted during session_close";
+			}
 		}
+		const pendingOperations = await owner.drain(deadlineLeft());
+		rec.shutdown = { confirmed: closed.confirmed && pendingOperations.length === 0, ms: closed.ms, pendingJobs: closed.pendingJobs, pendingOperations, ...(closed.error ? { error: closed.error } : {}) };
+		foldClose(registry, task, session, rec, closed);
+		if (rec.shutdown.confirmed === false && rec.status === "completed") { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "shutdown_unconfirmed" }; }
 		rec.models.main.served = [...raw.served.values()];
 		rec.reworkTurns = ledgerTotals(raw.rework).turns;
 		rec.main = ledgerTotals(raw.main);
-		rec.worker = ledgerTotals(raw.worker);
+		rec.worker = ledgerTotals(workerLedger(raw));
 		rec.reviewer.usage = ledgerTotals(raw.review);
 		rec.durationMs = Date.now() - started;
 	}
 	return { rec, raw };
 }
 
-// Closes a session and records whether shutdown confirmed that every owning background worker ended; an adapter without the report is unconfirmed-by-report only when it throws.
-async function closeRecorded(adapter, session) {
+// Closes a session and records whether shutdown confirmed that every owning background worker ended. The close is bounded by ms: a close that does not return
+// in time (or throws) is unconfirmed, because an adapter that cannot report is not proof that anything stopped.
+async function closeRecorded(adapter, session, ms) {
 	try {
-		const r = await adapter.closeSession(session);
-		return { confirmed: r?.confirmed !== false, ms: r?.ms ?? null, pendingJobs: r?.pendingJobs ?? [] };
+		const r = await race(adapter.closeSession(session, { budgetMs: ms }), ms);
+		if (r.timedOut) return { confirmed: false, timedOut: true, ms: null, pendingJobs: [], error: "session close did not return before the task deadline" };
+		if (r.error) throw r.error;
+		const v = r.value;
+		return { confirmed: v?.confirmed !== false, ms: v?.ms ?? null, pendingJobs: v?.pendingJobs ?? [], pendingKeys: v?.pendingKeys, audits: v?.audits, diagnostics: v?.diagnostics, ignoredAudits: v?.ignoredAudits, sendMessageErrors: v?.sendMessageErrors, abortSnapshot: v?.abortSnapshot };
 	} catch (e) {
 		return { confirmed: false, ms: null, pendingJobs: [], error: boundedDiagnostic(e.message, 300).text };
 	}
 }
 
 // Manual compaction between tasks: the only compaction in the compacted arm (auto-compaction is disabled in every arm).
-async function compactShared({ adapter, session, ledger }) {
-	const k = await adapter.compact(session);
+async function compactShared({ adapter, session, ledger, signal }) {
+	const k = await adapter.compact(session, { signal });
 	addUsage(ledger, k?.usage);
 	return { tokensBefore: k?.tokensBefore ?? null, usage: ledgerTotals(addUsage(emptyLedger("model"), k?.usage)) };
 }
@@ -358,7 +593,7 @@ const sumNullable = (values) => (values.some((v) => v === null || v === undefine
 export function computeTotals(records, raws, compactionLedger) {
 	const sum = (key, kind) => raws.reduce((acc, r) => addLedgers(acc, r[key]), emptyLedger(kind));
 	const main = ledgerTotals(sum("main", "model"));
-	const worker = ledgerTotals(sum("worker", "worker"));
+	const worker = ledgerTotals(raws.reduce((acc, r) => addLedgers(acc, workerLedger(r)), emptyLedger("worker")));
 	const reviewer = ledgerTotals(sum("review", "model"));
 	const rework = ledgerTotals(sum("rework", "model"));
 	const compaction = compactionLedger.calls === 0
@@ -395,7 +630,7 @@ export function computeTotals(records, raws, compactionLedger) {
 }
 
 // Runs the fixed-order manifest once in one mode. Writes the result after every task and at the end; never retries a task.
-export async function runBenchmark({ manifest, mode, adapter, workspace, acceptance = runAcceptance, config = {}, writeResult = () => {}, now = () => new Date().toISOString() }) {
+export async function runBenchmark({ manifest, mode, adapter, workspace, acceptance = runAcceptanceAsync, config = {}, writeResult = () => {}, now = () => new Date().toISOString() }) {
 	const spec = MODES[mode];
 	if (!spec) throw new Error(`unknown mode "${mode}"; use one of ${Object.keys(MODES).join(", ")}`);
 	validateManifest(manifest);
@@ -403,6 +638,13 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 	assertCap(config.diagnosticChars, "config.diagnosticChars");
 	assertLimit(config.limits?.roundSettleTimeoutMs, "config.limits.roundSettleTimeoutMs");
 	assertLimit(config.limits?.shutdownGraceMs, "config.limits.shutdownGraceMs");
+	assertLimit(config.limits?.taskTimeoutMs, "config.limits.taskTimeoutMs");
+	for (const t of manifest.tasks) {
+		const b = taskBudgetOf(t, config.limits);
+		assertLimit(b, `task ${t.id} taskTimeoutMs`);
+		if (b.value <= config.limits.shutdownGraceMs.value) throw new Error(`task ${t.id} taskTimeoutMs ${b.value} leaves no positive work window after the reserved shutdown grace ${config.limits.shutdownGraceMs.value}`);
+	}
+	const clock = config.clock ?? (() => performance.now());
 	if (!config.roles?.main || !config.roles?.reviewer) throw new Error("config.roles.main and config.roles.reviewer are required (the configured identities)");
 	if (!config.runtime?.fingerprint) throw new Error("config.runtime is required: the candidate runtime identity");
 	const desc = adapter.describe();
@@ -417,27 +659,60 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			runtime: { root: config.runtime.root ?? null, extensions: config.runtime.extensions ?? null, fingerprint: config.runtime.fingerprint, endFingerprint: null },
 		},
 		environment: { node: process.version, platform: process.platform, arch: process.arch, adapter: desc },
-		status: "running", startedAt: now(), finishedAt: null, compactionFailures: [], tasks: [], notRun: [], totals: null,
+		status: "running", startedAt: now(), finishedAt: null, compactionFailures: [], tasks: [], notRun: [], totals: null, progress: null,
 	};
+	// Event-driven progress (no polling): the current task, round, stage and last meaningful native event, written at stage starts and at those events.
+	const progress = (u) => { result.progress = { ...(result.progress ?? {}), ...u }; writeResult(result); };
 	const raws = [];
 	const compactionLedger = emptyLedger("model");
 	const shared = { session: null };
+	let activeDeadlineAt = null; // original deadline of the task being run: an outer emergency close may not grant itself a fresh grace beyond it
+	const registry = createRegistry();
 	try {
 		for (let i = 0; i < manifest.tasks.length; i++) {
 			const task = manifest.tasks[i];
 			let compactionBefore = null;
+			// The task clock starts before its setup compaction: between-task compaction belongs to the next task's budget.
+			const startedAt = clock();
+			activeDeadlineAt = startedAt + taskBudgetOf(task, config.limits).value;
+			let preStop = null;
+			const owner = createOwner();
+			const ac = new AbortController();
 			if (spec.compaction === "manual-between-tasks" && i > 0) {
 				try {
-					compactionBefore = await compactShared({ adapter, session: shared.session, ledger: compactionLedger });
+					const budget = taskBudgetOf(task, config.limits);
+					const cutoffAt = startedAt + budget.value - config.limits.shutdownGraceMs.value;
+					const ms = cutoffAt - clock();
+					if (ms <= 0) preStop = "compaction";
+					else {
+						const p = Promise.resolve().then(() => compactShared({ adapter, session: shared.session, ledger: compactionLedger, signal: ac.signal }));
+						const r = await race(p, ms);
+						// A timed out compaction is aborted and owned (its late usage is still counted); it is not assumed stopped.
+						if (r.timedOut) { ac.abort(); owner.track("compaction", p); preStop = "compaction"; }
+						else if (r.error) throw r.error;
+						else { compactionBefore = r.value; if (clock() >= cutoffAt) preStop = "compaction"; }
+					}
 				} catch (e) {
 					result.compactionFailures.push({ beforeTask: task.id, error: e.message });
 					throw e;
 				}
 			}
-			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, limits: config.limits, shared, compactionBefore });
+			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, limits: config.limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal: i === manifest.tasks.length - 1 });
 			result.tasks.push(rec);
 			raws.push(raw);
 			writeResult(result);
+			// A deliberate budget expiry is unfinished, never a pass. Fresh mode continues only after a confirmed drain; a long session is never silently recreated.
+			if (rec.status === "budget_exhausted") {
+				(result.budgetExhausted ??= []).push(task.id);
+				result.status = "unfinished";
+				result.error = `task ${task.id} budget exhausted during ${rec.budget.stage}`;
+				if (rec.shutdown?.confirmed !== true) {
+					result.shutdownUnconfirmed = { task: task.id, pendingOperations: rec.shutdown?.pendingOperations ?? [], pendingJobs: rec.shutdown?.pendingJobs ?? [] };
+					result.error += `; shutdown unconfirmed (${[...result.shutdownUnconfirmed.pendingOperations, ...result.shutdownUnconfirmed.pendingJobs].join(", ") || "close not confirmed"}): the run stops and no further task starts`;
+				}
+				if (spec.sessionPolicy === "new-per-task" && rec.shutdown?.confirmed === true) continue;
+				break;
+			}
 			// Infrastructure or methodinvalid: stop here (no further tasks), keep the partial results, and the run is not complete.
 			if (rec.status === "infrastructure" || rec.status === "method_invalid") {
 				result.status = "invalid";
@@ -453,12 +728,16 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 		result.error = e.message;
 	} finally {
 		if (shared.session) {
-			const closed = await closeRecorded(adapter, shared.session);
+			const closed = await closeRecorded(adapter, shared.session, Math.max(0, Math.min(config.limits.shutdownGraceMs.value, activeDeadlineAt - clock())));
 			shared.session = null;
 			if (closed.confirmed === false) { result.status = "failed"; result.error = "shutdown_unconfirmed: a background worker may still be running"; }
 		}
 	}
+	result.progress = null;
 	result.notRun = manifest.tasks.slice(result.tasks.length).map((t) => t.id);
+	for (const id of registry.tasks.keys()) registry.refresh(id);
+	// Records no task could be proven to own are explicit unknowns of the run, never any task's usage.
+	if (registry.orphan.unresolved.length) { raws.push({ main: emptyLedger("model"), rework: emptyLedger("model"), worker: registry.orphanLedger(), review: emptyLedger("model"), jobs: new Map() }); result.unattributed = registry.orphans; }
 	result.totals = computeTotals(result.tasks, raws, compactionLedger);
 	if (config.recheckRuntime) {
 		const end = config.recheckRuntime();

@@ -72,6 +72,13 @@ test("snapshot diffs report added, modified and removed files relative to the wo
 	assert.deepEqual(diffSnapshots(before, snapshot(dir)), { added: ["agent/c.ts"], modified: ["agent/a.ts"], removed: ["agent/b.ts"] });
 });
 
+test("snapshot honors a cooperative stop between files (an interrupted kernel read is not claimed)", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-snap-"));
+	write(dir, "a.ts", "1");
+	assert.throws(() => snapshot(dir, { stop: () => true }), (e) => e.code === "ETIMEDOUT");
+	assert.equal(snapshot(dir, { stop: () => false }).size, 1);
+});
+
 test("assertInside accepts only descendants of the scratch root", () => {
 	assert.doesNotThrow(() => assertInside("C:/s/x/y", "C:/s"));
 	assert.throws(() => assertInside("C:/other/y", "C:/s"), /outside/);
@@ -95,4 +102,52 @@ test("the policy is the untracked, newly generated root .serena/ only: tracked, 
 	for (const p of [".serena/tracked.yml", ".serena/pre.txt", ".serena2/x", ".serena", ".serenax/x", "sub/.serena/x", "agent/work.txt", "parse.out", ".h4-checks/build-env.test.ts"]) assert.equal(isToolState(p, ctx), false, p);
 	assert.equal(isToolState(".serena/y", { tracked: new Set(), before: undefined }), false, "no trusted baseline, no exclusion");
 	assert.equal(isToolState(".serena/y", { tracked: undefined, before: new Map() }), false, "no trusted tracked set, no exclusion");
+});
+
+// F6: timeoutMs is the TOTAL budget of one materialization; the remaining time is recomputed before every owned subprocess and nothing launches after the cutoff.
+import cp from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+const withGitDouble = (costMs, fn) => {
+	const orig = cp.execFileSync; const calls = []; const clock = { t: 0 };
+	cp.execFileSync = (exe, args, opts) => { if (exe !== "git") return orig(exe, args, opts); calls.push({ command: args[0], timeout: opts.timeout }); clock.t += costMs; return args[0] === "ls-tree" ? "agent/a.ts\0" : Buffer.from("abc blob 7\nparent-a\n"); };
+	syncBuiltinESMExports();
+	try { return fn(clock, calls); } finally { cp.execFileSync = orig; syncBuiltinESMExports(); }
+};
+const tmpScratch = () => fs.mkdtempSync(path.join(os.tmpdir(), "bench-scratch-"));
+
+test("sequential ls-tree and cat-file share one total budget: the second call gets the remainder, not another full window", () => {
+	withGitDouble(110, (clock, calls) => {
+		const scratch = tmpScratch(); const dest = path.join(scratch, "ws");
+		assert.throws(() => materializeHarness({ repo: "unused", commit: "c".repeat(40), dest, scratchRoot: scratch, timeoutMs: 119, now: () => clock.t }), (e) => e.code === "ETIMEDOUT");
+		assert.deepEqual(calls.map((c) => c.command), ["ls-tree", "cat-file"]);
+		assert.equal(calls[0].timeout, 119);
+		assert.equal(calls[1].timeout, 9);
+		assert.equal(fs.existsSync(dest), false, "an exhausted materialization writes nothing");
+	});
+});
+
+test("no subprocess is launched after the budget is spent, and a launched one always has a finite positive timeout (never 0 = unbounded)", () => {
+	withGitDouble(120, (clock, calls) => {
+		const scratch = tmpScratch();
+		assert.throws(() => materializeHarness({ repo: "unused", commit: "c".repeat(40), dest: path.join(scratch, "ws"), scratchRoot: scratch, timeoutMs: 119, now: () => clock.t }), (e) => e.code === "ETIMEDOUT");
+		assert.deepEqual(calls.map((c) => c.command), ["ls-tree"], "cat-file never launches");
+	});
+	withGitDouble(0, (clock, calls) => {
+		const scratch = tmpScratch();
+		clock.t = 0;
+		assert.throws(() => materializeHarness({ repo: "unused", commit: "c".repeat(40), dest: path.join(scratch, "ws"), scratchRoot: scratch, timeoutMs: 0.5, now: () => clock.t }), (e) => e.code === "ETIMEDOUT");
+		assert.equal(calls.length, 0, "a sub-millisecond remainder floors to 0 and must not launch an unbounded call");
+	});
+});
+
+test("the workspace passes the runner's remaining-time supplier to every owned subprocess", async () => {
+	let remaining = 100; const seen = [];
+	const orig = cp.execFileSync;
+	cp.execFileSync = (exe, args, opts) => { if (exe !== "git") return orig(exe, args, opts); seen.push(opts.timeout); remaining -= 40; return args[0] === "ls-tree" ? "agent/a.ts\0" : Buffer.from("abc blob 7\nparent-a\n"); };
+	syncBuiltinESMExports();
+	try {
+		const scratch = tmpScratch();
+		await createWorkspace({ repo: "unused", scratchRoot: scratch }).prepare({ parent: "d".repeat(40), id: "H1" }, path.join(scratch, "fresh", "H1"), { remainingMs: () => remaining });
+	} finally { cp.execFileSync = orig; syncBuiltinESMExports(); }
+	assert.deepEqual(seen, [100, 60]);
 });

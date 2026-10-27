@@ -12,10 +12,27 @@ export function assertInside(child, parent) {
 	return child;
 }
 
+// Time left for an owned blocking subprocess. timeoutMs is a TOTAL budget of one operation on the monotonic `now`; remainingMs (a supplier of the current ms left, for example the
+// runner's task clock) overrides it. Neither given: unbounded (direct callers only). The remainder is read again before EVERY subprocess; a remainder under 1 ms never launches one
+// (execFileSync treats a timeout of 0 as unbounded), it fails as ETIMEDOUT, which the runner treats as the task deadline.
+export function remainingOf({ timeoutMs, remainingMs, now = () => performance.now() } = {}) {
+	if (typeof remainingMs === "function") return remainingMs;
+	if (timeoutMs === undefined || timeoutMs === null) return null;
+	const end = now() + timeoutMs;
+	return () => end - now();
+}
+function subprocessTimeout(remaining, what) {
+	if (!remaining) return undefined;
+	const ms = remaining();
+	if (!(ms >= 1)) throw Object.assign(new Error(`${what} not started: the time budget is spent`), { code: "ETIMEDOUT" });
+	return Math.floor(ms);
+}
+
 // Harness-root paths of a commit, from the tree listing only. RFID-named paths belong to another project: they are never
 // read or written into a replay; they are reported by name (excluded) so the disclosure is explicit.
-export function listHarnessTree({ repo, commit, roots = HARNESS_ROOTS }) {
-	const out = execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", commit, "--", ...roots], { cwd: repo, encoding: "utf8", maxBuffer: 256 << 20 });
+export function listHarnessTree({ repo, commit, roots = HARNESS_ROOTS, timeoutMs, remainingMs, now }) {
+	const timeout = subprocessTimeout(remainingOf({ timeoutMs, remainingMs, now }), "git ls-tree");
+	const out = execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", commit, "--", ...roots], { cwd: repo, encoding: "utf8", maxBuffer: 256 << 20, timeout });
 	const all = out.split("\0").filter(Boolean).sort();
 	const excluded = all.filter((p) => /rfid/i.test(p));
 	const paths = all.filter((p) => !/rfid/i.test(p)).map(assertHarnessPath);
@@ -27,10 +44,11 @@ export function listHarnessPaths(args) {
 }
 
 // Blob bytes for explicit paths only. Missing or non-blob paths throw (a held-out test that does not exist is never a pass).
-export function readBlobs({ repo, commit, paths }) {
+export function readBlobs({ repo, commit, paths, timeoutMs, remainingMs, now }) {
 	const blobs = new Map();
 	if (paths.length === 0) return blobs;
-	const out = execFileSync("git", ["cat-file", "--batch"], { cwd: repo, input: paths.map((p) => `${commit}:${p}\n`).join(""), maxBuffer: 1 << 30 });
+	const timeout = subprocessTimeout(remainingOf({ timeoutMs, remainingMs, now }), "git cat-file");
+	const out = execFileSync("git", ["cat-file", "--batch"], { cwd: repo, input: paths.map((p) => `${commit}:${p}\n`).join(""), maxBuffer: 1 << 30, timeout });
 	let pos = 0;
 	for (const p of paths) {
 		const nl = out.indexOf(0x0a, pos);
@@ -53,10 +71,13 @@ function writeBlobs(blobs, dest) {
 }
 
 // Replaces dest with the harness roots of one commit (the parent state of a task).
-export function materializeHarness({ repo, commit, dest, scratchRoot, roots = HARNESS_ROOTS }) {
+// timeoutMs (or remainingMs) is the TOTAL budget of the whole materialization, shared by the sequential git reads; nothing is removed or written once it is spent.
+export function materializeHarness({ repo, commit, dest, scratchRoot, roots = HARNESS_ROOTS, timeoutMs, remainingMs, now }) {
 	assertInside(dest, scratchRoot);
-	const { paths, excluded } = listHarnessTree({ repo, commit, roots });
-	const blobs = readBlobs({ repo, commit, paths });
+	const remaining = remainingOf({ timeoutMs, remainingMs, now });
+	const { paths, excluded } = listHarnessTree({ repo, commit, roots, remainingMs: remaining });
+	const blobs = readBlobs({ repo, commit, paths, remainingMs: remaining });
+	subprocessTimeout(remaining, "workspace write");
 	fs.rmSync(dest, { recursive: true, force: true });
 	fs.mkdirSync(dest, { recursive: true });
 	writeBlobs(blobs, dest);
@@ -64,10 +85,10 @@ export function materializeHarness({ repo, commit, dest, scratchRoot, roots = HA
 }
 
 // Overwrites explicit paths with their content at a commit (held-out acceptance tests from the post-task tree).
-export function writeCommitFiles({ repo, commit, paths, dest, scratchRoot }) {
+export function writeCommitFiles({ repo, commit, paths, dest, scratchRoot, timeoutMs, remainingMs, now }) {
 	assertInside(dest, scratchRoot);
 	paths.forEach(assertHarnessPath);
-	writeBlobs(readBlobs({ repo, commit, paths }), dest);
+	writeBlobs(readBlobs({ repo, commit, paths, timeoutMs, remainingMs, now }), dest);
 	return { files: paths.length };
 }
 
@@ -80,11 +101,13 @@ function walk(dir, base = dir, found = []) {
 	return found;
 }
 
-// Relative POSIX path -> sha256 of every file under dir.
-export function snapshot(dir) {
+// Relative POSIX path -> sha256 of every file under dir. Synchronous: an optional stop() is checked between files (cooperative, so a single blocked read
+// still cannot be interrupted); a true stop throws ETIMEDOUT, which the runner treats as the task deadline.
+export function snapshot(dir, { stop } = {}) {
 	const map = new Map();
 	if (!fs.existsSync(dir)) return map;
 	for (const file of walk(dir)) {
+		if (stop?.()) throw Object.assign(new Error("workspace snapshot stopped at the task deadline"), { code: "ETIMEDOUT" });
 		const rel = path.relative(dir, file).split(path.sep).join("/");
 		map.set(rel, crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
 	}
@@ -118,8 +141,9 @@ export function createWorkspace({ repo, scratchRoot, roots = HARNESS_ROOTS }) {
 	return {
 		toolStatePolicy: TOOL_STATE_POLICY,
 		dirFor: (mode, task) => assertInside(path.join(scratchRoot, mode, mode === "fresh" ? task.id : "shared"), scratchRoot),
-		prepare: async (task, dir) => materializeHarness({ repo, commit: task.parent, dest: dir, scratchRoot, roots }),
-		heldOut: async (task, dir) => writeCommitFiles({ repo, commit: task.commit, paths: task.acceptanceTests, dest: dir, scratchRoot }),
+		// Git reads are bounded by the remaining task time (timeoutMs, kills the git child); the file writes are synchronous and cannot be interrupted, only checked after.
+		prepare: async (task, dir, o) => materializeHarness({ repo, commit: task.parent, dest: dir, scratchRoot, roots, timeoutMs: o?.timeoutMs, remainingMs: o?.remainingMs }),
+		heldOut: async (task, dir, o) => writeCommitFiles({ repo, commit: task.commit, paths: task.acceptanceTests, dest: dir, scratchRoot, timeoutMs: o?.timeoutMs, remainingMs: o?.remainingMs }),
 		snapshot,
 		diff: diffSnapshots,
 	};

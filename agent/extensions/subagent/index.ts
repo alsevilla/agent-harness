@@ -12,7 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { BackgroundWorkers, formatUsageSummary, LogicalUsage, RpcWorker, type UsageScope } from "./background.ts";
+import { BackgroundWorkers, formatUsageSummary, LogicalUsage, phase1Of, RpcWorker, type UsageScope } from "./background.ts";
 import { applyAdvice, dropConsultation, formatByRole, formatPlanner, formatTop, openConsultation, parseConsultationMeta, parseUsageArgs, type Advice, type ConsultationMeta, type UsageView } from "./usage-telemetry.ts";
 import { auxiliaryUsage, emptyMainState, formatMain, mainStateFromBranch, recordMainCompaction, recordMainTurn, type MainState } from "./main-usage.ts";
 import { WorkerMonitor } from "./monitor.ts";
@@ -74,6 +74,7 @@ const tierFields = (agent: SelectedAgent | undefined) => ({ ...(agent?.modelTier
 
 interface SingleResult {
 	workerId?: string;
+	phase1?: { taskId: string; attempts: number; firstTurnPromptTokens: number | null; peakPromptTokens: number | null };
 	modelTier?: ModelTier;
 	modelSlot?: ModelSlot; // present only when the run was explicitly started on the tier fallback
 	nodeId?: string; // DAG mode: node identity, stable even when agents repeat
@@ -96,7 +97,23 @@ interface SingleResult {
 	step?: number;
 }
 
+// Requested agent names of one native call, in request order (duplicates kept): structured receipt identity, so nothing parses the displayed English. Only names the
+// resolved registry knows are returned; any other requested name is counted (invalid), never copied, because a refused or mistyped name is untrusted caller text.
+export const requestedRoles = (p: any, known: (name: string) => boolean): { roles: string[]; invalid: number } => {
+	const names = [p?.agent, ...(p?.chain ?? []).map((s: any) => s?.agent), ...(p?.tasks ?? []).map((t: any) => t?.agent), ...(p?.dag ?? []).map((n: any) => n?.agent)].filter((a) => a !== undefined && a !== null);
+	const roles = names.filter((a): a is string => typeof a === "string" && known(a));
+	return { roles, invalid: names.length - roles.length };
+};
+// The identities Pi/this extension generate: job bg-N, worker <generation>:<n>, #N, decision request dec-<alnum 8..40> (decision-relay-state REQUEST_ID), consultation cons-N.
+// A target outside that grammar is caller text (possibly a secret), so it is omitted.
+const NATIVE_TARGET = /^(?:bg-\d{1,9}|\d{1,9}:\d{1,9}|#\d{1,9}|dec-[A-Za-z0-9]{8,40}|cons-\d{1,9})$/;
+// subagent_control metadata: the action enum and a native job/worker/request id only. Never the steer message, answer, basis, reference or any other body.
+export const controlDetails = (p: any): { action: string; target?: string } => ({ action: String(p?.action ?? ""), ...(typeof p?.target === "string" && NATIVE_TARGET.test(p.target) ? { target: p.target } : {}) });
+// Adds the safe control metadata to every result of the wrapped tool, error results included; the result text and any retained job details stay untouched.
+const withControlDetails = <T extends { execute: (...args: any[]) => Promise<any> }>(tool: T): T => ({ ...tool, execute: async (...args: any[]) => { const r = await tool.execute(...args); return { ...r, details: { ...(r?.details ?? {}), control: controlDetails(args[1]) } }; } });
 interface SubagentDetails {
+	roles?: string[]; // requested roles the registry resolved; rolesInvalid counts the others (never their text)
+	rolesInvalid?: number;
 	mode: "single" | "parallel" | "chain" | "dag";
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
@@ -222,7 +239,9 @@ async function runSingleAgent(
 	const logical = dispatchDefaults.usageScope ? new LogicalUsage(dispatchDefaults.usageScope, Boolean(dispatchDefaults.jobId), taskMeta(agents, agentName, dispatchDefaults.consultationId)) : undefined;
 	try {
 		const result = await runSingleAgentJob(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, access, logical);
-		logical?.settle(result.stopReason === "aborted" ? "aborted" : isFailedResult(result) ? "failed" : "completed", result);
+		const settled = logical?.settle(result.stopReason === "aborted" ? "aborted" : isFailedResult(result) ? "failed" : "completed", result);
+		// Existing Phase 1 numbers of this task, carried unchanged (null when the first turn reported no usage); never estimated.
+		if (settled) result.phase1 = phase1Of(settled);
 		return result;
 	} catch (error) {
 		logical?.settle(signal?.aborted ? "aborted" : "failed");
@@ -950,6 +969,7 @@ export default function (pi: ExtensionAPI) {
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain" | "dag") =>
 				(results: SingleResult[]): SubagentDetails => ({
+					...(({ roles, invalid }) => ({ roles, rolesInvalid: invalid }))(requestedRoles(params, (name) => agents.some((a) => a.name === name))),
 					mode,
 					agentScope,
 					projectAgentsDir: discovery.projectAgentsDir,
@@ -1366,7 +1386,7 @@ export default function (pi: ExtensionAPI) {
             return { content: [{ type: "text" as const, text: `Authorized ${minted.length} single-use operation(s) for ${role ?? "main"}; they expire in ${ttlMs / 60_000} min.` }], details: { count: minted.length } };
         },
     });
-    pi.registerTool({
+    pi.registerTool(withControlDetails({
         name: "subagent_control", label: "Subagent control",
         description: "Manage existing background jobs. list returns job/worker IDs and current activity. steer sends a new instruction to an active worker at its next tool boundary; use its unique worker ID when a job has multiple workers. pause enforces a hold after the current tool/model call; resume continues the same worker. Pause a job to hold all active workers and later chain steps. A steering message alone is model advice, not an enforced stop. cancel stops a worker or job. result retrieves a finished job. Completions arrive automatically, so do not busy-poll. Never restart or duplicate a running worker just to steer it. decisions lists worker decision requests; answer or decline a requestId only with its traceable basis or reason. Answers never resume a paused job; steer never answers a decision.",
         parameters: Type.Object({action: StringEnum(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline", "advice"] as const), target: Type.Optional(Type.String({description: "Job ID bg-N, full worker ID, #N, or decision requestId dec-…"})), message: Type.Optional(Type.String()), answer: Type.Optional(Type.String({description: "Freeform answer text (action answer)"})), basis: Type.Optional(StringEnum(["user_answer", "existing_authorization"] as const)), reference: Type.Optional(Type.String({description: "Traceable source of the answer or authorization"})), reason: Type.Optional(Type.String({description: "Why the request is declined (action decline)"})), advice: Type.Optional(StringEnum(["accepted", "rejected"] as const, {description: "action advice: main's decision on a planner consultation cons-N (telemetry; last write wins)"}))}),
@@ -1383,7 +1403,7 @@ export default function (pi: ExtensionAPI) {
                 return {content: [{type: "text", text}]};
             } catch (error) { return {isError: true, content: [{type: "text", text: String(error)}]}; }
         },
-    });
+    }));
     monitor.control = async (args, ctx) => {
         if (args.trim() === "roles") { const { editRoleConfig } = await import("./roles-editor.ts"); await editRoleConfig(ctx); return; }
         // /subagent usage [--by-role | --top N | --main | --planner]: plain usage keeps the existing summary text unchanged.

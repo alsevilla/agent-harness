@@ -228,3 +228,61 @@ test("a schema 4 result is INCONCLUSIVE against a schema 5 result", async () => 
 	assert.equal(c.verdict, "INCONCLUSIVE");
 	assert.ok(c.inconclusive.some((r) => /schemaVersion/.test(r)));
 });
+
+// A task cut by the task deadline (budget_exhausted) or a review that never ran is missing quality evidence: never NO_REGRESSION, even if the result is mislabelled complete.
+test("a budget_exhausted task or an unknown review cycle is INCONCLUSIVE, never NO_REGRESSION", async () => {
+	const good = await run([task("H1")]);
+	const cut = JSON.parse(JSON.stringify(good));
+	cut.tasks[0].status = "budget_exhausted";
+	cut.tasks[0].budget = { ...(cut.tasks[0].budget ?? {}), exhausted: true, stage: "acceptance" };
+	const c = compareResults(good, cut);
+	assert.equal(c.verdict, "INCONCLUSIVE");
+	assert.ok(c.inconclusive.some((r) => /budget/.test(r)), c.inconclusive.join("\n"));
+	const unknown = JSON.parse(JSON.stringify(good));
+	unknown.tasks[0].reviewer.cycles.at(-1).status = "unknown";
+	assert.equal(compareResults(good, unknown).verdict, "INCONCLUSIVE");
+	assert.equal(compareResults(unknown, good).verdict, "INCONCLUSIVE");
+});
+
+// F7: effective per-task capacity controls (task timeout, round settlement, shutdown grace and the derived budget fields) are measurement controls: a missing or different value is
+// INCONCLUSIVE; the provenance string and absolute clock timestamps are not comparison keys.
+const withLimits = (over) => fixtureConfig({ maxReworkRounds: { value: 0, source: "fixture" }, limits: { ...fixtureConfig().limits, ...over } });
+const lim = (value, source = "fixture") => ({ value, source });
+test("a different task timeout (1200000 vs 2400000) is INCONCLUSIVE, not NO_REGRESSION", async () => {
+	const a = await run([task("H1")]);
+	const b = await run([task("H1")], { config: withLimits({ taskTimeoutMs: lim(2400000) }) });
+	const c = compareResults(a, b);
+	assert.equal(c.verdict, "INCONCLUSIVE");
+	assert.ok(c.inconclusive.some((r) => /taskTimeoutMs/.test(r)), c.inconclusive.join("|"));
+});
+test("a different round settlement or shutdown grace is INCONCLUSIVE", async () => {
+	const a = await run([task("H1")]);
+	for (const over of [{ roundSettleTimeoutMs: lim(500000) }, { shutdownGraceMs: lim(10000) }]) {
+		const c = compareResults(a, await run([task("H1")], { config: withLimits(over) }));
+		assert.equal(c.verdict, "INCONCLUSIVE", JSON.stringify(over));
+	}
+});
+test("a missing capacity field on either side is INCONCLUSIVE (no implicit unlimited default)", async () => {
+	const a = await run([task("H1")]);
+	const b = structuredClone(a);
+	delete b.config.limits.shutdownGraceMs;
+	assert.equal(compareResults(a, b).verdict, "INCONCLUSIVE");
+	const c = structuredClone(a);
+	delete c.tasks[0].budget.taskTimeoutMs;
+	assert.equal(compareResults(a, c).verdict, "INCONCLUSIVE");
+	assert.equal(compareResults(c, a).verdict, "INCONCLUSIVE");
+});
+test("identical values with different provenance strings and different absolute timestamps stay comparable", async () => {
+	const a = await run([task("H1")]);
+	const b = await run([task("H1")], { config: withLimits({ taskTimeoutMs: lim(1200000, "a different run flag"), shutdownGraceMs: lim(30000, "other source") }) });
+	b.startedAt = "2099-01-01T00:00:00.000Z"; b.finishedAt = "2099-01-01T01:00:00.000Z"; b.tasks[0].budget.exhaustedAtOffsetMs = 999;
+	assert.equal(compareResults(a, b).verdict, "NO_REGRESSION");
+});
+test("a per-task manifest override is caught even when the run defaults are identical", async () => {
+	const a = await run([task("H1")]);
+	const b = await run([task("H1", { taskTimeoutMs: 2400000 })]);
+	assert.deepEqual(a.config.limits, b.config.limits);
+	const c = compareResults(a, b);
+	assert.equal(c.verdict, "INCONCLUSIVE");
+	assert.ok(c.inconclusive.some((r) => /H1/.test(r) && /taskTimeoutMs/.test(r)), c.inconclusive.join("|"));
+});

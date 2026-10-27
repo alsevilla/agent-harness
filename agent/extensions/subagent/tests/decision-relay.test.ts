@@ -110,10 +110,18 @@ async function runNodeSuite() {
 			registerTool(def: any) { tools.set(def.name, def); },
 			registerProvider() {}, // Phase B: the default export registers the cooldown providers; no-op for this relay suite
 			registerCommand() {},
-			sendMessage(msg: any, opts: any) { messages.push({ msg, opts }); return Promise.resolve(); },
-			emit(name: string) { for (const fn of handlers.get(name) ?? []) fn(); },
+			getCommands() { return []; },
+			entries: [] as Array<{ customType: string; data: any }>, sendFault: undefined as undefined | "throw" | "async", appendFault: false, runnerErrors: [] as string[],
+			// Pi's real pi.sendMessage returns void: a stale owner throws synchronously (assertActive); an async delivery failure is only reported on the runner's error channel (agent-session.js bindCore), never to the caller.
+			sendMessage(msg: any, opts: any): void {
+				messages.push({ msg, opts });
+				if (pi.sendFault === "throw") throw new Error("This extension ctx is stale after session replacement or reload.");
+				if (pi.sendFault === "async") Promise.reject(new Error("SECRET delivery failure text")).catch((e) => { pi.runnerErrors.push(e.message); });
+			},
+			appendEntry(customType: string, data: any) { if (pi.appendFault) throw new Error("This extension ctx is stale after session replacement or reload."); pi.entries.push({ customType, data }); },
+			emit(name: string, ...args: any[]) { for (const fn of handlers.get(name) ?? []) fn(...args); },
 			// Pi awaits session handlers: the returned promise settles when every handler of the event has.
-			emitAsync(name: string) { return Promise.all((handlers.get(name) ?? []).map((fn) => fn())); },
+			emitAsync(name: string, ...args: any[]) { return Promise.all((handlers.get(name) ?? []).map((fn) => fn(...args))); },
 		};
 		pis.push(pi);
 		return pi;
@@ -728,6 +736,181 @@ async function runNodeSuite() {
 		assert.equal(settled, "settled");
 		assert.ok(closedAt > 0, "the worker process was closed before the shutdown handlers resolved");
 		assert.equal(pi.messages.some((m: any) => m.msg.customType === "subagent-completion"), false, "no completion is delivered into a closed session");
+	});
+
+	const sessionCtx = (id: string) => ({ sessionManager: { getSessionId: () => id } });
+	const auditsOf = (pi: any, type = "subagent-terminal-audit") => pi.entries.filter((e: any) => e.customType === type).map((e: any) => e.data);
+	const USAGE = { input: 11, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 19, cost: { total: 0.0234 } };
+
+	test("B2 native receipts and results carry structured details.roles from the requested agent names, not from displayed text", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const receipt = await tool(pi, "subagent").execute("call", { tasks: [{ agent: "test-worker", task: "a", readOnly: true }, { agent: "test-worker", task: "b", readOnly: true }], background: true }, undefined, undefined, { cwd: candidate, hasUI: false });
+		assert.deepEqual(receipt.details.roles, ["test-worker", "test-worker"], "duplicate roles stay distinct entries");
+		assert.equal(receipt.details.background, true);
+	});
+
+	test("F4 an unregistered secret-shaped role and control target go through the native refusal and control wrapper, the adapter normaliser and serialisation without a trace of the raw name", async () => {
+		const { normalise } = await import("../../../../tests/benchmark/lib/sdk-adapter.mjs");
+		const SECRET = "sk-reviewsynthetic0123456789";
+		const pi = fakePi();
+		subagentExtension(pi);
+		const refused = await tool(pi, "subagent").execute("call", { tasks: [{ agent: "test-worker", task: "a", readOnly: true }, { agent: SECRET, task: "b", readOnly: true }], background: true }, undefined, undefined, { cwd: candidate, hasUI: false });
+		assert.equal(refused.isError, true, "an unknown role launches nothing");
+		assert.deepEqual([refused.details.roles, refused.details.rolesInvalid], [["test-worker"], 1], "the registered role is kept, the unknown one only counted");
+		assert.equal(JSON.stringify(refused.details).includes(SECRET), false);
+		const odd = await control(pi, { action: "cancel", target: SECRET });
+		assert.equal(odd.details.control.target, undefined);
+		const ctx = { session: "sess-A", roles: new Set(["test-worker"]) };
+		const events = [
+			normalise({ type: "tool_execution_end", toolName: "subagent", toolCallId: "c1", isError: true, result: { content: [{ type: "text", text: "refused" }], details: refused.details } }, ctx),
+			normalise({ type: "tool_execution_end", toolName: "subagent_control", toolCallId: "c2", isError: true, result: { content: [{ type: "text", text: "refused" }], details: { ...odd.details, control: { action: "cancel", target: SECRET } } } }, ctx),
+		];
+		assert.equal(JSON.stringify(events).includes(SECRET), false, "even a producer that did leak the raw name is stopped by the adapter's grammar");
+	});
+
+	test("B4 subagent_control reports only an action enum and a safe id in structured details, never steer, answer or authorization bodies", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		const jobId = await startJob(pi, "control me", true);
+		const steer = await control(pi, { action: "steer", target: jobId, message: "SECRET-STEER-BODY" });
+		assert.deepEqual(steer.details.control, { action: "steer", target: jobId });
+		const answer = await control(pi, { action: "answer", target: "dec-0123456789ab", answer: "SECRET-ANSWER", basis: "existing_authorization", reference: "SECRET-TOKEN" });
+		assert.deepEqual(answer.details.control, { action: "answer", target: "dec-0123456789ab" }, "an error result keeps the same safe shape");
+		const odd = await control(pi, { action: "steer", target: "bad target with spaces SECRET", message: "x" });
+		assert.equal(odd.details.control.target, undefined, "an unsafe target is omitted, not echoed");
+		assert.equal(JSON.stringify([steer.details, answer.details, odd.details]).includes("SECRET"), false);
+	});
+
+	test("B5 a normal completion appends one hidden terminal audit that keeps the owner, stable worker identity and charged usage, and the notice is unchanged", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-A"));
+		const jobId = await startJob(pi, "Audit me", true);
+		finishWith(children[0], "WORKER-REPORT", USAGE);
+		await waitFor(() => completionOf(pi, jobId) !== undefined && auditsOf(pi).length > 0, "completion and audit");
+		const [audit] = auditsOf(pi);
+		assert.equal(audit.ownerSession, "sess-A");
+		assert.equal(audit.jobId, jobId);
+		assert.equal(audit.state, "completed");
+		assert.equal(audit.completionSuppressed, false);
+		assert.equal(audit.results[0].position, 0);
+		assert.equal(audit.results[0].agent, "test-worker");
+		assert.equal(audit.results[0].usage.cost, 0.0234);
+		assert.deepEqual(audit.results[0].usage, completionOf(pi, jobId).details.results[0].usage, "same numbers as the completion, so the adapter counts them once");
+		assert.equal(typeof audit.endedAt, "number");
+		assert.equal(JSON.stringify(audit).includes("WORKER-REPORT"), false, "no worker output or prompt in the hidden audit");
+		assert.equal(pi.messages.filter((m: any) => m.msg.customType === "subagent-completion").length, 1, "the audit adds no model message or turn");
+	});
+
+	test("B5 a shutdown generation suppresses the model completion but the hidden audit retains the charged terminal usage before the owner is forgotten", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-S"));
+		const jobId = await startJob(pi, "Cancel me", true);
+		children[0].emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial" }], usage: USAGE, model: "fake/model", provider: "fake", stopReason: "toolUse" } });
+		await pi.emitAsync("session_shutdown", {}, sessionCtx("sess-S"));
+		assert.equal(pi.messages.some((m: any) => m.msg.customType === "subagent-completion"), false, "no model completion into a closed session");
+		const audits = auditsOf(pi).filter((a: any) => a.jobId === jobId);
+		assert.equal(audits.length, 1, "exactly one audit for the cancelled job");
+		assert.equal(audits[0].ownerSession, "sess-S");
+		assert.equal(audits[0].state, "aborted");
+		assert.equal(audits[0].completionSuppressed, true);
+		assert.equal(audits[0].results[0].usage.cost, 0.0234, "charged usage of the interrupted worker is kept");
+		assert.equal(audits[0].results[0].usage.turns, 1);
+	});
+
+	test("B5 a completion that cannot be delivered records a bounded owner diagnostic code, does not retry, and never stores the error text", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-D"));
+		pi.sendFault = "throw";
+		const jobId = await startJob(pi, "Undeliverable", true);
+		finishWith(children[0], "WORKER-REPORT", USAGE);
+		await waitFor(() => auditsOf(pi, "subagent-delivery-diagnostic").length > 0, "diagnostic");
+		const [diag] = auditsOf(pi, "subagent-delivery-diagnostic");
+		assert.deepEqual([diag.code, diag.jobId, diag.ownerSession], ["completion_delivery_failed", jobId, "sess-D"]);
+		assert.equal(JSON.stringify(diag).includes("SECRET"), false);
+		assert.equal(pi.messages.filter((m: any) => m.msg.customType === "subagent-completion").length, 1, "no retry or second wake-up");
+		assert.equal(auditsOf(pi)[0].completion, "submit_failed", "the terminal audit distinguishes a failed submission from a working job");
+	});
+
+	test("F3 pi.sendMessage returns void: an async delivery failure is not seen by the caller, so the audit records a submission attempt and never a confirmed delivery or a made-up failure", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-V"));
+		pi.sendFault = "async";
+		const jobId = await startJob(pi, "Async failure", true);
+		finishWith(children[0], "WORKER-REPORT", USAGE);
+		await waitFor(() => auditsOf(pi).length > 0 && pi.runnerErrors.length > 0, "audit and runner error");
+		const [audit] = auditsOf(pi);
+		assert.equal(audit.completion, "submitted");
+		assert.equal("completionDelivered" in audit, false, "no delivery claim exists in the audit");
+		assert.equal(auditsOf(pi, "subagent-delivery-diagnostic").length, 0, "an uncorrelatable async failure is not attributed to the job");
+		assert.equal(JSON.stringify(pi.entries).includes("SECRET"), false);
+		assert.equal(pi.messages.filter((m: any) => m.msg.customType === "subagent-completion").length, 1, "no retry or second wake-up");
+		assert.equal(audit.jobId, jobId);
+	});
+
+
+	test("B5 the completion notice is byte-identical whether or not a hidden audit could be appended", async () => {
+		const contentOf = async (appendFault: boolean) => {
+			const pi = fakePi();
+			subagentExtension(pi);
+			pi.appendFault = appendFault;
+			const jobId = await startJob(pi, "Same notice", true);
+			finishWith(children.at(-1), "WORKER-REPORT", USAGE);
+			await waitFor(() => completionOf(pi, jobId) !== undefined, "completion");
+			return (completionOf(pi, jobId).content as string).replace(/w:\d+/g, "w:N"); // the worker counter is process-wide, not part of the notice logic under test
+		};
+		assert.equal(await contentOf(true), await contentOf(false));
+	});
+
+	test("B5 a job keeps the session that launched it as owner after the session is replaced; the new session's id never appears on it", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-A"));
+		const jobId = await startJob(pi, "Old owner", true);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-B")); // replacement resets and aborts the old session's job
+		await waitFor(() => auditsOf(pi).some((a: any) => a.jobId === jobId), "old-owner audit");
+		assert.deepEqual(auditsOf(pi).filter((a: any) => a.jobId === jobId).map((a: any) => [a.ownerSession, a.completionSuppressed]), [["sess-A", true]]);
+	});
+
+	test("B3 the real audit and completion of one worker compose into a single ledger entry through the adapter's own normaliser and the usage ledger", async () => {
+		const { normalise } = await import("../../../../tests/benchmark/lib/sdk-adapter.mjs");
+		const { emptyLedger, addAuditUsage, markUnknown, ledgerTotals } = await import("../../../../tests/benchmark/lib/usage.mjs");
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-C"));
+		const done = await startJob(pi, "Completes", true);
+		finishWith(children[0], "R", USAGE);
+		await waitFor(() => completionOf(pi, done) !== undefined && auditsOf(pi).length === 1, "first job");
+		const cancelled = await startJob(pi, "Cancelled", true);
+		children[1].emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial" }], usage: { ...USAGE, cost: { total: 0.5 } }, model: "fake/model", provider: "fake", stopReason: "toolUse" } });
+		await pi.emitAsync("session_shutdown", {}, sessionCtx("sess-C"));
+		const ctx = { at: () => 1, session: "sess-C" };
+		const audits = pi.entries.map((e: any) => normalise({ type: "entry_appended", entry: { type: "custom", id: e.customType + e.data.jobId, customType: e.customType, data: e.data } }, ctx)).filter((n: any) => n?.type === "audit");
+		const completion = normalise({ type: "message_end", message: { role: "custom", customType: "subagent-completion", content: completionOf(pi, done).content, details: completionOf(pi, done).details } }, ctx);
+		assert.deepEqual(audits.map((a: any) => a.jobKey).sort(), [`sess-C/${done}`, `sess-C/${cancelled}`].sort());
+		const seen = new Set<string>(); const ledger = emptyLedger("worker");
+		for (const ev of [completion, ...audits]) { if (seen.has(ev.jobKey)) continue; seen.add(ev.jobKey); addAuditUsage(ledger, ev); } // the runner's first-wins rule
+		const t = ledgerTotals(ledger);
+		assert.equal(t.launches, 2);
+		assert.ok(Math.abs(t.cost.knownPricedSubtotal - 0.5234) < 1e-9, `subtotal ${t.cost.knownPricedSubtotal}`);
+		assert.equal(t.cost.total, null, "the cancelled worker's in-flight stream makes the total unknown");
+		assert.deepEqual(t.cost.unresolved.map((u: any) => u.reason), ["aborted_in_flight_usage_unknown"]);
+		void markUnknown;
+	});
+
+	test("B5 a stale owner context (session replaced) makes appendEntry throw; the job still settles and nothing leaks", async () => {
+		const pi = fakePi();
+		subagentExtension(pi);
+		await pi.emitAsync("session_start", {}, sessionCtx("sess-old"));
+		const jobId = await startJob(pi, "Stale owner", true);
+		pi.appendFault = true;
+		finishWith(children[0], "WORKER-REPORT", USAGE);
+		await waitFor(() => completionOf(pi, jobId) !== undefined, "completion still delivered");
+		assert.equal(pi.entries.length, 0, "nothing appended through an invalidated owner");
 	});
 
 	// Fills the three other global slots, then a two-task parallel call: task 0 runs (slot 4), task 1 waits for a slot. Abort rejects the queued entry at once while the running one closes late.

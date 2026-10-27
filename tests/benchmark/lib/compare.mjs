@@ -27,6 +27,16 @@ function evaluatorCheck(b, c) {
 	return { comparable: reasons.length === 0, reasons };
 }
 
+// Measurement capacity controls. The effective VALUES (not their provenance strings, not absolute clock timestamps) must be present and equal on both sides, for the run limits and
+// for every task's own effective budget: a manifest per-task override can differ while the run defaults are identical. A missing value is never an implicit unlimited default.
+const LIMIT_KEYS = ["taskTimeoutMs", "roundSettleTimeoutMs", "shutdownGraceMs"];
+const finite = (v) => (Number.isFinite(v) ? v : null);
+const limitValues = (r) => Object.fromEntries(LIMIT_KEYS.map((k) => [k, finite(r.config?.limits?.[k]?.value)]));
+const taskValues = (t) => ({ taskTimeoutMs: finite(t?.budget?.taskTimeoutMs), roundSettleTimeoutMs: finite(t?.delegation?.roundSettleTimeoutMs?.value), shutdownGraceMs: finite(t?.delegation?.shutdownGraceMs?.value), "budget.graceMs": finite(t?.budget?.graceMs), "budget.workCutoffOffsetMs": finite(t?.budget?.workCutoffOffsetMs), "budget.deadlineOffsetMs": finite(t?.budget?.deadlineOffsetMs) });
+function capacityDiffs(label, b, c) {
+	return Object.keys(b).filter((k) => b[k] === null || c[k] === null || b[k] !== c[k]).map((k) => `${label} ${k} differs or is missing (${b[k] ?? "missing"} vs ${c[k] ?? "missing"})`);
+}
+
 export function compareResults(base, cand) {
 	const inconclusive = [];
 	const reasons = [];
@@ -40,10 +50,17 @@ export function compareResults(base, cand) {
 		const ids = (r.tasks ?? []).map((t) => t.id);
 		if (ids.length !== (r.order ?? []).length || JSON.stringify(ids) !== JSON.stringify(r.order ?? [])) inconclusive.push(`${name} has ${ids.length} task result(s) for ${(r.order ?? []).length} ordered task(s): tasks do not match the order`);
 		if (r.totals?.reviewer?.unavailableCycles > 0) inconclusive.push(`${name} has ${r.totals.reviewer.unavailableCycles} unavailable reviewer cycle(s)`);
+		// A task cut by its deadline is unfinished and a review that never ran is missing evidence: neither is a quality result, even in a mislabelled complete run.
+		const cut = (r.tasks ?? []).filter((t) => t.status === "budget_exhausted" || t.budget?.exhausted === true).map((t) => t.id);
+		if (cut.length) inconclusive.push(`${name} has task(s) cut by the task budget (${cut.join(", ")}): unfinished, not a quality result`);
+		const unknown = (r.tasks ?? []).reduce((n, t) => n + (t.reviewer?.cycles ?? []).filter((c) => c.status === "unknown").length, 0);
+		if (unknown > 0) inconclusive.push(`${name} has ${unknown} reviewer cycle(s) that never ran (unknown): missing review evidence`);
 	}
 	if (sig(base.config?.measurementPolicy ?? null) !== sig(cand.config?.measurementPolicy ?? null)) inconclusive.push("measurement exclusion policy differs or is missing on one side");
 	const cap = (r) => r.config?.maxReworkRounds?.value ?? null;
 	if (cap(base) === null || cap(base) !== cap(cand)) inconclusive.push(`rework cap differs or is missing (${cap(base)} vs ${cap(cand)})`);
+	inconclusive.push(...capacityDiffs("run limit", limitValues(base), limitValues(cand)));
+	(base.tasks ?? []).forEach((t, i) => inconclusive.push(...capacityDiffs(`task ${t.id}`, taskValues(t), taskValues((cand.tasks ?? [])[i]))));
 	for (const role of ["main", "reviewer"]) {
 		const b = base.config?.roles?.[role], c = cand.config?.roles?.[role];
 		if (!b || !c || b.model !== c.model || b.thinking !== c.thinking || sig(b.fallbacks ?? []) !== sig(c.fallbacks ?? [])) inconclusive.push(`configured ${role} model, thinking or fallbacks differ (${b?.model ?? "none"} vs ${c?.model ?? "none"})`);

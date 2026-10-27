@@ -84,28 +84,117 @@ function textOf(result) {
 	return (result?.content ?? []).filter((c) => c?.type === "text").map((c) => c.text).join("\n");
 }
 
-function normalise(ev) {
+// Allowlists for everything that is not model-visible text. Only these shapes ever leave a native event: no prompt, steer/answer body, authorization, stderr or error text.
+const CONTROL_ACTIONS = new Set(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline", "advice"]);
+const DECISION_STATES = new Set(["open", "settled", "rejected"]);
+const AUDIT_STATES = new Set(["completed", "failed", "aborted", "running"]);
+const DIAGNOSTIC_CODES = new Set(["completion_delivery_failed"]);
+export const TERMINAL_AUDIT = "subagent-terminal-audit";
+export const DELIVERY_DIAGNOSTIC = "subagent-delivery-diagnostic";
+// Identities are validated against what Pi and the subagent extension actually generate (job bg-N, worker <generation>:<n>, decision dec-<alnum>, see
+// agent/extensions/subagent index.ts NATIVE_TARGET and decision-relay-state REQUEST_ID) or against the registered roles, never by character class: a token-shaped secret
+// passes any character filter. Anything else is omitted.
+const JOB_ID = /^bg-\d{1,9}$/;
+const WORKER_ID = /^(?:\d{1,9}|bg-\d{1,9}):\d{1,9}$/;
+const REQUEST_ID = /^dec-[A-Za-z0-9]{8,40}$/;
+const TARGET = /^(?:bg-\d{1,9}|\d{1,9}:\d{1,9}|#\d{1,9}|dec-[A-Za-z0-9]{8,40}|cons-\d{1,9})$/;
+const TOKEN = /^[A-Za-z0-9._:/@+-]{1,96}$/;
+const token = (v) => (typeof v === "string" && TOKEN.test(v) ? v : undefined);
+const matching = (re) => (v) => (typeof v === "string" && re.test(v) ? v : null);
+const jobId = matching(JOB_ID), requestId = matching(REQUEST_ID), targetId = matching(TARGET), workerId = matching(WORKER_ID);
+// A role is recorded only when the candidate's registered role set contains it (ctx.roles); with no registry no name is recorded.
+const roleOf = (name, roles) => (typeof name === "string" && roles?.has(name) ? name : undefined);
+const fin = (v) => (Number.isFinite(v) ? v : undefined);
+const usageOf = (u) => (u && typeof u === "object" ? { input: fin(u.input), output: fin(u.output), cacheRead: fin(u.cacheRead), cacheWrite: fin(u.cacheWrite), cost: fin(u.cost), turns: fin(u.turns), contextTokens: fin(u.contextTokens) } : undefined);
+const resultOf = (r, i, roles) => ({
+	position: Number.isInteger(r?.position) ? r.position : i, workerId: workerId(r?.workerId) ?? undefined, agent: roleOf(r?.agent, roles), exitCode: fin(r?.exitCode), stopReason: token(r?.stopReason),
+	model: token(r?.model), modelTier: token(r?.modelTier), modelSlot: token(r?.modelSlot), usage: usageOf(r?.usage),
+	phase1: r?.phase1 ? { taskId: token(r.phase1.taskId), attempts: fin(r.phase1.attempts), firstTurnPromptTokens: fin(r.phase1.firstTurnPromptTokens) ?? null, peakPromptTokens: fin(r.phase1.peakPromptTokens) ?? null, unpricedTurns: fin(r.phase1.unpricedTurns) } : undefined,
+});
+// A foreground child result: the same allowlisted identity/usage shape as a completion child, plus its error flag and bounded-by-the-runner error text. An agent name the registry does
+// does not know is omitted and scrubbed from the error text (it is caller-supplied); numeric usage and the other diagnostics stay.
+const foregroundResultOf = (r, i, roles) => {
+	const base = resultOf(r, i, roles);
+	const bad = typeof r?.agent === "string" && r.agent !== "" && base.agent === undefined ? r.agent : null;
+	const text = (v) => (typeof v === "string" ? (bad ? v.split(bad).join("[unknown-role]") : v) : undefined);
+	return { ...base, isError: r?.isError === true, errorMessage: text(r?.errorMessage), stderr: text(r?.stderr) };
+};
+const controlOf = (c) => (c && CONTROL_ACTIONS.has(c.action) ? { action: c.action, ...(targetId(c.target) ? { target: c.target } : {}) } : null);
+const COMPLETION_STATES = new Set(["suppressed", "submitted", "submit_failed"]);
+// Job ids seen at a prompt (receipt) or completion carry the task whose prompt showed them; an audit, diagnostic or close record is stamped from that map only, never guessed.
+const stampTask = (ctx, id) => (typeof id === "string" && ctx.taskOf ? { taskId: ctx.taskOf(id) } : {});
+
+// The extension's hidden entries (pi.appendEntry custom entries, never model context). An audit whose owner session is not this session is reported ignored, never counted.
+function hiddenOf(entry, ctx) {
+	const d = entry?.data;
+	if (entry?.customType === TERMINAL_AUDIT) {
+		if (!d || d.v !== 1 || !jobId(d.jobId)) return null;
+		const owner = token(d.ownerSession) ?? null;
+		if (ctx.session && owner && owner !== ctx.session) return { type: "audit_ignored", jobId: d.jobId, reason: "owner_mismatch" };
+		return { type: "audit", jobKey: `${ctx.session ?? ""}/${d.jobId}`, jobId: d.jobId, ownerSession: owner, state: AUDIT_STATES.has(d.state) ? d.state : null, startedAt: fin(d.startedAt) ?? null, endedAt: fin(d.endedAt) ?? null,
+			completionSuppressed: d.completionSuppressed === true, completion: COMPLETION_STATES.has(d.completion) ? d.completion : null, results: Array.isArray(d.results) ? d.results.map((r, i) => resultOf(r, i, ctx.roles)) : [], ...stampTask(ctx, d.jobId) };
+	}
+	if (entry?.customType === DELIVERY_DIAGNOSTIC) {
+		if (!d || !DIAGNOSTIC_CODES.has(d.code) || !jobId(d.jobId)) return null;
+		const owner = token(d.ownerSession) ?? null;
+		if (ctx.session && owner && owner !== ctx.session) return { type: "audit_ignored", jobId: d.jobId, reason: "owner_mismatch" };
+		return { type: "diagnostic", code: d.code, jobId: d.jobId, jobKey: `${ctx.session ?? ""}/${d.jobId}`, ...stampTask(ctx, d.jobId) };
+	}
+	return null;
+}
+
+// ctx: { at: () => task-relative ms | null, session: owning session id | null }. Offsets are on native events only.
+export function normalise(ev, ctx = {}) {
+	const stamp = (o) => (ctx.at ? { ...o, atMs: ctx.at() } : o);
+	const key = (jobId) => (jobId === null ? null : `${ctx.session ?? ""}/${jobId}`);
 	if (ev?.type === "message_end" && ev.message?.role === "assistant") {
 		const m = ev.message;
 		return { type: "assistant", message: { role: "assistant", usage: m.usage, provider: m.provider, model: m.model } };
 	}
 	if (ev?.type === "message_end" && ev.message?.role === "custom" && ev.message.customType === "subagent-completion") {
 		const d = ev.message.details ?? {};
-		return { type: "completion", jobId: typeof d.jobId === "string" ? d.jobId : null, state: typeof d.state === "string" ? d.state : null, results: Array.isArray(d.results) ? d.results : [] };
+		const id = jobId(d.jobId);
+		return stamp({ type: "completion", jobId: id, jobKey: key(id), session: ctx.session ?? null, state: AUDIT_STATES.has(d.state) ? d.state : null, results: Array.isArray(d.results) ? d.results.map((r, i) => resultOf(r, i, ctx.roles)) : [], ...(id && ctx.claim ? { taskId: ctx.claim(id) } : {}) });
 	}
-	if (ev?.type === "tool_execution_end" && ev.toolName === "subagent") return { type: "subagent", toolCallId: ev.toolCallId, isError: ev.isError === true || ev.result?.isError === true, text: textOf(ev.result), details: ev.result?.details };
-	// Tool name and outcome only (no arguments, no packet text); error text is kept only for a failed call.
+	// Notice state and ids only: the question, options, context and answer stay in the message.
+	if (ev?.type === "message_end" && ev.message?.role === "custom" && ev.message.customType === "subagent-decision") {
+		const d = ev.message.details ?? {};
+		return stamp({ type: "decision", state: DECISION_STATES.has(d.state) ? d.state : null, requestId: requestId(d.requestId), jobId: jobId(d.jobId) });
+	}
+	if (ev?.type === "entry_appended" && ev.entry?.type === "custom") { const h = hiddenOf(ev.entry, ctx); return h ? stamp(h) : null; }
+	if (ev?.type === "tool_execution_end" && ev.toolName === "subagent") {
+		const d = ev.result?.details;
+		return stamp({ type: "subagent", toolCallId: ev.toolCallId, isError: ev.isError === true || ev.result?.isError === true, text: textOf(ev.result), details: d && typeof d === "object" ? { ...d, roles: undefined, ...(Array.isArray(d.results) ? { results: d.results.map((r, i) => foregroundResultOf(r, i, ctx.roles)) } : {}) } : d, session: ctx.session ?? null, roles: Array.isArray(d?.roles) ? d.roles.map((n) => roleOf(n, ctx.roles)).filter(Boolean) : null, ...(Number.isInteger(d?.rolesInvalid) ? { rolesInvalid: d.rolesInvalid } : {}) });
+	}
+	// Tool name and outcome only (no arguments, no packet text); error text is kept only for a failed call. A control call adds its validated action and safe id.
 	if (ev?.type === "tool_execution_end") {
 		const text = textOf(ev.result);
-		return { type: "tool", name: ev.toolName ?? null, isError: ev.isError === true, errorText: ev.isError === true && text ? text : null };
+		const base = { type: "tool", name: ev.toolName ?? null, isError: ev.isError === true, errorText: ev.isError === true && text ? text : null };
+		if (ev.toolName !== "subagent_control") return base;
+		const control = controlOf(ev.result?.details?.control);
+		// A retrieved job result (action result on a job id): its child usage, allowlisted like a completion's. It is retrieval, never a launch or a delivery.
+		const rs = ev.result?.details?.results;
+		const retrieved = control?.action === "result" && jobId(control.target) && ev.isError !== true && Array.isArray(rs);
+		return stamp({ ...base, control, ...(retrieved ? { session: ctx.session ?? null, controlResults: rs.map((r, i) => resultOf(r, i, ctx.roles)) } : {}) });
 	}
 	return null;
+}
+
+// The role names the session can legitimately dispatch: the candidate package's agents and the profile's user agents (file name = role name).
+function registeredRoles(...dirs) {
+	const names = new Set();
+	for (const dir of dirs) { try { for (const f of fs.readdirSync(dir)) if (f.endsWith(".md")) names.add(f.slice(0, -3)); } catch { /* an absent directory registers nothing */ } }
+	return names;
 }
 
 // Settlement tracking: a background receipt is pending until its completion; epoch counts changes so a wake-up is never lost between checks.
 function track(state, n) {
 	if (n?.type === "subagent" && n.details?.background === true && typeof n.details?.jobId === "string") {
-		if (!state.completed.has(n.details.jobId)) state.pending.set(n.details.jobId, { mode: n.details.mode ?? null });
+		if (!state.jobTasks.has(n.details.jobId)) state.jobTasks.set(n.details.jobId, state.curTask ?? null);
+		if (!state.completed.has(n.details.jobId)) {
+			state.pending.set(n.details.jobId, { mode: n.details.mode ?? null });
+			state.jobs.set(n.details.jobId, { jobId: n.details.jobId, roles: n.roles ?? null, mode: n.details.mode ?? null, receiptAtMs: n.atMs ?? null, lastEventAtMs: n.atMs ?? null, lastEvent: "receipt" });
+		}
 	} else if (n?.type === "completion" && n.jobId) {
 		state.pending.delete(n.jobId);
 		state.completed.add(n.jobId);
@@ -113,6 +202,17 @@ function track(state, n) {
 	state.epoch++;
 	for (const wake of state.waiters.splice(0)) wake();
 }
+
+// The last native event that named a still-pending job (a control call on it or a decision of its worker), by task-relative offset. Unknown stays null.
+function noteJobEvent(state, n) {
+	const jobId = n?.type === "tool" && n.control ? n.control.target : n?.type === "decision" ? n.jobId : null;
+	const j = jobId ? state.jobs.get(jobId) : null;
+	if (!j) return;
+	j.lastEventAtMs = n.atMs ?? null;
+	j.lastEvent = n.type === "tool" ? `control:${n.control.action}` : `decision:${n.state ?? "unknown"}`;
+}
+// Every still-pending job with what is known of it, taken before anything is aborted. A missing value is null (not recorded), never zero.
+const pendingSnapshot = (state) => [...state.pending.keys()].map((jobId) => { const j = state.jobs.get(jobId) ?? {}; return { jobId, roles: j.roles ?? null, mode: j.mode ?? null, receiptAtMs: j.receiptAtMs ?? null, lastEventAtMs: j.lastEventAtMs ?? null, lastEvent: j.lastEvent ?? null }; });
 
 // Resolves to {value} or {error}, or {timedOut: true} once ms elapse (the timer is always cleared).
 const race = (promise, ms) => new Promise((resolve) => {
@@ -127,39 +227,82 @@ async function settleRound(state, timeoutMs) {
 	const started = Date.now();
 	const left = () => Math.max(0, timeoutMs - (Date.now() - started));
 	let timedOut = false;
+	// Wait phases on the task clock: idle (the main run is working) or completion (idle, waiting for a background worker's completion).
+	const startedAtMs = state.at(); const phases = []; let phase = null; let phaseAt = null;
+	const enter = (p) => { leave(); phase = p; phaseAt = state.at(); };
+	const leave = () => { if (phase) { phases.push({ phase, startMs: phaseAt, endMs: state.at() }); phase = null; } };
+	let lastPhase = null;
 	for (;;) {
 		const seen = state.epoch;
+		enter("idle"); lastPhase = "idle";
 		const idle = await race(state.session.waitForIdle(), left());
 		if (idle.timedOut) { timedOut = true; break; }
 		if (idle.error) throw idle.error;
 		if (state.epoch !== seen) continue; // a completion arrived meanwhile: re-check idleness before deciding
 		if (state.pending.size === 0) break;
+		enter("completion"); lastPhase = "completion";
 		const woke = await race(new Promise((resolve) => { if (state.epoch !== seen) resolve(); else state.waiters.push(resolve); }), left());
 		if (woke.timedOut) { timedOut = true; break; }
 	}
 	const pendingJobs = [...state.pending.keys()];
+	// Snapshot BEFORE the abort: what was pending and when it last did anything, so the abort cannot change the record.
+	const snapshotAtMs = state.at(); const pending = pendingSnapshot(state);
+	leave();
+	const endedAtMs = state.at();
 	// Timeout: stop the main's run now; closing the session then cancels and awaits every owning worker (nothing is snapshotted or scored meanwhile).
 	if (timedOut) await race(state.session.abort?.(), state.limits?.shutdownGraceMs?.value ?? 0);
-	return { settled: !timedOut && pendingJobs.length === 0, timedOut, pendingJobs, waitedMs: Date.now() - started };
+	return { settled: !timedOut && pendingJobs.length === 0, timedOut, pendingJobs, waitedMs: Date.now() - started, startedAtMs, endedAtMs, snapshotAtMs, lastPhase, phases, pending };
 }
 
 // Shutdown through the runtime; confirmed only when the extension's session_shutdown handlers (which await their workers) finished within the grace.
-async function closeState(state) {
-	state.unsubscribe?.();
+// Hidden entries (audit, diagnostic, ignored audit) of this session. The subscription saw most of them live; the session's own entries are read once more after the
+// shutdown generation drained, so an entry whose event was missed is still found. Each entry counts once (by its entry id).
+function ingestEntry(state, entry) {
+	if (entry?.id !== undefined) { if (state.seenEntries.has(entry.id)) return null; state.seenEntries.add(entry.id); }
+	const n = normalise({ type: "entry_appended", entry }, state.ctx());
+	if (n) state.hidden.push(n);
+	return n;
+}
+function collectHidden(state) {
+	try { for (const e of state.session.sessionManager?.getEntries?.() ?? []) if (e?.type === "custom") ingestEntry(state, e); } catch { /* the live subscription remains the source */ }
+	const of = (type) => state.hidden.filter((h) => h.type === type);
+	return { audits: of("audit"), ignoredAudits: of("audit_ignored"), diagnostics: of("diagnostic") };
+}
+
+// budgetMs (the caller's remaining time) only ever tightens the configured grace: effective = min(grace, budgetMs); 0/negative/non-finite = expired (fail closed, no default).
+// One abort/dispose operation per session (cached); a later call waits on it only for its own effective budget, so a stricter budget never waits for a longer cached one.
+async function closeState(state, { budgetMs } = {}) {
 	const started = Date.now();
 	const pendingJobs = [...(state.pending?.keys() ?? [])];
 	// A reviewer's resources must be the bytes it started with: a guidance, skill or SYSTEM edit during the review leaves the identity unstable (INCONCLUSIVE).
 	const res = state.identity?.contract?.resources;
 	if (res && state.recheck) { const end = state.recheck(); res.endResourcesSha256 = end.resourcesSha256; res.stable = end.resourcesSha256 === res.resourcesSha256 && end.effectivePromptSha256 === res.effectivePromptSha256; }
 	// Abort and await idle first: the run (and any foreground child it owns) must be closed before shutdown is confirmed; runtime.dispose() only invalidates the session synchronously.
-	const done = Promise.resolve().then(async () => { await state.session.abort?.(); await state.runtime.dispose(); });
-	const grace = state.limits?.shutdownGraceMs?.value;
-	const r = grace === undefined ? { ...(await done.then((value) => ({ value }), (error) => ({ error }))) } : await race(done, grace);
+	state.closing ??= Promise.resolve().then(async () => { await state.session.abort?.(); await state.runtime.dispose(); });
+	const done = state.closing;
+	const configured = state.limits?.shutdownGraceMs?.value;
+	const cap = budgetMs === undefined ? undefined : (Number.isFinite(budgetMs) ? Math.max(0, budgetMs) : 0);
+	const grace = cap === undefined ? configured : configured === undefined ? cap : Math.min(configured, cap);
+	// Neither a configured grace nor a caller budget: nothing bounds the wait and no default is invented, so the close is treated as expired (unconfirmed unless already finished).
+	const r = await race(done, grace ?? 0);
 	const error = r.error ? String(r.error.message ?? r.error).slice(0, 300) : null;
-	return { confirmed: !r.timedOut && !r.error, ms: Date.now() - started, pendingJobs, error };
+	// Collected after the awaited shutdown and before the state is forgotten; the live subscription stays attached until here.
+	const hidden = collectHidden(state);
+	state.unsubscribe?.();
+	// pi.sendMessage returns void and Pi reports an async delivery failure only through the extension error channel, with no job id: counted here, never attributed or quoted.
+	const sendMessageErrors = state.extensionErrors.filter((e) => e.event === "send_message").length;
+	const jobTasks = Object.fromEntries([...state.jobTasks].map(([id, t]) => [`${state.sessionId ?? ""}/${id}`, t]));
+	return { confirmed: !r.timedOut && !r.error, ms: Date.now() - started, jobTasks, sendMessageErrors, pendingJobs, pendingKeys: pendingJobs.map((id) => `${state.sessionId ?? ""}/${id}`), error, ...hidden, ...(state.abortSnapshot ? { abortSnapshot: state.abortSnapshot } : {}) };
 }
 
-export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
+// Pi 1.4.0 gives createAgentSession and loader.reload() no AbortSignal, so an open cannot be interrupted midway: the task signal is checked at every await
+// boundary and whatever a late factory produced is disposed through the lifecycle owner. Compaction and runs have real cancellation (abortCompaction, abort).
+// A dispose that throws (sync) or rejects (async) is an unconfirmed shutdown; its error text is dropped, never propagated.
+const disposedOk = async (dispose) => { try { await dispose(); return true; } catch { return false; } };
+const cancelled = (what) => Object.assign(new Error(`${what} cancelled: the task deadline passed`), { cancelled: true });
+const live = (signal, what) => { if (signal?.aborted) throw cancelled(what); };
+
+export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => performance.now() } = {}) {
 	let sdk = null;
 	let registry = null;
 	const pi = async () => {
@@ -181,8 +324,10 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
 			if (!provider || !id) throw new Error("no default model in the profile settings (defaultProvider/defaultModel); refusing to choose one");
 			return { model: `${provider}/${id}`, fallbacks: [], thinking: settings.getDefaultThinkingLevel() ?? null, source: "profile default (settings defaultProvider/defaultModel/defaultThinkingLevel)" };
 		},
-		async openSession({ cwd, role, compactionEnabled, taskId, runtime, roleSpec, limits }) {
+		async openSession({ cwd, role, compactionEnabled, taskId, runtime, roleSpec, limits, signal, timeline, onEvent }) {
+			live(signal, "session open");
 			const m = await pi();
+			live(signal, "session open");
 			if (!roleSpec) throw new Error(`no configured ${role} identity for task ${taskId}`);
 			registry ??= m.ModelRuntime.create();
 			const modelRuntime = await registry;
@@ -195,6 +340,7 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
 			if (isReview) Object.assign(loaderOptions, { noContextFiles: true, appendSystemPrompt: review.appendSystemPrompt });
 			const loader = new m.DefaultResourceLoader(loaderOptions);
 			await loader.reload();
+			live(signal, "session open");
 			// What the loader really carries: a candidate AGENTS.md or skill that a profile copy shadows is not measured, so the open fails closed.
 			const loaded = { agentsFiles: loader.getAgentsFiles?.().agentsFiles ?? [], skills: loader.getSkills?.().skills ?? [] };
 			if (!isReview) {
@@ -210,11 +356,18 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
 			const { session } = await m.createAgentSession(options);
 			// The supported lifecycle owner: AgentSessionRuntime.dispose() emits session_shutdown to the extensions (which cancel and await their background
 			// workers) and then disposes the session. Session.dispose() alone emits no shutdown, and session_start is only emitted by bindExtensions().
-			if (typeof m.AgentSessionRuntime !== "function") { session.dispose(); throw Object.assign(new Error("the Pi SDK exports no AgentSessionRuntime; refusing to open a session whose shutdown cannot be confirmed"), { infrastructure: true, kind: "lifecycle_unavailable" }); }
+			if (typeof m.AgentSessionRuntime !== "function") { const ok = await disposedOk(() => session.dispose()); throw Object.assign(new Error("the Pi SDK exports no AgentSessionRuntime; refusing to open a session whose shutdown cannot be confirmed"), { infrastructure: true, kind: "lifecycle_unavailable", unconfirmed: !ok }); }
 			const services = { cwd, agentDir: m.getAgentDir(), modelRuntime, settingsManager, resourceLoader: loader, diagnostics: [] };
 			const lifecycle = new m.AgentSessionRuntime(session, services, async () => { throw new Error("session replacement is not supported by the benchmark"); });
-			const state = { session, runtime: lifecycle, role, taskId, buffer: [], limits, pending: new Map(), completed: new Set(), epoch: 0, waiters: [], extensionErrors: [] };
-			await session.bindExtensions({ onError: (e) => state.extensionErrors.push({ event: e?.event ?? null, error: String(e?.error ?? "").slice(0, 300) }) });
+			// A session the factory returned after the cutoff is shut down through the runtime (extension workers awaited) and never bound or prompted.
+			if (signal?.aborted) { const ok = await disposedOk(() => lifecycle.dispose()); throw Object.assign(cancelled("session open"), { unconfirmed: !ok }); }
+			const state = { session, runtime: lifecycle, role, taskId, buffer: [], limits, pending: new Map(), completed: new Set(), epoch: 0, waiters: [], extensionErrors: [], jobs: new Map(), hidden: [], seenEntries: new Set(), jobTasks: new Map(), curTask: taskId ?? null, roles: registeredRoles(path.join(runtime.root, "agent", "agents"), path.join(m.getAgentDir(), "agents")), timeline: timeline ?? null, onEvent: onEvent ?? null, abortSnapshot: null };
+			// Task-relative offsets on the injected monotonic clock; null when no task timeline was supplied (not recorded, never zero). sessionId is the owner key of every audit.
+			state.at = () => (state.timeline ? clock() - state.timeline.startedAt : null);
+			state.sessionId = session.sessionManager?.getSessionId?.() ?? null;
+			state.ctx = () => ({ at: state.at, session: state.sessionId, roles: state.roles, taskOf: (id) => state.jobTasks.get(id) ?? null, claim: (id) => state.jobTasks.get(id) ?? null });
+			await session.bindExtensions({ onError: (e) => state.extensionErrors.push({ event: typeof e?.event === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(e.event) ? e.event : null, error: null }) });
+			if (signal?.aborted) { const c = await closeState(state); throw Object.assign(cancelled("session open"), { unconfirmed: c.confirmed === false }); }
 			const active = session.getActiveToolNames?.() ?? [];
 			const missing = isReview ? [] : CONTROL_TOOLS.filter((t) => !active.includes(t));
 			if (missing.length) {
@@ -234,7 +387,14 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
 				state.recheck = measure;
 			}
 			else state.identity.resources = { agentsFiles: loaded.agentsFiles.map((f) => ({ path: f.path, sha256: sha256(Buffer.from(f.content ?? "", "utf8")) })), skills: loaded.skills.map((sk) => ({ name: sk.name, filePath: sk.filePath })), extensionErrors: state.extensionErrors };
-			state.unsubscribe = session.subscribe((ev) => { const n = normalise(ev); if (n) { state.buffer.push(n); track(state, n); } });
+			state.unsubscribe = session.subscribe((ev) => {
+				if (ev?.type === "entry_appended") { if (ev.entry?.id !== undefined) { if (state.seenEntries.has(ev.entry.id)) return; state.seenEntries.add(ev.entry.id); } }
+				const n = normalise(ev, state.ctx());
+				if (!n) return;
+				if (n.type === "audit" || n.type === "audit_ignored" || n.type === "diagnostic") state.hidden.push(n);
+				state.buffer.push(n); track(state, n); noteJobEvent(state, n);
+				if (n.type !== "assistant" && !(n.type === "tool" && !n.control)) { try { state.onEvent?.(n); } catch { /* progress is best effort */ } }
+			});
 			return state;
 		},
 		async startContext(state) {
@@ -243,16 +403,49 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi } = {}) {
 			return { contextTokens: usage?.tokens ?? null, contextWindow: usage?.contextWindow ?? null, systemPromptChars: s.systemPrompt.length, activeTools: s.getActiveToolNames(), messageCount: s.messages.length };
 		},
 		// The main session's prompt returns only once its round is settled (idle, no pending background job); a reviewer has no workers to wait for.
-		async prompt(state, text, { settle } = {}) {
-			state.buffer = [];
-			await state.session.prompt(text);
-			const settlement = state.role === "main" ? await settleRound(state, settle?.timeoutMs) : null;
-			return { events: state.buffer, text: state.session.getLastAssistantText() ?? "", settlement };
+		async prompt(state, text, { settle, budgetMs, signal, timeline, onEvent, taskId } = {}) {
+			live(signal, "prompt");
+			if (taskId !== undefined) state.curTask = taskId;
+			if (timeline) state.timeline = timeline;
+			if (onEvent) state.onEvent = onEvent;
+			// The task signal aborts the real run (session.abort awaits idle); a model call is never started after the cutoff.
+			// What was pending is recorded first, so the abort cannot change it.
+			const onAbort = () => { state.abortSnapshot ??= { atMs: state.at(), pending: pendingSnapshot(state) }; void Promise.resolve(state.session.abort?.()).catch(() => {}); };
+			signal?.addEventListener("abort", onAbort, { once: true });
+			try { return await runPrompt(state, text, { settle, budgetMs }); } finally { signal?.removeEventListener("abort", onAbort); }
 		},
-		async compact(state) {
-			const r = await state.session.compact();
-			return { tokensBefore: r.tokensBefore, usage: r.usage };
+		async compact(state, { signal } = {}) {
+			live(signal, "compaction");
+			// abortCompaction() is the supported cancel; compact() then settles (rejects) and is awaited here.
+			const onAbort = () => { try { state.session.abortCompaction?.(); } catch { /* the awaited compact() reports the outcome */ } };
+			signal?.addEventListener("abort", onAbort, { once: true });
+			try {
+				const r = await state.session.compact();
+				return { tokensBefore: r.tokensBefore, usage: r.usage };
+			} finally { signal?.removeEventListener("abort", onAbort); }
 		},
-		async closeSession(state) { return closeState(state); },
+		async closeSession(state, opts) { return closeState(state, opts); },
 	};
+}
+
+// One main or reviewer prompt: the run is bounded by budgetMs (aborted and awaited within the grace on expiry), then the round settles.
+async function runPrompt(state, text, { settle, budgetMs }) {
+	state.buffer = [];
+	const started = Date.now();
+	if (budgetMs !== undefined) {
+		// The task deadline reaches the model run itself: on expiry the run is aborted (awaited within the grace), never merely abandoned.
+		const r = await race(state.session.prompt(text), budgetMs);
+		if (r.error) throw r.error;
+		if (r.timedOut) {
+			const snapshotAtMs = state.at(); const pending = pendingSnapshot(state);
+			await race(state.session.abort?.(), state.limits?.shutdownGraceMs?.value ?? 0);
+			return { events: state.buffer, text: "", settlement: { settled: false, timedOut: true, budgetExhausted: true, pendingJobs: [...state.pending.keys()], waitedMs: Date.now() - started, startedAtMs: null, endedAtMs: state.at(), snapshotAtMs, lastPhase: "prompt", phases: [], pending } };
+		}
+	} else await state.session.prompt(text);
+	const remaining = budgetMs === undefined ? undefined : budgetMs - (Date.now() - started);
+	// Under one whole ms left there is nothing to settle in: never a fresh 1 ms grant beyond the budget.
+	if (remaining !== undefined && remaining < 1) return { events: state.buffer, text: "", settlement: { settled: false, timedOut: true, budgetExhausted: true, pendingJobs: [...state.pending.keys()], waitedMs: Date.now() - started, startedAtMs: null, endedAtMs: state.at(), snapshotAtMs: state.at(), lastPhase: "prompt", phases: [], pending: pendingSnapshot(state) } };
+	const settleMs = remaining === undefined ? settle?.timeoutMs : Math.min(settle?.timeoutMs ?? budgetMs, remaining);
+	const settlement = state.role === "main" ? await settleRound(state, settleMs) : null;
+	return { events: state.buffer, text: state.session.getLastAssistantText() ?? "", settlement };
 }
