@@ -4,6 +4,7 @@ import { runAcceptanceAsync } from "./acceptance.mjs";
 import { validateManifest, manifestDigest } from "./manifest.mjs";
 import { addUsage, addWorkerUsage, addJobUsage, newJob, observeJob, markUnknown, emptyLedger, ledgerTotals, addLedgers, sumCosts } from "./usage.mjs";
 import { evaluatorOf, summarizeEvaluators } from "./evaluator.mjs";
+import { TOPOLOGY_METHOD, describeProblems } from "./topology.mjs";
 
 // v2: each reviewer cycle records its effective evaluator (compare requires it); totals.evaluator summarises it. v1 results are not comparable.
 // v3: method validity (infrastructure and methodinvalid stops, delegation and main diagnostics, per-round held-out baseline). v2 results are not comparable.
@@ -196,16 +197,20 @@ const WRITE_TOOLS = ["edit", "write"];
 
 // Each child result of one subagent call or background completion: role, outcome and bounded diagnostics. A child with no assistant turn is a failed
 // attempt, not a measured workload. terminal: the job itself ended failed or aborted, an actual terminal worker failure (never a quality score).
-function launchRecords(results, limit, { terminal = false, jobId = null } = {}) {
+// mainCancel: this job's SUCCESSFUL main cancel (a started job, aborted before its completion). Only the exact abort-kill shape is exempt; it is labelled
+// "cancelled-by-main" (never a measured writer, never infrastructure). Exempt only with the producer's attestation abort.running === true and abort.priorFailure === false (the
+// abort diagnostic is non-empty for every aborted child and absent fields prove nothing). Missing/malformed provenance, any other exit code or a never-started child stays a terminal failure.
+function launchRecords(results, limit, { terminal = false, jobId = null, mainCancel = false } = {}) {
 	const list = Array.isArray(results) ? results : [];
 	if (list.length === 0) return [{ agent: null, status: "unreported", turns: null, jobId }];
 	return list.map((r) => {
 		const turns = Number.isFinite(r?.usage?.turns) ? r.usage.turns : null;
 		// A child that errored, exited nonzero or stopped by error/abort is a terminal failure whatever it was charged for; usage is still counted once by the caller.
+		const byMain = mainCancel && turns > 0 && r?.exitCode === 1 && r?.stopReason === "aborted" && r?.abort?.running === true && r?.abort?.priorFailure === false;
 		const failed = terminal || r?.isError === true || (Number.isInteger(r?.exitCode) && r.exitCode !== 0) || r?.stopReason === "error" || r?.stopReason === "aborted";
 		return {
 			agent: typeof r?.agent === "string" ? r.agent : null,
-			status: turns === null ? "unreported" : turns === 0 ? "no-child-turn" : failed ? "terminal-failure" : "measured",
+			status: turns === null ? "unreported" : turns === 0 ? "no-child-turn" : byMain ? "cancelled-by-main" : failed ? "terminal-failure" : "measured",
 			turns, exitCode: Number.isInteger(r?.exitCode) ? r.exitCode : null,
 			stopReason: typeof r?.stopReason === "string" ? r.stopReason : null,
 			errorMessage: boundedDiagnostic(r?.errorMessage, limit).text,
@@ -227,7 +232,7 @@ export function callKind(ev) {
 
 // One main round from its own events: assistant turns, tool names, counts and errors (never arguments), subagent receipts/refusals/completions and launches.
 function observeRound(events, limit) {
-	const tools = {}; const launches = []; const receipts = []; const refusals = []; const completed = new Set(); const completedKeys = new Set(); const timeline = []; const audits = []; const diagnostics = []; const ignoredAudits = []; let assistantTurns = 0;
+	const tools = {}; const launches = []; const receipts = []; const refusals = []; const completed = new Set(); const completedKeys = new Set(); const timeline = []; const audits = []; const diagnostics = []; const ignoredAudits = []; const cancelled = new Set(); const receiptIds = new Set(); let assistantTurns = 0;
 	const at = (ev) => (Number.isFinite(ev?.atMs) ? ev.atMs : null);
 	for (const ev of events ?? []) {
 		if (ev?.type === "assistant") assistantTurns++;
@@ -235,12 +240,15 @@ function observeRound(events, limit) {
 			const t = (tools[ev.name] ??= { calls: 0, errors: 0 });
 			t.calls++;
 			if (ev.isError) { t.errors++; const e = boundedDiagnostic(ev.errorText, limit).text; if (e !== null && t.firstError === undefined) t.firstError = e; }
+			// A cancel counts only when it succeeded, named a safe job id, and came BEFORE that job's completion (events are in order).
+			// It also needs this job's receipt already seen (a cancel before the receipt can never match).
+			if (ev.control?.action === "cancel" && ev.isError === false && typeof ev.control.target === "string" && receiptIds.has(ev.control.target)) cancelled.add(ev.control.target);
 			if (ev.control) timeline.push({ type: "control", action: ev.control.action, target: ev.control.target ?? null, atMs: at(ev) });
 		} else if (ev?.type === "subagent") {
 			const kind = callKind(ev);
 			// Only the adapter's registry-validated roles; the raw details.roles is untrusted caller text and is never read here. rolesInvalid is a count.
 			const roles = Array.isArray(ev.roles) ? ev.roles : null;
-			if (kind === "receipt") { receipts.push({ jobId: ev.details.jobId, mode: typeof ev.details.mode === "string" ? ev.details.mode : null, roles, ...(Number.isInteger(ev.rolesInvalid) ? { rolesInvalid: ev.rolesInvalid } : {}), key: keyOf(ev.session, ev.details.jobId), atMs: at(ev) }); timeline.push({ type: "receipt", jobId: ev.details.jobId, roles, atMs: at(ev) }); }
+			if (kind === "receipt") { receiptIds.add(ev.details.jobId); receipts.push({ jobId: ev.details.jobId, mode: typeof ev.details.mode === "string" ? ev.details.mode : null, roles, ...(Number.isInteger(ev.rolesInvalid) ? { rolesInvalid: ev.rolesInvalid } : {}), key: keyOf(ev.session, ev.details.jobId), atMs: at(ev) }); timeline.push({ type: "receipt", jobId: ev.details.jobId, roles, atMs: at(ev) }); }
 			else if (kind === "results") { launches.push(...launchRecords(ev.details.results, limit)); timeline.push({ type: "foreground", roles, atMs: at(ev) }); }
 			else if (kind === "refused") {
 				// A refusal that named a role the registry does not know quotes untrusted caller text: only the count is kept, never the text (the redactor cannot know what a name is).
@@ -254,7 +262,7 @@ function observeRound(events, limit) {
 		else if (ev?.type === "completion") {
 			completed.add(ev.jobId); completedKeys.add(ev.jobKey ?? keyOf(ev.session, ev.jobId));
 			timeline.push({ type: "completion", jobId: ev.jobId ?? null, state: ev.state ?? null, atMs: at(ev) });
-			launches.push(...launchRecords(ev.results, limit, { terminal: ev.state === "failed" || ev.state === "aborted", jobId: ev.jobId ?? null }));
+			launches.push(...launchRecords(ev.results, limit, { terminal: ev.state === "failed" || ev.state === "aborted", jobId: ev.jobId ?? null, mainCancel: ev.state === "aborted" && cancelled.has(ev.jobId) && receiptIds.has(ev.jobId) }));
 		}
 	}
 	const pendingJobs = [...new Set(receipts.map((r) => r.jobId))].filter((id) => !completed.has(id));
@@ -268,7 +276,7 @@ function observeRound(events, limit) {
 // The writer is required once per TASK: cumulativeWriterLaunches (measured expected-writer launches so far, this round included) lets a rework round without a new
 // writer stay valid after an earlier one; omitted, only this round counts. Round 0 has no earlier launches, so the first-round guard is unchanged.
 export function classifyRound(diag, expectedWriter, { cumulativeWriterLaunches } = {}) {
-	const failed = diag.launches.find((l) => l.status !== "measured");
+	const failed = diag.launches.find((l) => l.status !== "measured" && l.status !== "cancelled-by-main");
 	if (failed) return { class: "infrastructure", kind: "launch_failed", agent: failed.agent, launchStatus: failed.status };
 	// A receipt never matched by its completion, or a settlement that timed out, means a worker may still be running: nothing is snapshotted, reviewed or scored.
 	const pending = [...new Set([...diag.pendingJobs, ...(diag.settlement?.pendingJobs ?? [])])];
@@ -655,6 +663,8 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, limits: config.limits, resources: config.resources ?? null, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
 			roles: { main: config.roles.main, reviewer: config.roles.reviewer },
 			registry: config.registry ?? null,
+			// Agent topology proof (topology.mjs): a measured (non-synthetic) run needs ok true; compare requires the same method. Null for a synthetic run.
+			topology: config.topology ?? null,
 			measurementPolicy: { toolState: workspace.toolStatePolicy ? { id: workspace.toolStatePolicy.id, roots: workspace.toolStatePolicy.roots, rule: workspace.toolStatePolicy.rule } : null },
 			runtime: { root: config.runtime.root ?? null, extensions: config.runtime.extensions ?? null, fingerprint: config.runtime.fingerprint, endFingerprint: null },
 		},
@@ -668,8 +678,11 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 	const shared = { session: null };
 	let activeDeadlineAt = null; // original deadline of the task being run: an outer emergency close may not grant itself a fresh grace beyond it
 	const registry = createRegistry();
+	// A direct library caller cannot bypass the CLI guard: a measured run needs the agent topology proof BEFORE any workspace, session, provider or prompt.
+	const topoStop = result.synthetic ? null : !config.topology || config.topology.method !== TOPOLOGY_METHOD ? { class: "methodinvalid", kind: "agent_topology_missing", detail: "no agent topology proof of this method" } : config.topology.ok !== true ? { class: "infrastructure", kind: "agent_topology_blocked", detail: describeProblems(config.topology) } : null;
+	if (topoStop) { result.status = "invalid"; result.error = `${topoStop.kind}: ${topoStop.detail}`; result.invalid = { task: null, class: topoStop.class, kind: topoStop.kind }; }
 	try {
-		for (let i = 0; i < manifest.tasks.length; i++) {
+		for (let i = 0; i < (topoStop ? 0 : manifest.tasks.length); i++) {
 			const task = manifest.tasks[i];
 			let compactionBefore = null;
 			// The task clock starts before its setup compaction: between-task compaction belongs to the next task's budget.
@@ -722,7 +735,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			}
 			if (rec.status !== "completed") throw new Error(`task ${task.id} ${rec.status}: ${rec.error}`);
 		}
-		if (result.status === "running") result.status = "complete";
+		if (result.status === "running") result.status = "complete"; // a topology stop is already "invalid"
 	} catch (e) {
 		result.status = "failed";
 		result.error = e.message;

@@ -6,7 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
+import { createPiSdkAdapter as realCreatePiSdkAdapter } from "./lib/sdk-adapter.mjs";
+import { okTopology } from "./fixtures/topology-fixture.mjs";
+// These suites drive a FAKE SDK, so the agent topology proof is injected at the adapter boundary (the real check needs the installed SDK; topology*.test.mjs run it for real).
+const createPiSdkAdapter = (o = {}) => realCreatePiSdkAdapter({ topology: okTopology, ...o });
 import { fixtureLimits, FakeAgentSessionRuntime } from "./fixtures/fake-runtime.mjs";
 
 // catalog: qualified ids that exist; withAuth: providers with usable credentials; settings: profile defaults.

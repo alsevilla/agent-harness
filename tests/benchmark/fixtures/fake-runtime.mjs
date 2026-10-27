@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { MODES } from "../lib/runner.mjs";
 import * as realWorkspace from "../lib/workspace.mjs";
+import { fixtureTopology } from "./topology-fixture.mjs";
 const { snapshot, diffSnapshots } = realWorkspace;
 
 export const u = (input, output, cacheRead = 0, cacheWrite = 0, total = 0.01) => ({ input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite, cost: { input: total / 2, output: total / 4, cacheRead: total / 8, cacheWrite: total / 8, total } });
@@ -30,7 +31,7 @@ export class FakeAgentSessionRuntime {
 	async dispose() { await this.session.emitShutdown?.(); this.session.dispose(); }
 }
 export const fixtureLimits = () => ({ roundSettleTimeoutMs: { value: 600000, source: "fixture roles default" }, shutdownGraceMs: { value: 30000, source: "fixture roles default" }, taskTimeoutMs: { value: 1200000, source: "fixture roles default" } });
-export const fixtureConfig = (over = {}) => ({ limits: fixtureLimits(), maxReworkRounds: { value: 2, source: "fixture roles default" }, diagnosticChars: { value: 300, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), ...over });
+export const fixtureConfig = (over = {}) => ({ limits: fixtureLimits(), maxReworkRounds: { value: 2, source: "fixture roles default" }, diagnosticChars: { value: 300, source: "fixture roles default" }, roles: fixtureRoles(), runtime: fixtureRuntime(), topology: fixtureTopology(), ...over });
 
 // Parent state: work.txt "broken", gate "red". Held-out content (post-task) is "green".
 // tracked: extra materialized (tracked) files {path: text} that the parent commit carries; the policy is the real workspace's tool-state policy.

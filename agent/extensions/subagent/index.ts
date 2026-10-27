@@ -94,6 +94,7 @@ interface SingleResult {
 	attempts?: AttemptProvenance[]; // only after an availability fallback: every launched attempt, earliest first
 	stopReason?: string;
 	errorMessage?: string;
+	abort?: { running: boolean; priorFailure: boolean }; // trusted text-free abort provenance, set only when this child was aborted: running = still alive at kill time; priorFailure = a failure was observed before/independently of the kill (sticky)
 	step?: number;
 }
 
@@ -463,6 +464,7 @@ async function runAgentAttempt(
 		args.push("--extension", guard.entry);
 		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
 		let wasAborted = false;
+		let abortWhileRunning = false, failureSeen = false; // abort provenance facts; never derived from errorMessage text
 
 		let removeAbort = () => {};
         const exitCode = await new Promise<number>((resolve) => {
@@ -481,6 +483,7 @@ async function runAgentAttempt(
                 if (client) {
                     void client.send("prompt", "Task: " + task).catch(error => {
                         if (client.closed && currentResult.messages.length) return;
+                        failureSeen = true;
                         currentResult.stopReason = "error"; currentResult.errorMessage = error.message;
                         proc.stdin?.end();
                     });
@@ -534,6 +537,7 @@ async function runAgentAttempt(
 						if (reported) { currentResult.model = reported; currentResult.modelSource = "observed"; }
 						currentResult.stopReason = msg.stopReason; // the latest assistant decides; a missing reason must clear an earlier stop
 						currentResult.errorMessage = msg.errorMessage; // latest assistant decides, like stopReason
+						if (msg.stopReason === "error" || (!wasAborted && msg.stopReason === "aborted")) failureSeen = true; // sticky: a later turn or the abort overwrite cannot clear it
 					}
 					emitUpdate();
 				}
@@ -563,6 +567,7 @@ async function runAgentAttempt(
 			});
 
 			proc.on("error", (error) => {
+                failureSeen = true;
                 currentResult.stderr += error.message;
                 client?.close(error.message); if (worker) dispatchDefaults.runtime?.detach(worker.id);
 				resolve(1);
@@ -570,6 +575,8 @@ async function runAgentAttempt(
 
 			if (signal) {
 				const killProc = () => {
+					abortWhileRunning = proc.exitCode === null && proc.signalCode === null;
+					if (!abortWhileRunning && (proc.exitCode !== 0 || proc.signalCode !== null)) failureSeen = true; // already exited nonzero/by signal before the abort
 					wasAborted = true;
 					proc.kill("SIGTERM");
 					const forceKill = setTimeout(() => {
@@ -587,7 +594,7 @@ async function runAgentAttempt(
         cleanExit = exitCode === 0 && !wasAborted;
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, wasAborted ? "aborted" : isFailedResult(currentResult) ? "failed" : "completed", wasAborted ? "Subagent was aborted" : isFailedResult(currentResult) ? getResultOutput(currentResult) : undefined);
         // A started child's terminal outcome (messages, usage) is returned, never thrown: Pi turns a throw into an empty-details refusal that drops the charged turns.
-        if (wasAborted) { currentResult.stopReason = "aborted"; currentResult.errorMessage = dispatchDefaults.jobId ? "Subagent was stopped" : "Subagent was aborted"; return currentResult; }
+        if (wasAborted) { currentResult.abort = { running: abortWhileRunning, priorFailure: failureSeen }; currentResult.stopReason = "aborted"; currentResult.errorMessage = dispatchDefaults.jobId ? "Subagent was stopped" : "Subagent was aborted"; return currentResult; }
 		const remainingFallbacks = fallbackModels ?? getFallbackSequence(model, agent.fallbackModel);
 		const retryResult = {
 			...currentResult,

@@ -8,7 +8,10 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { runBenchmark } from "./lib/runner.mjs";
-import { normalise, createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
+import { normalise, createPiSdkAdapter as realCreatePiSdkAdapter } from "./lib/sdk-adapter.mjs";
+import { okTopology } from "./fixtures/topology-fixture.mjs";
+// These suites drive a FAKE SDK, so the agent topology proof is injected at the adapter boundary (the real check needs the installed SDK; topology*.test.mjs run it for real).
+const createPiSdkAdapter = (o = {}) => realCreatePiSdkAdapter({ topology: okTopology, ...o });
 import { emptyLedger, ledgerTotals, newJob, observeJob, addJobUsage, addAuditUsage, addWorkerUsage } from "./lib/usage.mjs";
 import { fixtureRoles, fixtureLimits, fakeAdapter, fakeWorkspace, root, task, manifest, fixtureConfig, gate, assistant, u, writerLaunch } from "./fixtures/fake-runtime.mjs";
 

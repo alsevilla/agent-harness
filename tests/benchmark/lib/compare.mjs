@@ -1,3 +1,5 @@
+import { TOPOLOGY_METHOD } from "./topology.mjs";
+
 // Side-by-side comparison of two runs. Regression: acceptance rate drops or high-severity reviewer findings rise.
 // NO_REGRESSION is RELATIVE to the baseline on the same matched tasks. It is NOT all tasks passed: read allAccepted and
 // unacceptedTasks. Synthetic, failed, unavailable, mismatched or incomplete data is INCONCLUSIVE, never a pass.
@@ -46,6 +48,8 @@ export function compareResults(base, cand) {
 	if (base.mode !== cand.mode) inconclusive.push(`mode differs (${base.mode} vs ${cand.mode})`);
 	for (const [name, r] of [["baseline", base], ["candidate", cand]]) {
 		if (r.synthetic === true) inconclusive.push(`${name} is a synthetic result: not benchmark evidence`);
+		// The agent topology proof is a METHOD guard: a missing proof (an older run) or another proof method is not comparable. Per-run cwd, ids and the proof fingerprint are not compared.
+		else if (r.config?.topology?.method !== TOPOLOGY_METHOD || r.config.topology.ok !== true) inconclusive.push(`${name} lacks a passing agent topology proof of method ${TOPOLOGY_METHOD} (older or unproven runs are not comparable)`);
 		if (r.status !== "complete") inconclusive.push(`${name} run status is ${r.status}${r.error ? `: ${r.error}` : ""}`);
 		const ids = (r.tasks ?? []).map((t) => t.id);
 		if (ids.length !== (r.order ?? []).length || JSON.stringify(ids) !== JSON.stringify(r.order ?? [])) inconclusive.push(`${name} has ${ids.length} task result(s) for ${(r.order ?? []).length} ordered task(s): tasks do not match the order`);

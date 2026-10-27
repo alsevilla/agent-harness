@@ -18,6 +18,7 @@ import { createSyntheticAdapter } from "./lib/synthetic-adapter.mjs";
 import { compareResults } from "./lib/compare.mjs";
 import { candidateRuntime, resourceShadowing } from "./lib/runtime.mjs";
 import { resolveBenchmarkRoles } from "./lib/roles.mjs";
+import { TOPOLOGY_METHOD, describeProblems, safeTopologyReason } from "./lib/topology.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO = path.resolve(HERE, "..", "..");
@@ -82,6 +83,16 @@ function resourcesFor(adapterName, repo, agentDir) {
 	if (resources.shadowed.length) throw new Error(`candidate prompt resources are shadowed by the profile installation (mode profile-installed); this run would not measure the candidate. Install the candidate resources into the profile first, then rerun. Blocker (Phase 2 measurement): ${resources.shadowed.map((f) => `${f.path} [${f.state}]`).join(", ")}`);
 	return resources;
 }
+
+// The agent topology proof of the exact candidate runtime at this cwd, produced by the real adapter check BEFORE any workspace, session, provider or prompt.
+// A check that cannot run is a structured blocking result (never an assumed pass); only an allowlisted reason code is kept, never a foreign error message.
+export async function checkTopology({ adapter, repo, cwd }) {
+	try { return await adapter.agentTopology({ runtime: candidateRuntime({ candidateRoot: repo }), cwd }); } catch (e) {
+		const reason = safeTopologyReason(e);
+		return { method: TOPOLOGY_METHOD, ok: false, problems: [{ kind: "topology_unproven", ...(reason ? { reason } : {}) }], fingerprint: null };
+	}
+}
+const topologyBlocker = (t) => `agent_topology: ${describeProblems(t) || "unproven"}`;
 
 // --task H1,H2 selects named tasks (manifest order kept); an empty or unknown selection is refused before any run.
 function selectTasks(manifest, flags) {
@@ -180,13 +191,21 @@ async function main(argv) {
 		} else if (adapterName === "synthetic") adapter = createSyntheticAdapter();
 		else throw new Error("--adapter must be pi-sdk or synthetic");
 		const candidate = candidateIdentity(repo);
+		// Real adapter only (a synthetic run measures nothing): a topology that does not resolve every canonical role as a package role ends the run here as a structured
+		// blocker with the diagnostic persisted; no workspace, session, provider or prompt exists, so no shutdown is claimed.
+		const topology = adapterName === "pi-sdk" ? await checkTopology({ adapter, repo, cwd: scratch }) : null;
+		if (topology && topology.ok !== true) {
+			writeJson(out, { status: "blocked", blocker: { kind: "agent_topology", problems: topology.problems }, topology, candidate, tasksRun: 0 });
+			console.log(JSON.stringify({ status: "blocked", blocker: topologyBlocker(topology), out }, null, 2));
+			return 1;
+		}
 		const runtime = candidateRuntime({ candidateRoot: repo });
 		const roles = resolveBenchmarkRoles({ candidateRoot: repo, agentDir: await adapter.agentDir(), main: await adapter.resolveMainSpec({ candidateRoot: repo }) });
 		const maxReworkRounds = reworkFlag ?? { value: roles.writer.value, source: roles.writer.source };
 		const diagnosticChars = diagFlag ?? { value: roles.writer.diagnosticChars.value, source: roles.writer.diagnosticChars.source };
 		const limits = { roundSettleTimeoutMs: roundFlag ?? roles.writer.roundSettleTimeoutMs, shutdownGraceMs: graceFlag ?? roles.writer.shutdownGraceMs, taskTimeoutMs: taskFlag ?? roles.writer.taskTimeoutMs };
 		const resources = resourcesFor(adapterName, repo, await adapter.agentDir());
-		const config = { limits, resources, maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
+		const config = { limits, resources, topology, maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
 		const selection = { tasks: manifest.tasks.map((t) => t.id), fullTaskCount: fullManifest.tasks.length };
 		const result = await runBenchmark({ manifest, mode, adapter, workspace: createWorkspace({ repo, scratchRoot: scratch }), config, writeResult: (r) => writeJson(out, { ...r, candidate, selection }) });
 		console.log(JSON.stringify({ status: result.status, error: result.error ?? null, invalid: result.invalid ?? null, expectedWriter: result.expectedWriter, mode, order: result.order, maxReworkRounds: result.config.maxReworkRounds, reviewer: result.config.roles.reviewer.model, accepted: result.totals.acceptance, endToEndCost: result.totals.endToEnd.cost, runtime: result.config.runtime.fingerprint, out }, null, 2));
@@ -198,8 +217,11 @@ async function main(argv) {
 		const adapter = createPiSdkAdapter({ piPackageRoot: requireFlag(flags, "pi-package-root") });
 		const roles = resolveBenchmarkRoles({ candidateRoot: repo, agentDir: await adapter.agentDir(), main: await adapter.resolveMainSpec({ candidateRoot: repo }) });
 		const limits = { roundSettleTimeoutMs: millisFlag(flags, "round-timeout-ms") ?? roles.writer.roundSettleTimeoutMs, shutdownGraceMs: millisFlag(flags, "shutdown-grace-ms") ?? roles.writer.shutdownGraceMs };
-		const report = { candidate: candidateIdentity(repo), limits, resources: null, blocker: null, check: null };
+		const report = { candidate: candidateIdentity(repo), limits, resources: null, topology: null, blocker: null, check: null };
 		try { report.resources = resourcesFor("pi-sdk", repo, await adapter.agentDir()); } catch (e) { report.blocker = e.message; }
+		// Both blockers are reported; a blocked preflight opens no session, so it records no shutdown.
+		report.topology = await checkTopology({ adapter, repo, cwd: scratch });
+		if (report.topology.ok !== true) report.blocker = [report.blocker, topologyBlocker(report.topology)].filter(Boolean).join(" | ");
 		if (report.blocker === null) report.check = await preflightMain({ adapter, repo, scratch, roles, limits });
 		const ok = report.blocker === null && report.check.ok === true;
 		if (flags.out) writeJson(flags.out, report);

@@ -11,6 +11,8 @@ import { pathToFileURL } from "node:url";
 import crypto from "node:crypto";
 import { runtimeExtensionPaths, verifyLoadedResources } from "./runtime.mjs";
 import { loadReviewerContract } from "./reviewer-contract.mjs";
+import { checkAgentTopology, describeProblems, safeTopologyReason, TOPOLOGY_REASONS } from "./topology.mjs";
+import { loadNativeAgents } from "./topology-loader.mjs";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 // The main session delegates implementation through native subagent dispatch and never edits or writes the task directly (C6). subagent_control is the
@@ -106,9 +108,18 @@ const jobId = matching(JOB_ID), requestId = matching(REQUEST_ID), targetId = mat
 const roleOf = (name, roles) => (typeof name === "string" && roles?.has(name) ? name : undefined);
 const fin = (v) => (Number.isFinite(v) ? v : undefined);
 const usageOf = (u) => (u && typeof u === "object" ? { input: fin(u.input), output: fin(u.output), cacheRead: fin(u.cacheRead), cacheWrite: fin(u.cacheWrite), cost: fin(u.cost), turns: fin(u.turns), contextTokens: fin(u.contextTokens) } : undefined);
+// The producer's abort provenance: a plain object whose OWN fields running/priorFailure are both booleans, reduced to exactly those two. Anything else (missing,
+// array, inherited, non-boolean, partial) is undefined: never defaulted to false, and no other key or error body is ever carried.
+const abortOf = (a) => {
+	if (!a || typeof a !== "object" || Array.isArray(a)) return undefined;
+	const p = Object.getPrototypeOf(a);
+	if (p !== Object.prototype && p !== null) return undefined;
+	const own = (k) => Object.hasOwn(a, k) && typeof a[k] === "boolean";
+	return own("running") && own("priorFailure") ? { running: a.running, priorFailure: a.priorFailure } : undefined;
+};
 const resultOf = (r, i, roles) => ({
 	position: Number.isInteger(r?.position) ? r.position : i, workerId: workerId(r?.workerId) ?? undefined, agent: roleOf(r?.agent, roles), exitCode: fin(r?.exitCode), stopReason: token(r?.stopReason),
-	model: token(r?.model), modelTier: token(r?.modelTier), modelSlot: token(r?.modelSlot), usage: usageOf(r?.usage),
+	abort: abortOf(r?.abort), model: token(r?.model), modelTier: token(r?.modelTier), modelSlot: token(r?.modelSlot), usage: usageOf(r?.usage),
 	phase1: r?.phase1 ? { taskId: token(r.phase1.taskId), attempts: fin(r.phase1.attempts), firstTurnPromptTokens: fin(r.phase1.firstTurnPromptTokens) ?? null, peakPromptTokens: fin(r.phase1.peakPromptTokens) ?? null, unpricedTurns: fin(r.phase1.unpricedTurns) } : undefined,
 });
 // A foreground child result: the same allowlisted identity/usage shape as a completion child, plus its error flag and bounded-by-the-runner error text. An agent name the registry does
@@ -169,7 +180,7 @@ export function normalise(ev, ctx = {}) {
 	// Tool name and outcome only (no arguments, no packet text); error text is kept only for a failed call. A control call adds its validated action and safe id.
 	if (ev?.type === "tool_execution_end") {
 		const text = textOf(ev.result);
-		const base = { type: "tool", name: ev.toolName ?? null, isError: ev.isError === true, errorText: ev.isError === true && text ? text : null };
+		const base = { type: "tool", name: ev.toolName ?? null, isError: typeof ev.isError === "boolean" ? ev.isError : null, errorText: ev.isError === true && text ? text : null };
 		if (ev.toolName !== "subagent_control") return base;
 		const control = controlOf(ev.result?.details?.control);
 		// A retrieved job result (action result on a job id): its child usage, allowlisted like a completion's. It is retrieval, never a launch or a delivery.
@@ -302,7 +313,9 @@ const disposedOk = async (dispose) => { try { await dispose(); return true; } ca
 const cancelled = (what) => Object.assign(new Error(`${what} cancelled: the task deadline passed`), { cancelled: true });
 const live = (signal, what) => { if (signal?.aborted) throw cancelled(what); };
 
-export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => performance.now() } = {}) {
+// topology: test-boundary injection of the agent topology proof ({runtime, cwd, agentDir} -> result). The default is the REAL check (native discovery, installed SDK);
+// there is no skip option, and a missing proof is never assumed to pass.
+export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => performance.now(), topology } = {}) {
 	let sdk = null;
 	let registry = null;
 	const pi = async () => {
@@ -315,6 +328,15 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 	return {
 		describe: () => ({ name: "pi-sdk", synthetic: false, piPackageRoot: piPackageRoot ?? null, extensions: "candidate package.json pi.extensions (global discovery off)" }),
 		async agentDir() { return (await pi()).getAgentDir(); },
+		// Do the canonical package roles resolve as PACKAGE roles for the exact extension this runtime loads, at this cwd? The ambient SDK getAgentDir is what the native
+		// child sees (no environment swap). Throws when the proof cannot be produced (no explicit installed SDK root, no registerHooks); never returns a guessed ok.
+		async agentTopology({ runtime, cwd }) {
+			const entry = runtimeExtensionPaths(runtime)[0];
+			const agentDir = (await pi()).getAgentDir();
+			if (topology) return topology({ runtime, cwd, agentDir });
+			const native = await loadNativeAgents({ extensionEntry: entry, piPackageRoot });
+			return checkAgentTopology({ candidateRoot: runtime.root, extensionEntry: entry, discover: native.discoverAgents, resolveTier: native.resolveModelTier, cwd, agentDir });
+		},
 		// The profile default main model and thinking level, read from the SDK settings registry (never chosen by the benchmark).
 		async resolveMainSpec({ candidateRoot }) {
 			const m = await pi();
@@ -329,6 +351,13 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			const m = await pi();
 			live(signal, "session open");
 			if (!roleSpec) throw new Error(`no configured ${role} identity for task ${taskId}`);
+			// The main session runs the candidate extension at the REPLAY cwd (a nearer project agents directory can override a canonical role): proven before any
+			// ModelRuntime, loader, factory or prompt exists.
+			if (role !== "review") {
+				let proof;
+				try { proof = await this.agentTopology({ runtime, cwd }); } catch (e) { const reason = safeTopologyReason(e); throw Object.assign(new Error(`agent topology could not be proven (topology_check_failed${reason ? `: ${TOPOLOGY_REASONS[reason]}` : ""})`), { infrastructure: true, kind: "agent_topology", ...(reason ? { reason } : {}) }); }
+				if (proof?.ok !== true) throw Object.assign(new Error(`agent topology blocks this session (the canonical package roles do not all resolve as package roles): ${describeProblems(proof) || "no proof"}`), { infrastructure: true, kind: "agent_topology", topology: proof ?? null });
+			}
 			registry ??= m.ModelRuntime.create();
 			const modelRuntime = await registry;
 			const resolved = await resolveChain({ ...roleSpec, role }, modelRuntime);

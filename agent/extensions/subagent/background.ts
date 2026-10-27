@@ -175,6 +175,7 @@ export function completionResults(result: any) {
     position: i, workerId: typeof r?.workerId === "string" ? r.workerId : undefined, nodeId: typeof r?.nodeId === "string" ? r.nodeId : undefined,
     phase1: r?.phase1 ? { taskId: typeof r.phase1.taskId === "string" ? r.phase1.taskId : undefined, attempts: num(r.phase1.attempts), firstTurnPromptTokens: num(r.phase1.firstTurnPromptTokens) ?? null, peakPromptTokens: num(r.phase1.peakPromptTokens) ?? null, unpricedTurns: num(r.phase1.unpricedTurns) } : undefined,
     agent: typeof r?.agent === "string" ? r.agent : undefined, exitCode: num(r?.exitCode), stopReason: typeof r?.stopReason === "string" ? r.stopReason : undefined,
+    abort: typeof r?.abort?.running === "boolean" && typeof r.abort.priorFailure === "boolean" ? { running: r.abort.running, priorFailure: r.abort.priorFailure } : undefined,
     model: typeof r?.model === "string" ? r.model : undefined, modelTier: r?.modelTier, modelSlot: r?.modelSlot,
     usage: r?.usage ? { input: num(r.usage.input), output: num(r.usage.output), cacheRead: num(r.usage.cacheRead), cacheWrite: num(r.usage.cacheWrite), cost: num(r.usage.cost), turns: num(r.usage.turns), contextTokens: num(r.usage.contextTokens) } : undefined,
   }));

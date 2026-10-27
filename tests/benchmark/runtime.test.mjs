@@ -6,7 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { candidateRuntime } from "./lib/runtime.mjs";
-import { createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
+import { createPiSdkAdapter as realCreatePiSdkAdapter } from "./lib/sdk-adapter.mjs";
+import { okTopology, fixtureTopology } from "./fixtures/topology-fixture.mjs";
+// These suites drive a FAKE SDK, so the agent topology proof is injected at the adapter boundary (the real check needs the installed SDK; topology*.test.mjs run it for real).
+const createPiSdkAdapter = (o = {}) => realCreatePiSdkAdapter({ topology: okTopology, ...o });
 import { runBenchmark } from "./lib/runner.mjs";
 import { task, manifest, root, fakeWorkspace, gate, fixtureLimits, FakeAgentSessionRuntime } from "./fixtures/fake-runtime.mjs";
 
@@ -86,7 +89,7 @@ for (const mode of ["fresh", "long-fixed", "long-compacted"]) {
 		const result = await runBenchmark({
 			manifest: manifest([task("H1"), task("H2")]), mode, adapter: createPiSdkAdapter({ loadPi: async () => fakeSdk(rec), piPackageRoot: "/pi" }),
 			workspace: sentinelWorkspace(scratch), acceptance: gate,
-			config: { limits: fixtureLimits(), maxReworkRounds: { value: 0, source: "fixture" }, diagnosticChars: { value: 300, source: "fixture" }, roles, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: cand }).fingerprint },
+			config: { limits: fixtureLimits(), maxReworkRounds: { value: 0, source: "fixture" }, diagnosticChars: { value: 300, source: "fixture" }, roles, runtime, topology: fixtureTopology(), recheckRuntime: () => candidateRuntime({ candidateRoot: cand }).fingerprint },
 		});
 		assert.equal(result.status, "complete", result.error);
 		const absExt = EXT.map((e) => path.join(cand, e));
