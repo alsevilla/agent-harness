@@ -754,7 +754,8 @@ test("a hung rework round is cut by the same clock that started before round 0",
 	const r = await timed(() => runOwned({ tasks: [task("H1")], adapter: ad }));
 	const t = r.tasks[0];
 	assert.equal(t.budget.stage, "main_prompt");
-	assert.equal(t.mainDiagnostics.rounds.length, 1);
+	// The cut rework round is kept as a partial record next to the completed round 0 (never lost, never a completed round).
+	assert.deepEqual(t.mainDiagnostics.rounds.map((x) => [x.round, x.partial === true]), [[0, false], [1, true]]);
 	assert.ok(t.budget.exhaustedAtOffsetMs < 380, `cut near 300ms of one shared clock, not 150 + 300 (${t.budget.exhaustedAtOffsetMs})`);
 });
 

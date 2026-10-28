@@ -96,7 +96,7 @@ export const DELIVERY_DIAGNOSTIC = "subagent-delivery-diagnostic";
 // Identities are validated against what Pi and the subagent extension actually generate (job bg-N, worker <generation>:<n>, decision dec-<alnum>, see
 // agent/extensions/subagent index.ts NATIVE_TARGET and decision-relay-state REQUEST_ID) or against the registered roles, never by character class: a token-shaped secret
 // passes any character filter. Anything else is omitted.
-const JOB_ID = /^bg-\d{1,9}$/;
+export const JOB_ID = /^bg-\d{1,9}$/;
 const WORKER_ID = /^(?:\d{1,9}|bg-\d{1,9}):\d{1,9}$/;
 const REQUEST_ID = /^dec-[A-Za-z0-9]{8,40}$/;
 const TARGET = /^(?:bg-\d{1,9}|\d{1,9}:\d{1,9}|#\d{1,9}|dec-[A-Za-z0-9]{8,40}|cons-\d{1,9})$/;
@@ -390,7 +390,7 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			const lifecycle = new m.AgentSessionRuntime(session, services, async () => { throw new Error("session replacement is not supported by the benchmark"); });
 			// A session the factory returned after the cutoff is shut down through the runtime (extension workers awaited) and never bound or prompted.
 			if (signal?.aborted) { const ok = await disposedOk(() => lifecycle.dispose()); throw Object.assign(cancelled("session open"), { unconfirmed: !ok }); }
-			const state = { session, runtime: lifecycle, role, taskId, buffer: [], limits, pending: new Map(), completed: new Set(), epoch: 0, waiters: [], extensionErrors: [], jobs: new Map(), hidden: [], seenEntries: new Set(), jobTasks: new Map(), curTask: taskId ?? null, roles: registeredRoles(path.join(runtime.root, "agent", "agents"), path.join(m.getAgentDir(), "agents")), timeline: timeline ?? null, onEvent: onEvent ?? null, abortSnapshot: null };
+			const state = { session, runtime: lifecycle, role, taskId, buffer: [], limits, pending: new Map(), completed: new Set(), epoch: 0, waiters: [], extensionErrors: [], jobs: new Map(), hidden: [], seenEntries: new Set(), jobTasks: new Map(), curTask: taskId ?? null, roles: registeredRoles(path.join(runtime.root, "agent", "agents"), path.join(m.getAgentDir(), "agents")), timeline: timeline ?? null, onEvent: onEvent ?? null, abortSnapshot: null, requested: new Set() };
 			// Task-relative offsets on the injected monotonic clock; null when no task timeline was supplied (not recorded, never zero). sessionId is the owner key of every audit.
 			state.at = () => (state.timeline ? clock() - state.timeline.startedAt : null);
 			state.sessionId = session.sessionManager?.getSessionId?.() ?? null;
@@ -417,6 +417,9 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			}
 			else state.identity.resources = { agentsFiles: loaded.agentsFiles.map((f) => ({ path: f.path, sha256: sha256(Buffer.from(f.content ?? "", "utf8")) })), skills: loaded.skills.map((sk) => ({ name: sk.name, filePath: sk.filePath })), extensionErrors: state.extensionErrors };
 			state.unsubscribe = session.subscribe((ev) => {
+				// A subagent call started but not yet ended has no receipt/result: it is REQUESTED (unknown outcome), never a launch.
+				if (ev?.type === "tool_execution_start" && ev.toolName === "subagent") state.requested.add(ev.toolCallId);
+				else if (ev?.type === "tool_execution_end" && ev.toolName === "subagent") state.requested.delete(ev.toolCallId);
 				if (ev?.type === "entry_appended") { if (ev.entry?.id !== undefined) { if (state.seenEntries.has(ev.entry.id)) return; state.seenEntries.add(ev.entry.id); } }
 				const n = normalise(ev, state.ctx());
 				if (!n) return;
@@ -443,6 +446,8 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			signal?.addEventListener("abort", onAbort, { once: true });
 			try { return await runPrompt(state, text, { settle, budgetMs }); } finally { signal?.removeEventListener("abort", onAbort); }
 		},
+		// What this session has already observed in the current prompt, read-only (no SDK call, no message to the model); safe structured events only.
+		observed(state) { return { events: [...state.buffer], pending: pendingSnapshot(state), requestedUnacked: state.requested.size }; },
 		async compact(state, { signal } = {}) {
 			live(signal, "compaction");
 			// abortCompaction() is the supported cancel; compact() then settles (rejects) and is awaited here.

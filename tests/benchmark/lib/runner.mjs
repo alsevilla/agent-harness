@@ -4,6 +4,7 @@ import { runAcceptanceAsync } from "./acceptance.mjs";
 import { validateManifest, manifestDigest } from "./manifest.mjs";
 import { addUsage, addWorkerUsage, addJobUsage, newJob, observeJob, markUnknown, emptyLedger, ledgerTotals, addLedgers, sumCosts } from "./usage.mjs";
 import { evaluatorOf, summarizeEvaluators } from "./evaluator.mjs";
+import { JOB_ID } from "./sdk-adapter.mjs";
 import { TOPOLOGY_METHOD, describeProblems } from "./topology.mjs";
 
 // v2: each reviewer cycle records its effective evaluator (compare requires it); totals.evaluator summarises it. v1 results are not comparable.
@@ -89,22 +90,26 @@ export function parseReviewOutput(text) {
 	return { status: "ok", findings, highCount: findings.filter((f) => f.severity === "critical" || f.severity === "high").length };
 }
 
-export function taskPrompt(task) {
+// artifacts: the exact absolute task-owned {scratch, evidence} directories (outside the workspace); without them the older blanket wording is kept.
+const artifactLine = (a) => `Implementation and tests only in this workspace; task-owned scratch/evidence ONLY at exactly these absolute assigned paths: scratch ${a.scratch}; evidence ${a.evidence}. Anything else created inside the workspace counts as an unrelated change.`;
+export function taskPrompt(task, artifacts) {
 	return [
 		`Harness task ${task.id} (${task.tier}, ${task.category}).`,
 		`Goal: ${task.brief ?? task.subject}`,
 		`Edit only these files: ${task.allowedFiles.join(", ")}.`,
-		"Work only inside this workspace. Finish with a short statement of what you changed.",
+		artifacts ? artifactLine(artifacts) : "Work only inside this workspace.",
+		"Finish with a short statement of what you changed.",
 	].join("\n");
 }
 
-export function reworkPrompt(task, round, gate, review, unrelated) {
+export function reworkPrompt(task, round, gate, review, unrelated, artifacts) {
 	const lines = [`REWORK round ${round} for ${task.id}: the change is not accepted yet.`];
 	if (!gate.accepted) lines.push(`Acceptance failed (${gate.reason ?? "tests did not pass"}). Output tail:\n${String(gate.outputTail ?? "").slice(-TAIL)}`);
 	if (unrelated.length) lines.push(`Revert changes outside the allowed files: ${unrelated.join(", ")}.`);
 	const high = review.status === "ok" ? review.findings.filter((f) => f.severity === "critical" || f.severity === "high") : [];
 	if (high.length) lines.push(`Reviewer findings to fix:\n${high.map((f) => `- ${f.severity}: ${f.text}`).join("\n")}`);
 	lines.push(`Edit only these files: ${task.allowedFiles.join(", ")}.`);
+	if (artifacts) lines.push(artifactLine(artifacts));
 	return lines.join("\n");
 }
 
@@ -230,6 +235,9 @@ export function callKind(ev) {
 	return "unreported";
 }
 
+// Model-chosen tool names are data: look up and create only OWN records (defineProperty, so "__proto__"/"constructor"/"toString" never hit inherited members or the prototype setter).
+const ownTool = (tools, name) => (Object.hasOwn(tools, name) ? tools[name] : Object.defineProperty(tools, name, { value: { calls: 0, errors: 0 }, enumerable: true, writable: true, configurable: true })[name]);
+
 // One main round from its own events: assistant turns, tool names, counts and errors (never arguments), subagent receipts/refusals/completions and launches.
 function observeRound(events, limit) {
 	const tools = {}; const launches = []; const receipts = []; const refusals = []; const completed = new Set(); const completedKeys = new Set(); const timeline = []; const audits = []; const diagnostics = []; const ignoredAudits = []; const cancelled = new Set(); const receiptIds = new Set(); let assistantTurns = 0;
@@ -237,7 +245,7 @@ function observeRound(events, limit) {
 	for (const ev of events ?? []) {
 		if (ev?.type === "assistant") assistantTurns++;
 		else if (ev?.type === "tool") {
-			const t = (tools[ev.name] ??= { calls: 0, errors: 0 });
+			const t = ownTool(tools, ev.name);
 			t.calls++;
 			if (ev.isError) { t.errors++; const e = boundedDiagnostic(ev.errorText, limit).text; if (e !== null && t.firstError === undefined) t.firstError = e; }
 			// A cancel counts only when it succeeded, named a safe job id, and came BEFORE that job's completion (events are in order).
@@ -289,11 +297,12 @@ export function classifyRound(diag, expectedWriter, { cumulativeWriterLaunches }
 }
 
 // Records one round on the task: tool counts, bounded final text, launch outcomes (with their round) and the writer count.
-function noteRound(rec, diag, round, text, limit, expectedWriter) {
+function noteRound(rec, diag, round, text, limit, expectedWriter, open) {
 	const md = rec.mainDiagnostics;
+	if (open) delete open.partial; // the round completed: the pre-created record becomes the normal one
 	md.assistantTurns += diag.assistantTurns;
 	for (const [name, t] of Object.entries(diag.tools)) {
-		const acc = (md.tools[name] ??= { calls: 0, errors: 0 });
+		const acc = ownTool(md.tools, name);
 		acc.calls += t.calls; acc.errors += t.errors;
 		if (t.firstError !== undefined && acc.firstError === undefined) acc.firstError = t.firstError;
 	}
@@ -311,7 +320,54 @@ function noteRound(rec, diag, round, text, limit, expectedWriter) {
 	const writerLaunches = diag.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length;
 	rec.delegation.writerLaunches += writerLaunches;
 	// Per-round telemetry from counts only (no arguments, no reasoning), so nothing is inferred from task totals.
-	md.rounds.push({ round, assistantTurns: diag.assistantTurns, writerLaunches, toolCalls: Object.values(diag.tools).reduce((s, t) => s + t.calls, 0), tools: Object.fromEntries(Object.entries(diag.tools).map(([n, t]) => [n, { calls: t.calls, errors: t.errors }])) });
+	const entry = { round, assistantTurns: diag.assistantTurns, writerLaunches, toolCalls: Object.values(diag.tools).reduce((s, t) => s + t.calls, 0), tools: Object.entries(diag.tools).reduce((o, [n, t]) => { Object.assign(ownTool(o, n), { calls: t.calls, errors: t.errors }); return o; }, {}) };
+	if (open) { for (const k of Object.keys(open)) delete open[k]; Object.assign(open, entry); } else md.rounds.push(entry);
+}
+
+// A round that ended before its prompt returned: what the adapter had ALREADY observed (counts, ids, roles, statuses; no text, arguments or error strings), kept as partial.
+// Known counts are separate from coverage: an unobserved part is unknown, never zero, and nothing here is added to the writer count, the ledgers or any pass verdict.
+// Usage stays with the owned prompt operation (absorbed once if it returns late), so nothing is double counted.
+// Interrupted-round persistence is an allowlist: trusted structured outcome (status, counts, exit code) plus controlled values only. No child/native free-form text
+// (errorMessage, stderr, refusal text) and no provider-owned strings (model, tier, slot, unvalidated stopReason/job id/mode) is copied.
+const STOP_REASONS = new Set(["stop", "length", "toolUse", "error", "aborted"]);
+const SAFE_MODES = new Set(["single", "parallel", "chain"]);
+const safeJob = (v) => (typeof v === "string" && JOB_ID.test(v) ? v : null);
+// Tool names are SDK event.toolName: the model can name any string, and the SDK still reports a rejected call under it. Only the controlled session vocabulary
+// (adapter MAIN_TOOLS plus the write tools the main session must not use) is a name; every other name aggregates under one fixed key, never as a key or value.
+const KNOWN_TOOLS = new Set(["read", "grep", "find", "ls", "subagent", "subagent_control", ...WRITE_TOOLS]);
+function partialTools(tools) {
+	const out = {};
+	for (const [n, t] of Object.entries(tools)) { const k = KNOWN_TOOLS.has(n) ? n : "unknown_tool"; const acc = ownTool(out, k); acc.calls += t.calls; acc.errors += t.errors; }
+	return out;
+}
+const partialLaunch = (l) => ({ agent: l.agent, status: l.status, turns: l.turns, exitCode: l.exitCode, stopReason: STOP_REASONS.has(l.stopReason) ? l.stopReason : l.stopReason === null ? null : "other", jobId: safeJob(l.jobId) });
+const partialReceipt = (r) => ({ jobId: safeJob(r.jobId), mode: SAFE_MODES.has(r.mode) ? r.mode : null, roles: r.roles, ...(r.rolesInvalid !== undefined ? { rolesInvalid: r.rolesInvalid } : {}), completed: r.completed, atMs: r.atMs });
+const partialRefusal = (r) => ({ text: null, reason: r.reason ?? "refused", ...(r.rolesInvalid !== undefined ? { rolesInvalid: r.rolesInvalid } : {}) });
+const partialTimeline = (t) => (t.type === "receipt" ? { ...t, jobId: safeJob(t.jobId) } : t);
+function interruptRound(rec, open, e, adapter, session, registry, task, limit, expectedWriter, atMs) {
+	let snap = null;
+	try { snap = typeof adapter.observed === "function" ? adapter.observed(session) : null; } catch { snap = null; }
+	const ns = nsOf(session);
+	// A completion/audit of a job another task owns is not this round's; an unclaimed one (this round's own) is kept.
+	const events = snap ? (snap.events ?? []).filter((ev) => !(ev?.type === "completion" || ev?.type === "audit" || ev?.type === "diagnostic") || (registry.ownerOf(ns, ev.jobKey ?? keyOf(ev.session, ev.jobId)) ?? task.id) === task.id) : null;
+	const d = events ? observeRound(events, limit) : null;
+	const round = open.round;
+	const cause = e instanceof BudgetStop ? "budget_exhausted" : "error";
+	Object.assign(open, {
+		partial: true, interrupted: { cause, stage: e instanceof BudgetStop ? e.stage : "main_prompt", ...(cause === "error" ? { source: typeof e?.kind === "string" ? e.kind : e?.name ?? null, infrastructure: e?.infrastructure === true } : {}), endOffsetMs: atMs },
+		known: d ? { assistantTurns: d.assistantTurns, toolCalls: Object.values(d.tools).reduce((s, t) => s + t.calls, 0), tools: partialTools(d.tools), launches: d.launches.length, receipts: d.receipts.length, refusals: d.refusals.length, expectedWriterLaunches: d.launches.filter((l) => l.agent === expectedWriter && l.status === "measured").length } : null,
+		coverage: { complete: false, events: d ? "partial" : "unknown", adapterObservability: d ? "available" : "unavailable", requestedUnacked: Number.isInteger(snap?.requestedUnacked) ? snap.requestedUnacked : null, pendingJobs: d ? d.pendingJobs.map(safeJob) : null },
+	});
+	if (!d) return;
+	const dl = rec.delegation;
+	dl.launches.push(...d.launches.map((l) => ({ round, partial: true, ...partialLaunch(l) })));
+	dl.receipts.push(...d.receipts.map((r) => ({ round, partial: true, ...partialReceipt(r) })));
+	dl.refusals.push(...d.refusals.map((r) => ({ round, partial: true, ...partialRefusal(r) })));
+	dl.timeline.push(...d.timeline.map((t) => ({ round, partial: true, ...partialTimeline(t) })));
+	noteHidden(rec, { audits: d.audits, diagnostics: d.diagnostics, ignoredAudits: d.ignoredAudits });
+	dl.partialCoverage = { complete: false, rounds: [...new Set([...(dl.partialCoverage?.rounds ?? []), round])] };
+	for (const [n, t] of Object.entries(partialTools(d.tools))) { const acc = ownTool(rec.mainDiagnostics.tools, n); acc.calls += t.calls; acc.errors += t.errors; }
+	rec.mainDiagnostics.assistantTurns += d.assistantTurns;
 }
 
 // Hidden-entry facts of a task: terminal audits (owner, state, and what the producer did with the completion: suppressed, submitted or submit_failed; submitted is an attempt,
@@ -469,11 +525,14 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 	const timeline = { startedAt };
 	const onEvent = (e) => progress?.({ task: task.id, round, lastEvent: { type: e.type, atMs: Number.isFinite(e.atMs) ? e.atMs : null, jobId: e.jobId ?? e.details?.jobId ?? null, ...(e.control ? { action: e.control.action } : {}), ...(e.state ? { state: e.state } : {}), ...(e.code ? { code: e.code } : {}) } });
 	registry.enroll(task.id, rec, raw);
-	let session = null;
+	let session = null; let currentRound = null;
 	try {
 		if (preStop) { session = shared.session; throw new BudgetStop(preStop); }
 		const prepared = await stage("workspace_prepare", (ms, signal) => workspace.prepare(task, dir, { timeoutMs: wholeMs(ms), remainingMs: left, signal }), { strict: true });
 		const before = await snap();
+		// Owned scratch/evidence outside the scored workspace, created under the same task clock (no separate grant).
+		const artifacts = workspace.artifactsFor ? workspace.artifactsFor(mode, task) : null;
+		if (artifacts) { await stage("artifact_prepare", () => workspace.prepareArtifacts(artifacts), { strict: true }); rec.artifacts = artifacts; }
 		const tracked = new Set(prepared?.paths ?? []);
 		const policy = workspace.toolStatePolicy ?? null;
 		if (spec.sessionPolicy === "new-per-task" || shared.session === null) {
@@ -484,11 +543,14 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		sessionUsers.get(session).add(task.id);
 		rec.models.main.opened = session.identity ?? null;
 		rec.startContext = contextOf(await stage("start_context", () => adapter.startContext(session)));
-		let prompt = taskPrompt(task);
+		let prompt = taskPrompt(task, artifacts);
 		for (;;) {
 			// Held-out baseline: the state this round's main session receives (the previous round's restored tests), reset every round.
 			const prePrompt = await snap();
 			// Usage is absorbed inside the owned operation: a turn that completes after the cutoff is still counted, and never scored.
+			// The round record exists BEFORE the prompt: a cut, cancel or error keeps it (partial) instead of losing the round.
+			currentRound = { round, partial: true, startOffsetMs: clock() - startedAt };
+			rec.mainDiagnostics.rounds.push(currentRound);
 			const { out, diag } = await stage("main_prompt", async (ms, signal) => {
 				// The settle round takes whole ms only; under one whole ms left is budget exhaustion, never a new 1 ms grant (wholeMs would grant one).
 				const whole = Math.floor(ms);
@@ -501,7 +563,8 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 				absorb(events, { ...raw, isRework: round > 0 });
 				return { out: o, diag: d };
 			});
-			noteRound(rec, diag, round, out?.text, diagnostics.value, expectedWriter);
+			noteRound(rec, diag, round, out?.text, diagnostics.value, expectedWriter, currentRound);
+			currentRound = null;
 			if ((diag.settlement?.timedOut === true || diag.settlement?.budgetExhausted === true) && left() <= 0) throw new BudgetStop("main_settlement");
 			const stop = classifyRound(diag, expectedWriter, { cumulativeWriterLaunches: rec.delegation.writerLaunches });
 			if (stop) throw new RoundStop({ ...stop, round });
@@ -527,11 +590,12 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 			if (!needRework || round >= rec.maxReworkRounds.value) break;
 			round++;
 			rec.reworkRounds = round;
-			prompt = reworkPrompt(task, round, { ...gate, accepted: testsPassed }, review, unrelated);
+			prompt = reworkPrompt(task, round, { ...gate, accepted: testsPassed }, review, unrelated, artifacts);
 		}
 		rec.reworkRounds = round;
 		rec.status = "completed";
 	} catch (e) {
+		if (currentRound) interruptRound(rec, currentRound, e, adapter, session, registry, task, diagnostics.value, expectedWriter, clock() - startedAt);
 		if (e instanceof BudgetStop) {
 			rec.status = "budget_exhausted"; rec.accepted = false;
 			budgetRec.exhausted = true; budgetRec.stage = e.stage; budgetRec.exhaustedAtOffsetMs = clock() - startedAt;
@@ -665,7 +729,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			registry: config.registry ?? null,
 			// Agent topology proof (topology.mjs): a measured (non-synthetic) run needs ok true; compare requires the same method. Null for a synthetic run.
 			topology: config.topology ?? null,
-			measurementPolicy: { toolState: workspace.toolStatePolicy ? { id: workspace.toolStatePolicy.id, roots: workspace.toolStatePolicy.roots, rule: workspace.toolStatePolicy.rule } : null },
+			measurementPolicy: { artifacts: workspace.artifactPolicy ? { id: workspace.artifactPolicy.id, rule: workspace.artifactPolicy.rule } : null, toolState: workspace.toolStatePolicy ? { id: workspace.toolStatePolicy.id, roots: workspace.toolStatePolicy.roots, rule: workspace.toolStatePolicy.rule } : null },
 			runtime: { root: config.runtime.root ?? null, extensions: config.runtime.extensions ?? null, fingerprint: config.runtime.fingerprint, endFingerprint: null },
 		},
 		environment: { node: process.version, platform: process.platform, arch: process.arch, adapter: desc },

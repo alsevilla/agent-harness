@@ -136,10 +136,26 @@ export const TOOL_STATE_POLICY = {
 	isToolState: (p, { tracked, before } = {}) => tracked instanceof Set && before instanceof Map && p.startsWith(SERENA_ROOT) && !tracked.has(p) && !before.has(p),
 };
 
+// Task-owned scratch and evidence directories: exact absolute paths under <scratchRoot>/_artifacts/<mode>/<task id>/, a sibling of (never inside) every workspace directory and of the
+// scored snapshot boundary. Per task, so sequential tasks never share or overlap; the workspace is rebuilt but these are never removed here.
+export const ARTIFACT_POLICY = { id: "task-owned-artifacts-v1", rule: "scratch and evidence directories are exact absolute task-owned paths outside the scored workspace; any file inside the workspace is still scored" };
+export function artifactPaths({ scratchRoot, mode, task, workspaceDir }) {
+	if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(task?.id))) throw new Error(`task id ${task?.id} cannot name an artifact directory`);
+	const root = assertInside(path.join(scratchRoot, "_artifacts", mode, task.id), scratchRoot);
+	const apart = (a, b) => { const r = path.relative(path.resolve(a), path.resolve(b)); return r.startsWith("..") || path.isAbsolute(r); };
+	if (workspaceDir && !(apart(root, workspaceDir) && apart(workspaceDir, root))) throw new Error(`artifact root ${root} overlaps the workspace ${workspaceDir}`);
+	const fwd = (p) => path.resolve(p).split(path.sep).join("/");
+	return { scratch: fwd(path.join(root, "scratch")), evidence: fwd(path.join(root, "evidence")) };
+}
+
 // The runner's workspace: one stable directory per mode (shared) or per task (fresh), always under the scratch root.
 export function createWorkspace({ repo, scratchRoot, roots = HARNESS_ROOTS }) {
 	return {
 		toolStatePolicy: TOOL_STATE_POLICY,
+		artifactPolicy: ARTIFACT_POLICY,
+		artifactsFor(mode, task) { return artifactPaths({ scratchRoot, mode, task, workspaceDir: this.dirFor(mode, task) }); },
+		// New owned directories only (recursive create keeps anything already there); nothing is deleted.
+		async prepareArtifacts(a) { for (const p of [a.scratch, a.evidence]) { assertInside(p, scratchRoot); fs.mkdirSync(p, { recursive: true }); } },
 		dirFor: (mode, task) => assertInside(path.join(scratchRoot, mode, mode === "fresh" ? task.id : "shared"), scratchRoot),
 		// Git reads are bounded by the remaining task time (timeoutMs, kills the git child); the file writes are synchronous and cannot be interrupted, only checked after.
 		prepare: async (task, dir, o) => materializeHarness({ repo, commit: task.parent, dest: dir, scratchRoot, roots, timeoutMs: o?.timeoutMs, remainingMs: o?.remainingMs }),
