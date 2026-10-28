@@ -233,7 +233,7 @@ async function main(argv) {
 		if (files.length !== 2) throw new Error("usage: compare <baseline.json> <candidate.json> [--out file]");
 		const report = compareResults(JSON.parse(fs.readFileSync(files[0], "utf8")), JSON.parse(fs.readFileSync(files[1], "utf8")));
 		if (flags.out) writeJson(flags.out, report);
-		console.log(JSON.stringify({ verdict: report.verdict, reasons: report.reasons, inconclusive: report.inconclusive, allAccepted: report.allAccepted, unacceptedTasks: report.unacceptedTasks, caveat: report.caveat }, null, 2));
+		console.log(JSON.stringify({ verdict: report.verdict, reasons: report.reasons, inconclusive: report.inconclusive, allAccepted: report.allAccepted, contract: report.contract, baselineEligible: report.baselineEligible, attemptCoverage: report.attemptCoverage, quality: report.quality, unacceptedTasks: report.unacceptedTasks, caveat: report.caveat }, null, 2));
 		return report.verdict === "REGRESSION" ? 1 : 0;
 	}
 	console.error("usage: cli.mjs validate | validate-history | run | preflight | compare  (see tests/benchmark/README.md)");
