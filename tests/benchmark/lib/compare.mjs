@@ -132,6 +132,10 @@ function capacityDiffs(label, b, c) {
 	return Object.keys(b).filter((k) => b[k] === null || c[k] === null || b[k] !== c[k]).map((k) => `${label} ${k} differs or is missing (${b[k] ?? "missing"} vs ${c[k] ?? "missing"})`);
 }
 
+// Long-mode continuation policy (a method property: after a confirmed cut the session is restored from its faithful history). Fresh runs have no continuation, so a fresh result is NOT APPLICABLE
+// whether or not the field exists (old saved fresh data is read as is, never rewritten). A long result must record the same policy on both sides; a missing one is not assumed compatible.
+const continuationPolicy = (r) => (r.mode === "fresh" ? "not-applicable" : (r.config?.continuation?.policy ?? null));
+
 export function compareResults(base, cand) {
 	const inconclusive = [];
 	const reasons = [];
@@ -142,6 +146,7 @@ export function compareResults(base, cand) {
 	if (base.manifestDigest !== cand.manifestDigest) inconclusive.push("manifest digest differs (different benchmark)");
 	if (JSON.stringify(base.order) !== JSON.stringify(cand.order)) inconclusive.push("task order differs");
 	if (base.mode !== cand.mode) inconclusive.push(`mode differs (${base.mode} vs ${cand.mode})`);
+	else if (continuationPolicy(base) === null || continuationPolicy(base) !== continuationPolicy(cand)) inconclusive.push(`long-mode continuation policy differs or is missing (${continuationPolicy(base) ?? "missing"} vs ${continuationPolicy(cand) ?? "missing"})`);
 	for (const [name, r] of [["baseline", base], ["candidate", cand]]) {
 		if (r.synthetic === true) inconclusive.push(`${name} is a synthetic result: not benchmark evidence`);
 		// The agent topology proof is a METHOD guard: a missing proof (an older run) or another proof method is not comparable. Per-run cwd, ids and the proof fingerprint are not compared.
@@ -189,7 +194,7 @@ export function compareResults(base, cand) {
 	return {
 		verdict, reasons, inconclusive,
 		contract: CONTRACT,
-		appliedPolicy: { sourceSchema: base.schemaVersion, candidateSchema: cand.schemaVersion, deadlineOutcomes: "structured-budget-cut-is-failed-attempt", missingReview: "unknown" },
+		appliedPolicy: { sourceSchema: base.schemaVersion, candidateSchema: cand.schemaVersion, deadlineOutcomes: "structured-budget-cut-is-failed-attempt", missingReview: "unknown", continuation: { baseline: continuationPolicy(base) ?? "missing", candidate: continuationPolicy(cand) ?? "missing" } },
 		// baselineEligible: the pair is usable matched bounded-budget data (complete attempt coverage, drained shutdowns, same method and limits). It is NOT a verdict and NOT a full 8-task baseline.
 		baselineEligible: coverage.baseline.eligible && coverage.candidate.eligible && inconclusive.length === 0,
 		attemptCoverage: coverage,

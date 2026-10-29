@@ -68,14 +68,17 @@ export const reviewerContractFixture = (body = "FIXTURE REVIEWER CONTRACT", reso
 
 // Scripted adapter: mainScript(session, text) returns { events, text }; reviewer returns reviewText.
 // reviewSelected: the effective (e.g. fallback) reviewer model; contractBody: the reviewer contract body the session carries.
-export function fakeAdapter({ mainScript, reviewText = "FINDING low: nit\nNO FINDINGS", compactFails = false, synthetic = true, reviewSelected, contractBody, reviewResources } = {}) {
+// history: false removes the optional restore capability (snapshotHistory), as an adapter that cannot restore. A restored session continues the call count (its message count), under a new id.
+export function fakeAdapter({ mainScript, reviewText = "FINDING low: nit\nNO FINDINGS", compactFails = false, synthetic = true, reviewSelected, contractBody, reviewResources, history = true } = {}) {
 	const log = []; let n = 0;
 	return {
 		log,
+		...(history ? { snapshotHistory(s) { log.push(["snapshot", s.id]); return { data: { calls: s.calls }, entryCount: s.calls + 1, sessionId: `fake-${s.id}` }; } } : {}),
 		describe: () => ({ name: "fake-adapter", synthetic, version: "0" }),
 		async openSession(o) {
-			const s = { id: ++n, ...o, calls: 0 };
-			log.push(["open", s.id, o.role, o.compactionEnabled]);
+			const s = { id: ++n, ...o, calls: o.history ? o.history.data.calls : 0 };
+			if (o.history) s.restored = { entryCount: o.history.entryCount, appendedOnOpen: 0, newSession: true };
+			log.push(["open", s.id, o.role, o.compactionEnabled, o.history ? o.history.entryCount : null]);
 			const configuredModel = o.roleSpec?.model;
 			const model = o.role === "review" && reviewSelected ? reviewSelected : configuredModel;
 			s.identity = { configured: o.roleSpec, selected: { model }, attempts: [{ model, status: "selected" }], observed: { model, thinking: o.roleSpec?.thinking ?? null }, servedThinking: "unknown" };

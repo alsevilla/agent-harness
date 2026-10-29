@@ -269,6 +269,16 @@ async function settleRound(state, timeoutMs) {
 // Hidden entries (audit, diagnostic, ignored audit) of this session. The subscription saw most of them live; the session's own entries are read once more after the
 // shutdown generation drained, so an entry whose event was missed is still found. Each entry counts once (by its entry id).
 function ingestEntry(state, entry) {
+	// An entry restored from a previous session's history is old evidence: its audit or diagnostic is reported ignored (job id only), never parsed for ownership or counted again, even when
+	// its recorded owner is missing. Entries this session wrote itself keep the ownership rules above.
+	if (state.restoredIds?.has(entry?.id)) {
+		if (state.seenEntries.has(entry.id)) return null;
+		state.seenEntries.add(entry.id);
+		const id = (entry.customType === TERMINAL_AUDIT || entry.customType === DELIVERY_DIAGNOSTIC) ? jobId(entry.data?.jobId) : null;
+		const n = id ? { type: "audit_ignored", jobId: id, reason: "restored_history" } : null;
+		if (n) state.hidden.push(n);
+		return n;
+	}
 	if (entry?.id !== undefined) { if (state.seenEntries.has(entry.id)) return null; state.seenEntries.add(entry.id); }
 	const n = normalise({ type: "entry_appended", entry }, state.ctx());
 	if (n) state.hidden.push(n);
@@ -309,6 +319,12 @@ async function closeState(state, { budgetMs } = {}) {
 // Pi 1.4.0 gives createAgentSession and loader.reload() no AbortSignal, so an open cannot be interrupted midway: the task signal is checked at every await
 // boundary and whatever a late factory produced is disposed through the lifecycle owner. Compaction and runs have real cancellation (abortCompaction, abort).
 // A dispose that throws (sync) or rejects (async) is an unconfirmed shutdown; its error text is dropped, never propagated.
+// The restore seed must be the manager's own header-less entry list (public getEntries): a header would make the SDK reuse the old session id. Anything else is refused, never emptied.
+function restorableEntries(history) {
+	const e = history?.data;
+	if (!Array.isArray(e) || e.length === 0 || e.length !== history.entryCount || e.some((x) => !x || typeof x !== "object" || x.type === "session" || typeof x.id !== "string")) throw Object.assign(new Error("the history to restore is not a header-less SessionManager entry list"), { continuationRestore: true });
+	return e;
+}
 const disposedOk = async (dispose) => { try { await dispose(); return true; } catch { return false; } };
 const cancelled = (what) => Object.assign(new Error(`${what} cancelled: the task deadline passed`), { cancelled: true });
 const live = (signal, what) => { if (signal?.aborted) throw cancelled(what); };
@@ -346,7 +362,15 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			if (!provider || !id) throw new Error("no default model in the profile settings (defaultProvider/defaultModel); refusing to choose one");
 			return { model: `${provider}/${id}`, fallbacks: [], thinking: settings.getDefaultThinkingLevel() ?? null, source: "profile default (settings defaultProvider/defaultModel/defaultThinkingLevel)" };
 		},
-		async openSession({ cwd, role, compactionEnabled, taskId, runtime, roleSpec, limits, signal, timeline, onEvent }) {
+		// The faithful, header-less entries of a (closed) main session's manager, cloned: the SessionManager stays readable after dispose, and later events cannot change the copy.
+		// No model call, no clock. data stays in memory only (the runner never writes it); entryCount is the only value recorded.
+		snapshotHistory(state) {
+			const sm = state.session?.sessionManager;
+			if (state.role !== "main" || typeof sm?.getEntries !== "function") throw new Error("this session has no readable SessionManager history");
+			const data = structuredClone(sm.getEntries());
+			return { data, entryCount: data.length, sessionId: state.sessionId ?? null };
+		},
+		async openSession({ cwd, role, compactionEnabled, taskId, runtime, roleSpec, limits, signal, timeline, onEvent, history }) {
 			live(signal, "session open");
 			const m = await pi();
 			live(signal, "session open");
@@ -378,7 +402,10 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			}
 			const appendLoaded = isReview ? loader.getAppendSystemPrompt().includes(review.contract.body) : null;
 			if (isReview && appendLoaded !== true) throw new Error("reviewer contract did not reach the loaded system prompt; refusing to open the session");
-			const options = { cwd, sessionManager: m.SessionManager.inMemory(cwd), settingsManager, resourceLoader: loader, modelRuntime, model: resolved.model };
+			// A restore seeds a replacement manager with the previous manager's entries WITHOUT the session header (public SessionManager.inMemory(cwd, options, entries)): the SDK then mints a
+			// new session id, so audit ownership and job keys of the old session cannot collide. The entries are cloned; the caller's snapshot is never aliased.
+			const seed = !isReview && history ? restorableEntries(history) : null;
+			const options = { cwd, sessionManager: seed ? m.SessionManager.inMemory(cwd, undefined, structuredClone(seed)) : m.SessionManager.inMemory(cwd), settingsManager, resourceLoader: loader, modelRuntime, model: resolved.model };
 			if (roleSpec.thinking) options.thinkingLevel = roleSpec.thinking;
 			options.tools = isReview ? review.tools : MAIN_TOOLS;
 			if (!isReview && !Number.isInteger(limits?.shutdownGraceMs?.value)) throw new Error("the main session needs limits.shutdownGraceMs from the run configuration");
@@ -394,6 +421,14 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 			// Task-relative offsets on the injected monotonic clock; null when no task timeline was supplied (not recorded, never zero). sessionId is the owner key of every audit.
 			state.at = () => (state.timeline ? clock() - state.timeline.startedAt : null);
 			state.sessionId = session.sessionManager?.getSessionId?.() ?? null;
+			if (seed) {
+				// Proof of the restore from the live manager: the same entries in the same order, under a new id. Extra entries the SDK appended on its own are only counted.
+				const now = session.sessionManager?.getEntries?.() ?? [];
+				const same = now.length >= seed.length && seed.every((e, i) => e?.id === now[i]?.id);
+				if (!same) { const ok = await disposedOk(() => lifecycle.dispose()); throw Object.assign(new Error("history restore did not preserve the entries in order"), { continuationRestore: true, unconfirmed: !ok }); }
+				state.restored = { entryCount: seed.length, appendedOnOpen: now.length - seed.length, newSession: state.sessionId !== null && state.sessionId !== (history.sessionId ?? null) };
+				state.restoredIds = new Set(seed.map((e) => e?.id).filter((id) => id !== undefined));
+			}
 			state.ctx = () => ({ at: state.at, session: state.sessionId, roles: state.roles, taskOf: (id) => state.jobTasks.get(id) ?? null, claim: (id) => state.jobTasks.get(id) ?? null });
 			await session.bindExtensions({ onError: (e) => state.extensionErrors.push({ event: typeof e?.event === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(e.event) ? e.event : null, error: null }) });
 			if (signal?.aborted) { const c = await closeState(state); throw Object.assign(cancelled("session open"), { unconfirmed: c.confirmed === false }); }
@@ -450,6 +485,14 @@ export function createPiSdkAdapter({ piPackageRoot, loadPi, clock = () => perfor
 		observed(state) { return { events: [...state.buffer], pending: pendingSnapshot(state), requestedUnacked: state.requested.size }; },
 		async compact(state, { signal } = {}) {
 			live(signal, "compaction");
+			// Applicability from the SDK's own PUBLIC SessionManager data (getBranch / buildSessionContext), the same preconditions AgentSession.compact() enforces before any provider call:
+			// a compaction entry already last ("Already compacted"), or a context with no messages (only settings/custom entries). A manager that exposes neither is NOT assumed empty:
+			// compact() runs and every error (also "Nothing to compact") still propagates. No model call and no usage for a not-applicable state.
+			const sm = state.session?.sessionManager;
+			if (typeof sm?.getBranch === "function" && typeof sm?.buildSessionContext === "function") {
+				if (sm.getBranch().at(-1)?.type === "compaction") return { compactionNotApplicable: "already-compacted", tokensBefore: null, usage: null };
+				if (sm.buildSessionContext().messages.length === 0) return { compactionNotApplicable: "context-empty", tokensBefore: null, usage: null };
+			}
 			// abortCompaction() is the supported cancel; compact() then settles (rejects) and is awaited here.
 			const onAbort = () => { try { state.session.abortCompaction?.(); } catch { /* the awaited compact() reports the outcome */ } };
 			signal?.addEventListener("abort", onAbort, { once: true });

@@ -76,6 +76,9 @@ export const MODES = {
 	"long-compacted": { sessionPolicy: "shared-fixed-order", compaction: "manual-between-tasks" },
 };
 const TAIL = 2000;
+// Long modes only: after a confirmed deadline cut the faithful in-memory session history (aborted tail included, no session header) seeds a replacement session with a new id.
+// Recorded in config.continuation; compare requires the same policy on both long sides. A fresh run has no such field (not applicable).
+export const CONTINUATION_POLICY = "faithful-history-restore/1";
 
 // Reviewer output counts only when it contains the structured lines; anything else is unavailable, never zero findings.
 export function parseReviewOutput(text) {
@@ -478,6 +481,18 @@ async function runReview({ adapter, dir, task, changed, gate, ledger, runtime, r
 	}
 }
 
+// Opens the main session. With a restored history the adapter must prove it restored exactly that many entries under a NEW session id; otherwise the open fails closed
+// (an empty or silently different session is never labelled long). The raw history is only handed to the adapter, in memory.
+async function openMain({ adapter, dir, task, runtime, roles, limits, signal, timeline, onEvent, history }) {
+	const s = await adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main, limits, signal, timeline, onEvent, ...(history ? { history } : {}) });
+	if (history && (s?.restored?.entryCount !== history.entryCount || s.restored.newSession !== true)) {
+		const c = await closeRecorded(adapter, s, limits.shutdownGraceMs.value);
+		throw Object.assign(new Error(`history restore was not confirmed (restored entries and a new session id are required)${c.confirmed ? "" : "; the unproven session could not be confirmed closed"}`), { continuationRestore: true });
+	}
+	return s;
+}
+const restoredNote = (history, session) => ({ fromTaskId: history.fromTaskId, entryCount: history.entryCount, appendedOnOpen: Number.isInteger(session.restored?.appendedOnOpen) ? session.restored.appendedOnOpen : null, newSessionId: true });
+
 async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal }) {
 	const started = Date.now();
 	const budget = taskBudgetOf(task, limits);
@@ -526,8 +541,11 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 	const onEvent = (e) => progress?.({ task: task.id, round, lastEvent: { type: e.type, atMs: Number.isFinite(e.atMs) ? e.atMs : null, jobId: e.jobId ?? e.details?.jobId ?? null, ...(e.control ? { action: e.control.action } : {}), ...(e.state ? { state: e.state } : {}), ...(e.code ? { code: e.code } : {}) } });
 	registry.enroll(task.id, rec, raw);
 	let session = null; let currentRound = null;
+	// Controlled continuation metadata only (ids, counts, reason codes): never any transcript content.
+	const cont = () => (rec.continuation ??= { policy: CONTINUATION_POLICY, restored: null, captured: null, stop: null });
+	const noteRestore = () => { if (shared.restored) { cont().restored = shared.restored; shared.restored = null; } };
 	try {
-		if (preStop) { session = shared.session; throw new BudgetStop(preStop); }
+		if (preStop) { session = shared.session; noteRestore(); throw new BudgetStop(preStop); }
 		const prepared = await stage("workspace_prepare", (ms, signal) => workspace.prepare(task, dir, { timeoutMs: wholeMs(ms), remainingMs: left, signal }), { strict: true });
 		const before = await snap();
 		// Owned scratch/evidence outside the scored workspace, created under the same task clock (no separate grant).
@@ -536,9 +554,14 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		const tracked = new Set(prepared?.paths ?? []);
 		const policy = workspace.toolStatePolicy ?? null;
 		if (spec.sessionPolicy === "new-per-task" || shared.session === null) {
-			session = await stage("session_open", (ms, signal) => adapter.openSession({ cwd: dir, role: "main", compactionEnabled: false, taskId: task.id, runtime, roleSpec: roles.main, limits, signal, timeline, onEvent }), { strict: true, late: (s) => adapter.closeSession(s, { budgetMs: deadlineLeft() }) });
-			if (spec.sessionPolicy !== "new-per-task") shared.session = session;
+			const history = spec.sessionPolicy === "new-per-task" ? null : shared.history;
+			session = await stage("session_open", (ms, signal) => openMain({ adapter, dir, task, runtime, roles, limits, signal, timeline, onEvent, history }), { strict: true, late: (s) => adapter.closeSession(s, { budgetMs: deadlineLeft() }) });
+			if (spec.sessionPolicy !== "new-per-task") {
+				shared.session = session; shared.opened = true;
+				if (history) { shared.restored = restoredNote(history, session); shared.history = null; }
+			}
 		} else session = shared.session;
+		noteRestore();
 		if (!sessionUsers.has(session)) sessionUsers.set(session, new Set());
 		sessionUsers.get(session).add(task.id);
 		rec.models.main.opened = session.identity ?? null;
@@ -604,6 +627,7 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		} else if (e instanceof RoundStop) { rec.status = e.info.class === "infrastructure" ? "infrastructure" : "method_invalid"; rec.invalid = e.info; }
 		else if (e.infrastructure === true) { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: e.kind ?? "native_dispatch_unavailable" }; }
 		else rec.status = "error";
+		if (e.continuationRestore === true) cont().stop = { reason: "history_restore_failed", fromTaskId: shared.history?.fromTaskId ?? null };
 		rec.error = e.message;
 	} finally {
 		// A stopped round closes its session at once (even a shared one): shutdown cancels and awaits every owning worker before the workspace can be reused.
@@ -628,6 +652,25 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		rec.shutdown = { confirmed: closed.confirmed && pendingOperations.length === 0, ms: closed.ms, pendingJobs: closed.pendingJobs, pendingOperations, ...(closed.error ? { error: closed.error } : {}) };
 		foldClose(registry, task, session, rec, closed);
 		if (rec.shutdown.confirmed === false && rec.status === "completed") { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "shutdown_unconfirmed" }; }
+		// A closed shared session cannot be prompted again, but its SessionManager entries stay readable. After a CONFIRMED deadline cut (abort awaited, runtime disposed, owner empty,
+		// still inside the original deadline) the faithful history is snapshotted here, before the session reference is lost; any other stop leaves no history and the run stops.
+		if (session && stopped && spec.sessionPolicy !== "new-per-task") {
+			shared.history = null; shared.historyStop = null;
+			if (rec.status === "budget_exhausted") {
+				if (rec.shutdown.confirmed !== true) shared.historyStop = "shutdown_unconfirmed";
+				else if (typeof adapter.snapshotHistory !== "function") shared.historyStop = "adapter_history_unsupported";
+				else if (Math.floor(deadlineLeft()) < 1) shared.historyStop = "snapshot_after_task_deadline";
+				else {
+					try {
+						const h = adapter.snapshotHistory(session);
+						// The synchronous capture cannot be preempted: an overrun is detected after it returns and the late seed is discarded (same whole-ms rule, no grant).
+						if (Math.floor(deadlineLeft()) < 1) shared.historyStop = "snapshot_after_task_deadline";
+						else if (!h || h.data === undefined || !Number.isInteger(h.entryCount) || h.entryCount < 0) shared.historyStop = "history_snapshot_invalid";
+						else { shared.history = { data: h.data, entryCount: h.entryCount, sessionId: h.sessionId ?? null, fromTaskId: task.id }; cont().captured = { entryCount: h.entryCount }; }
+					} catch { shared.historyStop = "history_snapshot_failed"; }
+				}
+			}
+		}
 		rec.models.main.served = [...raw.served.values()];
 		rec.reworkTurns = ledgerTotals(raw.rework).turns;
 		rec.main = ledgerTotals(raw.main);
@@ -655,6 +698,8 @@ async function closeRecorded(adapter, session, ms) {
 // Manual compaction between tasks: the only compaction in the compacted arm (auto-compaction is disabled in every arm).
 async function compactShared({ adapter, session, ledger, signal }) {
 	const k = await adapter.compact(session, { signal });
+	// A not-applicable state is recorded as such: no call, no usage, no savings (a truthful no-op, never a compressed-summary claim).
+	if (k?.compactionNotApplicable) return { compactionNotApplicable: k.compactionNotApplicable, tokensBefore: null, usage: null };
 	addUsage(ledger, k?.usage);
 	return { tokensBefore: k?.tokensBefore ?? null, usage: ledgerTotals(addUsage(emptyLedger("model"), k?.usage)) };
 }
@@ -727,6 +772,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, limits: config.limits, resources: config.resources ?? null, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
 			roles: { main: config.roles.main, reviewer: config.roles.reviewer },
 			registry: config.registry ?? null,
+			...(spec.sessionPolicy === "new-per-task" ? {} : { continuation: { policy: CONTINUATION_POLICY } }),
 			// Agent topology proof (topology.mjs): a measured (non-synthetic) run needs ok true; compare requires the same method. Null for a synthetic run.
 			topology: config.topology ?? null,
 			measurementPolicy: { artifacts: workspace.artifactPolicy ? { id: workspace.artifactPolicy.id, rule: workspace.artifactPolicy.rule } : null, toolState: workspace.toolStatePolicy ? { id: workspace.toolStatePolicy.id, roots: workspace.toolStatePolicy.roots, rule: workspace.toolStatePolicy.rule } : null },
@@ -739,7 +785,8 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 	const progress = (u) => { result.progress = { ...(result.progress ?? {}), ...u }; writeResult(result); };
 	const raws = [];
 	const compactionLedger = emptyLedger("model");
-	const shared = { session: null };
+	// shared.history is the in-memory restore seed (never written to the result); opened: a session was ever opened; restored/historyStop: controlled notes.
+	const shared = { session: null, history: null, opened: false, restored: null, historyStop: null };
 	let activeDeadlineAt = null; // original deadline of the task being run: an outer emergency close may not grant itself a fresh grace beyond it
 	const registry = createRegistry();
 	// A direct library caller cannot bypass the CLI guard: a measured run needs the agent topology proof BEFORE any workspace, session, provider or prompt.
@@ -756,11 +803,30 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			const owner = createOwner();
 			const ac = new AbortController();
 			if (spec.compaction === "manual-between-tasks" && i > 0) {
+				const budget = taskBudgetOf(task, config.limits);
+				const cutoffAt = startedAt + budget.value - config.limits.shutdownGraceMs.value;
+				// A cut task closed the shared session: it is reopened from its faithful history FIRST, inside this task's own setup budget (no model call), then compacted.
+				// A failed restore fails the run closed (no empty session is substituted).
+				if (cutoffAt - clock() > 0 && shared.session === null && shared.history) {
+					const history = shared.history;
+					const op = Promise.resolve().then(() => openMain({ adapter, dir: workspace.dirFor(mode, task), task, runtime: config.runtime, roles: config.roles, limits: config.limits, signal: ac.signal, timeline: { startedAt }, history }));
+					const o = await race(op, cutoffAt - clock());
+					if (o.timedOut) { ac.abort(); owner.track("session_open", op, (s) => adapter.closeSession(s, { budgetMs: Math.max(0, activeDeadlineAt - clock()) })); preStop = "session_open"; }
+					else if (o.error) throw o.error;
+					else {
+						shared.session = o.value; shared.opened = true; shared.restored = restoredNote(history, o.value); shared.history = null;
+						if (clock() >= cutoffAt) preStop = "session_open";
+					}
+				}
 				try {
-					const budget = taskBudgetOf(task, config.limits);
-					const cutoffAt = startedAt + budget.value - config.limits.shutdownGraceMs.value;
 					const ms = cutoffAt - clock();
-					if (ms <= 0) preStop = "compaction";
+					// No session and no history: only provable when no session ever opened (the continuation admission guarantees it), so there is nothing to compact and the task
+					// opens its first session normally. Any other no-session state would lose context: fail closed, never compact null.
+					if (!preStop && shared.session === null && !shared.history) {
+						if (shared.opened) throw new Error("long-compacted has no live or restorable session after an opened session (context unavailable)");
+					}
+					else if (preStop) { /* cut while reopening: nothing further runs */ }
+					else if (ms <= 0) preStop = "compaction";
 					else {
 						const p = Promise.resolve().then(() => compactShared({ adapter, session: shared.session, ledger: compactionLedger, signal: ac.signal }));
 						const r = await race(p, ms);
@@ -778,7 +844,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			result.tasks.push(rec);
 			raws.push(raw);
 			writeResult(result);
-			// A deliberate budget expiry is unfinished, never a pass. Fresh mode continues only after a confirmed drain; a long session is never silently recreated.
+			// A deliberate budget expiry is unfinished, never a pass. Fresh mode continues only after a confirmed drain; a long session continues only from its faithful restored history (never silently recreated empty).
 			if (rec.status === "budget_exhausted") {
 				(result.budgetExhausted ??= []).push(task.id);
 				result.status = "unfinished";
@@ -787,7 +853,15 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 					result.shutdownUnconfirmed = { task: task.id, pendingOperations: rec.shutdown?.pendingOperations ?? [], pendingJobs: rec.shutdown?.pendingJobs ?? [] };
 					result.error += `; shutdown unconfirmed (${[...result.shutdownUnconfirmed.pendingOperations, ...result.shutdownUnconfirmed.pendingJobs].join(", ") || "close not confirmed"}): the run stops and no further task starts`;
 				}
-				if (spec.sessionPolicy === "new-per-task" && rec.shutdown?.confirmed === true) continue;
+				if (rec.shutdown?.confirmed === true) {
+					if (spec.sessionPolicy === "new-per-task") continue;
+					// A long run continues only when no context can be lost: the still-open session (the cut never reached it), the confirmed faithful snapshot, or no session ever existed.
+					if (shared.session !== null || shared.history !== null || !shared.opened) continue;
+					const reason = shared.historyStop ?? "history_unavailable";
+					(rec.continuation ??= { policy: CONTINUATION_POLICY, restored: null, captured: null, stop: null }).stop = { reason };
+					result.continuationStop = { task: task.id, reason };
+					result.error += `; long-session continuation is not possible (${reason}): the run stops and the remaining tasks are not run`;
+				}
 				break;
 			}
 			// Infrastructure or methodinvalid: stop here (no further tasks), keep the partial results, and the run is not complete.

@@ -13,7 +13,7 @@ const createPiSdkAdapter = (o = {}) => realCreatePiSdkAdapter({ topology: okTopo
 import { fixtureLimits, FakeAgentSessionRuntime } from "./fixtures/fake-runtime.mjs";
 
 // catalog: qualified ids that exist; withAuth: providers with usable credentials; settings: profile defaults.
-function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], withAuth = ["anthropic", "openai-codex"], settings = { provider: "anthropic", model: "claude-main", thinking: "high" }, dropSubagent = false, dropControl = false, loaded = { agentsFiles: [], skills: [] }, agentDir = "/agent-dir", basePrompt = "BASE PROMPT", systemFile, promptOverride } = {}) {
+function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], withAuth = ["anthropic", "openai-codex"], settings = { provider: "anthropic", model: "claude-main", thinking: "high" }, dropSubagent = false, dropControl = false, loaded = { agentsFiles: [], skills: [] }, agentDir = "/agent-dir", basePrompt = "BASE PROMPT", systemFile, promptOverride, realSessionManager } = {}) {
 	const session = {
 		listeners: [],
 		subscribe(l) { this.listeners.push(l); return () => {}; },
@@ -43,7 +43,8 @@ function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-
 		dispose() { calls.order.push("dispose"); calls.disposed++; },
 	};
 	return {
-		SessionManager: { inMemory: (cwd) => ({ kind: "memory", cwd }) },
+		// realSessionManager: the installed SDK's own SessionManager class (a pure data container: no AgentSession, provider, auth or file); the fake session then carries the manager the adapter passed.
+		SessionManager: realSessionManager ?? { inMemory: (cwd) => ({ kind: "memory", cwd }) },
 		SettingsManager: {
 			inMemory: (s) => ({ kind: "settings", settings: s }),
 			create: (cwd, agentDir) => { calls.settingsCreate.push({ cwd, agentDir }); return { getDefaultProvider: () => settings.provider, getDefaultModel: () => settings.model, getDefaultThinkingLevel: () => settings.thinking }; },
@@ -52,7 +53,7 @@ function fakeSdk(calls, { catalog = ["anthropic/claude-main", "anthropic/claude-
 		DefaultResourceLoader: class { constructor(o) { calls.loader.push(o); this.o = o; } async reload() { calls.reloaded++; if (calls.reloadHook) await calls.reloadHook(); } getAppendSystemPrompt() { return this.o.appendSystemPrompt ?? []; } getAgentsFiles() { return { agentsFiles: loaded.agentsFiles }; } getSkills() { return { skills: loaded.skills, diagnostics: [] }; } getSystemPrompt() { return systemFile?.content; } getSystemPromptSource() { return systemFile ? { path: systemFile.path } : undefined; } getAppendSystemPromptSources() { return []; } },
 		getAgentDir: () => agentDir,
 		AgentSessionRuntime: class extends FakeAgentSessionRuntime { async dispose() { calls.order.push("shutdown"); await super.dispose(); } },
-		async createAgentSession(opts) { calls.create.push(opts); if (calls.createHook) await calls.createHook(); const active = (opts.tools ?? ["read", "bash"]).filter((t) => !(dropSubagent && t === "subagent") && !(dropControl && t === "subagent_control")); return { session: Object.assign(session, { systemPrompt: promptOverride ?? `${typeof basePrompt === "function" ? basePrompt() : basePrompt}\n<cwd>\n${opts.cwd.replace(/\\/g, "/")}\n</cwd>`, model: opts.model, thinkingLevel: opts.thinkingLevel ?? "medium", active }) }; },
+		async createAgentSession(opts) { calls.create.push(opts); if (calls.createHook) await calls.createHook(); const active = (opts.tools ?? ["read", "bash"]).filter((t) => !(dropSubagent && t === "subagent") && !(dropControl && t === "subagent_control")); return { session: Object.assign(session, typeof opts.sessionManager?.buildSessionContext === "function" ? { sessionManager: opts.sessionManager, messages: opts.sessionManager.buildSessionContext().messages } : {}, { systemPrompt: promptOverride ?? `${typeof basePrompt === "function" ? basePrompt() : basePrompt}\n<cwd>\n${opts.cwd.replace(/\\/g, "/")}\n</cwd>`, model: opts.model, thinkingLevel: opts.thinkingLevel ?? "medium", active }) }; },
 	};
 }
 
@@ -701,4 +702,73 @@ test("a repeated close is one actual abort/dispose; a stricter later budget does
 	assert.equal((await first).confirmed, true);
 	assert.equal((await ad.closeSession(s, { budgetMs: 0 })).confirmed, true, "an already-closed session is idempotent");
 	assert.equal(c.order.filter((x) => x === "dispose").length, 1, "one dispose, no double close");
+});
+
+// ---- Long-mode continuation: the faithful SessionManager history of a closed main session seeds a replacement manager (public SessionManager.inMemory(cwd, options, entries), SDK 1.4 docs/sdk.md "Session storage") ----
+// SessionManager here is the installed SDK's own class used as a DATA container only (verified in session-manager.js: no AgentSession, provider, auth, network or file when inMemory); nothing is prompted.
+const SDK_ROOT = process.env.PI_PACKAGE_ROOT ?? path.join(process.env.USERPROFILE ?? process.env.HOME ?? "", ".pi", "agent", "install", "releases", "1.4.0", "node_modules", "@earendil-works", "pi-coding-agent");
+const SM_FILE = path.join(SDK_ROOT, "dist", "core", "session-manager.js");
+const aborted = { role: "assistant", content: [{ type: "text", text: "RAWTAIL partial" }, { type: "toolCall", id: "call-1", name: "subagent", arguments: { agent: "general-worker", task: "PARTIAL" } }], api: "fake", provider: "fake", model: "fake", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "aborted", timestamp: 3 };
+const openMain = (ad, ws, extra = {}) => ad.openSession({ cwd: ws, role: "main", compactionEnabled: false, taskId: "H1", runtime: RUNTIME, roleSpec: MAIN, limits: fixtureLimits(), ...extra });
+
+test("C1 restore: the closed session's entries (aborted tail included, header excluded) seed a replacement manager with a NEW id; messages equal; old audits ignored; one dispose each", { skip: !fs.existsSync(SM_FILE) }, async () => {
+	const { SessionManager } = await import(pathToFileURL(SM_FILE).href);
+	const c = calls(); const ws = workspace();
+	const ad = createPiSdkAdapter({ loadPi: async () => fakeSdk(c, { realSessionManager: SessionManager }), piPackageRoot: "/pi" });
+	const s1 = await openMain(ad, ws);
+	const sm1 = s1.session.sessionManager;
+	sm1.appendThinkingLevelChange("high");
+	sm1.appendMessage({ role: "user", content: "RAWUSER task", timestamp: 1 });
+	sm1.appendMessage({ ...aborted, content: [{ type: "text", text: "RAWDONE" }], stopReason: "stop", timestamp: 2 });
+	sm1.appendCustomEntry("subagent-terminal-audit", { v: 1, jobId: "bg-1", ownerSession: null, state: "completed", startedAt: 1, endedAt: 2, completionSuppressed: false, completion: "submitted", results: [{ agent: "general-worker", exitCode: 0, usage: { input: 5, output: 5, cost: 1, turns: 1 } }] });
+	sm1.appendMessage(aborted);
+	const before = sm1.buildSessionContext().messages; const oldId = sm1.getSessionId(); const entriesBefore = sm1.getEntries();
+	await ad.closeSession(s1);
+	const h = ad.snapshotHistory(s1);
+	assert.equal(h.entryCount, entriesBefore.length);
+	assert.ok(h.data.every((e) => e.type !== "session"), "no session header in the seed");
+	assert.notEqual(h.data[0], entriesBefore[0], "cloned, never aliased");
+	sm1.appendMessage({ role: "user", content: "LATE", timestamp: 9 });
+	assert.equal(h.data.length, entriesBefore.length, "a late write does not change the snapshot");
+	const s2 = await openMain(ad, ws, { history: h });
+	const sm2 = s2.session.sessionManager;
+	assert.notEqual(sm2, sm1);
+	assert.notEqual(sm2.getSessionId(), oldId);
+	assert.notEqual(sm2.getHeader().id, oldId);
+	assert.deepEqual(sm2.getEntries().map((e) => e.id), entriesBefore.map((e) => e.id));
+	assert.deepEqual(s2.session.messages, before, "same reconstructed model context");
+	assert.equal(s2.session.messages.at(-1).stopReason, "aborted", "the aborted partial tail is kept");
+	assert.deepEqual(s2.restored, { entryCount: entriesBefore.length, appendedOnOpen: 0, newSession: true });
+	assert.equal(c.create[1].sessionManager, sm2, "the manager the adapter built is what createAgentSession received");
+	assert.equal((await ad.startContext(s2)).messageCount, before.length);
+	const closed = await ad.closeSession(s2);
+	assert.deepEqual(closed.audits, [], "a restored audit is never counted again, even with no recorded owner");
+	assert.deepEqual(closed.ignoredAudits.map((a) => [a.jobId, a.reason]), [["bg-1", "restored_history"]]);
+	assert.equal(c.disposed, 2);
+	assert.equal(JSON.stringify(closed).includes("RAW"), false, "no transcript text in the close record");
+});
+
+test("C2 an entry list with a session header, no ids or a wrong count is refused, never replaced by an empty session", { skip: !fs.existsSync(SM_FILE) }, async () => {
+	const { SessionManager } = await import(pathToFileURL(SM_FILE).href);
+	const c = calls(); const ws = workspace();
+	const ad = createPiSdkAdapter({ loadPi: async () => fakeSdk(c, { realSessionManager: SessionManager }), piPackageRoot: "/pi" });
+	const src = SessionManager.inMemory(ws); src.appendMessage({ role: "user", content: "x", timestamp: 1 });
+	const withHeader = [src.getHeader(), ...src.getEntries()];
+	for (const bad of [{ data: withHeader, entryCount: 2 }, { data: [{ type: "message" }], entryCount: 1 }, { data: src.getEntries(), entryCount: 5 }, { data: [], entryCount: 0 }, { data: "x", entryCount: 1 }]) {
+		await assert.rejects(() => openMain(ad, ws, { history: bad }), (e) => e.continuationRestore === true);
+	}
+	assert.equal(c.create.length, 0, "no session was created for a refused restore");
+});
+
+test("C3 an own-session audit with a missing owner is still counted; only entries restored by this open are ignored", { skip: !fs.existsSync(SM_FILE) }, async () => {
+	const { SessionManager } = await import(pathToFileURL(SM_FILE).href);
+	const c = calls(); const ws = workspace();
+	const ad = createPiSdkAdapter({ loadPi: async () => fakeSdk(c, { realSessionManager: SessionManager }), piPackageRoot: "/pi" });
+	const src = SessionManager.inMemory(ws); src.appendThinkingLevelChange("high"); src.appendMessage({ role: "user", content: "x", timestamp: 1 });
+	const h = { data: structuredClone(src.getEntries()), entryCount: 2, sessionId: src.getSessionId() };
+	const s = await openMain(ad, ws, { history: h });
+	s.session.sessionManager.appendCustomEntry("subagent-terminal-audit", { v: 1, jobId: "bg-1", ownerSession: null, state: "completed", completionSuppressed: false, completion: "submitted", results: [] });
+	const closed = await ad.closeSession(s);
+	assert.deepEqual(closed.audits.map((a) => a.jobKey), [`${s.session.sessionManager.getSessionId()}/bg-1`], "same job id, new session: its own key, no collision with the old bg-1");
+	assert.deepEqual(closed.ignoredAudits, []);
 });

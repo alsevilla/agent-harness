@@ -570,7 +570,7 @@ test("a hung reviewer makes the review unknown (never zero findings) and the tas
 	assert.equal(t.reviewer.cycles.at(-1).highCount, null);
 });
 
-test("fresh mode continues after a confirmed drain; long modes stop unfinished with the rest not run", async () => {
+test("fresh mode continues after a confirmed drain; a long run whose drain is not confirmed stops unfinished with the rest not run (confirmed long cuts: continuation.test.mjs)", async () => {
 	let first = true;
 	// The hung prompt is released when its session is closed (what the real adapter does through session.abort), so the drain can be confirmed.
 	const script = (s, text) => (first ? ((first = false), new Promise((r) => { s.release = () => r({ events: [], text: "" }); })) : fixMain(s, text));
@@ -715,15 +715,18 @@ test("a reviewer session that opens late is disposed and never prompted", async 
 	assert.equal(r.tasks[0].shutdown.confirmed, true);
 });
 
-test("a compaction that ignores the abort and resolves late keeps its usage; the task is cut before open or prompt and the long run stops", async () => {
+test("a compaction that ignores the abort and resolves late keeps its usage; the task is cut before any prompt and the long run continues from the restored history", async () => {
 	const ad = fakeAdapter({ mainScript: fixMain }); const compact = ad.compact; let n = 0; let sig = null;
-	ad.compact = async (s, o) => { sig = o?.signal; if (++n === 1) await sleep(350); return compact(s); };
+	ad.compact = async (s, o) => { if (++n === 1) { sig = o?.signal; await sleep(350); } return compact(s); };
 	const r = await timed(() => runOwned({ tasks: [task("H1"), task("H2"), task("H3")], mode: "long-compacted", adapter: ad }));
 	assert.equal(r.tasks[1].budget.stage, "compaction");
 	assert.equal(sig?.aborted, true, "the compaction was given the task signal and it was aborted");
-	assert.equal(ad.log.filter((e) => e[0] === "prompt" && e[2] === "main").length, 1, "no prompt after the cutoff");
-	assert.equal(r.totals.compaction.calls, 1, "the late compaction's usage is counted");
-	assert.deepEqual(r.notRun, ["H3"]);
+	const mainPrompts = ad.log.filter((e) => e[0] === "prompt" && e[2] === "main").map((e) => e[1]);
+	assert.equal(mainPrompts.length, 2, "no prompt for the cut task");
+	assert.notEqual(mainPrompts[0], mainPrompts[1], "H3 prompts the replacement session");
+	assert.equal(r.totals.compaction.calls, 2, "the late compaction's usage is counted, then H3's own compaction");
+	assert.deepEqual(r.notRun, []);
+	assert.equal(r.tasks[2].status, "completed");
 	assert.equal(r.tasks[1].shutdown.confirmed, true);
 });
 
