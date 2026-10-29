@@ -22,6 +22,7 @@ const FILES = {
 	qmd: path.join(PROFILE, "extensions", "qmd", "index.ts"),
 };
 for (const file of Object.values(FILES)) { mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, "// controlled fixture\n"); }
+writeFileSync(path.join(path.dirname(FILES.qmd), "config.json"), "{}"); // QMD loads only with its sibling config
 after(() => { fs.rmSync(PROFILE, { recursive: true, force: true }); fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }); });
 const FULL_LAUNCH = ["--extension", FILES.ponytailExt, "--extension", FILES.serena, "--extension", FILES.qmd, "--extension", FILES.graphifyExt, "--skill", FILES.graphifySkill, "--tools", "read,grep,find,ls,serena_find_symbol,qmd_search"];
 // Node equivalent of the former module mock: resolve the Pi package to a data: module exposing only getAgentDir.

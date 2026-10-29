@@ -45,9 +45,9 @@ function role(name: string) {
   return { name, description: "actual role test", source: "user" as const, filePath: fileURLToPath(filePath),
     tools: toolsLine[1].split(",").map(tool => tool.trim()) };
 }
-function effectiveTools(agent: ReturnType<typeof role>) {
+function effectiveTools(agent: ReturnType<typeof role>, qmdExtension?: string) {
   const args: string[] = [];
-  assert.equal(configureCodeIntegrations(args, agent), true);
+  assert.equal(configureCodeIntegrations(args, agent, [], qmdExtension), true);
   const index = args.indexOf("--tools");
   assert.ok(index >= 0 && args[index + 1], "effective allowlist missing");
   return args[index + 1].split(",");
@@ -57,7 +57,7 @@ for (const name of ["backend-worker", "frontend-worker", "general-worker", "data
     const agent = role(name);
     assert.ok(agent.tools.includes("edit"));
     assert.ok(!agent.tools.includes("write"));
-    const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, () => effectiveTools(agent));
+    const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, (_d, q) => effectiveTools(agent, q));
     for (const tool of agent.tools) assert.ok(tools.includes(tool), `role tool lost: ${tool}`);
     assert.ok(!tools.includes("write"));
     for (const tool of unsafeMutations) assert.ok(!tools.includes(tool), `unexpected mutation: ${tool}`);
@@ -97,24 +97,24 @@ test("package resource guidance states precedence and empty outside the package"
 test("database-specialist remains read-only with no precise-edit or write grant", () => {
   const agent = role("database-specialist");
   assert.ok(!agent.tools.includes("edit") && !agent.tools.includes("write"));
-  const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, () => effectiveTools(agent));
+  const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, (_d, q) => effectiveTools(agent, q));
   for (const tool of [...agent.tools, ...config.readOnlyTools]) assert.ok(tools.includes(tool), tool);
   for (const tool of ["edit", "write", ...unsafeMutations]) assert.ok(!tools.includes(tool), tool);
 });
 test("actual read-only scout grants remain unchanged", () => {
   const agent = role("scout");
   assert.ok(!agent.tools.includes("edit") && !agent.tools.includes("write"));
-  const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, () => effectiveTools(agent));
+  const tools = withAgentDir({ ponytailExtension: true, ponytailSkill: true }, (_d, q) => effectiveTools(agent, q));
   for (const tool of [...agent.tools, ...config.readOnlyTools]) assert.ok(tools.includes(tool), tool);
   for (const tool of ["edit", "write", ...unsafeMutations]) assert.ok(!tools.includes(tool), tool);
 });
 
 // Ponytail is optional for reviewer launches only: fixtures toggle its extension/skill and the other integrations stay required.
-type Present = { ponytailExtension?: boolean; ponytailSkill?: boolean; qmd?: boolean; serena?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean };
+type Present = { ponytailExtension?: boolean; ponytailSkill?: boolean; qmd?: boolean; qmdConfig?: boolean; serena?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean };
 const ponytailExtensionPath = (dir: string) => join(dir, "npm", "node_modules", "@dietrichgebert", "ponytail", "pi-extension", "index.js");
 const ponytailSkillPath = (dir: string) => join(dir, "npm", "node_modules", "@dietrichgebert", "ponytail", "skills", "ponytail-review", "SKILL.md");
 function withAgentDir<T>(present: Present, run: (dir: string, qmdExtension?: string) => T): T {
-  const { ponytailExtension = false, ponytailSkill = false, qmd = true, serena = true, graphifyExtension = true, graphifySkill = true } = present;
+  const { ponytailExtension = false, ponytailSkill = false, qmd = true, qmdConfig = true, serena = true, graphifyExtension = true, graphifySkill = true } = present;
   const dir = fs.mkdtempSync(join(tmpdir(), "code-integrations-fixture-"));
   const packages = join(dir, "npm", "node_modules");
   const files = [
@@ -123,25 +123,44 @@ function withAgentDir<T>(present: Present, run: (dir: string, qmdExtension?: str
     ...(serena ? [join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts")] : []),
     ...(graphifyExtension ? [join(packages, "graphify-pi", "extensions", "graphify.ts")] : []),
     ...(graphifySkill ? [join(dir, "skills", "graphify", "SKILL.md")] : []),
+    ...(qmd ? [join(dir, "extensions", "qmd", "index.ts")] : []),
+    ...(qmd && qmdConfig ? [join(dir, "extensions", "qmd", "config.json")] : []),
   ];
   for (const file of files) { fs.mkdirSync(join(file, ".."), { recursive: true }); fs.writeFileSync(file, ""); }
   const saved = agentDir;
   agentDir = dir;
-  try { return run(dir, qmd ? undefined : join(dir, "qmd-absent", "index.ts")); } finally { agentDir = saved; fs.rmSync(dir, { recursive: true, force: true }); }
+  try { return run(dir, join(dir, "extensions", qmd ? "qmd" : "qmd-absent", "index.ts")); } finally { agentDir = saved; fs.rmSync(dir, { recursive: true, force: true }); }
 }
-test("reviewer launches with Ponytail absent: normal reviewer integrations and no Ponytail grant", () => {
-  withAgentDir({}, () => {
+// QMD's extension reads a machine-local sibling config.json at load; an index.ts without it must not be launched.
+test("QMD index.ts without sibling config.json: extension and qmd tools omitted, guidance names QMD", () => {
+  withAgentDir({ ponytailExtension: true, qmdConfig: false }, (_dir, qmdExtension) => {
     const args: string[] = [];
-    assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
+    assert.equal(configureCodeIntegrations(args, { ...role("general-worker"), tools: ["read", "qmd_search"] }, [], qmdExtension), true);
+    assert.ok(!args.some(arg => arg.endsWith(join("qmd", "index.ts"))), args.join(" "));
+    assert.ok(!args[args.indexOf("--tools") + 1].includes("qmd_"));
+    assert.match(unavailableIntegrationGuidance("general-worker", qmdExtension), /Not loaded:[^.]*QMD extension/);
+  });
+  withAgentDir({ ponytailExtension: true }, (_dir, qmdExtension) => {
+    const args: string[] = [];
+    configureCodeIntegrations(args, role("general-worker"), [], qmdExtension);
+    assert.ok(args.includes(qmdExtension!));
+    assert.ok(args[args.indexOf("--tools") + 1].includes("qmd_search"));
+    assert.equal(unavailableIntegrationGuidance("general-worker", qmdExtension), "");
+  });
+});
+test("reviewer launches with Ponytail absent: normal reviewer integrations and no Ponytail grant", () => {
+  withAgentDir({}, (_d, q) => {
+    const args: string[] = [];
+    assert.equal(configureCodeIntegrations(args, role("reviewer"), [], q), true);
     assert.ok(!args.some(arg => /ponytail/i.test(arg)), args.join(" "));
     assert.equal(args.filter(arg => arg === "--extension").length, 3, "qmd, serena and graphify extensions");
     assert.ok(args.includes("--skill"), "graphify skill still loaded");
   });
 });
 test("reviewer with Ponytail extension and review skill loads both for supplemental guidance", () => {
-  withAgentDir({ ponytailExtension: true, ponytailSkill: true }, dir => {
+  withAgentDir({ ponytailExtension: true, ponytailSkill: true }, (dir, q) => {
     const args: string[] = [];
-    assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
+    assert.equal(configureCodeIntegrations(args, role("reviewer"), [], q), true);
     for (const [flag, file] of [["--extension", ponytailExtensionPath(dir)], ["--skill", ponytailSkillPath(dir)]]) {
       const index = args.indexOf(file);
       assert.ok(index > 0 && args[index - 1] === flag, `${flag} ${file} missing`);
@@ -149,16 +168,16 @@ test("reviewer with Ponytail extension and review skill loads both for supplemen
   });
 });
 test("reviewer with Ponytail extension but no review skill still launches with the extension", () => {
-  withAgentDir({ ponytailExtension: true }, dir => {
+  withAgentDir({ ponytailExtension: true }, (dir, q) => {
     const args: string[] = [];
-    assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
+    assert.equal(configureCodeIntegrations(args, role("reviewer"), [], q), true);
     assert.ok(args.includes(ponytailExtensionPath(dir)));
     assert.ok(!args.includes(ponytailSkillPath(dir)));
   });
 });
 for (const name of ["general-worker", "scout"]) {
   test(`${name} still fails closed when Ponytail is absent`, () => {
-    withAgentDir({}, () => {
+    withAgentDir({}, (_d, q) => {
       assert.throws(() => configureCodeIntegrations([], role(name)), new RegExp(`Code integration missing for ${name}: .*ponytail`));
     });
   });
@@ -172,8 +191,8 @@ test("reviewer with Serena absent launches with QMD and Graphify, without Serena
   assert.deepEqual(integrationFamilies(run.tools), ["qmd_"]);
 });
 test("reviewer keeps read-only tools and excludes edit, write and Serena mutations with Ponytail absent", () => {
-  withAgentDir({}, () => {
-    const tools = effectiveTools(role("reviewer"));
+  withAgentDir({}, (_d, q) => {
+    const tools = effectiveTools(role("reviewer"), q);
     assert.ok(!tools.includes("edit") && !tools.includes("write"));
     for (const tool of unsafeMutations) assert.ok(!tools.includes(tool), tool);
     for (const tool of config.readOnlyTools) assert.ok(tools.includes(tool), `read-only integration lost: ${tool}`);
@@ -257,8 +276,8 @@ test("general-worker still fails closed when Ponytail is absent, even with every
   });
 });
 test("unavailable integrations are named with fallback guidance; present ones are not", () => {
-  withAgentDir({ serena: false, graphifySkill: false }, () => {
-    const note = unavailableIntegrationGuidance("general-worker");
+  withAgentDir({ serena: false, graphifySkill: false }, (_d, q) => {
+    const note = unavailableIntegrationGuidance("general-worker", q);
     assert.match(note, /Serena/);
     assert.match(note, /Graphify skill/);
     assert.doesNotMatch(note, /QMD/);
@@ -269,7 +288,7 @@ test("unavailable integrations are named with fallback guidance; present ones ar
   });
   withAgentDir({ qmd: false }, (_dir, qmdExtension) => assert.match(unavailableIntegrationGuidance("general-worker", qmdExtension), /QMD/));
   withAgentDir({ ponytailExtension: false, ponytailSkill: false }, () => assert.match(unavailableIntegrationGuidance("reviewer"), /Ponytail.*ponytail-review/s));
-  withAgentDir({ ponytailExtension: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true }, () => assert.equal(unavailableIntegrationGuidance("general-worker"), ""));
+  withAgentDir({ ponytailExtension: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true }, (_d, q) => assert.equal(unavailableIntegrationGuidance("general-worker", q), ""));
 });
 test("shared guidance: a failing integration is reported once, not retried, and presence is not health", () => {
   const text = assembled(repoAt("failure-once"), { launchArgs: FULL_LAUNCH });

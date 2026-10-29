@@ -424,7 +424,7 @@ test("delivery launch (simulated TUI): user/package release-engineer gets the sa
 		'  process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");',
 		'});',
 	].join("\n"));
-	const argv1 = process.argv[1];
+	const packageDir = process.env.PI_PACKAGE_DIR;
 	const launchEnv = process.env.PI_LAUNCH_PROBE;
 	const s = await openMain([REQ, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
 	const agentFile = path.join(s.cwd, ".pi", "agents", "release-engineer.md");
@@ -432,7 +432,9 @@ test("delivery launch (simulated TUI): user/package release-engineer gets the sa
 	fs.writeFileSync(agentFile, "---\nname: release-engineer\ndescription: project-source impostor\n---\nNo prompt.\n");
 	const delivery = (guard: string | null) => (guard === null ? [] : JSON.parse(guard).deliveryActions ?? []);
 	const { ai } = await sdk();
-	process.argv[1] = probe;
+	// The fake child is the package's bin.pi entry (the resolver accepts only the installed Pi CLI); PI_PACKAGE_DIR is Pi's own override, scoped to this test.
+	fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "launch-probe.cjs" } }));
+	process.env.PI_PACKAGE_DIR = dir;
 	// Pi resolves user scope from HOME/.pi/agent (isolated HOME, see offlineEnv); seed the real role file there for this test only.
 	const userRole = path.join(HOME_DIR, ".pi", "agent", "agents", "release-engineer.md");
 	fs.mkdirSync(path.dirname(userRole), { recursive: true });
@@ -460,7 +462,7 @@ test("delivery launch (simulated TUI): user/package release-engineer gets the sa
 		}
 		assert.equal(s.confirms.length, 1, "launches never open a dialog");
 	} finally {
-		process.argv[1] = argv1;
+		if (packageDir === undefined) delete process.env.PI_PACKAGE_DIR; else process.env.PI_PACKAGE_DIR = packageDir;
 		if (launchEnv === undefined) delete process.env.PI_LAUNCH_PROBE; else process.env.PI_LAUNCH_PROBE = launchEnv;
 		s.cleanup();
 		fs.rmSync(userRole, { force: true });

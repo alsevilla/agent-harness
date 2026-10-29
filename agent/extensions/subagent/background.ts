@@ -4,6 +4,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
 import { servedReported } from "./provenance.ts";
 import { boundBackgroundCompletion, expandRetainedResult } from "./compact-handoff.ts";
+import { nextTaskId, type ConsultationRecord, type TaskUsageRecord } from "./usage-telemetry.ts";
+import type { ModelTier } from "./agents.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
 export class RpcWorker {
@@ -65,19 +67,31 @@ export class RpcWorker {
 // Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text, prompts or model roles). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
 export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number }
 export interface UsageSlice extends UsageTotals { completed: number; failed: number; aborted: number }
-export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice }
+export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; tasks: TaskUsageRecord[]; consultations: ConsultationRecord[] }
 const zeroTotals = (): UsageTotals => ({ attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0 });
 const zeroSlice = (): UsageSlice => ({ ...zeroTotals(), completed: 0, failed: 0, aborted: 0 });
-export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice() });
+export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), tasks: [], consultations: [] });
+// Prompt = provider input + cached context (cacheRead, cacheWrite); output is never part of it. Null when the input count is not a number.
+const promptOf = (usage: any): number | null => {
+  if (!Number.isFinite(usage?.input)) return null;
+  const n = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
+  return usage.input + n(usage.cacheRead) + n(usage.cacheWrite);
+};
+export interface TaskMeta { role: string; tier?: ModelTier; slot?: "fallback"; consultationId?: string }
+export interface SettleProvenance { requestedModel?: string; model?: string; modelSource?: string; attempts?: { requestedModel?: string }[] }
 // One logical job (one runSingleAgent request). Finalized message_end usage only; finalizes once; physical attempts counted at spawn.
 export class LogicalUsage {
   private totals = zeroTotals(); private open = true;
-  private scope: UsageScope; private slice: "foreground" | "background";
-  constructor(scope: UsageScope, background: boolean) { this.scope = scope; this.slice = background ? "background" : "foreground"; scope.running++; }
+  private scope: UsageScope; private slice: "foreground" | "background"; private meta: TaskMeta;
+  private firstPrompt: number | null | undefined; private peakPrompt: number | null = null; // undefined until the first turn
+  constructor(scope: UsageScope, background: boolean, meta: TaskMeta = { role: "unknown" }) { this.scope = scope; this.slice = background ? "background" : "foreground"; this.meta = meta; scope.running++; }
   attempt() { if (this.open) this.totals.attempts++; }
   turn(usage: any) {
     if (!this.open) return;
     const t = this.totals; t.turns++;
+    const prompt = promptOf(usage);
+    if (this.firstPrompt === undefined) this.firstPrompt = prompt;
+    if (prompt !== null && (this.peakPrompt === null || prompt > this.peakPrompt)) this.peakPrompt = prompt;
     if (!usage) { t.unpricedTurns++; return; }
     const n = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
     const input = n(usage.input), output = n(usage.output), cacheRead = n(usage.cacheRead), cacheWrite = n(usage.cacheWrite);
@@ -87,12 +101,27 @@ export class LogicalUsage {
     t.cost += cost;
     if (cost === 0 && input + output + cacheRead + cacheWrite > 0) t.zeroCostTurns++;
   }
-  settle(status: "completed" | "failed" | "aborted") {
+  // Settles once into the launch scope and appends one numeric task record. Provenance: configured = first attempt's request; observed only when the final attempt reported an identity.
+  settle(status: "completed" | "failed" | "aborted", provenance?: SettleProvenance): TaskUsageRecord | undefined {
     if (!this.open) return;
     this.open = false; this.scope.running--;
     const slice = this.scope[this.slice]; const t = this.totals;
     for (const key of Object.keys(t) as (keyof UsageTotals)[]) slice[key] += t[key];
     slice[status]++;
+    const { meta } = this;
+    const configured = provenance?.attempts?.[0]?.requestedModel ?? provenance?.requestedModel;
+    const observed = provenance?.modelSource === "observed" ? provenance.model : undefined;
+    const record: TaskUsageRecord = {
+      id: nextTaskId(), role: meta.role,
+      ...(meta.tier !== undefined ? { tier: meta.tier } : {}), ...(meta.slot !== undefined ? { slot: meta.slot } : {}),
+      background: this.slice === "background", status, attempts: t.attempts, turns: t.turns,
+      input: t.input, output: t.output, cacheRead: t.cacheRead, cacheWrite: t.cacheWrite, cost: t.cost, unpricedTurns: t.unpricedTurns,
+      firstTurnPromptTokens: this.firstPrompt ?? null, peakPromptTokens: this.peakPrompt,
+      ...(configured !== undefined ? { configuredModel: configured } : {}), ...(observed !== undefined ? { observedModel: observed } : {}),
+      ...(meta.consultationId !== undefined ? { consultationId: meta.consultationId } : {}),
+    };
+    this.scope.tasks.push(record);
+    return record;
   }
 }
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -127,6 +156,29 @@ export function formatUsageSummary(scope: UsageScope): string {
 interface Job {
   id: string; generation: number; state: "running" | "completed" | "failed" | "aborted";
   controller: AbortController; workerIds: string[]; nodes: Map<string, string>; result?: any; pendingSteers: string[]; paused?: boolean; waiting?: string;
+  done?: Promise<void>; // settles after the job's workers ended and its completion was handed over; shutdown awaits it
+  owner: string | null; startedAt: number; // owning session id (captured at session_start) and wall-clock start, for the hidden audit
+  delivery?: "completion_delivery_failed"; // set only when handing the completion to Pi threw; a working job never has it
+}
+// The existing Phase 1 numbers of one settled logical job, carried unchanged on its result (null when the first turn reported no usage; never estimated). unpricedTurns is the
+// existing price-completeness count: the native aggregate adds 0 for a turn with no price, so only this count says whether a finite cost is complete.
+export const phase1Of = (record: TaskUsageRecord) => ({ taskId: record.id, attempts: record.attempts, firstTurnPromptTokens: record.firstTurnPromptTokens, peakPromptTokens: record.peakPromptTokens, unpricedTurns: record.unpricedTurns });
+export const TERMINAL_AUDIT = "subagent-terminal-audit";
+export const DELIVERY_DIAGNOSTIC = "subagent-delivery-diagnostic";
+const sessionIdOf = (ctx: any): string | null => { try { const id = ctx?.sessionManager?.getSessionId?.(); return typeof id === "string" && id ? id : null; } catch { return null; } };
+// Per-worker metadata of a settled job, carried in the completion message details only. Custom message details are never sent to the model, so this adds
+// no model-visible text: the notice content stays exactly the bounded completion. Numbers and role/model labels only (no task text, prompts or output).
+export function completionResults(result: any) {
+  const list = Array.isArray(result?.details?.results) ? result.details.results : [];
+  const num = (v: unknown) => (Number.isFinite(v) ? (v as number) : undefined);
+  return list.map((r: any, i: number) => ({
+    position: i, workerId: typeof r?.workerId === "string" ? r.workerId : undefined, nodeId: typeof r?.nodeId === "string" ? r.nodeId : undefined,
+    phase1: r?.phase1 ? { taskId: typeof r.phase1.taskId === "string" ? r.phase1.taskId : undefined, attempts: num(r.phase1.attempts), firstTurnPromptTokens: num(r.phase1.firstTurnPromptTokens) ?? null, peakPromptTokens: num(r.phase1.peakPromptTokens) ?? null, unpricedTurns: num(r.phase1.unpricedTurns) } : undefined,
+    agent: typeof r?.agent === "string" ? r.agent : undefined, exitCode: num(r?.exitCode), stopReason: typeof r?.stopReason === "string" ? r.stopReason : undefined,
+    abort: typeof r?.abort?.running === "boolean" && typeof r.abort.priorFailure === "boolean" ? { running: r.abort.running, priorFailure: r.abort.priorFailure } : undefined,
+    model: typeof r?.model === "string" ? r.model : undefined, modelTier: r?.modelTier, modelSlot: r?.modelSlot,
+    usage: r?.usage ? { input: num(r.usage.input), output: num(r.usage.output), cacheRead: num(r.usage.cacheRead), cacheWrite: num(r.usage.cacheWrite), cost: num(r.usage.cost), turns: num(r.usage.turns), contextTokens: num(r.usage.contextTokens) } : undefined,
+  }));
 }
 export class BackgroundWorkers {
   jobs = new Map<string, Job>();
@@ -138,24 +190,30 @@ export class BackgroundWorkers {
   usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
   pendingNote?: () => string; // runtime-derived CLEANUP_PENDING text (never child text); empty when nothing is pending
   private sequence = 0;
+  private draining = new Set<Promise<void>>(); // job.done of every job still closing its workers; survives reset so a repeated shutdown waits too
   private slots = 0;
   private queue: {signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void; abort: () => void}[] = [];
   private pi: ExtensionAPI;
+  private owner: string | null = null; // this runtime's session id, captured at session_start; null when the host gave none
   readonly monitor: WorkerMonitor;
   private decisions: DecisionRelay;
   // Explicit fields, not parameter properties (strip-only Node must load this file).
   constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay()) {
     this.pi = pi; this.monitor = monitor; this.decisions = decisions;
-    pi.on("session_start", () => this.reset());
+    pi.on("session_start", (_event: unknown, ctx: unknown) => { this.owner = sessionIdOf(ctx); void this.reset(); });
+    // Awaited by Pi: shutdown completes only after every owning background worker ended, so none can write after the workspace is reused.
     pi.on("session_shutdown", () => this.reset());
   }
-  reset() {
+  // Aborts every job and worker; resolves once the aborted jobs finished (children closed). Never rejects.
+  reset(): Promise<unknown> {
     this.settleDecisions(this.decisions.clear("session-reset"));
     this.generation++;
     this.usage = newUsageScope();
+    const settling = [...this.draining]; // every job not yet drained, including ones an earlier reset already aborted
     for (const job of this.jobs.values()) job.controller.abort();
     for (const controller of this.controllers.values()) controller.abort();
     this.jobs.clear(); this.clients.clear(); this.controllers.clear(); this.steering.clear(); this.waitingKeys.clear();
+    return Promise.allSettled(settling);
   }
   async acquire(limit: number, signal?: AbortSignal): Promise<() => void> {
     if (signal?.aborted) throw new Error("Subagent was aborted");
@@ -177,9 +235,9 @@ export class BackgroundWorkers {
   start(run: (signal: AbortSignal, jobId: string) => Promise<any>) {
     if ([...this.jobs.values()].filter(j => j.state === "running").length >= 16) throw new Error("16 background jobs are already active; finish or stop a job first");
     const id = `bg-${++this.sequence}`;
-    const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: []};
+    const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: [], owner: this.owner, startedAt: Date.now()};
     this.jobs.set(id, job);
-    void (async () => {
+    job.done = (async () => {
       try {
         job.result = await run(job.controller.signal, id);
         job.state = job.controller.signal.aborted ? "aborted" : job.result.isError ? "failed" : "completed";
@@ -189,22 +247,40 @@ export class BackgroundWorkers {
         job.result = {isError: true, content: [{type: "text", text: String(error)}]};
       }
       this.settleDecisions(this.decisions.settleJob(id, "job-ended"));
-      if (job.generation !== this.generation) return;
+      // A shutdown or reset generation never gets a model completion (that would wake a closing owner), but its terminal usage is still recorded below.
+      if (job.generation !== this.generation) { this.audit(job, true, false); return; }
       const output = (job.result.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
       // Sent first and without a turn of its own: the completion below wakes main, which then sees both. Separate so completion bounding can never truncate it.
       try {
         const note = this.pendingNote?.() ?? "";
         if (note) await this.pi.sendMessage({customType: "subagent-cleanup-pending", content: note, display: true, details: {jobId: id}}, {triggerTurn: false, deliverAs: "followUp"});
       } catch { /* a failed read is not pending state */ }
+      // pi.sendMessage returns void: Pi drops the runtime's promise and reports an async failure only through the runner's error channel, uncorrelated with this job.
+      // So this records an attempt (submitted), never a delivery; only a synchronous throw (an invalidated owner) is a failure this job can be blamed for.
+      let submitted = false;
       try {
-        await this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
-      } catch { /* Session can close while its completion is being delivered. */ }
+        this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state, results: completionResults(job.result)}}, {triggerTurn: true, deliverAs: "followUp"});
+        submitted = true;
+      } catch { job.delivery = "completion_delivery_failed"; this.append(DELIVERY_DIAGNOSTIC, {v: 1, code: job.delivery, jobId: id, ownerSession: job.owner, at: Date.now()}); } // no retry and no wake-up; the error text is never stored
+      this.audit(job, false, submitted);
       const finished = [...this.jobs.values()].filter(j => j.state !== "running");
       for (const old of finished.slice(0, Math.max(0, finished.length - 64))) {
         this.jobs.delete(old.id); for (const workerId of old.workerIds) this.steering.delete(workerId);
       }
     })();
+    this.draining.add(job.done); void job.done.finally(() => this.draining.delete(job.done!));
     return job;
+  }
+  // Non-model-visible session metadata: Pi's pi.appendEntry writes a `custom` entry that buildSessionContext never converts to a message. It throws once the owning
+  // runtime was invalidated (session replaced), which is exactly the old-owner case: nothing is written then and nothing reaches a newer session.
+  private append(customType: string, data: unknown): boolean {
+    try { this.pi.appendEntry(customType, data); return true; } catch { return false; }
+  }
+  // Terminal usage record of one job: owner, stable worker identity and numbers only (no prompt, output, error or stderr text).
+  // completion: "suppressed" (shutdown generation, never sent), "submitted" (handed to pi.sendMessage; delivery is NOT confirmed, only an observed consumer completion proves it) or "submit_failed".
+  private audit(job: Job, suppressed: boolean, submitted: boolean) {
+    const completion = suppressed ? "suppressed" : submitted ? "submitted" : "submit_failed";
+    this.append(TERMINAL_AUDIT, {v: 1, ownerSession: job.owner, jobId: job.id, dispatch: `${job.owner ?? "unowned"}/${job.id}`, state: job.state, startedAt: job.startedAt, endedAt: Date.now(), workerIds: [...job.workerIds], completionSuppressed: suppressed, completion, results: completionResults(job.result)});
   }
   assertCanLaunch(roles: string[]) {
     const heldJob = [...this.jobs.values()].find(j => j.state === "running" && j.paused);
@@ -334,7 +410,7 @@ export class BackgroundWorkers {
     } catch { /* Session can close while its decision notice is delivered. */ }
   }
   list() {
-    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
+    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, paused: !!j.paused, waiting: j.waiting, ...(j.delivery ? {delivery: j.delivery} : {}), workers: j.workerIds.map(id => {
       const r = this.monitor.store.records.get(id);
       return {id, node: j.nodes.get(id), name: r?.name, model: r?.reportedModel ?? r?.model, modelSource: r?.reportedModel ? "observed" : "requested", requestedModel: r?.model, observedModels: r?.observed ?? [], servedReported: servedReported(r?.observed), ...(r?.modelTier !== undefined ? { modelTier: r.modelTier } : {}), ...(r?.modelSlot !== undefined ? { modelSlot: r.modelSlot } : {}), state: r?.state ?? "history expired", activity: r?.activity};
     })}));

@@ -179,20 +179,20 @@
         "thinking": "medium"
       }
     },
-    "tools": "read, grep, find, ls, bash, powershell, edit"
+    "tools": "read, grep, find, ls, bash, powershell, edit",
+    "maxReworkRounds": 2,
+    "diagnosticChars": 300,
+    "roundSettleTimeoutMs": 1200000,
+    "taskTimeoutMs": 1200000,
+    "shutdownGraceMs": 60000
   },
   {
     "name": "planner",
-    "defaultModelTier": "economy",
+    "defaultModelTier": "capable",
     "modelTiers": {
-      "economy": {
-        "model": "anthropic/claude-haiku-5-5",
-        "fallbackModel": "openai-codex/gpt-6-luna",
-        "thinking": "high"
-      },
       "capable": {
-        "model": "anthropic/claude-sonnet-5-5",
-        "fallbackModel": "openai-codex/gpt-6.1-sol",
+        "model": "anthropic/claude-opus-5-5",
+        "fallbackModel": "",
         "thinking": "high"
       }
     },
@@ -220,7 +220,7 @@
     "defaultModelTier": "economy",
     "modelTiers": {
       "economy": {
-        "model": "anthropic/claude-haiku-5-5" ,
+        "model": "anthropic/claude-haiku-5-5",
         "fallbackModel": "openai-codex/gpt-6-luna",
         "thinking": "medium"
       },

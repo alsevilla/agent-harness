@@ -2,6 +2,7 @@ import { COMPACT_HANDOFF_INSTRUCTIONS } from "../../compact-handoff.ts";
 // Test doubles for the pi runtime surface touched by subagent/index.ts and agents.ts.
 // Loaded only through the resolve hook in tests/fallback-runtime.node.ts; never shipped at runtime.
 import { EventEmitter } from "node:events";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -51,6 +52,17 @@ export function spawn(_command, args) {
 
 // @earendil-works/pi-coding-agent surface used by agents.ts and index.ts.
 export const CONFIG_DIR_NAME = ".pi";
+// Fake installed Pi package: a valid package.json bin.pi entry, so the resolver in getPiInvocation accepts it (the fake spawn ignores the command).
+let fakePackageDir;
+export function getPackageDir() {
+	if (!fakePackageDir) {
+		fakePackageDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-doubles-package-"));
+		fs.mkdirSync(path.join(fakePackageDir, "dist", "bundle"), { recursive: true });
+		fs.writeFileSync(path.join(fakePackageDir, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/bundle/cli.js" } }));
+		fs.writeFileSync(path.join(fakePackageDir, "dist", "bundle", "cli.js"), "// fake pi cli (test double)\n");
+	}
+	return fakePackageDir;
+}
 export function getAgentDir() {
 	return process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
 }
