@@ -493,7 +493,7 @@ async function openMain({ adapter, dir, task, runtime, roles, limits, signal, ti
 }
 const restoredNote = (history, session) => ({ fromTaskId: history.fromTaskId, entryCount: history.entryCount, appendedOnOpen: Number.isInteger(session.restored?.appendedOnOpen) ? session.restored.appendedOnOpen : null, newSessionId: true });
 
-async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal }) {
+async function runTask({ task, order, mode, spec, adapter, workspace, acceptance, cap, diagnosticsRun, expectedWriter, runtime, roles, limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal, processGate = null }) {
 	const started = Date.now();
 	const budget = taskBudgetOf(task, limits);
 	const cutoffAt = startedAt + budget.value - limits.shutdownGraceMs.value;
@@ -636,6 +636,12 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		const stopped = rec.status === "infrastructure" || rec.status === "method_invalid" || rec.status === "error" || rec.status === "budget_exhausted";
 		if (stopped) ac.abort();
 		let closed = { confirmed: true, ms: null, pendingJobs: [] };
+		// Process gate (shared long modes only, at a deadline cut whose workspace is about to be reused): the descendants are recorded BEFORE the close, while ancestry is intact. A gate that
+		// cannot record is a controlled unconfirmed state, never success. The final task has no next workspace.
+		let gateState = null;
+		if (processGate && session && stopped && rec.status === "budget_exhausted" && spec.sessionPolicy !== "new-per-task" && !isFinal) {
+			try { gateState = await processGate.begin(deadlineLeft); } catch { gateState = { ok: false, failure: "tool_failed", recorded: [], threw: true }; }
+		}
 		// The final task of a shared-session run closes its session HERE, under its own original deadline and ownership (not later in an outer cleanup with a fresh grace), so its
 		// terminal audits are folded before the task and run totals are final.
 		if (session && (spec.sessionPolicy === "new-per-task" || stopped || isFinal)) {
@@ -651,6 +657,21 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 		const pendingOperations = await owner.drain(deadlineLeft());
 		rec.shutdown = { confirmed: closed.confirmed && pendingOperations.length === 0, ms: closed.ms, pendingJobs: closed.pendingJobs, pendingOperations, ...(closed.error ? { error: closed.error } : {}) };
 		foldClose(registry, task, session, rec, closed);
+		// Assessed only after a CONFIRMED SDK close and drain (separate proofs). Controlled record only: method, counts and enums, never PIDs, identities or raw errors.
+		if (gateState) {
+			const none = (failure) => ({ method: processGate.method, confirmed: false, assessable: false, recorded: Array.isArray(gateState.recorded) ? gateState.recorded.length : 0, attributedAlive: 0, terminated: 0, targeted: 0, remainingAlive: null, waitMs: 0, failure });
+			if (rec.shutdown.confirmed !== true) rec.shutdown.processGate = none("close_unconfirmed");
+			else if (gateState.threw) rec.shutdown.processGate = none("tool_failed");
+			else {
+				try {
+					const g = await processGate.finish(gateState, deadlineLeft);
+					rec.shutdown.processGate = { method: processGate.method, confirmed: g?.confirmed === true, assessable: g?.assessable === true, recorded: g?.recorded ?? 0, attributedAlive: g?.attributedAlive ?? 0, terminated: g?.terminated ?? 0, targeted: g?.targeted ?? 0, remainingAlive: Number.isInteger(g?.remainingAlive) ? g.remainingAlive : null, waitMs: g?.waitMs ?? 0, failure: g?.confirmed === true ? null : (typeof g?.failure === "string" ? g.failure : "tool_failed") };
+				} catch { rec.shutdown.processGate = none("tool_failed"); }
+			}
+		} else if (processGate && !session && rec.status === "budget_exhausted" && spec.sessionPolicy !== "new-per-task" && !isFinal) {
+			// No session was closed by this task (cut before one was opened, or a retained live session was left alone): nothing to gate. The marker lets compare tell this from a missing proof.
+			rec.shutdown.processGate = { method: processGate.method, applicable: false, reason: "no_session_closed" };
+		}
 		if (rec.shutdown.confirmed === false && rec.status === "completed") { rec.status = "infrastructure"; rec.invalid = { class: "infrastructure", kind: "shutdown_unconfirmed" }; }
 		// A closed shared session cannot be prompted again, but its SessionManager entries stay readable. After a CONFIRMED deadline cut (abort awaited, runtime disposed, owner empty,
 		// still inside the original deadline) the faithful history is snapshotted here, before the session reference is lost; any other stop leaves no history and the run stops.
@@ -658,6 +679,7 @@ async function runTask({ task, order, mode, spec, adapter, workspace, acceptance
 			shared.history = null; shared.historyStop = null;
 			if (rec.status === "budget_exhausted") {
 				if (rec.shutdown.confirmed !== true) shared.historyStop = "shutdown_unconfirmed";
+				else if (rec.shutdown.processGate && rec.shutdown.processGate.confirmed !== true) shared.historyStop = "quiescence_unconfirmed";
 				else if (typeof adapter.snapshotHistory !== "function") shared.historyStop = "adapter_history_unsupported";
 				else if (Math.floor(deadlineLeft()) < 1) shared.historyStop = "snapshot_after_task_deadline";
 				else {
@@ -747,7 +769,7 @@ export function computeTotals(records, raws, compactionLedger) {
 }
 
 // Runs the fixed-order manifest once in one mode. Writes the result after every task and at the end; never retries a task.
-export async function runBenchmark({ manifest, mode, adapter, workspace, acceptance = runAcceptanceAsync, config = {}, writeResult = () => {}, now = () => new Date().toISOString() }) {
+export async function runBenchmark({ manifest, mode, adapter, workspace, acceptance = runAcceptanceAsync, config = {}, writeResult = () => {}, now = () => new Date().toISOString(), processGate = null }) {
 	const spec = MODES[mode];
 	if (!spec) throw new Error(`unknown mode "${mode}"; use one of ${Object.keys(MODES).join(", ")}`);
 	validateManifest(manifest);
@@ -772,7 +794,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 			maxReworkRounds: config.maxReworkRounds, diagnosticChars: config.diagnosticChars, limits: config.limits, resources: config.resources ?? null, sessionPolicy: spec.sessionPolicy, compaction: spec.compaction, reviewer: "fresh-session-per-review",
 			roles: { main: config.roles.main, reviewer: config.roles.reviewer },
 			registry: config.registry ?? null,
-			...(spec.sessionPolicy === "new-per-task" ? {} : { continuation: { policy: CONTINUATION_POLICY } }),
+			...(spec.sessionPolicy === "new-per-task" ? {} : { continuation: { policy: CONTINUATION_POLICY, ...(processGate ? { gate: processGate.method } : {}) } }),
 			// Agent topology proof (topology.mjs): a measured (non-synthetic) run needs ok true; compare requires the same method. Null for a synthetic run.
 			topology: config.topology ?? null,
 			measurementPolicy: { artifacts: workspace.artifactPolicy ? { id: workspace.artifactPolicy.id, rule: workspace.artifactPolicy.rule } : null, toolState: workspace.toolStatePolicy ? { id: workspace.toolStatePolicy.id, roots: workspace.toolStatePolicy.roots, rule: workspace.toolStatePolicy.rule } : null },
@@ -840,7 +862,7 @@ export async function runBenchmark({ manifest, mode, adapter, workspace, accepta
 					throw e;
 				}
 			}
-			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, limits: config.limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal: i === manifest.tasks.length - 1 });
+			const { rec, raw } = await runTask({ task, order: i + 1, mode, spec, adapter, workspace, acceptance, cap: config.maxReworkRounds, diagnosticsRun: config.diagnosticChars, expectedWriter: manifest.expectedWriter, runtime: config.runtime, roles: config.roles, limits: config.limits, shared, compactionBefore, clock, startedAt, preStop, owner, ac, progress, registry, isFinal: i === manifest.tasks.length - 1, processGate: spec.sessionPolicy === "new-per-task" ? null : processGate });
 			result.tasks.push(rec);
 			raws.push(raw);
 			writeResult(result);

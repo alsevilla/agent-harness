@@ -197,3 +197,13 @@ test("an override with no work window after the grace, or an invalid manifest ta
 		assert.equal(fs.existsSync(path.join(d, "work")), false, `${label}: no scratch work`);
 	}
 });
+
+// Process-gate wiring: real CLI function, no SDK, no OS inspection at import or construction.
+import { processGateFor } from "./cli.mjs";
+import { GATE_METHOD } from "./lib/process-gate.mjs";
+test("CLI gate wiring: only pi-sdk in a shared long mode gets the gate; fresh, synthetic and unknown modes get none", () => {
+	assert.equal(processGateFor("pi-sdk", "fresh"), null);
+	assert.equal(processGateFor("synthetic", "long-fixed"), null);
+	assert.equal(processGateFor("pi-sdk", "nonsense"), null);
+	for (const m of ["long-fixed", "long-compacted"]) assert.equal(processGateFor("pi-sdk", m).method, GATE_METHOD);
+});

@@ -1,4 +1,5 @@
 import { TOPOLOGY_METHOD } from "./topology.mjs";
+import { GATE_METHOD } from "./process-gate.mjs";
 
 // Side-by-side comparison of two runs. Regression: acceptance rate drops or high-severity reviewer findings rise.
 // NO_REGRESSION is RELATIVE to the baseline on the same matched tasks. It is NOT all tasks passed: read allAccepted and
@@ -39,6 +40,48 @@ function summaryProblem(s, d) {
 	return d !== null && (s.accepted !== d.accepted || s.total !== d.total || Math.abs(s.rate - d.rate) > 1e-9);
 }
 
+// Process-gate evidence (shared long modes). A non-final deadline cut closed a session, so its workspace is about to be reused: it must carry a coherent gate PROOF, or the runner's explicit
+// no-session marker when corroborated by the task record (no start context, no work stage). This is structured-record consistency, NOT authentication: a hand-forged consistent record passes.
+// Counts follow the producer: attributedAlive is the FIRST post-close observation, remainingAlive the LAST one, targeted the identities named in terminate requests. A process may exit on its
+// own between observations (terminated < targeted is legitimate); only a final observation of none counts as quiescence.
+const GATE_KEYS = ["method", "confirmed", "assessable", "recorded", "attributedAlive", "terminated", "targeted", "remainingAlive", "waitMs", "failure"];
+const EXEMPT_KEYS = ["method", "applicable", "reason"];
+const NON_SDK_ADAPTERS = new Set(["fake-adapter", "synthetic"]);
+// Non-Windows values of the documented Node process.platform contract (runner: environment.platform = process.platform). Exact match only: 'android' (experimental), padded/case-altered or custom strings stay unknown.
+const NON_WINDOWS_PLATFORMS = new Set(["aix", "darwin", "freebsd", "linux", "openbsd", "sunos"]);
+const NO_SESSION_STAGES = new Set(["workspace_prepare", "workspace_snapshot", "artifact_prepare", "session_open"]);
+const hasKeys = (o, keys) => { const k = Object.keys(o); return k.length === keys.length && keys.every((x) => k.includes(x)); };
+const sessionEvidence = (t) => (t.startContext ?? null) !== null || !NO_SESSION_STAGES.has(t.budget?.stage) || (Array.isArray(t.budget?.stages) ? t.budget.stages : []).some((s) => !NO_SESSION_STAGES.has(s?.stage));
+function proofValid(g, method, platform) {
+	if (g === null || typeof g !== "object" || !hasKeys(g, GATE_KEYS) || g.method !== method) return false;
+	if (g.confirmed !== true || g.assessable !== true || g.failure !== null) return false;
+	if (![g.recorded, g.attributedAlive, g.terminated, g.targeted, g.remainingAlive, g.waitMs].every(isCount)) return false;
+	if (g.recorded === 0 && (g.attributedAlive !== 0 || g.targeted !== 0 || g.terminated !== 0)) return false; // the producer seeds from the recorded identities: an empty seed cannot yield survivors or termination activity (NOT a general alive<=recorded bound: linked late children and repeated rounds may exceed a positive seed)
+	if (g.remainingAlive !== 0 || g.terminated > g.targeted || (g.attributedAlive === 0 ? g.targeted !== 0 : g.targeted < g.attributedAlive)) return false;
+	return method !== GATE_METHOD || platform === "win32";
+}
+function gateProblems(r) {
+	if (r.mode === "fresh") return [];
+	const method = r.config?.continuation?.gate ?? null, last = (r.order ?? []).length - 1, out = [];
+	if (method !== null && typeof method !== "string") return ["process gate: the recorded gate policy is malformed"];
+	// Applicable: a real pi-sdk result whose OS is Windows OR UNKNOWN. Mandatory platform metadata that is missing/malformed/unsupported is unknown, never a non-Windows exemption (the OS is not inferred from this host).
+	const plat = r.environment?.platform, platKnown = NON_WINDOWS_PLATFORMS.has(plat);
+	// Only the exact non-SDK producer names (fixture fakeAdapter, synthetic adapter) are exempt; a missing/malformed/unrecognised adapter name is unknown, never evidence that no gate applies.
+	const legacyWin = !platKnown && !NON_SDK_ADAPTERS.has(r.environment?.adapter?.name);
+	(r.tasks ?? []).forEach((t, i) => {
+		if (i >= last || !isCut(t)) return;
+		const g = t.shutdown?.processGate, has = g !== undefined && g !== null;
+		if (method === null) {
+			if (has) out.push(`process gate: task ${t.id} carries a gate record but the result records no gate policy`);
+			else if (legacyWin && sessionEvidence(t)) out.push(`process gate: task ${t.id} closed a session at a cut transition of a Windows (or unknown-OS) pi-sdk or unknown-adapter long result with no gate policy (not an eligible baseline)`);
+		} else if (!has) out.push(`process gate: task ${t.id} cut transition has no gate record`);
+		else if (typeof g === "object" && g.applicable === false) {
+			if (!hasKeys(g, EXEMPT_KEYS) || g.method !== method || g.reason !== "no_session_closed" || sessionEvidence(t) || t.shutdown?.ms !== null) out.push(`process gate: task ${t.id} no-session marker is malformed or contradicts the task record`);
+		} else if (!proofValid(g, method, r.environment?.platform)) out.push(`process gate: task ${t.id} gate proof is missing, unconfirmed or contradictory`);
+	});
+	return out;
+}
+
 function attemptCoverage(r) {
 	const tasks = r.tasks ?? [], order = r.order ?? [], reasons = [];
 	const ids = tasks.map((t) => t.id);
@@ -64,6 +107,7 @@ function attemptCoverage(r) {
 	if (r.shutdownUnconfirmed) reasons.push("run records an unconfirmed shutdown");
 	if (r.invalid) reasons.push("run records an invalid task");
 	for (const t of tasks) if (!drained(t)) reasons.push(`task ${t.id} final shutdown is not confirmed drained`);
+	reasons.push(...gateProblems(r));
 	const derived = derivedAcceptance(r);
 	const summaryWarnings = summaryProblem(r.totals?.acceptance, derived) ? ["cached acceptance summary is malformed or disagrees with the task records (derived from the task records instead)"] : [];
 	const accepted = derived?.accepted ?? null;
@@ -136,6 +180,9 @@ function capacityDiffs(label, b, c) {
 // whether or not the field exists (old saved fresh data is read as is, never rewritten). A long result must record the same policy on both sides; a missing one is not assumed compatible.
 const continuationPolicy = (r) => (r.mode === "fresh" ? "not-applicable" : (r.config?.continuation?.policy ?? null));
 
+// A long result's process-gate policy (benchmark-only detective gate method, or none) is also a method property: it must be the same on both long sides; fresh is not applicable.
+const gatePolicy = (r) => (r.mode === "fresh" ? "not-applicable" : (r.config?.continuation?.gate ?? "none"));
+
 export function compareResults(base, cand) {
 	const inconclusive = [];
 	const reasons = [];
@@ -147,6 +194,7 @@ export function compareResults(base, cand) {
 	if (JSON.stringify(base.order) !== JSON.stringify(cand.order)) inconclusive.push("task order differs");
 	if (base.mode !== cand.mode) inconclusive.push(`mode differs (${base.mode} vs ${cand.mode})`);
 	else if (continuationPolicy(base) === null || continuationPolicy(base) !== continuationPolicy(cand)) inconclusive.push(`long-mode continuation policy differs or is missing (${continuationPolicy(base) ?? "missing"} vs ${continuationPolicy(cand) ?? "missing"})`);
+	if (base.mode === cand.mode && gatePolicy(base) !== gatePolicy(cand)) inconclusive.push(`long-mode process gate policy differs (${gatePolicy(base)} vs ${gatePolicy(cand)}): not comparable`);
 	for (const [name, r] of [["baseline", base], ["candidate", cand]]) {
 		if (r.synthetic === true) inconclusive.push(`${name} is a synthetic result: not benchmark evidence`);
 		// The agent topology proof is a METHOD guard: a missing proof (an older run) or another proof method is not comparable. Per-run cwd, ids and the proof fingerprint are not compared.

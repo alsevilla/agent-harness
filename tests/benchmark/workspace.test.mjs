@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { listHarnessTree, materializeHarness, writeCommitFiles, snapshot, diffSnapshots, assertInside, createWorkspace, TOOL_STATE_POLICY } from "./lib/workspace.mjs";
+import { listHarnessTree, materializeHarness, writeCommitFiles, snapshot, diffSnapshots, assertInside, createWorkspace, TOOL_STATE_POLICY, rmWithRetry, RM_MAX_ATTEMPTS } from "./lib/workspace.mjs";
 
 const git = (cwd, ...args) => execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=bench", "-c", "user.email=bench@example.invalid", ...args], { cwd, encoding: "utf8" }).trim();
 const write = (root, rel, text) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), text); };
@@ -150,4 +150,50 @@ test("the workspace passes the runner's remaining-time supplier to every owned s
 		await createWorkspace({ repo: "unused", scratchRoot: scratch }).prepare({ parent: "d".repeat(40), id: "H1" }, path.join(scratch, "fresh", "H1"), { remainingMs: () => remaining });
 	} finally { cp.execFileSync = orig; syncBuiltinESMExports(); }
 	assert.deepEqual(seen, [100, 60]);
+});
+
+// Secondary bounded rm retry (synthetic rm/sleep/clock: no real lock, no destructive OS repro). It is never quiescence proof.
+const lock = (code) => Object.assign(new Error(`${code} locked`), { code });
+test("rm retry: a transient lock code is retried within the cap, then succeeds", () => {
+	for (const code of ["EPERM", "EACCES", "EBUSY", "ENOTEMPTY"]) {
+		let n = 0; const slept = [];
+		rmWithRetry("d", { rm: () => { if (++n < 3) throw lock(code); }, sleep: (ms) => slept.push(ms) });
+		assert.equal(n, 3, code); assert.equal(slept.length, 2);
+	}
+});
+test("rm retry: any other error is immediate and original", () => {
+	let n = 0; const err = lock("ENOENT");
+	assert.throws(() => rmWithRetry("d", { rm: () => { n++; throw err; }, sleep: () => assert.fail("no sleep") }), (e) => e === err && e.rmAttempts === 1);
+	assert.equal(n, 1);
+});
+test("rm retry: exhaustion rethrows the ORIGINAL error with attempts and elapsed; never an unbounded loop", () => {
+	let n = 0, t = 0; const err = lock("EBUSY");
+	assert.throws(() => rmWithRetry("d", { rm: () => { n++; throw err; }, sleep: (ms) => { t += ms; }, now: () => t }), (e) => e === err && e.rmAttempts === RM_MAX_ATTEMPTS && e.rmElapsedMs === t && t > 0);
+	assert.equal(n, RM_MAX_ATTEMPTS);
+});
+test("rm retry: no retry or sleep once the remaining task budget is spent", () => {
+	let n = 0; const err = lock("EPERM");
+	assert.throws(() => rmWithRetry("d", { remaining: () => 10, rm: () => { n++; throw err; }, sleep: () => assert.fail("budget spent") }), (e) => e === err && e.rmAttempts === 1);
+	assert.equal(n, 1);
+});
+test("rm retry: the remaining budget is rechecked BEFORE every removal attempt, so a sleep that overshoots never allows a post-budget rm; the original error and attempt data are kept", () => {
+	// Pure fake clock: attempt 1 sees 60 ms left; the 50 ms sleep really takes 100 ms, so attempt 2 would start 40 ms after the budget.
+	let time = 0, n = 0; const err = lock("EPERM"), seen = [];
+	assert.throws(() => rmWithRetry("d", { remaining: () => 60 - time, now: () => time, rm: () => { seen.push(60 - time); n++; throw err; }, sleep: () => { time += 100; } }), (e) => e === err && e.code === "EPERM" && e.rmAttempts === 1 && e.rmElapsedMs === 100);
+	assert.equal(n, 1, "rm was NOT called after the budget expired"); assert.deepEqual(seen, [60]);
+	// An oversleep that still leaves a whole ms retries normally; the exact boundary (0.9 ms left) does not.
+	for (const [left, calls] of [[1, 2], [0.9, 1], [0, 1], [-5, 1]]) {
+		let t = 0, c = 0;
+		assert.equal((() => { try { rmWithRetry("d", { remaining: () => 200 + left - t, now: () => t, rm: () => { c++; if (c === 1) throw lock("EBUSY"); }, sleep: () => { t += 200; } }); return "ok"; } catch (e) { return e.code; } })(), calls === 2 ? "ok" : "EBUSY", String(left));
+		assert.equal(c, calls, `left ${left}`);
+	}
+	// A budget already spent before the FIRST removal removes nothing.
+	assert.throws(() => rmWithRetry("d", { remaining: () => 0, rm: () => assert.fail("no rm after the budget"), sleep: () => assert.fail("no sleep") }), (e) => e.rmAttempts === 0);
+});
+test("materialize removes the old workspace through the bounded retry and still refuses paths outside the scratch root", () => {
+	const { repo, parent } = fixtureRepo(); const scratch = tmpScratch(); const dest = path.join(scratch, "shared");
+	fs.mkdirSync(dest, { recursive: true }); fs.writeFileSync(path.join(dest, "stale.txt"), "s");
+	materializeHarness({ repo, commit: parent, dest, scratchRoot: scratch });
+	assert.equal(fs.existsSync(path.join(dest, "stale.txt")), false);
+	assert.throws(() => materializeHarness({ repo, commit: parent, dest: os.tmpdir(), scratchRoot: scratch }), /outside the assigned scratch root/);
 });

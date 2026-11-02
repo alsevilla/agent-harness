@@ -15,6 +15,7 @@ import { runBenchmark, MODES } from "./lib/runner.mjs";
 import { createWorkspace } from "./lib/workspace.mjs";
 import { createPiSdkAdapter } from "./lib/sdk-adapter.mjs";
 import { createSyntheticAdapter } from "./lib/synthetic-adapter.mjs";
+import { createProcessGate } from "./lib/process-gate.mjs";
 import { compareResults } from "./lib/compare.mjs";
 import { candidateRuntime, resourceShadowing } from "./lib/runtime.mjs";
 import { resolveBenchmarkRoles } from "./lib/roles.mjs";
@@ -40,6 +41,9 @@ function parseArgs(argv) {
 }
 
 const git = (repo, ...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+
+// Benchmark-only process gate: only the real SDK adapter in a shared long mode (the cutoff transition that reuses a workspace). Fresh, synthetic and every other path get none. Constructing it inspects nothing.
+export const processGateFor = (adapterName, mode) => (adapterName === "pi-sdk" && MODES[mode]?.sessionPolicy !== "new-per-task" && MODES[mode] ? createProcessGate() : null);
 
 function candidateIdentity(repo) {
 	const head = git(repo, "rev-parse", "HEAD");
@@ -207,7 +211,7 @@ async function main(argv) {
 		const resources = resourcesFor(adapterName, repo, await adapter.agentDir());
 		const config = { limits, resources, topology, maxReworkRounds, diagnosticChars, roles: { main: roles.main, reviewer: roles.reviewer }, registry: roles.files, runtime, recheckRuntime: () => candidateRuntime({ candidateRoot: repo }).fingerprint };
 		const selection = { tasks: manifest.tasks.map((t) => t.id), fullTaskCount: fullManifest.tasks.length };
-		const result = await runBenchmark({ manifest, mode, adapter, workspace: createWorkspace({ repo, scratchRoot: scratch }), config, writeResult: (r) => writeJson(out, { ...r, candidate, selection }) });
+		const result = await runBenchmark({ manifest, mode, adapter, workspace: createWorkspace({ repo, scratchRoot: scratch }), config, processGate: processGateFor(adapterName, mode), writeResult: (r) => writeJson(out, { ...r, candidate, selection }) });
 		console.log(JSON.stringify({ status: result.status, error: result.error ?? null, invalid: result.invalid ?? null, expectedWriter: result.expectedWriter, mode, order: result.order, maxReworkRounds: result.config.maxReworkRounds, reviewer: result.config.roles.reviewer.model, accepted: result.totals.acceptance, endToEndCost: result.totals.endToEnd.cost, runtime: result.config.runtime.fingerprint, out }, null, 2));
 		return result.status === "complete" ? 0 : 1;
 	}

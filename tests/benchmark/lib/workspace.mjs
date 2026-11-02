@@ -70,6 +70,27 @@ function writeBlobs(blobs, dest) {
 	}
 }
 
+// Secondary, bounded retry of the workspace removal for a transient Windows lock (EPERM/EACCES/EBUSY/ENOTEMPTY) only. It is NEVER quiescence proof (the process gate is); any other error is
+// immediate, and exhaustion (attempts, or the remaining task time) rethrows the ORIGINAL error with the attempt count and elapsed ms attached. Nothing is removed after the budget is spent.
+const RM_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY", "ENOTEMPTY"]);
+export const RM_MAX_ATTEMPTS = 5, RM_DELAY_MS = 50;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export function rmWithRetry(dest, { remaining = null, rm = (p) => fs.rmSync(p, { recursive: true, force: true }), sleep = sleepSync, now = () => performance.now() } = {}) {
+	const t0 = now();
+	let last = null;
+	for (let attempt = 1; ; attempt++) {
+		// The whole-ms remaining budget is rechecked immediately before EVERY removal (a sleep may oversleep): nothing is removed once it is spent; the last original error is rethrown.
+		if (remaining && !(remaining() >= 1)) { const e = last ?? Object.assign(new Error("task budget spent before the workspace removal"), { code: "ETIMEDOUT" }); e.rmAttempts = attempt - 1; e.rmElapsedMs = Math.round(now() - t0); throw e; }
+		try { return rm(dest); } catch (e) {
+			last = e;
+			const delay = RM_DELAY_MS * attempt;
+			const left = remaining ? remaining() : Infinity;
+			if (!RM_RETRY_CODES.has(e?.code) || attempt >= RM_MAX_ATTEMPTS || !(left > delay + 1)) { e.rmAttempts = attempt; e.rmElapsedMs = Math.round(now() - t0); throw e; }
+			sleep(delay);
+		}
+	}
+}
+
 // Replaces dest with the harness roots of one commit (the parent state of a task).
 // timeoutMs (or remainingMs) is the TOTAL budget of the whole materialization, shared by the sequential git reads; nothing is removed or written once it is spent.
 export function materializeHarness({ repo, commit, dest, scratchRoot, roots = HARNESS_ROOTS, timeoutMs, remainingMs, now }) {
@@ -78,7 +99,7 @@ export function materializeHarness({ repo, commit, dest, scratchRoot, roots = HA
 	const { paths, excluded } = listHarnessTree({ repo, commit, roots, remainingMs: remaining });
 	const blobs = readBlobs({ repo, commit, paths, remainingMs: remaining });
 	subprocessTimeout(remaining, "workspace write");
-	fs.rmSync(dest, { recursive: true, force: true });
+	rmWithRetry(dest, { remaining });
 	fs.mkdirSync(dest, { recursive: true });
 	writeBlobs(blobs, dest);
 	return { files: paths.length, paths, excludedRfidNamed: excluded };
