@@ -36,6 +36,7 @@ import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "
 import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
+import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
@@ -355,7 +356,10 @@ async function runAgentAttempt(
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
+	const integrationArgsStart = args.length;
 	codeIntegrationsEnabled = configureCodeIntegrations(args, agent, dispatchDefaults.jobId ? [DECISION_TOOL] : []);
+	// Compact leaf contract, main never loads it. Inserted before the integration extensions: Serena/Graphify return a forced systemPrompt rendered at their turn, so this must run first.
+	if (childContextEligible(agent, codeIntegrationsEnabled)) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "child-context-entry.ts"));
 
     } catch (error) {
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, "failed", String(error));
