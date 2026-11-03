@@ -74,7 +74,8 @@ export function parseFrontmatter(content) {
 export class BackgroundWorkers {}
 export class RpcWorker {}
 export class WorkerMonitor {}
-export function configureCodeIntegrations() {
+export function configureCodeIntegrations(args) {
+	if (globalThis.__piTestCodeIntegrationsEnabled === true) { args.push("--extension", "integration-fixture.js"); return true; } // opt-in per test (stands in for Serena/Graphify, which force the prompt); default stays disabled
 	return false;
 }
 export const CODE_NAVIGATION_GUIDANCE = "";

@@ -579,3 +579,29 @@ test("background list model is the effective served id and only a responseModel 
 	assert.equal(row.servedReported, true);
 	assert.deepEqual(row.observedModels, [{ provider: "p", model: "asked", responseModel: "snap" }]);
 });
+
+// Child context slice: an integration-enabled non-project role gets exactly one extra --extension pair; every other launch flag is unchanged.
+test("child launch adds only the child-context entry pair for integration-enabled eligible roles", async () => {
+	const root = setupRoles({ "ctx-worker": "You are ctx-worker.", "release-engineer": "You are release-engineer." });
+	spawnPlan = () => ({ events: [reply(["STATUS: PASS"])], exitCode: 0 });
+	const launch = async (agent: string) => {
+		spawnLog = [];
+		await tool!.execute(`call-ctx-${agent}`, { agent, task: "check", background: false }, undefined, undefined, context(root));
+		return spawnLog[0].args;
+	};
+	const entries = (args: string[]) => args.flatMap((arg, i) => (args[i - 1] === "--extension" && arg.endsWith("child-context-entry.ts") ? [arg] : []));
+	const without = (args: string[]) => args.filter((arg, i) => !(/(child-context-entry\.ts|integration-fixture\.js)$/.test(arg) || (arg === "--extension" && /(child-context-entry\.ts|integration-fixture\.js)$/.test(args[i + 1] ?? "")))).map((arg, i, kept) => (kept[i - 1] === "--append-system-prompt" ? "<per-launch prompt file>" : arg)); // the temp prompt path is unique per launch
+	try {
+		(globalThis as any).__piTestCodeIntegrationsEnabled = false;
+		const disabled = await launch("ctx-worker");
+		assert.deepEqual(entries(disabled), []);
+		(globalThis as any).__piTestCodeIntegrationsEnabled = true;
+		const enabled = await launch("ctx-worker");
+		assert.equal(entries(enabled).length, 1);
+		assert.ok(enabled.findIndex((arg) => arg.endsWith("child-context-entry.ts")) < enabled.indexOf("integration-fixture.js"), "runs before integration extensions that force the system prompt");
+		assert.deepEqual(without(enabled), without(disabled), "only the one --extension pair differs: model, thinking, tools and every other flag are unchanged");
+		assert.deepEqual(entries(await launch("release-engineer")), [], "release-engineer keeps the full policy");
+	} finally {
+		delete (globalThis as any).__piTestCodeIntegrationsEnabled;
+	}
+});
