@@ -338,7 +338,7 @@ function tierEntries(snap: RoleSnapshot, slot: TierSlot): Array<Record<string, u
 	const map: Record<string, unknown> = { ...(snap.base.modelTiers as Record<string, unknown>), [defaultTier]: slot };
 	const modelTiers = Object.fromEntries(TIER_ORDER.filter((tier) => tier in map).map((tier) => [tier, map[tier]]));
 	const user = snap.entries.find((e) => e.name === snap.name);
-	const row = { name: snap.name, defaultModelTier: defaultTier, modelTiers, ...(user?.tools !== undefined ? { tools: user.tools } : {}) };
+	const row = { name: snap.name, defaultModelTier: defaultTier, modelTiers, ...(user?.tools !== undefined ? { tools: user.tools } : {}), ...(user?.budget !== undefined ? { budget: user.budget } : {}) }; // budget survives a tier save (the row is rebuilt from known keys)
 	return user ? snap.entries.map((e) => (e === user ? row : e)) : [...snap.entries, row];
 }
 

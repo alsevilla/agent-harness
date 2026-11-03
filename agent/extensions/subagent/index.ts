@@ -12,7 +12,8 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { BackgroundWorkers, formatUsageSummary, LogicalUsage, RpcWorker, type UsageScope } from "./background.ts";
+import { BackgroundWorkers, formatUsageSummary, LogicalUsage, newUsageScope, RpcWorker, type UsageScope } from "./background.ts";
+import { applyBudgetEnv, normalizeBudget, parseMarker, type BudgetMarker, type BudgetResult, type RoleBudget } from "./role-budget.ts";
 import { WorkerMonitor } from "./monitor.ts";
 import { acquireWorkspace, releaseWorkspace, WorkspaceAdmissionError, type WorkspaceAccess, type WorkspaceLease } from "./workspace-admission.ts";
 import { spawn } from "node:child_process";
@@ -92,6 +93,7 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	budget?: BudgetResult; // present only when an effective role budget applied to this launch
 }
 
 interface SubagentDetails {
@@ -177,6 +179,7 @@ interface DispatchDefaults {
 	thinkingLevel?: ThinkingLevel;
 	prBase?: string; // validated per-entry trusted PR base; shared by every attempt (fallbacks, steering restarts) of this one launch
 	cleanupId?: string; // id of the main-minted cleanup scope of this one launch; only its first spawn claims it
+	budget?: RoleBudget; // effective validated role budget of this one single-mode launch (task over role); absent = disabled, launch unchanged
 }
 
 const WORKSPACE_WAITING = "Waiting for workspace";
@@ -197,7 +200,8 @@ async function runSingleAgent(
 	access: WorkspaceAccess = "write",
 ): Promise<SingleResult> {
 	// One usage job per logical request, charged to the scope captured at dispatch; it settles exactly once here.
-	const logical = dispatchDefaults.usageScope ? new LogicalUsage(dispatchDefaults.usageScope, Boolean(dispatchDefaults.jobId)) : undefined;
+	const logical = dispatchDefaults.usageScope || dispatchDefaults.budget ? new LogicalUsage(dispatchDefaults.usageScope ?? newUsageScope(), Boolean(dispatchDefaults.jobId)) : undefined;
+	if (dispatchDefaults.budget) logical?.enableBudget(dispatchDefaults.budget.contextBudget !== undefined);
 	try {
 		const result = await runSingleAgentJob(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, access, logical);
 		logical?.settle(result.stopReason === "aborted" ? "aborted" : isFailedResult(result) ? "failed" : "completed");
@@ -306,6 +310,11 @@ async function runAgentAttempt(
 	const args: string[] = ["--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--offline"];
 	const inheritsDispatchConfig = !agent.model;
 	const model = attemptModel ?? agent.model ?? dispatchDefaults.model;
+	// Role budget (single mode): the turn count and warning state live on the logical job, so a fallback attempt never resets them.
+	const budget = dispatchDefaults.budget;
+	const turnsSpent = () => budget?.maxTurns !== undefined && logical !== undefined && logical.turns >= budget.maxTurns;
+	const warnState = (): "sent" | "not_delivered" => (logical?.budgetWarned ? "sent" : "not_delivered");
+	const spentResult = (): BudgetResult => { logical?.markExhausted(); return { state: "exhausted", reason: "turns", turns: logical?.turns, contextTokens: null, warn80: warnState(), limits: budget!, noNewAttempt: true }; };
 	const workerController = new AbortController();
     const parentSignal = signal;
     const parentAbort = () => workerController.abort();
@@ -333,12 +342,13 @@ async function runAgentAttempt(
         if (launch.state !== "launch") {
             release?.(); parentSignal?.removeEventListener("abort", parentAbort);
             const remaining = fallbackModels ?? getFallbackSequence(model, agent.fallbackModel);
-            if (launch.replayable && remaining.length) {
+            const spent = launch.replayable && remaining.length > 0 && turnsSpent(); // exhaustion never starts another attempt
+            if (launch.replayable && remaining.length && !spent) {
                 const fallback = await runAgentAttempt(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, lease, grantWindow, remaining[0], remaining.slice(1), logical);
                 fallback.stderr = `Model ${model} skipped (provider cooldown ${launch.state}); retried with ${remaining[0]}.\n${fallback.stderr}`;
                 return fallback;
             }
-            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, modelSource: "requested", requestedModel: model, observed: [], step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, attempts: [], ...tierFields(agent) }; // attempts: [] = no child launched, so a caller's `?? [attemptOf(..)]` cannot invent one
+            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, modelSource: "requested", requestedModel: model, observed: [], step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, attempts: [], ...tierFields(agent), ...(spent ? { budget: spentResult() } : {}) }; // attempts: [] = no child launched, so a caller's `?? [attemptOf(..)]` cannot invent one
         }
     }
     const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier, agent.modelSlot);
@@ -360,6 +370,8 @@ async function runAgentAttempt(
 	codeIntegrationsEnabled = configureCodeIntegrations(args, agent, dispatchDefaults.jobId ? [DECISION_TOOL] : []);
 	// Compact leaf contract, main never loads it. Inserted before the integration extensions: Serena/Graphify return a forced systemPrompt rendered at their turn, so this must run first.
 	if (childContextEligible(agent, codeIntegrationsEnabled)) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "child-context-entry.ts"));
+	// Budget controller: child-only, explicit, loaded only for an effective budget (a malformed capability env makes it fail to load, so the child exits before its first prompt).
+	if (budget) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "role-budget-entry.ts"));
 
     } catch (error) {
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, "failed", String(error));
@@ -425,6 +437,9 @@ async function runAgentAttempt(
 		args.push("--extension", guard.entry);
 		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
 		let wasAborted = false;
+		let budgetMarker = undefined as Extract<BudgetMarker, { event: "exhausted" }> | undefined; // assigned from the stdout closure
+		const childEnvBase: Record<string, string | undefined> = {...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : ""};
+		if (budget) applyBudgetEnv(childEnvBase, { budget, turnsBefore: logical?.turns ?? 0, warned: logical?.budgetWarned ?? false });
 
 		let removeAbort = () => {};
         const exitCode = await new Promise<number>((resolve) => {
@@ -433,7 +448,7 @@ async function runAgentAttempt(
 			dispatchDefaults.onSpawn?.();
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-                env: guard.childEnv({...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : ""}),
+                env: guard.childEnv(childEnvBase),
 				shell: false,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -449,6 +464,14 @@ async function runAgentAttempt(
                     if (worker && dispatchDefaults.jobId) dispatchDefaults.runtime?.attach(dispatchDefaults.jobId, worker.id, client, workerController);
                 }
             });
+            // Existing parent-owned termination: SIGTERM, then SIGKILL after 5 s if the child has not closed (user stop and budget fallback share it).
+			const terminate = () => {
+				proc.kill("SIGTERM");
+				const forceKill = setTimeout(() => {
+					if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+				}, 5000);
+				forceKill.unref(); proc.once("close", () => clearTimeout(forceKill));
+			};
             let buffer = "";
             // One decoder per stream per spawn: a pipe chunk may end inside a multi-byte codepoint.
             const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
@@ -471,6 +494,16 @@ async function runAgentAttempt(
                     // Detached workers cannot leave an unanswered dialog hanging.
                     proc.stdin?.write(JSON.stringify({type: "extension_ui_response", id: event.id, cancelled: true}) + "\n");
                     currentResult.stderr += `Worker dialog canceled: ${event.method} ${event.title ?? ""}\n`;
+                }
+                if (event.type === "entry_appended" && budget) {
+                    const marker = parseMarker(event.entry); // only a well-formed numeric/enum marker from a budgeted child counts
+                    if (marker?.event === "warn80" && marker.status === "sent") logical?.noteWarned();
+                    if (marker?.event === "context") logical?.noteContext(marker.tokens !== null); // the child's own latest observation, replaced by each later one and reset per attempt
+                    if (marker?.event === "exhausted" && !budgetMarker) {
+                        budgetMarker = marker;
+                        // The child already aborted itself; the single existing window (SIGTERM now, SIGKILL after 5 s) bounds the stop. No extra wait before it.
+                        if (!wasAborted && proc.exitCode === null && proc.signalCode === null) terminate();
+                    }
                 }
                 if (event.type === "tool_execution_start") currentResult.toolActivity = true;
                 if (event.type === "agent_settled" && client) { client.close(); proc.stdin?.end(); if (worker) dispatchDefaults.runtime?.detach(worker.id); }
@@ -531,14 +564,7 @@ async function runAgentAttempt(
 			});
 
 			if (signal) {
-				const killProc = () => {
-					wasAborted = true;
-					proc.kill("SIGTERM");
-					const forceKill = setTimeout(() => {
-						if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
-					}, 5000);
-                    forceKill.unref(); proc.once("close", () => clearTimeout(forceKill));
-				};
+				const killProc = () => { wasAborted = true; terminate(); };
 				if (signal.aborted) killProc();
 				else { signal.addEventListener("abort", killProc, { once: true }); removeAbort = () => signal?.removeEventListener("abort", killProc); }
 			}
@@ -547,9 +573,16 @@ async function runAgentAttempt(
 		removeAbort(); release?.(); release = undefined;
         currentResult.exitCode = exitCode;
         cleanExit = exitCode === 0 && !wasAborted;
+        // A budget stop is a controlled non-success: partial messages stay, nothing is accepted as done. A user stop that arrived first (wasAborted) wins.
+        const stopMarker = wasAborted ? undefined : budgetMarker;
+        if (budget) {
+            currentResult.budget = stopMarker ? { state: "exhausted", reason: stopMarker.reason, turns: stopMarker.turns, contextTokens: stopMarker.contextTokens, warn80: warnState(), limits: budget } : { state: "not_exhausted", warn80: warnState(), limits: budget };
+            if (stopMarker) { logical?.markExhausted(); currentResult.stopReason = "aborted"; currentResult.errorMessage = `budget_exhausted:${stopMarker.reason}`; cleanExit = false; }
+        }
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, wasAborted ? "aborted" : isFailedResult(currentResult) ? "failed" : "completed", wasAborted ? "Subagent was aborted" : isFailedResult(currentResult) ? getResultOutput(currentResult) : undefined);
         if (wasAborted && dispatchDefaults.jobId) { currentResult.stopReason = "aborted"; currentResult.errorMessage = "Subagent was stopped"; return currentResult; }
 		if (wasAborted) throw new Error("Subagent was aborted");
+		if (stopMarker) return currentResult; // exhaustion never triggers fallback, a model upgrade or a replay
 		const remainingFallbacks = fallbackModels ?? getFallbackSequence(model, agent.fallbackModel);
 		const retryResult = {
 			...currentResult,
@@ -561,6 +594,12 @@ async function runAgentAttempt(
 		// A child guard refusal replays only when this parent's own store still says replayable (no health is read from text).
 		const guardRefused = !wasAborted && !retryResult.toolActivity && retryResult.stopReason === "error" && model !== undefined && await guardRefusalReplayable(model, retryResult.errorMessage);
 		const nextModel = guardRefused ? remainingFallbacks[0] : nextFallbackModel(retryResult, remainingFallbacks, wasAborted);
+		if (nextModel && turnsSpent()) {
+			// The job's turn budget is already spent: no new attempt (fallback would otherwise reset the work the budget bounds).
+			currentResult.budget = spentResult();
+			currentResult.stderr += `${currentResult.stderr && !currentResult.stderr.endsWith("\n") ? "\n" : ""}budget_exhausted:turns: fallback attempt not started (turn budget spent).\n`;
+			return currentResult;
+		}
 		if (nextModel) {
 			const primaryError = getResultOutput(currentResult);
             const updates = worker ? dispatchDefaults.runtime?.steeringFor(worker.id) ?? [] : [];
@@ -669,6 +708,12 @@ const SubagentParams = Type.Object({
 	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
 	prBase: PR_BASE,
 	cleanup: CLEANUP,
+	// Optional child limits, single mode only (task over role, per field). Null is listed so the SDK keeps it for runtime refusal.
+	budget: Type.Optional(Type.Union([Type.Object({
+		// Unknown, not Integer: the SDK coerces integer-typed arguments ("4" -> 4, 1.5 -> 1, nested null dropped) before execute, which would hide an invalid raw budget; execute enforces positive safe integers.
+		maxTurns: Type.Optional(Type.Unknown({ description: "Positive integer: max assistant turns of this logical job across fallback attempts. Cooperative stop at a request boundary." })),
+		contextBudget: Type.Optional(Type.Unknown({ description: "Positive integer: estimated tokens of the child's current context (SDK estimate, per attempt, not billed tokens). Unknown or unanchored context is never treated as 0." })),
+	}, { additionalProperties: false, description: "Single mode only; parallel, chain and dag reject it, and reject roles that carry a budget, before any launch." }), Type.Null()])),
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -945,6 +990,22 @@ export default function (pi: ExtensionAPI) {
 					details: makeDetails("single")([]),
 					isError: true,
 				};
+			}
+
+			// Optional child budgets: single native dispatch only. An invalid or unsupported request (including an inherited role budget) is refused before any spawn, never ignored or run uncapped.
+			const budgetRefuse = (why: string) => ({ content: [{ type: "text" as const, text: `Invalid budget: ${why}; nothing was launched.` }], details: makeDetails(mode)([]), isError: true });
+			if (hasChain || hasTasks || hasDag) {
+				if (params.budget !== undefined) return budgetRefuse("a task budget is only supported in single mode");
+				// The entries of the mode that actually dispatches (same precedence as `mode`): an empty inactive array must not shadow them.
+				for (const [i, entry] of (((mode === "dag" ? params.dag : mode === "chain" ? params.chain : params.tasks) ?? []) as Array<{ agent: string }>).entries()) {
+					if ("budget" in entry) return budgetRefuse(`entry ${i} budget is only supported in single mode`);
+					const role = agents.find((candidate) => candidate.name === entry.agent);
+					if (role?.budget !== undefined) return budgetRefuse(`role "${role.name}" has a role budget, which is only supported in single mode (parallel, chain and dag would run it uncapped)`);
+				}
+			} else if (hasSingle) {
+				const { effective, error } = normalizeBudget(agents.find((candidate) => candidate.name === params.agent)?.budget, params.budget);
+				if (error) return budgetRefuse(error);
+				if (effective) dispatchDefaults.budget = effective;
 			}
 
 			// Validated before any project prompt, runtime start or launch: an invalid graph spawns nothing.

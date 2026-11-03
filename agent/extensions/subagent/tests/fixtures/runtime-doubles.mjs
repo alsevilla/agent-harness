@@ -7,7 +7,7 @@ import * as path from "node:path";
 
 // Scripted child process over the RPC transport: the task arrives as a stdin "prompt" line; the plan is chosen from that prompt, which is then acknowledged and played.
 // globalThis.__piSubagentFakeSpawn(args, task) returns { events, exitCode, hang, afterSpawn }.
-export function spawn(_command, args) {
+export function spawn(_command, args, options) {
 	const child = new EventEmitter();
 	child.stdout = new EventEmitter();
 	child.stderr = new EventEmitter();
@@ -20,7 +20,10 @@ export function spawn(_command, args) {
 		child.exitCode = code;
 		child.emit("close", code);
 	};
-	child.kill = () => {
+	let activePlan;
+	child.kill = (signal) => {
+		activePlan?.onKill?.(signal ?? "SIGTERM"); // optional per-plan observer (role-budget runtime tests)
+		if (activePlan?.ignoreTerm && signal !== "SIGKILL") return; // a child that survives SIGTERM until SIGKILL
 		child.signalCode = "SIGTERM";
 		queueMicrotask(() => close(null));
 	};
@@ -32,7 +35,14 @@ export function spawn(_command, args) {
 			if (!line.trim()) continue;
 			const message = JSON.parse(line);
 			if (message.type !== "prompt") continue;
-			const plan = globalThis.__piSubagentFakeSpawn(args, message.message);
+			const plan = globalThis.__piSubagentFakeSpawn(args, message.message, options);
+			activePlan = plan;
+			if (plan.epipe) { // producer-shaped: the child already exited (e.g. extension load failure), so the prompt write fails with EPIPE
+				const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+				queueMicrotask(() => { if (plan.stderr) child.stderr.emit("data", plan.stderr); stdin.emit("error", error); close(plan.exitCode ?? 1); });
+				callback?.(error);
+				return false;
+			}
 			queueMicrotask(() => {
 				child.stdout.emit("data", JSON.stringify({ type: "response", id: message.id, success: true, data: { disposition: "started" } }) + "\n");
 				for (const event of plan.events ?? []) child.stdout.emit("data", JSON.stringify(event) + "\n");

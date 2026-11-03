@@ -8,8 +8,10 @@ export default function pauseGate(pi: ExtensionAPI) {
   if (!controlPath) return;
   let paused = true;
   let announced = false;
-  const boundary = async () => {
+  // A budget stop (or any other abort of the current run) must not hang behind a hold; a non-aborted user hold is unchanged.
+  const boundary = async (_event?: unknown, ctx?: { signal?: AbortSignal }) => {
     for (;;) {
+      if (ctx?.signal?.aborted) return;
       try { const state = fs.readFileSync(controlPath, "utf8"); if (state === "1" || state === "0") paused = state === "1"; }
       catch { /* Retain the last state if the control file is temporarily unreadable. */ }
       if (!paused) {
