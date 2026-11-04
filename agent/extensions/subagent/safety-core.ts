@@ -1063,17 +1063,21 @@ function badSegments(p: string): boolean {
 }
 
 // Trusted artifact directory: ASCII absolute forward-slash placement under <worktrees>/<repo>/_scratch|_evidence/<task>, existing, canonical (no alias/link), and not overlapping the candidate.
-export function validateArtifactDir(input: string, candidate: string): string {
+export function validateArtifactDir(input: string, candidate: string, create = false): string {
 	// shortcut: any ~<digit> segment refuses as a possible 8.3 alias (may over-block a literal ~1 name), upgrade to native alias resolution when realpath can settle it.
 	if (typeof input === "string" && input.split("/").some((seg) => /~\d/.test(seg))) throw new RangeError("artifact directory is an alias or link (8.3 short name)");
 	if (typeof input !== "string" || !/^[\x20-\x7e]+$/.test(input) || input.includes("\\") || !PLACEMENT.test(input) || badSegments(input)) throw new RangeError("artifact directory must be an ASCII absolute forward-slash path under worktrees/<repo>/_scratch or _evidence");
+	const cand = normPath(canonicalCwd(candidate));
+	const dir = normPath(input);
+	if (dir === cand || dir.startsWith(`${cand}/`) || cand.startsWith(`${dir}/`)) throw new RangeError("artifact directory overlaps the candidate");
+	// Grant time only: a missing folder in the approved placement is created, then checked like an existing one (an alias or link still refuses).
+	if (create && !fs.existsSync(input)) {
+		try { fs.mkdirSync(input, { recursive: true }); } catch { throw new RangeError("artifact directory could not be created"); }
+	}
 	let stat: fs.Stats;
 	try { stat = fs.statSync(input); } catch { throw new RangeError("artifact directory does not exist"); }
 	if (!stat.isDirectory()) throw new RangeError("artifact directory is not a directory");
 	if (normPath(fs.realpathSync.native(input)) !== normPath(input)) throw new RangeError("artifact directory is an alias or link");
-	const cand = normPath(canonicalCwd(candidate));
-	const dir = normPath(input);
-	if (dir === cand || dir.startsWith(`${cand}/`) || cand.startsWith(`${dir}/`)) throw new RangeError("artifact directory overlaps the candidate");
 	return input;
 }
 
@@ -1869,15 +1873,60 @@ function leasedPush(store: GrantStore, decision: Extract<Decision, { action: "bl
 }
 
 // Fixed hint (no command or path echo) only when the sole refused argument is one -m/-F value that is not in the strict quoted grammar; amend, --no-verify, -a and other flags get none.
-function unsupportedCommitHint(decision: Extract<Decision, { action: "block" }>): string {
-	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_COMMIT" || parseNormalCommit(decision.op.command) !== undefined) return "";
-	const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
-	return /^git commit -[mF] \S+$/.test(bare) ? '; not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root)' : "";
+// ---- Redacted .env read: `node "<this folder>/read-env-redacted.mjs" "<absolute .env path>"` is the one way an agent may see .env settings.
+// The script prints keys with secret-like values hidden. Allowed only in that exact form and only while the script's bytes match the pinned
+// digest, so an edited copy cannot turn it into a raw read. Every other .env read or write stays SECRET (never grantable).
+export const REDACTED_ENV_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "read-env-redacted.mjs").replace(/\\/g, "/");
+export const REDACTED_ENV_SCRIPT_SHA256 = "ea8cbec2847ecb35c93596024170ceda229ef090ef3942824cd969137321b336";
+export function redactedEnvRead(toolName: string, input: Record<string, unknown>): boolean {
+	if (toolName !== "bash" && toolName !== "powershell") return false;
+	const t = tokenizeDelivery(String(input?.command ?? ""));
+	if (!t || t.length !== 3 || t[0].quoted !== "" || t[0].text !== "node" || t[1].quoted !== '"' || t[2].quoted !== '"') return false;
+	if (normPath(t[1].text) !== normPath(REDACTED_ENV_SCRIPT)) return false;
+	const target = t[2].text;
+	if (!PATH_ARG.test(target) || badSegments(target) || !/^\.env(\..+)?$/.test(path.posix.basename(target))) return false;
+	try {
+		return createHash("sha256").update(fs.readFileSync(REDACTED_ENV_SCRIPT).toString("latin1").replace(/\r\n/g, "\n"), "latin1").digest("hex") === REDACTED_ENV_SCRIPT_SHA256;
+	} catch {
+		return false;
+	}
+}
+
+// ---- Block messages: rule ids, the op digest, the program (never its arguments: a command may carry a credential), whether a grant can
+// ever help, and the exact next step.
+const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root); the -m text is one line of plain ASCII with no \\n escapes, the -F file lives in the task\'s _evidence or _scratch folder, and these forms need no grant';
+const RULE_ADVICE: Partial<Record<RiskRule, string>> = {
+	SECRET: `agents never read or write secret files (.env*, keys, credentials, .ssh/.aws/.gnupg) or name them in a command; to check .env settings run node "${REDACTED_ENV_SCRIPT}" "<absolute .env path>" (secret-like values hidden); .env.example, .env.sample and .env.template are ordinary files when named alone`,
+	OPAQUE_UNPARSEABLE: "the guard cannot parse this command (inline scripts with nested quotes, eval, encoded or deeply nested commands); write the script to a file in the task's _scratch folder and run it by path or pipe it on stdin (for example betterwright run < \"<absolute file>\")",
+	PATH_AMBIGUOUS: "use an exact absolute path without aliases, links or 8.3 short names",
+};
+function programOf(op: GuardOp): string {
+	if (op.kind !== "shell") return `${op.kind} ${op.path}`;
+	const words = op.command.trim().split(/\s+/);
+	const name = path.basename(words[0] ?? "").replace(/\.(exe|cmd|bat)$/i, "");
+	return ["git", "gh", "npm", "pnpm", "yarn"].includes(name.toLowerCase()) && /^[a-z][a-z-]*$/.test(words[1] ?? "") ? `${name} ${words[1]}` : name || "(empty)";
+}
+export function blockReason(decision: Extract<Decision, { action: "block" }>, scope: GuardScope, gateCommits: boolean): string {
+	const head = `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: `;
+	if (scope === "child" && gateCommits && decision.rules.length === 1 && decision.rules[0] === "GIT_COMMIT" && decision.op.kind === "shell") {
+		const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
+		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}.`;
+		if (parseNormalCommit(decision.op.command) !== undefined) return `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
+		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
+	}
+	const advice = decision.rules.map((r) => RULE_ADVICE[r]).filter(Boolean);
+	const how = !decision.grantable
+		? "not grantable: no approval unblocks this for an agent; the operator can run it directly"
+		: scope === "main"
+			? "grantable: the operator can approve this exact operation with request_authorization; the approval must name this folder and the exact command text, and is used once"
+			: "grantable: a worker receives only grants requested for its role and this folder before it was launched, with the exact command text; ask main to request one and relaunch the worker, or have the operator run it";
+	return `${head}${programOf(decision.op)}; ${how}${advice.length ? `; ${advice.join("; ")}` : ""}.`;
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
 export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
+	if (redactedEnvRead(toolName, input)) return undefined;
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") return undefined;
 	// A single-use record never carries PR merge or release create (defense in depth for envelopes or stores that hold one): only the action grants do.
@@ -1891,8 +1940,7 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, live)) return undefined;
 	if (guard.scope === "child" && cleanupAllows(guard.store, decision, live)) return undefined;
 	if (guard.scope === "child" && artifactCleanupAllows(guard.store, decision, live)) return undefined;
-	const how = decision.grantable ? "needs an explicit operator grant (request_authorization is for a genuinely blocked risky command such as merge or release, not ordinary commit, feature push or PR create)" : "not grantable to a model: use the operator out-of-band";
-	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}${unsupportedCommitHint(decision)}.` };
+	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) };
 }
 
 const MERGE_OR_RELEASE = /\bgh(?:\.exe)?\s+(?:(?:-R|--repo|--hostname)[\s=]\S+\s+)*(?:pr\s+merge|release\s+create)\b/i;

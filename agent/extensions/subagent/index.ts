@@ -762,7 +762,7 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 	if (!target) return fail("not a verified git repository with exactly one origin push URL; no lease minted.");
 	let artifactDir: string | undefined;
 	try {
-		artifactDir = artifactInput === undefined ? undefined : validateArtifactDir(artifactInput, target.candidate);
+		artifactDir = artifactInput === undefined ? undefined : validateArtifactDir(artifactInput, target.candidate, true);
 	} catch (error) {
 		return fail(`${(error as Error).message}; no lease minted.`);
 	}
@@ -825,7 +825,7 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	let artifactDir: string | undefined;
 	let superseded: ReturnType<typeof safetyGrants.findSuperseded>;
 	try {
-		artifactDir = d.artifact_dir === undefined ? undefined : validateArtifactDir(d.artifact_dir, target.candidate);
+		artifactDir = d.artifact_dir === undefined ? undefined : validateArtifactDir(d.artifact_dir, target.candidate, true);
 		const live = safetyGrants.findDelivery(binding);
 		if (live) return { content: [{ type: "text" as const, text: `Already authorized: ${d.action} of PR #${d.pr} at ${d.sha.slice(0, 7)} for ${repo} is live for this PI session; no new dialog.` }], details: {} };
 		superseded = safetyGrants.findSuperseded(binding);
