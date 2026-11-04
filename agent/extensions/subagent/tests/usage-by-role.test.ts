@@ -110,3 +110,14 @@ test("main context line: the SDK estimate is shown when available, unknown other
 	assert.ok(formatUsageSummary(scope, 900).endsWith("\nMain context: ~900 tokens (SDK estimate)"), "shown after the role breakdown");
 	assert.equal(formatUsageSummary(scope).includes("Main context"), false, "callers without a reading keep the old text");
 });
+
+test("cost per completed task counts failed and aborted cost against completed tasks only", () => {
+	const scope = newUsageScope();
+	run(scope, "backend", false, 100, 10, 0.3);
+	run(scope, "backend", false, 100, 10, 0.1, "failed");
+	run(scope, "debugger", false, 100, 10, 0.2, "aborted");
+	const text = formatUsageSummary(scope);
+	assert.match(text, /backend: 2 tasks[^\n]*\$0\.4000 SDK-estimated; \$0\.4000 per completed task/, "0.3 + 0.1 over 1 completed");
+	assert.doesNotMatch(text.split("\n").find((l) => l.includes("debugger:")) ?? "", /per completed task/, "no completed task: no ratio");
+	assert.match(text, /Foreground:[\s\S]*cost: \$0\.6000 SDK-estimated; \$0\.6000 per completed task/);
+});
