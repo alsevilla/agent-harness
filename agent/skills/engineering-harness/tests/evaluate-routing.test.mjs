@@ -441,8 +441,9 @@ function nativeDrift(contract = ev.NATIVE) {
 	check("SubagentParams keys", root.keys, new Set(contract.ROOT_KEYS));
 	check("NOTICE_MIN", NATIVE_NOTICE_MIN, contract.NOTICE_MIN);
 	const cleanupBlock = /const CLEANUP = .*?Type\.Null\(\)\]\)\);/s.exec(src)[0];
-	check("CLEANUP schema keys (all levels)", new Set([...cleanupBlock.matchAll(/\b(\w+): (?:Type\.|StringEnum)/g)].map((x) => x[1])), new Set(contract.CLEANUP_KEYS));
-	check("CLEANUP closed objects", (cleanupBlock.match(/additionalProperties: false/g) ?? []).length, 1);
+	check("CLEANUP schema keys (all levels)", new Set([...cleanupBlock.matchAll(/\b(\w+): (?:Type\.|StringEnum)/g)].map((x) => x[1])), new Set([...contract.CLEANUP_KEYS, ...contract.ARTIFACT_CLEANUP_KEYS]));
+	check("CLEANUP closed objects", (cleanupBlock.match(/additionalProperties: false/g) ?? []).length, 2);
+	check("ARTIFACT_REQUEST_KEYS", new Set(/const ARTIFACT_REQUEST_KEYS = "([^"]+)"/.exec(safety)[1].split(",")), new Set(contract.ARTIFACT_CLEANUP_KEYS));
 	check("CLEANUP_REQUEST_KEYS", new Set(/const CLEANUP_REQUEST_KEYS = "([^"]+)"/.exec(safety)[1].split(",")), new Set(contract.CLEANUP_KEYS));
 	check("cleanup role", /LEASE_ROLE = "([^"]+)"/.exec(safety)[1], contract.CLEANUP_ROLE);
 	check("BARE_SHA", /const BARE_SHA = \/(.+)\/;/.exec(safety)[1], contract.SHA.source);
@@ -640,7 +641,7 @@ describe("ModelTierTests", () => {
 		// The comparison must be able to fail: drift each evaluator constant on a copy (ES module exports are read-only, so the contract object is passed in).
 		const drifted = [
 			["ENTRY_KEYS", new Set(["not_a_native_field"])], ["DAG_KEYS", new Set(["id"])], ["ROOT_KEYS", new Set(["agent"])],
-			["CLEANUP_KEYS", new Set(["checkout"])], ["CLEANUP_ROLE", "general-worker"], ["SHA", /x/], ["MAX_TASKS", 9],
+			["CLEANUP_KEYS", new Set(["checkout"])], ["ARTIFACT_CLEANUP_KEYS", new Set(["task"])], ["CLEANUP_ROLE", "general-worker"], ["SHA", /x/], ["MAX_TASKS", 9],
 			["MAX_DAG_NODES", 9], ["DAG_ID", /x/], ["SCOPES", new Set(["user"])], ["TIERS", new Set(["economy"])], ["SLOTS", new Set()],
 			["NOTICE_MIN", 867],
 		];
