@@ -428,17 +428,30 @@ const PACKET_TRIM_REMOVED: Record<string, string[]> = {
 	"backend-worker": ["113098ec", "15c1ecda", "1a79c8a6", "1c41727b", "43674699", "4373eb59", "4c7fa1da", "aadd021d"],
 	"frontend-worker": ["00af8638", "167048b2", "1a79c8a6", "2121cf31", "2fa3feb7", "36590171", "36b49dbe", "56e7c2c4", "5c159289", "5da578e6", "65f26397", "73e6ed97", "96ba4c5b", "9cc44bca", "a9af9701", "bbc83d2e", "e2e40b5c"],
 };
+// Phase 4 role structure: the role-specific body is regrouped under Knows/loads | Before starting | Workflow | Where to look | Common failures.
+// The shared preamble (Scoped editing, Assigned module, Leaf boundary) and footer stay byte-identical. Sentences were moved, merged into
+// numbered steps or bullets, or dropped where they restated another line; removed/added/unadded are the reviewed hash deltas from the pre-Phase-4 body.
+const PHASE4_ROLE_STRUCTURE: Record<string, { headingsRemoved: string[]; headingsAdded: string[]; removed: string[]; added: string[]; unadded: string[] }> = {
+	"frontend-worker": {
+		headingsRemoved: ["## Design-Gate Boundary", "## Frontend Capability Routing", "## Assigned Workspace Safety", "## Before Editing", "## Implementation", "## TDD and Checks", "## Interrupted Handoff", "## Completion", "## SolidJS-specific implementation"],
+		headingsAdded: ["## Knows/loads", "## Before starting", "## Workflow", "## Where to look", "## Common failures"],
+		removed: ["010316e5", "02d2d32a", "03d5280d", "04dd3034", "0565bdeb", "07782ded", "085db2a0", "0aa80897", "112d6afa", "136e3635", "16970180", "19dc5868", "1a2c3c46", "1b4beab6", "1ca4fee2", "1eccda08", "208690f4", "21330f33", "2193e0da", "22573936", "2368d1c7", "243dac83", "295aab84", "2c343a97", "311c93b5", "32db556f", "339efad5", "362e0e1e", "3a75c654", "3d33966c", "3d56a7a0", "44273570", "481b7d0c", "4d1b06f4", "4d3f69ff", "4e5eea4d", "512c29a9", "5825ad9e", "5a4cde2d", "5ad2081e", "5b6c401c", "5d2744c0", "5e42e8ba", "61e7f8d1", "632b2cf8", "65480222", "69d732c8", "74304dc6", "7eb5cc35", "80921dd9", "82189ed2", "83ec8cc4", "878ba5b4", "87daca5d", "8fd51561", "8fe4f136", "9396d4a7", "9f21b205", "a0b0ea81", "a29335a3", "a62bc68f", "a7be6360", "a8a1fa02", "ab2a117e", "abf5ff73", "b541da65", "b72ed47b", "b7f7a3b1", "b9482019", "bfa19733", "c1cd9a78", "c1f1fe7e", "c373d79b", "c463d65c", "c9aa6bf4", "cb899521", "cf98d54a", "d31acb15", "d4d3334f", "d71f9eaf", "d9beb475", "dbfa21c2", "dd6e4df5", "df9d64fc", "e2840ee5", "e2876117", "e3b59e57", "e829733f", "ecf22fa4", "ed77e23d", "ee747e03", "f278fa3d", "f4660f49", "f5cf8a85"],
+		added: ["0906a518", "095e35fe", "11239c41", "16bcd518", "27eadcca", "2dacd057", "2e352e7e", "300ff616", "36d2f523", "4248f095", "48af7242", "4b89efc9", "650d8541", "6d98bfb6", "743e3aa2", "7c662fec", "8d969978", "9f3ef2b3", "a119d3e2", "a140cb7d", "ba85a074", "bfb6244c", "c6ad151e", "c7be5ec2", "d02fd2b9", "d2d40890", "dea0c134", "def17b65", "ed1bc621", "f8c42a1c"],
+		unadded: ["71b76b07", "9e95f556", "a2b4909c"],
+	},
+};
 test("every role/profile keeps frontmatter; sentences and headings change only by the reviewed closed-world mapping", () => {
 	for (const [key, before] of Object.entries(fixture.entries)) {
 		const [shape, role] = key.split("/");
 		if (key === "live/sqlite-specialist") continue; // Historical fixture retained; explicitly retired live role.
 		const { text, sourceText } = assembled(shape, role);
+		const phase4 = PHASE4_ROLE_STRUCTURE[role];
 		assert.equal(effectiveLegacyHeaderSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} effective Pi declarations changed`);
 		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
 		for (const h of HEADINGS_ABSENT_HERE) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
 		for (const h of PACKET_TRIM_HEADINGS[role] ?? []) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
-		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), [...HEADINGS_ABSENT_HERE, ...(PACKET_TRIM_HEADINGS[role] ?? [])].sort(), `${key} headings lost`);
-		assert.deepEqual(heads.filter((h) => !before.headings.includes(h)).sort(), HEADINGS_NEW_HERE, `${key} headings added`);
+		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), [...HEADINGS_ABSENT_HERE, ...(PACKET_TRIM_HEADINGS[role] ?? []), ...(phase4?.headingsRemoved ?? [])].sort(), `${key} headings lost`);
+		assert.deepEqual(heads.filter((h) => !before.headings.includes(h)).sort(), [...HEADINGS_NEW_HERE, ...(phase4?.headingsAdded ?? [])].sort(), `${key} headings added`);
 
 		const after = sentenceHashes(text);
 		const beforeSet = new Set(before.sentenceHashes);
@@ -448,7 +461,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 		const redundantHere = [...REDUNDANT_HASHES].filter((h) => beforeSet.has(h));
 		assert.equal(redundantHere.length, 1, `${key}: exactly one redundant restatement expected before`);
 
-		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere, ...(REPAIR_REMOVED[role] ?? []), ...(HOST_PATH_REWRITE_REMOVED[role] ?? []), ...(PACKET_TRIM_REMOVED[role] ?? [])].sort();
+		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere, ...(REPAIR_REMOVED[role] ?? []), ...(HOST_PATH_REWRITE_REMOVED[role] ?? []), ...(PACKET_TRIM_REMOVED[role] ?? []), ...(phase4?.removed ?? [])].sort();
 		const actualMissing = before.sentenceHashes.filter((h) => !after.has(h)).sort();
 		assert.deepEqual(actualMissing, expectedMissing, `${key}: sentences lost outside the reviewed mapping`);
 
@@ -457,7 +470,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 			else assert.equal(after.has(d.before), false, `${key}: ${d.before} (${d.status}) should be absent in this world`);
 		}
 
-		const expectedAdded = [...DISPOSITIONS.flatMap((d) => (d.after ? [d.after] : [])), ...NEW_AFTER, ...(REPAIR_ADDED[role] ?? []), ...(HOST_PATH_REWRITE_ADDED[role] ?? []), ...privacy.map((p) => sha(p.to).slice(0, 8)), ...[...(STACK_ADDED[role] ?? []), ...(RETRY_ROLES.includes(role) ? [IN_RUN_RETRY_RULE] : [])].flatMap((s) => sentences(s)).map((s) => sha(s).slice(0, 8))].filter((h) => !beforeSet.has(h) && !(HOST_PATH_REWRITE_UNADDED[role] ?? []).includes(h));
+		const expectedAdded = [...DISPOSITIONS.flatMap((d) => (d.after ? [d.after] : [])), ...NEW_AFTER, ...(REPAIR_ADDED[role] ?? []), ...(HOST_PATH_REWRITE_ADDED[role] ?? []), ...privacy.map((p) => sha(p.to).slice(0, 8)), ...[...(STACK_ADDED[role] ?? []), ...(RETRY_ROLES.includes(role) ? [IN_RUN_RETRY_RULE] : [])].flatMap((s) => sentences(s)).map((s) => sha(s).slice(0, 8)), ...(phase4?.added ?? [])].filter((h) => !beforeSet.has(h) && !(HOST_PATH_REWRITE_UNADDED[role] ?? []).includes(h) && !(phase4?.unadded ?? []).includes(h));
 		const actualAdded = [...after].filter((h) => !beforeSet.has(h));
 		assert.deepEqual([...new Set(actualAdded)].sort(), [...new Set(expectedAdded)].sort(), `${key}: sentences added outside the reviewed mapping`);
 	}
