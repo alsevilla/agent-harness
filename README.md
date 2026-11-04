@@ -151,7 +151,7 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 | Source release | v1.11.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated |
 | Delivery | Merge and release are unsupported on Copilot; an `ask_user` answer is not authorization |
-| Guard | A deny-only, best-effort `preToolUse` hook; it is not OS isolation, so keep branch protection or rulesets and least-privilege tokens |
+| Guard | A deny-only, best-effort `preToolUse` hook: merge and release, plus the harness guard's never-run rules (secret files, unparseable commands, curl-to-shell, privilege, config writes, package auth); other risky commands go to Copilot's own approval. It is not OS isolation, so keep branch protection or rulesets and least-privilege tokens |
 | Prompts | Not exported; `/learn` and the manual prompts are Pi-only |
 
 ## Limits
