@@ -106,6 +106,8 @@ orchestrator transfer.
 
 For meaningful behavior, run a focused test/check and establish the expected failure before production edits when feasible. Then implement, rerun to GREEN and run relevant regression checks. An already-passing test is not RED evidence; investigate the mismatch. Report RED command/result, GREEN command/result and any justified exception with replacement evidence. Do not weaken valid expectations. Non-behavioral work uses appropriate validation.
 
+When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.
+
 Follow the current global meaningful-behavior test policy; record failing-check evidence when feasible and explain exceptions. A formal plan is conditional; honor one when it governs this task.
 
 Behavioral work:

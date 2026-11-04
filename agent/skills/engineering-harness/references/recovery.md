@@ -10,6 +10,13 @@ mechanical, urgent, or because a worker's edits failed. In particular, missing
 match arms, dependency/type/API repairs, and changes needed to compile a delegated
 feature go back to the appropriate implementation worker. Main-session inspection and compiler/test runs are delegated to the narrowest read-only role (batched); packet preparation and synthesis remain with main.
 
+Workers fix a failing focused check in the same run (at most 2 tries) before
+returning, so a returned failure has already been tried. Do not launch another
+role only to rerun checks that already passed on the same code: reuse that result
+under the evidence-reuse rule in `token-efficiency.md`. Every recovery packet
+carries the failed command, an output excerpt, the changed files and the intended
+fix; these in-run tries do not change the retry cap below.
+
 For a failed edit, inspect the actual current files and failed command/result. If
 that worker is active, steer it with exact paths, diagnostics, intended change,
 and acceptance check. If it has ended, dispatch one focused recovery task to the
