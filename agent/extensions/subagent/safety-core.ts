@@ -1966,6 +1966,60 @@ export function redactedEnvRead(toolName: string, input: Record<string, unknown>
 	}
 }
 
+// ---- Read-only roles (capability-scoped, CapScope-style): a worker whose role has no edit/write tool, or whose launch declared
+// readOnly, may not change its candidate checkout through the shell either. Lexical and best-effort like the rest of the guard: it covers
+// redirections, file-writing commands, in-place editors, mutating git and package-manager subcommands, and edit/write tools. Writes
+// outside the candidate (the packet's _evidence/_scratch REPORT and artifact paths) stay allowed. Never grantable: the owning worker writes.
+export const CHILD_READONLY_ENV = "PI_SAFETY_READONLY";
+const RO_GIT = new Set(["add", "commit", "checkout", "switch", "restore", "reset", "apply", "am", "cherry-pick", "merge", "rebase", "revert", "rm", "mv", "clean", "push", "pull", "init", "clone", "worktree", "submodule", "notes", "update-index", "update-ref", "gc", "prune"]);
+const RO_PKG = new Set(["install", "i", "add", "remove", "rm", "uninstall", "un", "update", "up", "upgrade", "ci", "link", "unlink", "dedupe", "prune", "init", "version", "pkg"]);
+const RO_DEST_LAST = new Set(["cp", "copy", "copy-item", "mv", "move", "move-item", "install", "rsync"]);
+const RO_DEST_ALL = new Set(["tee", "touch", "truncate", "set-content", "out-file", "add-content", "new-item", "mkdir", "md", "ni"]);
+const RO_SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+function insideRoot(target: string, cwd: string, root: string): boolean {
+	if (/[$`%]/.test(target) || target === "") return true; // unexpandable here: assume the candidate (fail closed)
+	if (/^(\/dev\/null|nul|\$null)$/i.test(target) || /^&\d$/.test(target)) return false;
+	const full = normPath(slashed(path.resolve(cwd, target)));
+	const r = normPath(slashed(root)).replace(/\/+$/, "");
+	return full === r || full.startsWith(`${r}/`);
+}
+function readOnlyShell(text: string, cwd: string, root: string, depth = 0): string | undefined {
+	if (depth > 3) return "command nesting is too deep to check";
+	for (const raw of splitSegments(text)) {
+		const tokens = tokenize(raw);
+		for (let i = 0; i < tokens.length; i++) if (tokens[i].op && tokens[i].text.includes(">") && !/>&$/.test(tokens[i].text) && insideRoot(tokens[i + 1]?.text ?? "", cwd, root)) return "redirects output into the candidate checkout"; // >& targets a descriptor
+		const words = argvOf(tokens);
+		if (!words.length) continue;
+		const name = commandName(words[0]);
+		const args = words.slice(1);
+		const lower = args.map((a) => a.toLowerCase());
+		const positionals = args.filter((a) => !a.startsWith("-"));
+		if (RO_SHELLS.has(name)) { const at = lower.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a)); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args[at + 1], cwd, root, depth + 1); if (inner) return inner; } continue; }
+		if (name === "pwsh" || name === "powershell") { const at = lower.findIndex((a) => a === "-c" || a === "-command"); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args.slice(at + 1).join(" "), cwd, root, depth + 1); if (inner) return inner; } continue; }
+		if (name === "git") {
+			const sub = positionals[0]?.toLowerCase() ?? "";
+			if (RO_GIT.has(sub)) return `git ${sub} changes the repository`;
+			if (sub === "stash" && !["list", "show"].includes(positionals[1]?.toLowerCase() ?? "")) return "git stash changes the working tree";
+			if ((sub === "branch" || sub === "tag") && (positionals.length > 1 || lower.some((a) => /^-(d|D|m|M|c|C|f|a|s|u)$/.test(a) || a === "--delete" || a === "--move" || a === "--force"))) return `git ${sub} changes refs`;
+			continue;
+		}
+		if (["npm", "pnpm", "yarn", "bun", "pip", "pip3", "cargo", "dotnet", "go"].includes(name) && RO_PKG.has(positionals[0]?.toLowerCase() ?? "")) return `${name} ${positionals[0]} changes dependencies`;
+		if ((name === "sed" || name === "perl") && lower.some((a) => /^-[a-z]*i/.test(a) || a === "--in-place")) return `${name} -i edits files in place`;
+		if (RO_DEST_LAST.has(name) && positionals.length && insideRoot(positionals[positionals.length - 1], cwd, root)) return `${name} writes into the candidate checkout`;
+		if (RO_DEST_ALL.has(name) && positionals.some((p) => insideRoot(p, cwd, root))) return `${name} writes into the candidate checkout`;
+	}
+	return undefined;
+}
+/** Why a read-only worker's tool call would change its candidate checkout, or undefined when it does not. */
+export function readOnlyViolation(toolName: string, input: Record<string, unknown>, cwd: string, root: string): string | undefined {
+	if (toolName === "edit" || toolName === "write") {
+		const p = typeof input?.path === "string" ? input.path : typeof (input as any)?.file_path === "string" ? (input as any).file_path : "";
+		return insideRoot(p, cwd, root) ? `${toolName} changes a file in the candidate checkout` : undefined;
+	}
+	if (toolName !== "bash" && toolName !== "powershell") return undefined;
+	return readOnlyShell(String(input?.command ?? ""), cwd, root);
+}
+
 // ---- Block messages: rule ids, the op digest, the program (never its arguments: a command may carry a credential), whether a grant can
 // ever help, and the exact next step.
 const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root); the -m text is one line of plain ASCII with no \\n escapes, the -F file lives in the task\'s _evidence or _scratch folder, and these forms need no grant';
@@ -1998,8 +2052,15 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget; readOnlyRoot?: string }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
+	if (guard.scope === "child" && guard.readOnlyRoot !== undefined) {
+		const why = readOnlyViolation(toolName, input, cwd, guard.readOnlyRoot);
+		if (why) {
+			const digest = createHash("sha256").update(`${toolName}\0${JSON.stringify(input ?? {})}`).digest("hex").slice(0, 16);
+			return { block: true, reason: `Blocked by harness safety guard [READ_ONLY_ROLE] op ${digest}: ${why}; not grantable: this role is read-only for its candidate, so write REPORT and evidence files to the packet's _evidence or _scratch paths and return code or config changes to main for the owning worker.` };
+		}
+	}
 	if (redactedEnvRead(toolName, input)) return undefined;
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") return undefined;

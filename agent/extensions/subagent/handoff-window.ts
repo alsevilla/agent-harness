@@ -164,13 +164,29 @@ export function shortenContext<T extends Message>(messages: readonly T[], window
 	return masked ?? handoffs;
 }
 
+// Runtime state card: while jobs run or worker decisions wait, each main request ends with one hidden line naming them, so a compacted
+// conversation still knows what is in flight and never re-launches it. Appended at the very end, so the cached prefix is untouched.
+export const STATE_CARD_TYPE = "subagent-state";
+export interface StateJob { jobId: string; state: string; paused?: boolean; workers?: { name?: string }[] }
+export function stateCard(jobs: readonly StateJob[], epoch: string, openDecisions: number): string | undefined {
+	const running = jobs.filter((j) => j.state === "running");
+	if (!running.length && !openDecisions) return undefined;
+	const list = running.slice(0, 8).map((j) => `${j.jobId}@${epoch} (${[...new Set((j.workers ?? []).map((w) => w.name).filter(Boolean))].join(", ") || "starting"}${j.paused ? ", paused" : ""})`);
+	const parts = [running.length ? `running: ${list.join("; ")}${running.length > 8 ? `; +${running.length - 8} more` : ""}` : "no running jobs"];
+	if (openDecisions) parts.push(`${openDecisions} worker decision${openDecisions === 1 ? "" : "s"} waiting (subagent_control decisions)`);
+	return `[runtime state, not user text] ${parts.join("; ")}. Completions arrive automatically; do not re-launch running work.`;
+}
+
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
-export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env): number {
+export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined): number {
 	const window = handoffWindowFromEnv(env);
-	if (window === 0) return 0; // off: no handler, today's behavior exactly
+	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
 	pi.on("context", (event: { messages: Message[] }) => {
-		const messages = shortenContext(event.messages, window);
-		return messages ? { messages } : undefined;
+		const shortened = window > 0 ? shortenContext(event.messages, window) : undefined;
+		let card: string | undefined;
+		try { card = state?.(); } catch { card = undefined; }
+		if (!card) return shortened ? { messages: shortened } : undefined;
+		return { messages: [...(shortened ?? event.messages), { role: "custom", customType: STATE_CARD_TYPE, content: card, display: false, timestamp: Date.now() } as Message] };
 	});
 	return window;
 }

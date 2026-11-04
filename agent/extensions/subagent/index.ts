@@ -36,7 +36,7 @@ import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "
 import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
-import { registerHandoffWindow } from "./handoff-window.ts";
+import { registerHandoffWindow, stateCard } from "./handoff-window.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages } from "./compact-handoff.ts";
@@ -46,7 +46,7 @@ import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRela
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
 import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -430,6 +430,8 @@ async function runAgentAttempt(
 		owners.begin({ workerId: ownerId, role: agent.source === "user" || agent.source === "package" ? agentName : `untrusted:${agentName}`, cwd: canonicalCwd(cwd ?? defaultCwd), jobId: dispatchDefaults.jobId });
 		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
 		args.push("--extension", guard.entry);
+		// Read-only role (no edit/write tool) or a readOnly launch: its guard refuses changes to the candidate checkout, shell included.
+		const readOnlyRoot = lease?.access === "read" || (agent.tools !== undefined && !agent.tools.some((t) => t === "edit" || t === "write")) ? canonicalCwd(cwd ?? defaultCwd) : undefined;
 		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
 		let wasAborted = false;
 
@@ -440,7 +442,7 @@ async function runAgentAttempt(
 			dispatchDefaults.onSpawn?.();
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-                env: guard.childEnv({...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : ""}),
+                env: guard.childEnv({...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : "", [CHILD_READONLY_ENV]: readOnlyRoot ?? ""}),
 				shell: false,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -875,8 +877,11 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 
 export default function (pi: ExtensionAPI) {
 	let runtimeRef: BackgroundWorkers | undefined;
+	let decisionsRef: DecisionRelay | undefined;
 	registerProviderCooldown(pi);
-	registerHandoffWindow(pi); // request-only: older settled PASS results shortened; PI_SUBAGENT_HANDOFF_WINDOW=0 turns it off
+	// Request-only: older settled PASS results and main's old large tool outputs shortened (PI_SUBAGENT_HANDOFF_WINDOW=0 turns that off),
+	// plus a one-line runtime state card while jobs run or decisions wait.
+	registerHandoffWindow(pi, process.env, () => runtimeRef ? stateCard(runtimeRef.list(), runtimeRef.epoch, decisionsRef?.list().filter((d) => d.state === "announced" || d.state === "open").length ?? 0) : undefined);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
 	pi.on("agent_settled", (event) => {
@@ -912,6 +917,7 @@ export default function (pi: ExtensionAPI) {
 	});
 	const monitor = new WorkerMonitor(pi);
     const decisions = new DecisionRelay();
+    decisionsRef = decisions;
     const runtime = new BackgroundWorkers(pi, monitor, decisions);
     runtimeRef = runtime;
     // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.

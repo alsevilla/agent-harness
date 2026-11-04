@@ -150,3 +150,26 @@ test("shortenContext applies both rules to one request and leaves it alone when 
 	assert.equal(result.filter((m) => m.role === "toolResult" && m.toolName === "read" && masked(m)).length, 5);
 	assert.equal(shortenContext([user("hi"), ...reads(3)], 5), undefined);
 });
+
+// Runtime state card: one hidden trailing line while jobs run or decisions wait; the prefix is untouched.
+import { stateCard, STATE_CARD_TYPE } from "../handoff-window.ts";
+test("state card: names running jobs and open decisions, nothing when idle", () => {
+	assert.equal(stateCard([], "ep1", 0), undefined);
+	assert.equal(stateCard([{ jobId: "bg-1", state: "completed" }], "ep1", 0), undefined);
+	const card = stateCard([{ jobId: "bg-2", state: "running", workers: [{ name: "backend-worker" }] }, { jobId: "bg-3", state: "running", paused: true, workers: [] }], "ep1", 1)!;
+	assert.match(card, /^\[runtime state, not user text\] running: bg-2@ep1 \(backend-worker\); bg-3@ep1 \(starting, paused\); 1 worker decision waiting/);
+	assert.match(card, /do not re-launch running work/);
+});
+test("state card wiring: appended last as a hidden custom message, with or without the window; the prefix is unchanged", async () => {
+	const handlers = new Map<string, (event: unknown) => unknown>();
+	let card: string | undefined = "[runtime state, not user text] running: bg-1@e (x).";
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, { [HANDOFF_WINDOW_ENV]: "0" }, () => card);
+	const messages = [user("hi"), fg(1)];
+	const out = (await handlers.get("context")!({ messages })) as { messages: Msg[] };
+	assert.equal(out.messages.length, 3);
+	assert.deepEqual(out.messages.slice(0, 2), messages, "prefix untouched");
+	assert.equal(out.messages[2].customType, STATE_CARD_TYPE);
+	assert.equal(out.messages[2].display, false);
+	card = undefined;
+	assert.equal(await handlers.get("context")!({ messages }), undefined, "idle: no change");
+});
