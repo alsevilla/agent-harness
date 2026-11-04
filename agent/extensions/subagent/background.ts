@@ -113,6 +113,12 @@ function costText(s: UsageSlice): string {
   if (s.zeroCostTurns) text += `; ${plural(s.zeroCostTurns, "zero-cost turn")} with tokens, may be unpriced`;
   return text;
 }
+// Success-adjusted cost: all cost, including failed and aborted tasks, divided by completed tasks. "Completed" is execution state,
+// not an accepted PASS; it is still a better yardstick than raw tokens, because the prompt cache, not token count, dominates the bill.
+function perCompleted(s: UsageSlice): string {
+  if (s.completed === 0 || s.turns === 0 || s.unpricedTurns === s.turns) return "";
+  return `; $${(s.cost / s.completed).toFixed(4)} per completed task`;
+}
 function sliceLines(name: string, s: UsageSlice): string[] {
   const jobs = s.completed + s.failed + s.aborted;
   if (jobs === 0) return [`${name}: none settled`];
@@ -120,13 +126,13 @@ function sliceLines(name: string, s: UsageSlice): string[] {
   return [
     `${name}: ${plural(jobs, "settled agent task")} (${s.completed} completed, ${s.failed} failed, ${s.aborted} aborted); ${plural(s.attempts, "attempt")}; ${plural(s.turns, "turn")}`,
     `  ${tokens} tokens`,
-    `  cost: ${costText(s)}`,
+    `  cost: ${costText(s)}${perCompleted(s)}`,
   ];
 }
 const tokenTotal = (s: UsageSlice) => s.input + s.output + s.cacheRead + s.cacheWrite;
 function roleLine(name: string, s: UsageSlice): string {
   const n = (v: number) => v.toLocaleString("en-US");
-  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}`;
+  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}${perCompleted(s)}`;
 }
 // Main session's current context from the SDK estimate (ctx.getContextUsage().tokens); null when unavailable, never 0.
 export function mainContextTokens(ctx: { getContextUsage?: () => { tokens?: unknown } | undefined }): number | null {

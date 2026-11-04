@@ -119,12 +119,13 @@ test("tool description keeps every user role name discoverable without the 22-ro
 	assert.doesNotMatch(description, /test role chain-one/);
 });
 
-test("child system prompt carries the compact handoff guidance after the role prompt", async () => {
+test("child system prompt carries the compact handoff guidance in the shared prefix, before the role prompt", async () => {
 	const root = setupRoles({ "guided": "You are guided." });
 	spawnPlan = () => ({ events: [reply(["STATUS: PASS"])], exitCode: 0 });
 	await tool!.execute("call-guide", { agent: "guided", task: "check", background: false }, undefined, undefined, context(root));
 	const prompt = spawnLog.find((entry) => entry.appendPrompt)?.appendPrompt ?? "";
-	assert.match(prompt, /^You are guided\./);
+	assert.match(prompt, /^## Shell syntax/);
+	assert.ok(prompt.indexOf("## Final handoff to main") < prompt.indexOf("You are guided."));
 	assert.match(prompt, /## Final handoff to main/);
 	assert.match(prompt, /^STATUS: PASS \| FAIL \| INCONCLUSIVE \| BLOCKED \| ESCALATE\b/m);
 	assert.match(prompt, /^NEXT: .*\nRISKS: .*\nEVIDENCE: /m);

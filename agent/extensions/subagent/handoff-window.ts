@@ -8,6 +8,10 @@
 // the one-line form would not at least halve (a normal short reply saves too little to be worth the prefix change).
 // Cache stability: older results collapse in batches of `window` and a collapsed line never changes, so the request
 // prefix changes once per batch rather than on every new result.
+//
+// Main's own large tool outputs (read, bash, grep, find, ls) get the same treatment: the newest `window` stay word for word,
+// older ones are masked in whole batches by a one-line stub naming the tool and its file or command. Errors and short
+// outputs are never masked. Plain masking, not summarization: it saves tokens without a model call or a guessed digest.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const HANDOFF_WINDOW_ENV = "PI_SUBAGENT_HANDOFF_WINDOW";
@@ -116,12 +120,56 @@ export function collapseHandoffs<T extends Message>(messages: readonly T[], wind
 	return out;
 }
 
+const MASK_TOOLS = new Set(["read", "bash", "grep", "find", "ls"]);
+const MASK_MIN = 2000; // characters; a shorter output saves too little to be worth changing the prefix
+
+const argLabel = (tool: string, args: any): string => {
+	if (!args || typeof args !== "object") return "";
+	if (tool === "read" && typeof args.path === "string") return clip(`${args.path}${args.offset !== undefined || args.limit !== undefined ? ` (offset ${args.offset ?? 0}, limit ${args.limit ?? "all"})` : ""}`);
+	if (tool === "bash" && typeof args.command === "string") return clip(args.command);
+	try { return clip(JSON.stringify(args)); } catch { return ""; }
+};
+
+/** The single line that replaces an older large tool output in the request. */
+export function maskedLine(tool: string, label: string, length: number): string {
+	return `[older ${tool} output, shortened: ${label || "(no arguments)"}] ${length.toLocaleString("en-US")} characters; run it again if you still need the content`;
+}
+
+/** Returns a new message list with older large read/bash/grep/find/ls outputs masked, or undefined when nothing changes. Never mutates its input. */
+export function maskToolOutputs<T extends Message>(messages: readonly T[], window: number): T[] | undefined {
+	if (!(window > 0)) return undefined;
+	const calls = new Map<string, any>();
+	for (const m of messages) if (m?.role === "assistant" && Array.isArray(m.content)) for (const part of m.content as any[]) if (part?.type === "toolCall" && typeof part.id === "string") calls.set(part.id, part.arguments);
+	const outputs: { index: number; tool: string; length: number; id: unknown }[] = [];
+	messages.forEach((m, index) => {
+		if (m?.role !== "toolResult" || m.isError || !MASK_TOOLS.has(String(m.toolName))) return;
+		const text = textOf(m.content);
+		if (text === undefined || text.length < MASK_MIN) return;
+		outputs.push({ index, tool: String(m.toolName), length: text.length, id: m.toolCallId });
+	});
+	const batch = Math.floor(Math.max(0, outputs.length - window) / window) * window;
+	if (batch === 0) return undefined;
+	const out = messages.slice();
+	for (const o of outputs.slice(0, batch)) {
+		const label = argLabel(o.tool, typeof o.id === "string" ? calls.get(o.id) : undefined);
+		out[o.index] = { ...messages[o.index], content: [{ type: "text", text: maskedLine(o.tool, label, o.length) }] } as T;
+	}
+	return out;
+}
+
+/** Both request-only shortenings in order: subagent results first, then main's own large tool outputs. */
+export function shortenContext<T extends Message>(messages: readonly T[], window: number): T[] | undefined {
+	const handoffs = collapseHandoffs(messages, window);
+	const masked = maskToolOutputs(handoffs ?? messages, window);
+	return masked ?? handoffs;
+}
+
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
 export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0) return 0; // off: no handler, today's behavior exactly
 	pi.on("context", (event: { messages: Message[] }) => {
-		const messages = collapseHandoffs(event.messages, window);
+		const messages = shortenContext(event.messages, window);
 		return messages ? { messages } : undefined;
 	});
 	return window;
