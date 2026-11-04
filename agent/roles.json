@@ -86,7 +86,7 @@
   },
   {
     "name": "frontend-worker",
-    "defaultModelTier": "economy",
+    "defaultModelTier": "capable",
     "modelTiers": {
       "economy": {
         "model": "anthropic/claude-haiku-5-5",
@@ -166,7 +166,7 @@
   },
   {
     "name": "general-worker",
-    "defaultModelTier": "economy",
+    "defaultModelTier": "capable",
     "modelTiers": {
       "economy": {
         "model": "anthropic/claude-haiku-5-5",
@@ -200,7 +200,7 @@
   },
   {
     "name": "platform-worker",
-    "defaultModelTier": "economy",
+    "defaultModelTier": "capable",
     "modelTiers": {
       "economy": {
         "model": "anthropic/claude-haiku-5-5",
@@ -217,7 +217,7 @@
   },
   {
     "name": "backend-worker",
-    "defaultModelTier": "economy",
+    "defaultModelTier": "capable",
     "modelTiers": {
       "economy": {
         "model": "anthropic/claude-haiku-5-5",
@@ -280,7 +280,7 @@
   },
   {
     "name": "database-worker",
-    "defaultModelTier": "economy",
+    "defaultModelTier": "capable",
     "modelTiers": {
       "economy": {
         "model": "anthropic/claude-haiku-5-5",
