@@ -265,6 +265,29 @@ test("parallel: an exit 0 length child fails the batch as INCOMPLETE and keeps i
 	assert.match(result.content[0].text, /### \[cut-off\] INCOMPLETE \(length\)\n\npartial CHECKS: pending/);
 });
 
+test("shape T2: debugger PASS hands its report to the worker; a non-PASS debugger stops before the worker launches", async () => {
+	const root = setupRoles({ "debugger": "You are debugger.", "backend-worker": "You are backend-worker." });
+	const shape = { name: "T2", worker: "backend-worker", packets: { debugger: "find cause", worker: "fix it" } };
+	spawnPlan = (task) => ({ events: [reply([task.includes("find cause") ? "STATUS: PASS cause is X" : "STATUS: PASS fixed"])], exitCode: 0 });
+	const ok = await tool!.execute("call-shape-ok", { shape, background: false }, undefined, undefined, context(root));
+	assert.notEqual(ok.isError, true);
+	assert.equal(spawnLog.length, 2);
+	assert.match(spawnLog[1].task, /fix it[\s\S]*Previous step report:\nSTATUS: PASS cause is X/);
+
+	spawnLog = [];
+	spawnPlan = () => ({ events: [reply(["STATUS: BLOCKED cannot reproduce"])], exitCode: 0 });
+	const stopped = await tool!.execute("call-shape-stop", { shape, background: false }, undefined, undefined, context(root));
+	assert.equal(stopped.isError, true);
+	assert.match(stopped.content[0].text, /^Shape T2 stopped after step 1 \(debugger\): STATUS BLOCKED cannot reproduce; later steps did not run/);
+	assert.equal(spawnLog.length, 1);
+
+	spawnLog = [];
+	const both = await tool!.execute("call-shape-both", { shape, chain: [{ agent: "debugger", task: "x" }], background: false }, undefined, undefined, context(root));
+	assert.equal(both.isError, true);
+	assert.match(both.content[0].text, /shape already is a chain/);
+	assert.equal(spawnLog.length, 0);
+});
+
 test("chain: an exit 0 length step stops the chain before step 2 is launched", async () => {
 	const root = setupRoles({ "step-one": "You are step-one.", "step-two": "You are step-two." });
 	spawnPlan = () => ({ events: [replyWith("length", ["half a report"])], exitCode: 0 });

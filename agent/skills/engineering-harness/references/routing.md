@@ -10,7 +10,7 @@ Scout answers **where / what is affected**, not **why it fails**.
 
 ## Debugging
 A request to fix an existing malfunction is a bug-fix incident.
-If root cause is not established by evidence: `debugger -> worker`.
+If root cause is not established by evidence: subagent `shape` T2 (`debugger -> worker`, optional test-engineer and reviewer).
 Add Scout first only when location/blast radius is unknown. Add a specialist only when debugging exposes a material unresolved domain decision. Add independent verification/review only when risk warrants it.
 Debugger may be skipped when evidence already establishes the cause and the remaining work is implementation-only.
 If a speculative fix fails or produces an unexplained regression, use debugger before another speculative patch.
@@ -100,7 +100,7 @@ Scenarios:
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.
 - Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. Each item's packet names its own unit id and owned files and states that sibling units are not its work. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.
-- Ordered pipeline (stages known in advance, each needing the parent's actual result): use chain or DAG dependencies. Never parallelize dependent facts.
+- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 debugger -> worker; T3 [planner] -> [specialist] -> worker -> test-engineer [-> reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
 - Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `debugger` first. No automatic self-looping helpers, new modes or unbounded retries.
 
 ### Single versus parallel
@@ -116,7 +116,7 @@ When discovery or another prerequisite finding is needed, accept the discovery o
 ## Planning
 Do not create a formal multi-step plan for trivial/localized work. Use `plan` when dependencies, sequencing, rollout, migration, or cross-layer coordination make an explicit execution contract materially useful.
 
-For T3 work spanning several modules, main may launch one economy `planner` before the capable worker. Never for T1/T2; never several planners.
+For T3 work spanning several modules, main may launch one economy `planner` before the capable worker (the T3 shape's `planner` packet). Never for T1/T2; never several planners.
 
 PLAN is main-owned. `architecture-specialist` may supply architecture constraints/options before planning, but does not own worker sequencing, specialist gates, verification routing, or authorization. Use `decision` through main when an architectural choice itself requires explicit authorization.
 

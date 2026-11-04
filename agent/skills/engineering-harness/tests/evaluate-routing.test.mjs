@@ -611,6 +611,31 @@ describe("ModelTierTests", () => {
 
 	it("native_contract_constants_match_subagent_source", () => { assert.deepEqual(nativeDrift(), []); });
 
+	it("shape_expansion_matches_native_shape_module", async () => {
+		const native = await import(pathToFileURL(path.resolve(ROOT, "../../extensions/subagent/shape.ts")).href);
+		const shapes = [
+			{ name: "T1", worker: "backend-worker", packets: { worker: "w" } },
+			{ name: "T2", worker: "frontend-worker", packets: { debugger: "d", worker: "w" } },
+			{ name: "T2", worker: "general-worker", packets: { debugger: "d", worker: "w", test: "t", review: "r" } },
+			{ name: "T3", worker: "database-worker", packets: { worker: "w", test: "t" } },
+			{ name: "T3", worker: "backend-worker", specialist: "security-specialist", packets: { planner: "p", specialist: "s", worker: "w", test: "t", review: "r" } },
+		];
+		for (const shape of shapes) {
+			const out = native.expandShape(shape);
+			assert.ok(out.ok, JSON.stringify(shape));
+			const pick = (steps) => steps.map((s) => [s.agent, s.modelTier ?? null]);
+			assert.deepEqual(pick(ev.shapeChain(shape, "s")), pick(out.chain), JSON.stringify(shape));
+			const dispatches = ev.parseCalls([{ shape, background: false }], "calls");
+			assert.deepEqual(dispatches.map((d) => d.agent), out.chain.map((s) => s.agent));
+			assert.deepEqual([...dispatches.at(-1).before], dispatches.slice(0, -1).map((_, i) => i), "chain order is precedence");
+		}
+		for (const bad of [{ name: "T4", worker: "backend-worker", packets: { worker: "w" } }, { name: "T1", worker: "backend-worker", packets: { worker: "w", test: "t" } }, { name: "T3", worker: "backend-worker", packets: { worker: "w" } }]) {
+			assert.equal(native.expandShape(bad).ok, false);
+			assert.throws(() => ev.shapeChain(bad, "s"));
+		}
+		assert.throws(() => ev.parseCalls([{ shape: shapes[0], chain: [{ agent: "debugger", task: "t" }] }], "calls"), /shape already is a chain/);
+	});
+
 	it("native_parity_check_detects_in_memory_drift", () => {
 		// The comparison must be able to fail: drift each evaluator constant on a copy (ES module exports are read-only, so the contract object is passed in).
 		const drifted = [

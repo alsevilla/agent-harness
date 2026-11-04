@@ -45,6 +45,7 @@ import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
+import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
 import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
@@ -665,6 +666,21 @@ const DagNode = Type.Object({
 	prBase: PR_BASE,
 }, { additionalProperties: false });
 
+const ShapeParam = Type.Object({
+	name: StringEnum(SHAPE_NAMES, { description: "T1: worker. T2: debugger -> worker [-> test-engineer] [-> reviewer]. T3: [planner (economy)] -> [specialist] -> worker -> test-engineer [-> reviewer]. T4 and unusual tasks: use the other modes." }),
+	worker: StringEnum(SHAPE_WORKERS as [string, ...string[]], { description: "Implementation worker role for the worker step" }),
+	specialist: Type.Optional(Type.String({ description: "T3 only: the *-specialist role to run before the worker; needs packets.specialist" })),
+	packets: Type.Object({
+		planner: Type.Optional(Type.String({ description: "T3: adds one economy planner first" })),
+		debugger: Type.Optional(Type.String({ description: "T2: required" })),
+		specialist: Type.Optional(Type.String()),
+		worker: Type.String(),
+		test: Type.Optional(Type.String({ description: "T3: required; T2: optional" })),
+		review: Type.Optional(Type.String({ description: "T2/T3: optional reviewer after test-engineer" })),
+	}, { additionalProperties: false, description: "One packet per step; later steps also receive the previous step's report" }),
+	cwd: Type.Optional(Type.String({ description: "Working directory for every step" })),
+});
+
 const SubagentParams = Type.Object({
     background: Type.Optional(Type.Boolean({description: "Default true: return a job ID immediately; completion arrives automatically. Set false to explicitly wait for the entire task.", default: true})),
 	// Unknown, not Integer: the SDK coerces integer-typed arguments ("4000" -> 4000, 1.5 -> 1) before execute, which would hide an invalid raw value; execute enforces a safe integer >= the derived minimum.
@@ -677,6 +693,7 @@ const SubagentParams = Type.Object({
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
+	shape: Type.Optional(ShapeParam),
 	agentScope: Type.Optional(AgentScopeSchema),
 	dag: Type.Optional(Type.Array(DagNode, { minItems: 1, maxItems: 8, description: "DAG mode: up to 8 nodes with dependsOn edges; each node runs as its own agent" })),
 	readOnly: Type.Optional(Type.Boolean({ description: "Trusted declaration for single mode: the task only reads its checkout (default write). Not an OS sandbox." })),
@@ -895,7 +912,7 @@ export default function (pi: ExtensionAPI) {
 		description: [
 			"Delegate tasks to specialized subagents with isolated context. Background by default: return a job ID and keep responding to the user. Use subagent_control to list, steer, cancel or retrieve results. Do not repeatedly poll; completions arrive automatically. Do not claim a job is finished until its result arrives.",
 			"Available user roles: " + discoverAgents(process.cwd(), "user").agents.map(a => a.name).join(", "),
-			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder), dag (up to 8 nodes with dependsOn; a node runs after its parents are accepted).",
+			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder), dag (up to 8 nodes with dependsOn; a node runs after its parents are accepted), shape (T1/T2/T3 fixed sequence run as a chain; a step that does not report STATUS PASS stops it and returns to main; delivery stays a separate launch).",
 			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
 			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 		].join(" "),
@@ -915,6 +932,15 @@ export default function (pi: ExtensionAPI) {
 			const discovery = preparedDispatch?.discovery ?? discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
+
+			// Shape: expand to a fixed-order chain (the background re-entry carries both; it re-expands to the same chain).
+			let shapeError: string | undefined;
+			if (params.shape !== undefined) {
+				const expanded = expandShape(params.shape);
+				if (!expanded.ok) shapeError = expanded.error;
+				else if (!preparedDispatch && params.chain !== undefined) shapeError = "Invalid parameters: shape already is a chain; provide one or the other.";
+				else params = { ...params, chain: expanded.chain };
+			}
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -940,6 +966,8 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+
+			if (shapeError) return { content: [{ type: "text", text: `${shapeError} Nothing was launched.` }], details: makeDetails("chain")([]), isError: true };
 
 			if (modeCount !== 1) {
 				const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
@@ -1136,6 +1164,14 @@ export default function (pi: ExtensionAPI) {
 
 					// Printed markup is not executed, so a successor must not run on it; a final step keeps its labelled presentation.
 					const isError = isFailedResult(result) || (i < params.chain.length - 1 && printedToolMarkup(result));
+					const shapeStop = !isError && params.shape && i < params.chain.length - 1 ? shapeStepStop(extractFinalText(result.messages)) : undefined;
+					if (shapeStop) {
+						return {
+							content: [{ type: "text", text: `Shape ${params.shape!.name} stopped after step ${i + 1} (${step.agent}): ${shapeStop}; later steps did not run. Report:\n${getResultOutput(result)}` }],
+							details: makeDetails("chain")(results),
+							isError: true,
+						};
+					}
 					if (isError) {
 						const errorMsg = getResultOutput(result);
 						return {
@@ -1283,8 +1319,9 @@ export default function (pi: ExtensionAPI) {
         renderShell: "self",
         renderCall(args, theme) {
             if (args.background !== false) return {invalidate() {}, render: () => []};
-            const items = args.dag ?? args.chain ?? args.tasks ?? (args.agent ? [{agent: args.agent}] : []);
-            const mode = args.dag ? "dag" : args.chain ? "chain" : args.tasks ? "parallel" : "single";
+            const shaped = args.shape ? expandShape(args.shape) : undefined;
+            const items = args.dag ?? (shaped?.ok ? shaped.chain : undefined) ?? args.chain ?? args.tasks ?? (args.agent ? [{agent: args.agent}] : []);
+            const mode = args.dag ? "dag" : args.shape ? `shape ${args.shape.name}` : args.chain ? "chain" : args.tasks ? "parallel" : "single";
             const names = items.map(item => item.agent).join(", ").replace(/[\r\n\x1b]/g, " ").slice(0, 160);
             return monitor.compact(theme.fg("toolTitle", `subagent · ${mode} · ${names}`));
         },
