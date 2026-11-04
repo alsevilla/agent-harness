@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { formatUsageSummary, LogicalUsage, newUsageScope, type UsageScope } from "../background.ts";
+
+type Status = "completed" | "failed" | "aborted";
+
+// One logical job with one attempt and one priced turn, settled once (producer-shaped usage: finalized turn fields).
+function run(scope: UsageScope, role: string | undefined, background: boolean, input: number, output: number, cost: number, status: Status = "completed") {
+	const job = new LogicalUsage(scope, background, role);
+	job.attempt();
+	job.turn({ input, output, cacheRead: 0, cacheWrite: 0, cost: { total: cost } });
+	job.settle(status);
+}
+
+test("named roles aggregate foreground and background; each job settles once per role", () => {
+	const scope = newUsageScope();
+	run(scope, "backend", false, 100, 20, 0.5);
+	run(scope, "backend", true, 50, 10, 0.25, "failed");
+	run(scope, "reviewer", false, 30, 5, 0.1);
+	const roles = scope.roles ?? {};
+	assert.deepEqual(Object.keys(roles).sort(), ["backend", "reviewer"]);
+	assert.equal(roles.backend.input, 150);
+	assert.equal(roles.backend.completed, 1);
+	assert.equal(roles.backend.failed, 1);
+	assert.equal(roles.reviewer.output, 5);
+	for (const key of ["attempts", "turns", "input", "output"] as const) {
+		const roleSum = Object.values(roles).reduce((sum, slice) => sum + slice[key], 0);
+		assert.equal(roleSum, scope.foreground[key] + scope.background[key], key);
+	}
+	// A job settles once: a second settle on the same job adds nothing (one new job = +1 completed).
+	const again = new LogicalUsage(scope, false, "backend");
+	again.settle("completed");
+	again.settle("completed");
+	assert.equal(scope.roles?.backend.completed, 2);
+});
+
+test("role summary lists tokens-descending roles and leaves unnamed jobs out of roles", () => {
+	const scope = newUsageScope();
+	run(scope, "reviewer", false, 10, 1, 0.01);
+	run(scope, "backend", false, 500, 50, 0.5);
+	run(scope, undefined, false, 7, 7, 0.07);
+	assert.equal(Object.keys(scope.roles ?? {}).length, 2);
+	assert.equal(scope.foreground.input, 517);
+	const text = formatUsageSummary(scope);
+	assert.ok(text.indexOf("  backend:") > 0 && text.indexOf("  backend:") < text.indexOf("  reviewer:"));
+	assert.match(text, /By role \(foreground \+ background, most tokens first\):/);
+	assert.ok(text.includes("  backend: 1 task, 1 attempt, 1 turn; input 500 | output 50 | cacheRead 0 | cacheWrite 0; cost $0.5000 SDK-estimated"));
+});
+
+test("cache tokens and unpriced turns aggregate per role; aborted jobs count", () => {
+	const scope = newUsageScope();
+	const job = new LogicalUsage(scope, false, "tuner");
+	job.attempt();
+	job.turn({ input: 10, output: 2, cacheRead: 40, cacheWrite: 8, cost: undefined });
+	job.settle("aborted");
+	const slice = scope.roles?.tuner;
+	assert.equal(slice?.cacheRead, 40);
+	assert.equal(slice?.cacheWrite, 8);
+	assert.equal(slice?.unpricedTurns, 1);
+	assert.equal(slice?.aborted, 1);
+	assert.ok(formatUsageSummary(scope).includes("  tuner: 1 task, 1 attempt, 1 turn; input 10 | output 2 | cacheRead 40 | cacheWrite 8; cost not reported (no turn priced)"));
+});
+
+test("equal token totals tie-break by name; an empty role name is not listed", () => {
+	const scope = newUsageScope();
+	run(scope, "zeta", false, 5, 5, 0.1);
+	run(scope, "alpha", false, 5, 5, 0.1);
+	run(scope, "", false, 9, 9, 0.1);
+	assert.deepEqual(Object.keys(scope.roles ?? {}).sort(), ["alpha", "zeta"]);
+	const text = formatUsageSummary(scope);
+	assert.ok(text.indexOf("  alpha:") < text.indexOf("  zeta:"));
+	assert.equal(scope.foreground.input, 19);
+});
+
+test("reserved role names stay own data and never write a prototype", () => {
+	const scope = newUsageScope();
+	run(scope, "__proto__", false, 1, 1, 0);
+	run(scope, "constructor", false, 2, 2, 0);
+	assert.equal(Object.getPrototypeOf(scope.roles), Object.prototype);
+	assert.equal(({} as Record<string, unknown>).input, undefined);
+	assert.equal(scope.roles?.["__proto__"]?.input, 1);
+	assert.equal(scope.roles?.constructor.input, 2);
+	assert.ok(formatUsageSummary(scope).includes("  __proto__: 1 task"));
+});
+
+test("a job settles into its launch scope after reset and charges no other scope", () => {
+	const launch = newUsageScope();
+	const job = new LogicalUsage(launch, false, "reviewer");
+	job.attempt();
+	job.turn({ input: 3, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.01 } });
+	const afterReset = newUsageScope();
+	job.settle("completed");
+	assert.equal(launch.roles?.reviewer.completed, 1);
+	assert.equal(afterReset.roles && Object.keys(afterReset.roles).length, 0);
+});
+
+test("a scope without named roles shows no By role section", () => {
+	assert.equal(formatUsageSummary(newUsageScope()).includes("By role"), false);
+});

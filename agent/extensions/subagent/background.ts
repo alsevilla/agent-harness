@@ -63,21 +63,28 @@ export class RpcWorker {
   }
 }
 
-// Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text, prompts or model roles). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
+// Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text or prompts; a named agent role is kept only as its agent name). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
 export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number }
 export interface UsageSlice extends UsageTotals { completed: number; failed: number; aborted: number }
 // Opt-in role-budget counts of settled logical jobs (numeric only). eligible = had an effective budget; exhausted = stopped at a budget limit; measurable = exhausted, or ran to completion with every configured limit observable (a context limit needs the completing attempt's latest child observation to be an available anchored SDK estimate); unknown = eligible and neither.
 export interface BudgetCounts { eligible: number; measurable: number; unknown: number; exhausted: number }
 const zeroBudget = (): BudgetCounts => ({ eligible: 0, measurable: 0, unknown: 0, exhausted: 0 });
-export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; budget?: BudgetCounts }
+export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; budget?: BudgetCounts; roles?: Record<string, UsageSlice> }
 const zeroTotals = (): UsageTotals => ({ attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0 });
 const zeroSlice = (): UsageSlice => ({ ...zeroTotals(), completed: 0, failed: 0, aborted: 0 });
-export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), budget: zeroBudget() });
+export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), budget: zeroBudget(), roles: {} });
+// Own-key insert: a role named __proto__ or constructor stays data on this map, never a prototype write.
+function roleSlice(scope: UsageScope, role: string): UsageSlice {
+  const roles = (scope.roles ??= {});
+  if (!Object.hasOwn(roles, role)) Object.defineProperty(roles, role, { value: zeroSlice(), enumerable: true, writable: true, configurable: true });
+  return roles[role];
+}
 // One logical job (one runSingleAgent request). Finalized message_end usage only; finalizes once; physical attempts counted at spawn.
 export class LogicalUsage {
   private totals = zeroTotals(); private open = true;
   private scope: UsageScope; private slice: "foreground" | "background";
-  constructor(scope: UsageScope, background: boolean) { this.scope = scope; this.slice = background ? "background" : "foreground"; scope.running++; }
+  private role?: string;
+  constructor(scope: UsageScope, background: boolean, role?: string) { this.scope = scope; this.slice = background ? "background" : "foreground"; this.role = role || undefined; scope.running++; }
   private budget?: { contextCap: boolean; warned: boolean; observed: boolean; exhausted: boolean };
   // A new physical attempt starts with no context observation: an earlier attempt's estimate is never proof for this child's context.
   attempt() { if (this.open) { this.totals.attempts++; if (this.budget) this.budget.observed = false; } }
@@ -104,9 +111,10 @@ export class LogicalUsage {
   settle(status: "completed" | "failed" | "aborted") {
     if (!this.open) return;
     this.open = false; this.scope.running--;
-    const slice = this.scope[this.slice]; const t = this.totals;
-    for (const key of Object.keys(t) as (keyof UsageTotals)[]) slice[key] += t[key];
-    slice[status]++;
+    const t = this.totals;
+    const add = (dst: UsageSlice) => { for (const key of Object.keys(t) as (keyof UsageTotals)[]) dst[key] += t[key]; dst[status]++; };
+    add(this.scope[this.slice]);
+    if (this.role) add(roleSlice(this.scope, this.role));
     const b = this.budget;
     if (b) {
       const c = (this.scope.budget ??= zeroBudget()); c.eligible++;
@@ -135,6 +143,11 @@ function sliceLines(name: string, s: UsageSlice): string[] {
     `  cost: ${costText(s)}`,
   ];
 }
+const tokenTotal = (s: UsageSlice) => s.input + s.output + s.cacheRead + s.cacheWrite;
+function roleLine(name: string, s: UsageSlice): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}`;
+}
 // Plain text for /subagent usage: fixed labels, numeric aggregates only.
 export function formatUsageSummary(scope: UsageScope): string {
   const settled = scope.foreground.completed + scope.foreground.failed + scope.foreground.aborted + scope.background.completed + scope.background.failed + scope.background.aborted;
@@ -142,6 +155,8 @@ export function formatUsageSummary(scope: UsageScope): string {
   if (settled === 0 && scope.running === 0) return [...lines, "No delegated agent tasks yet this run."].join("\n");
   lines.push(...sliceLines("Foreground", scope.foreground), ...sliceLines("Background", scope.background));
   if (scope.running > 0) lines.push(`Pending: ${plural(scope.running, "agent task")} incl. queued, excluded until settled`);
+  const roles = Object.entries(scope.roles ?? {}).filter(([, s]) => s.completed + s.failed + s.aborted > 0).sort(([a, x], [b, y]) => tokenTotal(y) - tokenTotal(x) || a.localeCompare(b));
+  if (roles.length) lines.push("By role (foreground + background, most tokens first):", ...roles.map(([name, s]) => roleLine(name, s)));
   const b = scope.budget;
   if (b && b.eligible > 0) {
     const rate = b.measurable > 0 ? `${((b.exhausted / b.measurable) * 100).toFixed(1)}% of measurable (${b.exhausted}/${b.measurable})${b.exhausted * 20 > b.measurable ? "; above the 5% informational flag" : ""}` : "n/a (no measurable job)";

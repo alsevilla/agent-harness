@@ -205,7 +205,7 @@ async function runSingleAgent(
 	access: WorkspaceAccess = "write",
 ): Promise<SingleResult> {
 	// One usage job per logical request, charged to the scope captured at dispatch; it settles exactly once here.
-	const logical = dispatchDefaults.usageScope || dispatchDefaults.budget ? new LogicalUsage(dispatchDefaults.usageScope ?? newUsageScope(), Boolean(dispatchDefaults.jobId)) : undefined;
+	const logical = dispatchDefaults.usageScope || dispatchDefaults.budget ? new LogicalUsage(dispatchDefaults.usageScope ?? newUsageScope(), Boolean(dispatchDefaults.jobId), agentName) : undefined;
 	if (dispatchDefaults.budget) logical?.enableBudget(dispatchDefaults.budget.contextBudget !== undefined);
 	try {
 		const result = await runSingleAgentJob(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, access, logical);
