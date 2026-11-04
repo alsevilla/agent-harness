@@ -39,7 +39,7 @@ test("every code worker fixes a failing focused check in the same run, at most t
 });
 
 // Phase 4: roles moved to the shared structure list their five sections in this order.
-const FIVE_SECTION_ROLES = ["frontend-worker", "backend-worker"];
+const FIVE_SECTION_ROLES = ["frontend-worker", "backend-worker", "database-worker"];
 test("restructured roles use the five shared sections in order", () => {
 	const five = ["Knows/loads", "Before starting", "Workflow", "Where to look", "Common failures"];
 	for (const role of FIVE_SECTION_ROLES) {
