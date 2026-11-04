@@ -128,8 +128,19 @@ function roleLine(name: string, s: UsageSlice): string {
   const n = (v: number) => v.toLocaleString("en-US");
   return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}`;
 }
-// Plain text for /subagent usage: fixed labels, numeric aggregates only.
-export function formatUsageSummary(scope: UsageScope): string {
+// Main session's current context from the SDK estimate (ctx.getContextUsage().tokens); null when unavailable, never 0.
+export function mainContextTokens(ctx: { getContextUsage?: () => { tokens?: unknown } | undefined }): number | null {
+  let tokens: unknown;
+  try { tokens = ctx.getContextUsage?.()?.tokens; } catch { tokens = undefined; }
+  return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? Math.round(tokens) : null;
+}
+const mainContextLine = (tokens: number | null) => `Main context: ${tokens === null ? "unknown" : `~${tokens.toLocaleString("en-US")} tokens (SDK estimate)`}`;
+// Plain text for /subagent usage: fixed labels, numeric aggregates only. The main-context line is added only when the caller passes a reading.
+export function formatUsageSummary(scope: UsageScope, mainContext?: number | null): string {
+  const text = usageBody(scope);
+  return mainContext === undefined ? text : `${text}\n${mainContextLine(mainContext)}`;
+}
+function usageBody(scope: UsageScope): string {
   const settled = scope.foreground.completed + scope.foreground.failed + scope.foreground.aborted + scope.background.completed + scope.background.failed + scope.background.aborted;
   const lines = ["Subagent usage: this Pi run only (in memory; resets on reload or session change).", "SDK-observed cost may be catalog-estimated, not provider-reported billing. Settled agent tasks only."];
   if (settled === 0 && scope.running === 0) return [...lines, "No delegated agent tasks yet this run."].join("\n");
