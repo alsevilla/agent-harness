@@ -85,10 +85,14 @@ interface Child {
 (globalThis as { __piDagChildren?: Child[] }).__piDagChildren = [];
 const children = (): Child[] => (globalThis as { __piDagChildren: Child[] }).__piDagChildren;
 
-const PRIMARY = "openai-codex/gpt-6.1-sol";
-const LUNA = "openai-codex/gpt-6-luna";
-const HAIKU = "anthropic/claude-haiku-5-5"; // committed backend-worker economy primary
-const SONNET = "anthropic/claude-sonnet-5-5";
+// Model ids come from the committed agent/roles.json (backend-worker tiers); the approved-preset oracle fixture is the one hard-coded guard.
+const backendTiers = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../../../roles.json", import.meta.url)), "utf8")).find((r: { name: string }) => r.name === "backend-worker").modelTiers;
+const releaseTiers = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../../../roles.json", import.meta.url)), "utf8")).find((r: { name: string }) => r.name === "release-engineer").modelTiers;
+const PRIMARY = releaseTiers.capable.model as string; // release-engineer capable primary: generic primary for the synthetic fallback roles (same provider family as LUNA, so no Anthropic guard)
+const CAPABLE_FALLBACK = [backendTiers.capable.fallbackModel].flat()[0] as string; // backend-worker capable fallback
+const LUNA = releaseTiers.economy.model as string; // release-engineer economy primary: generic fallback for the synthetic roles
+const HAIKU = backendTiers.economy.model as string; // backend-worker economy primary
+const SONNET = backendTiers.capable.model as string; // backend-worker capable primary
 const role = (name: string, extra: Partial<AgentConfig> = {}): AgentConfig => ({ name, description: name, systemPrompt: "", source: "user", filePath: "", ...extra });
 const AGENTS: AgentConfig[] = [role("writer"), role("reader"), role("chain-fallback", { model: PRIMARY, fallbackModel: [LUNA] })];
 const WAITING = "Waiting for workspace";
@@ -208,7 +212,7 @@ check("modelSlot fallback runs in single, parallel, chain and dag, foreground an
 		const tool = pi.tools.get("subagent")!, control = pi.tools.get("subagent_control")!;
 		const ctx = dagCtx(makeRepo(`slot-${mode}-${backgroundMode}`));
 		const items: any[] = [{ agent: "backend-worker", task: "slot-0", modelTier: "capable", modelSlot: "fallback" }, { agent: "backend-worker", task: "plain-1", modelTier: "economy" }];
-		const expected = [PRIMARY, HAIKU]; // capable fallback (not the capable primary) and an ordinary economy primary
+		const expected = [CAPABLE_FALLBACK, HAIKU]; // capable fallback (not the capable primary) and an ordinary economy primary
 		const used = mode === "single" ? items.slice(0, 1) : items;
 		const args: any = { background: backgroundMode, agentScope: "both" };
 		if (mode === "single") Object.assign(args, used[0]);
@@ -236,7 +240,7 @@ check("modelSlot fallback runs in single, parallel, chain and dag, foreground an
 		assert.notEqual(result.isError, true);
 		const rows = result.details.results;
 		assert.equal(rows.length, used.length);
-		assert.equal(rows[0].model, PRIMARY); assert.equal(rows[0].modelTier, "capable"); assert.equal(rows[0].modelSlot, "fallback");
+		assert.equal(rows[0].model, CAPABLE_FALLBACK); assert.equal(rows[0].modelTier, "capable"); assert.equal(rows[0].modelSlot, "fallback");
 		assert.doesNotMatch(rows[0].stderr, /retried|skipped/);
 		if (used.length > 1) { assert.equal(rows[1].model, HAIKU); assert.equal(rows[1].modelTier, "economy"); assert.equal(Object.hasOwn(rows[1], "modelSlot"), false); }
 		dispatches++;
