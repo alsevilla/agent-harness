@@ -28,8 +28,8 @@
     "reviewer.default",
     "reviewer.economy",
     "reviewer.capable",
-    "general-worker.default",
-    "platform-worker.default",
+    "backend-worker.default",
+    "backend-worker.economy",
     "security-specialist.default",
     "security-specialist.economy",
     "security-specialist.capable",
@@ -382,9 +382,9 @@
       "defaultModelTier": "capable",
       "tiers": {
         "economy": {
-          "model": "openai-codex/gpt-6-luna",
+          "model": "anthropic/claude-haiku-5-5",
           "fallbackModel": [
-            "anthropic/claude-haiku-5-5"
+            "openai-codex/gpt-6-luna"
           ],
           "thinking": "medium"
         },

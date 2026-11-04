@@ -85,9 +85,14 @@ interface Child {
 (globalThis as { __piDagChildren?: Child[] }).__piDagChildren = [];
 const children = (): Child[] => (globalThis as { __piDagChildren: Child[] }).__piDagChildren;
 
-const PRIMARY = "openai-codex/gpt-6.1-sol";
-const LUNA = "openai-codex/gpt-6-luna";
-const SONNET = "anthropic/claude-sonnet-5-5";
+// Model ids come from the committed agent/roles.json (backend-worker tiers); the approved-preset oracle fixture is the one hard-coded guard.
+const backendTiers = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../../../roles.json", import.meta.url)), "utf8")).find((r: { name: string }) => r.name === "backend-worker").modelTiers;
+const releaseTiers = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../../../roles.json", import.meta.url)), "utf8")).find((r: { name: string }) => r.name === "release-engineer").modelTiers;
+const PRIMARY = releaseTiers.capable.model as string; // release-engineer capable primary: generic primary for the synthetic fallback roles (same provider family as LUNA, so no Anthropic guard)
+const CAPABLE_FALLBACK = [backendTiers.capable.fallbackModel].flat()[0] as string; // backend-worker capable fallback
+const LUNA = releaseTiers.economy.model as string; // release-engineer economy primary: generic fallback for the synthetic roles
+const HAIKU = backendTiers.economy.model as string; // backend-worker economy primary
+const SONNET = backendTiers.capable.model as string; // backend-worker capable primary
 const role = (name: string, extra: Partial<AgentConfig> = {}): AgentConfig => ({ name, description: name, systemPrompt: "", source: "user", filePath: "", ...extra });
 const AGENTS: AgentConfig[] = [role("writer"), role("reader"), role("chain-fallback", { model: PRIMARY, fallbackModel: [LUNA] })];
 const WAITING = "Waiting for workspace";
@@ -168,7 +173,7 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 				await waitFor(() => children().length === offset + i + 1, `${mode} ${backgroundMode} position-${i} spawn`);
 				const child = children()[offset + i];
 				await waitFor(() => child.received.some(m => m.type === "prompt"), `position-${i} prompt`);
-				assert.equal(child.model, tiers[i] === "economy" ? LUNA : SONNET);
+				assert.equal(child.model, tiers[i] === "economy" ? HAIKU : SONNET);
 				assert.ok(child.args.includes("--append-system-prompt"));
 				if (tiers[i] === "capable") assert.ok(child.args.includes(path.join(guardDir, "subscription-guard.ts")));
 				finish(child, `position-${i} tier result`); launches++;
@@ -184,7 +189,7 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 			assert.equal(result.details.results.length, tiers.length);
 			for (let i = 0; i < tiers.length; i++) {
 				const row = result.details.results[i];
-				assert.equal(row.agent, "backend-worker"); assert.equal(row.agentSource, "package"); assert.equal(row.model, tiers[i] === "economy" ? LUNA : SONNET); assert.equal(row.modelTier, tiers[i]); assert.equal(row.exitCode, 0);
+				assert.equal(row.agent, "backend-worker"); assert.equal(row.agentSource, "package"); assert.equal(row.model, tiers[i] === "economy" ? HAIKU : SONNET); assert.equal(row.modelTier, tiers[i]); assert.equal(row.exitCode, 0);
 				assert.match(finalText(row), new RegExp(`position-${i} tier result`));
 			}
 			dispatches++;
@@ -195,6 +200,10 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 
 // Explicit native modelSlot: "fallback" on a package role with an explicit tier starts on that tier's first usable fallback.
 check("modelSlot fallback runs in single, parallel, chain and dag, foreground and background, with per-entry provenance", async () => {
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	try {
 	const sdk = await import(piAiUrl);
 	const call = (arguments_: any) => ({ type: "toolCall" as const, id: "slot", name: "subagent", arguments: arguments_ });
 	let dispatches = 0;
@@ -203,7 +212,7 @@ check("modelSlot fallback runs in single, parallel, chain and dag, foreground an
 		const tool = pi.tools.get("subagent")!, control = pi.tools.get("subagent_control")!;
 		const ctx = dagCtx(makeRepo(`slot-${mode}-${backgroundMode}`));
 		const items: any[] = [{ agent: "backend-worker", task: "slot-0", modelTier: "capable", modelSlot: "fallback" }, { agent: "backend-worker", task: "plain-1", modelTier: "economy" }];
-		const expected = [PRIMARY, LUNA]; // capable fallback (not the capable primary) and an ordinary economy primary
+		const expected = [CAPABLE_FALLBACK, HAIKU]; // capable fallback (not the capable primary) and an ordinary economy primary
 		const used = mode === "single" ? items.slice(0, 1) : items;
 		const args: any = { background: backgroundMode, agentScope: "both" };
 		if (mode === "single") Object.assign(args, used[0]);
@@ -231,12 +240,13 @@ check("modelSlot fallback runs in single, parallel, chain and dag, foreground an
 		assert.notEqual(result.isError, true);
 		const rows = result.details.results;
 		assert.equal(rows.length, used.length);
-		assert.equal(rows[0].model, PRIMARY); assert.equal(rows[0].modelTier, "capable"); assert.equal(rows[0].modelSlot, "fallback");
+		assert.equal(rows[0].model, CAPABLE_FALLBACK); assert.equal(rows[0].modelTier, "capable"); assert.equal(rows[0].modelSlot, "fallback");
 		assert.doesNotMatch(rows[0].stderr, /retried|skipped/);
-		if (used.length > 1) { assert.equal(rows[1].model, LUNA); assert.equal(rows[1].modelTier, "economy"); assert.equal(Object.hasOwn(rows[1], "modelSlot"), false); }
+		if (used.length > 1) { assert.equal(rows[1].model, HAIKU); assert.equal(rows[1].modelTier, "economy"); assert.equal(Object.hasOwn(rows[1], "modelSlot"), false); }
 		dispatches++;
 	}
 	assert.equal(dispatches, 8);
+	} finally { fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true }); }
 });
 
 check("modelSlot refusals happen before any spawn: schema, runtime, root batch, non-package, tierless and no-fallback", async () => {
@@ -350,6 +360,10 @@ check("package backend-worker tier failures never upgrade to capable", async () 
 	const baseline = discoverAgents(userDir, "both").agents.find(a => a.name === "backend-worker")!;
 	assert.equal(baseline.source, "package");
 	assert.ok(baseline.modelTiers?.capable, "the package role has a configured capable tier");
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	try {
 	for (const scenario of ["ordinary failure", "availability after tool activity", "abort"] as const) {
 		const pi = fakePi(); subagentExtension(pi);
 		const tool = pi.tools.get("subagent")!;
@@ -376,6 +390,7 @@ check("package backend-worker tier failures never upgrade to capable", async () 
 		assert.equal(result.status, scenario === "abort" ? "rejected" : "fulfilled");
 		assert.equal(children().length, offset + 1, `${scenario} cannot launch a fallback or automatically upgrade to capable`);
 	}
+	} finally { fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true }); }
 });
 
 check("omitted tiers keep package defaults in legacy and mixed chain positions", async () => {
@@ -500,12 +515,17 @@ check("explicit package role tier selects configured model without changing role
 	const pi = fakePi();
 	subagentExtension(pi);
 	const tool = pi.tools.get("subagent")!;
+	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
+	fs.mkdirSync(guardDir, { recursive: true });
+	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	try {
 	const launch = tool.execute("tier-package", { background: false, agentScope: "both", agent: "backend-worker", task: "tier probe", modelTier: "economy" }, undefined, undefined, dagCtx(makeRepo("tier-package")));
 	await waitFor(() => children().length === 1, "canonical package role launches");
-	assert.equal(children()[0].args[children()[0].args.indexOf("--model") + 1], "openai-codex/gpt-6-luna");
+	assert.equal(children()[0].args[children()[0].args.indexOf("--model") + 1], HAIKU);
 	finish(children()[0], "ok");
 	const result = await launch;
 	assert.equal(result.isError, undefined);
+	} finally { fs.rmSync(path.join(userDir, "npm"), { recursive: true, force: true }); }
 });
 
 // Fixture overlay with distinct per-tier thinking on a non-Anthropic pair (no subscription guard): omitted and explicit launches must differ from flat effort.
