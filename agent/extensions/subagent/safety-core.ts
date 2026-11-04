@@ -602,7 +602,10 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		importCleanup(incoming) {
 			const valid = incoming.map(normalizeCleanup);
 			if (valid.length > MAX_CLEANUP_GRANTS) throw new RangeError("too many cleanup scopes");
-			cleanup.push(...valid);
+			for (const g of valid) {
+				if (g.task === undefined) cleanup.push(g);
+				else for (const folder of cleanupTargets(g)) artifacts.push({ path: folder, primary: g.primary, issuedAt: g.issuedAt });
+			}
 		},
 		findCleanup(candidate) {
 			live();
@@ -1410,7 +1413,10 @@ const TASK_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const CLEANUP_KEYS = "base,branch,candidate,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role";
 const CLEANUP_REQUEST_KEYS = "base,branch,checkout,headSha,mergeCommit,pr,quiescent";
 const PR_CLEANUP_FIELDS = "number,state,baseRefName,headRefName,headRefOid,isCrossRepository,mergeCommit";
-export interface CleanupGrant { id: string; role: string; candidate: string; primary: string; pushUrl: string; repo: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string; issuedAt: number }
+export interface CleanupGrant { id: string; role: string; candidate: string; primary: string; pushUrl: string; repo: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string; issuedAt: number; task?: string; group?: string }
+// Plain-branch variant: candidate = primary, plus the task and its artifact group (<primary-parent>/worktrees/<repo>); it covers only the two artifact folders.
+const ARTIFACT_GRANT_KEYS = "base,branch,candidate,group,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role,task";
+const ARTIFACT_REQUEST_KEYS = "base,branch,headSha,mergeCommit,pr,quiescent,task";
 
 const slashed = (p: string) => p.replace(/\\/g, "/");
 
@@ -1426,17 +1432,34 @@ function cleanupPlacement(candidate: unknown, primary: unknown): boolean {
 	return TASK_SEGMENT.test(task) && !/[. ]$/.test(task);
 }
 
+// The artifact group of a plain-branch task: exactly <parent of primary>/worktrees/<one segment>, no aliases.
+function artifactGroupOk(group: unknown, primary: unknown): boolean {
+	if (typeof group !== "string" || typeof primary !== "string" || group.length > 240 || !PATH_ARG.test(group) || badSegments(group) || group.split("/").some((seg) => /~\d/.test(seg))) return false;
+	const parent = path.posix.dirname(group);
+	return path.posix.basename(parent) === "worktrees" && normPath(path.posix.dirname(parent)) === normPath(path.posix.dirname(primary)) && TASK_SEGMENT.test(path.posix.basename(group));
+}
+
 function normalizeCleanup(input: unknown): CleanupGrant {
 	const v = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
-	if (Object.keys(v).sort().join() !== CLEANUP_KEYS) throw new TypeError("invalid cleanup scope");
-	if (v.role !== LEASE_ROLE || typeof v.id !== "string" || !/^[0-9a-f-]{36}$/.test(v.id) || !cleanupPlacement(v.candidate, v.primary)) throw new TypeError("invalid cleanup scope");
+	const keys = Object.keys(v).sort().join();
+	const artifacts = keys === ARTIFACT_GRANT_KEYS;
+	if (keys !== CLEANUP_KEYS && !artifacts) throw new TypeError("invalid cleanup scope");
+	if (v.role !== LEASE_ROLE || typeof v.id !== "string" || !/^[0-9a-f-]{36}$/.test(v.id)) throw new TypeError("invalid cleanup scope");
+	if (artifacts ? !(typeof v.task === "string" && TASK_SEGMENT.test(v.task) && typeof v.primary === "string" && v.candidate === v.primary && PATH_ARG.test(v.primary) && !badSegments(v.primary) && artifactGroupOk(v.group, v.primary)) : !cleanupPlacement(v.candidate, v.primary)) throw new TypeError("invalid cleanup scope");
 	assertPushUrl(v.pushUrl as string);
 	const repo = parseRepoFromPushUrl(v.pushUrl);
 	const branch = validatePushBranch(v.branch as string);
 	if (repo === undefined || v.repo !== repo || !baseBranchOk(v.base) || v.base === branch) throw new TypeError("invalid cleanup scope");
 	if (typeof v.pr !== "number" || !Number.isSafeInteger(v.pr) || v.pr < 1 || v.pr > 999999999) throw new TypeError("invalid cleanup scope");
 	if (typeof v.headSha !== "string" || !BARE_SHA.test(v.headSha) || typeof v.mergeCommit !== "string" || !BARE_SHA.test(v.mergeCommit) || typeof v.issuedAt !== "number" || !Number.isFinite(v.issuedAt)) throw new TypeError("invalid cleanup scope");
-	return { id: v.id, role: LEASE_ROLE, candidate: v.candidate as string, primary: v.primary as string, pushUrl: v.pushUrl as string, repo, branch, base: v.base, pr: v.pr, headSha: v.headSha, mergeCommit: v.mergeCommit, issuedAt: v.issuedAt };
+	const grant: CleanupGrant = { id: v.id, role: LEASE_ROLE, candidate: v.candidate as string, primary: v.primary as string, pushUrl: v.pushUrl as string, repo, branch, base: v.base, pr: v.pr, headSha: v.headSha, mergeCommit: v.mergeCommit, issuedAt: v.issuedAt };
+	if (artifacts) { grant.task = v.task as string; grant.group = v.group as string; }
+	return grant;
+}
+
+/** What a cleanup scope may remove: the checkout (worktree task) or the task's two artifact folders (plain-branch task). Reserved against new workers. */
+export function cleanupTargets(g: CleanupGrant): string[] {
+	return g.task !== undefined && g.group !== undefined ? ["_evidence", "_scratch"].map((kind) => `${g.group}/${kind}/${g.task}`) : [g.candidate];
 }
 
 // Absent key grants nothing; a present but malformed one fails the whole envelope closed.
@@ -1539,12 +1562,49 @@ export function verifyCleanup(g: CleanupGrant, live: DeliveryLive = defaultDeliv
 export interface CleanupDeps { store: GrantStore; owners: OwnerTracker; live?: DeliveryLive; primary: string; mainCwd: string; jobRunning(jobId: string): boolean }
 
 // Main-side mint, called from the subagent launch. The request is a selector and a quiescence declaration, never proof: ownership comes from the runtime tracker, everything else from live git and gh.
+// Plain-branch task: the folders come from the artifact directory the operator saw in this session's merge approval, never from the
+// request alone, so a task name cannot select another task's folders. The PR must be merged live, exactly as approved.
+function prepareArtifactCleanup(r: Record<string, unknown>, deps: CleanupDeps, live: DeliveryLive): { ok: true; grant: CleanupGrant } | { ok: false; reason: string } {
+	const refuse = (reason: string) => ({ ok: false as const, reason });
+	if (r.quiescent !== true) return refuse("main must declare the artifact folders quiescent (quiescent: true)");
+	if (typeof r.task !== "string" || !TASK_SEGMENT.test(r.task)) return refuse("task must be one folder name");
+	const primary = slashed(canonicalCwd(deps.primary));
+	const top = gitRead(primary, ["rev-parse", "--show-toplevel"]);
+	if (top?.length !== 1 || normPath(slashed(canonicalCwd(top[0]))) !== normPath(primary) || primaryOf(primary) === undefined || normPath(primaryOf(primary)!) !== normPath(primary)) return refuse("the launch folder is not a primary checkout root");
+	const branch = validatePushBranch(r.branch as string);
+	const approved = deps.store.listDelivery().find((d) => d.action === "merge" && normPath(slashed(d.candidate)) === normPath(primary) && d.branch === branch && d.base === r.base && d.pr === r.pr && d.sha === r.headSha);
+	if (!approved) return refuse("no merge approval in this session matches this primary checkout, branch, base, PR and head");
+	const dir = approved.artifactDir === undefined ? undefined : slashed(approved.artifactDir);
+	if (dir === undefined || !/\/_(?:evidence|scratch)\/[^/]+$/.test(dir) || path.posix.basename(dir) !== r.task) return refuse("the merge approval names no artifact directory for this task");
+	const group = path.posix.dirname(path.posix.dirname(dir));
+	const pushUrl = live.pushUrl(primary, branch);
+	if (pushUrl === undefined || pushUrl !== approved.pushUrl) return refuse("origin binding differs from the approved one");
+	const grant = normalizeCleanup({ id: randomUUID(), role: LEASE_ROLE, candidate: primary, primary, pushUrl, repo: parseRepoFromPushUrl(pushUrl), branch, base: r.base, pr: r.pr, headSha: r.headSha, mergeCommit: r.mergeCommit, issuedAt: live.now?.() ?? Date.now(), task: r.task, group });
+	const main = slashed(canonicalCwd(deps.mainCwd));
+	for (const folder of cleanupTargets(grant)) {
+		if (overlaps(main, folder)) return refuse("the main session runs inside an artifact folder");
+		if (deps.owners.reserved(folder)) return refuse("a cleanup for this task is already pending");
+		const busy = deps.owners.active(folder, deps.jobRunning);
+		if (busy) return refuse(busy);
+	}
+	if (redirectedGitEnvironment()) return refuse("git environment is redirected");
+	const env = live.env();
+	if (env.GH_HOST !== undefined || env.GH_REPO !== undefined) return refuse("gh environment is redirected");
+	const pr = live.ghJson(["pr", "view", String(grant.pr), "--repo", grant.repo, "--json", PR_CLEANUP_FIELDS]) as Record<string, any> | undefined;
+	if (!pr || typeof pr !== "object" || Array.isArray(pr)) return refuse("the PR could not be read");
+	if (pr.number !== grant.pr || pr.state !== "MERGED" || pr.isCrossRepository !== false || pr.headRefName !== grant.branch || pr.baseRefName !== grant.base) return refuse("the PR is not merged from this same-repo branch and base");
+	if (pr.headRefOid !== grant.headSha || pr.mergeCommit?.oid !== grant.mergeCommit) return refuse("the PR head or merge commit differs from the approved ones");
+	deps.store.addCleanupGrant(grant);
+	return { ok: true, grant };
+}
+
 export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true; grant: CleanupGrant } | { ok: false; reason: string } {
 	const refuse = (reason: string) => ({ ok: false as const, reason });
 	const live = deps.live ?? defaultDeliveryLive(livePushUrl);
 	try {
 		const r = (request && typeof request === "object" && !Array.isArray(request) ? request : {}) as Record<string, unknown>;
-		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent");
+		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() === ARTIFACT_REQUEST_KEYS) return prepareArtifactCleanup(r, deps, live);
+		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout (worktree task) or task (plain-branch task), plus branch, base, pr, headSha, mergeCommit and quiescent");
 		if (r.quiescent !== true) return refuse("main must declare the checkout quiescent (quiescent: true)");
 		if (typeof r.checkout !== "string" || !cleanupPlacement(r.checkout, slashed(canonicalCwd(deps.primary)))) return refuse("checkout is not exactly worktrees/<repo>/<task> of the launch primary");
 		const candidate = slashed(canonicalCwd(r.checkout));
@@ -1591,7 +1651,7 @@ function cleanupAllows(store: GrantStore, decision: Extract<Decision, { action: 
 // ---- Post-merge ARTIFACT cleanup: after the guard allowed the exact checkout removal, the same scope covers that task's two artifact
 // folders, <worktrees>/<repo>/_evidence/<task> and _scratch/<task>, with one exact removal each. A folder is removable only once the checkout
 // and its registration are gone, from the primary as cwd, and only when it is a plain directory holding no links, hard links or special files.
-export interface ArtifactCleanup { path: string; candidate: string; primary: string; issuedAt: number }
+export interface ArtifactCleanup { path: string; candidate?: string; primary: string; issuedAt: number } // no candidate: plain-branch task, nothing to remove first
 
 /** The two artifact folders of a task checkout `<group>/<task>`: `<group>/_evidence/<task>` and `<group>/_scratch/<task>`. */
 export function artifactFolders(candidate: string): string[] {
@@ -1617,10 +1677,13 @@ export function parseArtifactRemoval(command: string): string | undefined {
 export function verifyArtifactCleanup(a: ArtifactCleanup): string | undefined {
 	try {
 		if (redirectedGitEnvironment()) return "git environment is redirected";
-		if (fs.existsSync(a.candidate)) return "the task checkout still exists; remove it first";
-		const list = gitRead(a.primary, ["worktree", "list", "--porcelain"]);
-		if (!list) return "registrations could not be read";
-		if (list.some((line) => line.startsWith("worktree ") && normPath(line.slice(9)) === normPath(a.candidate))) return "the task checkout is still registered";
+		if (a.candidate !== undefined) {
+			const checkout = a.candidate;
+			if (fs.existsSync(checkout)) return "the task checkout still exists; remove it first";
+			const list = gitRead(a.primary, ["worktree", "list", "--porcelain"]);
+			if (!list) return "registrations could not be read";
+			if (list.some((line) => line.startsWith("worktree ") && normPath(line.slice(9)) === normPath(checkout))) return "the task checkout is still registered";
+		}
 		const st = fs.lstatSync(a.path);
 		if (!st.isDirectory() || st.isSymbolicLink()) return "artifact folder is not a plain directory";
 		if (normPath(slashed(fs.realpathSync.native(a.path))) !== normPath(a.path)) return "artifact folder is an alias or link";
@@ -1648,7 +1711,7 @@ function artifactCleanupAllows(store: GrantStore, decision: Extract<Decision, { 
 	}
 }
 
-export interface CleanupPendingEntry { state: "PENDING_UNVERIFIED" | "RETAINED"; checkout: string; reason?: string; request?: { checkout: string; branch: string; base: string; pr: number; headSha: string }; retainedArtifacts: { path: string; reason: string }[] }
+export interface CleanupPendingEntry { state: "PENDING_UNVERIFIED" | "RETAINED"; checkout?: string; task?: string; reason?: string; request?: { checkout?: string; task?: string; branch: string; base: string; pr: number; headSha: string }; retainedArtifacts: { path: string; reason: string }[] }
 
 // Discovery is advisory and must stay cheap: a bounded projection of in-memory runtime records (merge delivery grants this session issued, owner tracker). ZERO Git, gh, subprocess or filesystem I/O, because it runs on every background completion and list. It never claims READY or MERGED and omits mergeCommit and launchCwd: main obtains those with its own explicit live PR query when it schedules cleanup, and prepareCleanup and the child guard independently re-verify everything live.
 export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunning: (jobId: string) => boolean): CleanupPendingEntry[] {
@@ -1660,6 +1723,17 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 			const candidate = d.candidate.replace(/\\/g, "/").replace(/\/+$/, "");
 			if (seen.has(normPath(candidate))) continue;
 			seen.add(normPath(candidate));
+			if (path.posix.basename(path.posix.dirname(path.posix.dirname(candidate))) !== "worktrees") {
+				// Plain-branch task (candidate = primary): only the artifact folders the merge approval named, never the primary checkout.
+				const dir = d.artifactDir?.replace(/\\/g, "/");
+				if (dir === undefined || !/\/_(?:evidence|scratch)\/[^/]+$/.test(dir)) continue;
+				const task = path.posix.basename(dir);
+				const group = path.posix.dirname(path.posix.dirname(dir));
+				const artifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "plain-branch task: removed by a task cleanup once the knowledge checkpoint is SAVED outside every target or NO LESSON" }));
+				const busy = artifacts.map((a) => owners.active(a.path, jobRunning)).find(Boolean);
+				out.push(busy === undefined ? { state: "PENDING_UNVERIFIED", task, request: { task, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha }, retainedArtifacts: artifacts } : { state: "RETAINED", task, reason: busy, retainedArtifacts: artifacts });
+				continue;
+			}
 			const task = path.posix.basename(candidate);
 			const group = path.posix.dirname(candidate);
 			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "removed by the same cleanup after the checkout, once the knowledge checkpoint is SAVED outside every target or NO LESSON" }));
@@ -1672,7 +1746,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay; artifact folders are always retained.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
 export interface ChildGuardLaunch {
@@ -1697,7 +1771,7 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 		if (!(withLeases && role === LEASE_ROLE) || prBase !== undefined) throw new RangeError("cleanup needs a trusted release-engineer launch without a PR base");
 		if (!scope) throw new RangeError("cleanup scope is missing, expired or revoked");
 		const cwd = canonicalCwd(candidate);
-		if (normPath(cwd) !== normPath(scope.primary) || overlaps(cwd, scope.candidate)) throw new RangeError("cleanup must be launched in the primary checkout, outside the target");
+		if (normPath(cwd) !== normPath(scope.primary) || cleanupTargets(scope).some((target) => overlaps(cwd, target))) throw new RangeError("cleanup must be launched in the primary checkout, outside the target");
 	}
 	// A supplied PR base narrows the trusted release-engineer context only. Refuse before any grant is claimed or the window closes.
 	if (prBase !== undefined && (!(withLeases && role === LEASE_ROLE) || !baseBranchOk(prBase))) throw new RangeError("prBase needs a trusted release-engineer launch and a valid branch name");

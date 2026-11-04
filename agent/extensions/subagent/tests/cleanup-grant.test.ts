@@ -290,7 +290,7 @@ test("retired lifecycle: a request carrying `lifecycle` is refused as an unknown
 	const t = makeTask();
 	const { res } = mint(t, { req: { lifecycle: { action: "merge", learn: { state: "NO LESSON", reason: "x" } } } });
 	assert.equal(res.ok, false);
-	assert.match(res.reason, /cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent/);
+	assert.match(res.reason, /cleanup needs exactly checkout \(worktree task\) or task \(plain-branch task\), plus branch, base, pr, headSha, mergeCommit and quiescent/);
 	const s = setup();
 	const envelope = JSON.parse(s.text);
 	envelope.cleanupActions[0].disposal = { evidence: s.t.evidence, scratch: s.t.scratch };
@@ -733,4 +733,70 @@ test("artifact folders: non-exact forms, links inside, expired entries and the m
 	assert.ok(blocked(run(g, RM(s.t.scratch))), "a link inside the folder retains it");
 	clock.value += C.CLEANUP_TTL_MS + 1;
 	try { assert.ok(blocked(run(g, RM(s.t.evidence))), "expired"); } finally { clock.value = T0; }
+});
+
+// Plain-branch tasks (candidate = the primary checkout): a task cleanup removes only the artifact folders the merge approval named.
+let plainN = 0;
+function plainTask(withDir = true) {
+	const task = `plain-${++plainN}`;
+	const branch = `feat/${task}`;
+	git(PRIMARY, "branch", branch);
+	const head = git(PRIMARY, "rev-parse", branch);
+	const evidence = `${WT}/_evidence/${task}`, scratch = `${WT}/_scratch/${task}`;
+	for (const dir of [evidence, scratch]) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(`${dir}/REPORT.md`, "evidence\n"); }
+	const store = C.createGrantStore(() => clock.value);
+	store.addDeliveryGrant({ role: "release-engineer", candidate: PRIMARY, pushUrl: GH_URL, repo: "acme/widgets", branch, base: "main", action: "merge", pr: 12, sha: head, bound: { head, ref: `refs/heads/${branch}`, fingerprint: "a".repeat(64), exclude: [] }, ...(withDir ? { artifactDir: evidence } : {}) });
+	const pr = { number: 12, state: "MERGED", baseRefName: "main", headRefName: branch, headRefOid: head, isCrossRepository: false, mergeCommit: { oid: MERGE } };
+	const request = (over: Record<string, unknown> = {}) => ({ task, branch, base: "main", pr: 12, headSha: head, mergeCommit: MERGE, quiescent: true, ...over });
+	const prepare = (o: { req?: Record<string, unknown>; view?: unknown; owners?: any; mainCwd?: string } = {}) =>
+		C.prepareCleanup(request(o.req), { store, owners: o.owners ?? new S.OwnerTracker(), live: live(o.view ?? pr), primary: PRIMARY, mainCwd: o.mainCwd ?? PRIMARY, jobRunning: () => false });
+	return { task, branch, head, evidence, scratch, store, pr, prepare };
+}
+
+test("plain-branch cleanup: the task form mints from the merge approval and allows each artifact folder once from the primary", () => {
+	const p = plainTask();
+	const res = p.prepare();
+	assert.equal(res.ok, true, JSON.stringify(res));
+	assert.deepEqual(C.cleanupTargets(res.grant), [p.evidence, p.scratch]);
+	const { child } = childFrom(res.grant);
+	const g = guardOf(child, live(p.pr));
+	assert.equal(run(g, `rm -rf ${q(p.evidence)}`), undefined, "no checkout to remove first");
+	assert.ok(blocked(run(g, `rm -rf ${q(p.evidence)}`)), "replay");
+	assert.equal(C.guardToolCall(g, "powershell", { command: `Remove-Item -LiteralPath ${q(p.scratch)} -Recurse -Force` }, PRIMARY, C.livePushUrl), undefined);
+	assert.ok(blocked(run(g, `git worktree remove ${q(PRIMARY)}`)), "the primary checkout is never a target");
+	assert.ok(blocked(run(g, `rm -rf ${q(`${WT}/_evidence/other`)}`)), "another task's folder");
+	assert.ok(fs.existsSync(p.evidence), "the guard decides only");
+});
+
+test("plain-branch cleanup: refused without a matching merge approval, a named artifact directory, a merged PR or idle folders", () => {
+	const p = plainTask();
+	const refusals: [Record<string, unknown>, RegExp][] = [
+		[{ req: { task: "plain-999" } }, /names no artifact directory for this task/],
+		[{ req: { pr: 13 } }, /no merge approval in this session matches/],
+		[{ req: { headSha: "1".repeat(40) } }, /no merge approval in this session matches/],
+		[{ req: { quiescent: false } }, /quiescent/],
+		[{ req: { task: "../x" } }, /one folder name/],
+		[{ view: { ...p.pr, state: "OPEN" } }, /not merged/],
+		[{ view: { ...p.pr, mergeCommit: { oid: "2".repeat(40) } } }, /merge commit differs/],
+		[{ mainCwd: p.evidence }, /main session runs inside an artifact folder/],
+	];
+	for (const [o, why] of refusals) {
+		const res = p.prepare(o as any);
+		assert.equal(res.ok, false, JSON.stringify(o));
+		assert.match(res.reason, why, JSON.stringify(o));
+	}
+	const owners = new S.OwnerTracker();
+	owners.begin({ workerId: "w9", role: "test-engineer", cwd: p.scratch, jobId: "bg-9" });
+	assert.match(p.prepare({ owners }).reason, /still active/);
+	const bare = plainTask(false);
+	assert.match(bare.prepare().reason, /names no artifact directory/, "an approval without an artifact directory cleans nothing");
+});
+
+test("plain-branch pending entry proposes the task form and never the primary checkout", () => {
+	const p = plainTask();
+	const entries = C.cleanupPending(p.store, new S.OwnerTracker(), () => false);
+	assert.equal(entries.length, 1);
+	assert.equal(entries[0].checkout, undefined);
+	assert.deepEqual(entries[0].request, { task: p.task, branch: p.branch, base: "main", pr: 12, headSha: p.head });
+	assert.deepEqual(entries[0].retainedArtifacts.map((a: any) => a.path), [p.evidence, p.scratch]);
 });

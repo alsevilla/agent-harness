@@ -11,7 +11,7 @@ export const overlaps = (a: string, b: string): boolean => {
 
 export interface OwnerRecord { workerId: string; role: string; cwd: string; jobId?: string; ended: boolean }
 
-interface Reservation { target: string; expires: number; claimed: boolean }
+interface Reservation { targets: string[]; expires: number; claimed: boolean }
 
 export class OwnerTracker {
 	private records = new Map<string, OwnerRecord>();
@@ -22,7 +22,7 @@ export class OwnerTracker {
 		const now = Date.now();
 		for (const [id, held] of this.reservations) {
 			if (held.expires <= now) this.reservations.delete(id);
-			else if (overlaps(held.target, r.cwd)) throw new Error("a checkout cleanup is pending for this folder; no worker may start in or above it");
+			else if (held.targets.some((t) => overlaps(t, r.cwd))) throw new Error("a checkout cleanup is pending for this folder; no worker may start in or above it");
 		}
 		this.records.set(r.workerId, { ...r, ended: false });
 	}
@@ -31,13 +31,13 @@ export class OwnerTracker {
 		const record = this.records.get(workerId);
 		if (record) record.ended = true;
 	}
-	reserve(target: string, expiresAt: number, id: string = target): void {
-		this.reservations.set(id, { target, expires: expiresAt, claimed: false });
+	reserve(target: string | string[], expiresAt: number, id: string = Array.isArray(target) ? target.join("|") : target): void {
+		this.reservations.set(id, { targets: Array.isArray(target) ? [...target] : [target], expires: expiresAt, claimed: false });
 	}
 	// A live (unexpired) reservation overlapping the folder: a cleanup for it is already pending, claimed or retained.
 	reserved(target: string): boolean {
 		const now = Date.now();
-		return [...this.reservations.values()].some((held) => held.expires > now && overlaps(held.target, target));
+		return [...this.reservations.values()].some((held) => held.expires > now && held.targets.some((t) => overlaps(t, target)));
 	}
 	// The child took the scope out of the parent store: from here the reservation is the only thing refusing an overlapping writer.
 	markClaimed(id: string): void {
@@ -55,6 +55,13 @@ export class OwnerTracker {
 	clear(): void {
 		this.records.clear();
 		this.releaseUnclaimed();
+	}
+	// Artifact folders: workers write there from another cwd, so no record is expected. Refuses only a live worker or job in or above the folder.
+	active(folder: string, jobRunning: (jobId: string) => boolean): string | undefined {
+		const touching = [...this.records.values()].filter((r) => overlaps(r.cwd, folder));
+		if (touching.some((r) => !r.ended)) return "a worker is still active or paused in this folder";
+		if (touching.some((r) => r.jobId !== undefined && jobRunning(r.jobId))) return "a job is still running or paused in this folder";
+		return undefined;
 	}
 	// Fixed refusal reason, or undefined when every recorded worker touching the folder is terminal and a delivery owner is on record. No record at all is unknown, never idle.
 	check(candidate: string, jobRunning: (jobId: string) => boolean): string | undefined {

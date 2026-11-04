@@ -46,7 +46,7 @@ import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRela
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
 import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -626,7 +626,11 @@ const CLEANUP = Type.Optional(Type.Union([Type.Object({
 	checkout: Type.String({ description: "Exact absolute forward-slash path of the merged task checkout under worktrees/<repo>/<task>" }),
 	branch: Type.String(), base: Type.String(), pr: Type.Number(), headSha: Type.String({ description: "40-hex PR head the checkout is on" }), mergeCommit: Type.String({ description: "40-hex merge commit of the merged PR" }),
 	quiescent: Type.Boolean({ description: "Main's declaration that no worker, service or process uses the checkout; must be true" }),
-}, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are never removed." }), Type.Null()]));
+}, { additionalProperties: false, description: "Worktree task: removes this checkout (git worktree remove, no force), then its _evidence/<task> and _scratch/<task> folders. Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target." }), Type.Object({
+	task: Type.String({ description: "Task folder name of a plain-branch task: the <task> in the _evidence/<task> or _scratch/<task> artifact directory named by this session's merge approval" }),
+	branch: Type.String(), base: Type.String(), pr: Type.Number(), headSha: Type.String({ description: "40-hex PR head approved for the merge" }), mergeCommit: Type.String({ description: "40-hex merge commit of the merged PR" }),
+	quiescent: Type.Boolean({ description: "Main's declaration that no worker or process uses the task's artifact folders; must be true" }),
+}, { additionalProperties: false, description: "Plain-branch task (candidate = the primary checkout): removes only that task's _evidence/<task> and _scratch/<task> folders. Needs single mode, agent release-engineer, cwd = the primary checkout." }), Type.Null()]));
 
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
@@ -1084,7 +1088,7 @@ export default function (pi: ExtensionAPI) {
                 if (params.cwd === undefined || (params.prBase !== undefined && params.prBase !== null) || params.readOnly === true) return refuse("cwd must be the primary checkout; no prBase and not readOnly");
                 const minted = prepareCleanup(params.cleanup, { store: safetyGrants, owners, primary: path.resolve(ctx.cwd, params.cwd), mainCwd: ctx.cwd, jobRunning: (id) => runtime.jobs.get(id)?.state === "running" });
                 if (!minted.ok) return refuse(minted.reason);
-                owners.reserve(minted.grant.candidate, minted.grant.issuedAt + CLEANUP_TTL_MS, minted.grant.id);
+                owners.reserve(cleanupTargets(minted.grant), minted.grant.issuedAt + CLEANUP_TTL_MS, minted.grant.id);
                 dispatchDefaults.cleanupId = minted.grant.id;
             } else if (preparedDispatch?.cleanupId) dispatchDefaults.cleanupId = preparedDispatch.cleanupId;
             if (params.background !== false) {

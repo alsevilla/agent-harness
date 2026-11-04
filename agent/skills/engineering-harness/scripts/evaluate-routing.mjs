@@ -59,6 +59,7 @@ const SHAPE_WORKERS = set("backend-worker", "database-worker", "frontend-worker"
 const SHAPE_PACKETS = { T1: [["worker"], []], T2: [["debugger", "worker"], ["test", "review"]], T3: [["worker", "test"], ["planner", "specialist", "review"]] };
 export const NATIVE_NOTICE_MIN = 868; // NOTICE_MIN in compact-handoff.ts (derived there from the worst-case notice skeleton; the parity test recomputes it)
 const NATIVE_CLEANUP_KEYS = set("checkout", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent"); // CLEANUP schema / CLEANUP_REQUEST_KEYS
+const NATIVE_ARTIFACT_CLEANUP_KEYS = set("task", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent"); // plain-branch form / ARTIFACT_REQUEST_KEYS
 const NATIVE_CLEANUP_ROLE = "release-engineer"; // the only role whose single-mode launch accepts `cleanup` (LEASE_ROLE)
 const NATIVE_SHA = /^[0-9a-f]{40}$/; // BARE_SHA; `$` without the m flag matches only at the very end (no trailing-newline slack)
 const BATCH_MODES = ["tasks", "chain", "dag"];
@@ -68,7 +69,7 @@ const NATIVE_DAG_ID = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/; // dag.ts NODE_ID
 const NATIVE_SCOPES = set("user", "project", "both");
 /** The native-contract constants, for the parity test (ES module exports are read-only, so the test drifts copies of this object). */
 export const NATIVE = Object.freeze({
-	ENTRY_KEYS: NATIVE_ENTRY_KEYS, DAG_KEYS: NATIVE_DAG_KEYS, ROOT_KEYS: NATIVE_ROOT_KEYS, CLEANUP_KEYS: NATIVE_CLEANUP_KEYS,
+	ENTRY_KEYS: NATIVE_ENTRY_KEYS, DAG_KEYS: NATIVE_DAG_KEYS, ROOT_KEYS: NATIVE_ROOT_KEYS, CLEANUP_KEYS: NATIVE_CLEANUP_KEYS, ARTIFACT_CLEANUP_KEYS: NATIVE_ARTIFACT_CLEANUP_KEYS,
 	CLEANUP_ROLE: NATIVE_CLEANUP_ROLE, SHA: NATIVE_SHA, MAX_TASKS: NATIVE_MAX_TASKS, MAX_DAG_NODES: NATIVE_MAX_DAG_NODES,
 	DAG_ID: NATIVE_DAG_ID, SCOPES: NATIVE_SCOPES, TIERS, SLOTS, NOTICE_MIN: NATIVE_NOTICE_MIN,
 });
@@ -381,8 +382,9 @@ function flag(value, where) {
 /** Shape of the root `cleanup` request as the runtime mints it (offline: no live PR, git or authorization claim is made). */
 function cleanup(call, at) {
 	const where = `${at}.cleanup`;
-	const value = obj(call.cleanup, NATIVE_CLEANUP_KEYS, where);
-	for (const key of ["checkout", "branch", "base"]) text(value[key], `${where}.${key}`);
+	const plain = isObj(call.cleanup) && has(call.cleanup, "task");
+	const value = obj(call.cleanup, plain ? NATIVE_ARTIFACT_CLEANUP_KEYS : NATIVE_CLEANUP_KEYS, where);
+	for (const key of [plain ? "task" : "checkout", "branch", "base"]) text(value[key], `${where}.${key}`);
 	const pr = value.pr;
 	if (!isInt(pr) || !(pr >= 1 && pr <= 999999999)) throw fail(`${where}.pr: expected a positive integer PR number`);
 	for (const key of ["headSha", "mergeCommit"]) {
