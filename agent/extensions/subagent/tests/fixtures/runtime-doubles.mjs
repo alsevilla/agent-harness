@@ -22,7 +22,7 @@ export function spawn(_command, args, options) {
 	};
 	let activePlan;
 	child.kill = (signal) => {
-		activePlan?.onKill?.(signal ?? "SIGTERM"); // optional per-plan observer (role-budget runtime tests)
+		activePlan?.onKill?.(signal ?? "SIGTERM"); // optional per-plan kill observer
 		if (activePlan?.ignoreTerm && signal !== "SIGKILL") return; // a child that survives SIGTERM until SIGKILL
 		child.signalCode = "SIGTERM";
 		queueMicrotask(() => close(null));

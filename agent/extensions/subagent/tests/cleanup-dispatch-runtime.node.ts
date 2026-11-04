@@ -284,3 +284,59 @@ test("unrelated background completion and list run ZERO Git/gh/subprocess calls 
 		assert.deepEqual(reached, [], "the blocking gh double was never called");
 	} finally { cp.execFileSync = realExec; }
 });
+
+// The grant store and owner tracker are module-wide (at most 4 live delivery grants): a session shutdown drops them so later tests start clean.
+async function shutdownSession() {
+	const host = fakeHost();
+	subagentExtension(host);
+	for (const fn of host.handlers.get("session_shutdown") ?? []) await fn({}, ctx);
+}
+
+for (const stopReason of ["length", "error", "aborted"]) {
+	test(`exit 0 with stopReason ${stopReason} is not a clean close: the claimed cleanup reservation is retained`, { timeout: 60_000 }, async () => {
+		await shutdownSession();
+		const s = await readySession();
+		const base = children().length;
+		await s.launch();
+		await waitFor(() => children().length === base + 1, "cleanup child spawns");
+		children()[base].emitLine({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "partial" }], stopReason, usage } });
+		children()[base].exit(0);
+		await sleep(60);
+		assert.equal((await writerInTarget(s.host, s.t.dir)).refused, true, "a failed-result close keeps the folder reserved until TTL");
+		assert.equal(children().length, base + 1);
+	});
+}
+
+test("retired lifecycle/disposal: unknown fields are rejected (not ignored) with no dialog-minted grant, no launch and no artifact deletion; a normal cleanup close never touches _scratch or _evidence", { timeout: 60_000 }, async () => {
+	await shutdownSession();
+	const s = await readySession();
+	const name = path.posix.basename(s.t.dir);
+	const artifacts = [`${WT}/_evidence/${name}`, `${WT}/_scratch/${name}`];
+	for (const d of artifacts) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(`${d}/keep.txt`, "k\n"); }
+	const base = children().length;
+	const retired = await s.launch({ cleanup: { ...s.request, lifecycle: { action: "merge", learn: { state: "NO LESSON", reason: "x" } } } });
+	assert.equal(retired.isError, true);
+	assert.match(text(retired), /cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent/, "lifecycle is an unknown field, not a missing approval");
+	assert.equal(children().length, base, "nothing launched");
+	const host = fakeHost();
+	subagentExtension(host);
+	const t = makeTask();
+	const state = bindDelivery(t.dir, t.branch, {});
+	const disposal = await host.tools.get("request_authorization")!.execute("auth", { delivery: { action: "merge", branch: t.branch, base: "main", pr: 12, sha: state.head, cwd: t.dir, bind: { expect: state.fingerprint }, disposal: { checkout: t.dir, evidence: artifacts[0], scratch: artifacts[1] } } }, undefined, undefined, ctx);
+	assert.equal(disposal.isError, true);
+	assert.match(text(disposal), /unknown field.*disposal/i);
+	const tools = s.host.tools as Map<string, any>;
+	assert.equal(tools.get("request_authorization").parameters.properties.delivery.additionalProperties, false, "closed delivery schema");
+	assert.equal("disposal" in tools.get("request_authorization").parameters.properties.delivery.properties, false);
+	const cleanupSchema = tools.get("subagent").parameters.properties.cleanup.anyOf[0];
+	assert.equal(cleanupSchema.additionalProperties, false, "closed cleanup schema");
+	assert.equal("lifecycle" in cleanupSchema.properties, false);
+	// Normal cleanup: after the confirmed clean close no runtime step removes or reports on the artifact folders.
+	await s.launch();
+	await waitFor(() => children().length === base + 1, "cleanup child spawns");
+	finish(children()[base]);
+	await sleep(60);
+	for (const d of artifacts) assert.ok(fs.existsSync(`${d}/keep.txt`), `${d} untouched`);
+	assert.equal(s.host.sent.filter((m) => m.customType === "subagent-lifecycle").length, 0);
+	assert.equal(fs.existsSync(`${WT}/_receipts`), false, "no receipt is written");
+});

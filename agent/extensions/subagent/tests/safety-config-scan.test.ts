@@ -266,6 +266,13 @@ test("legacy flat and per-tier-provider entries stay bounded-compatible", () => 
 	assert.ok(emptyTierFallback.findings.some((x) => x.rule === "ROLE_SHAPE" && /modelTiers\.capable/.test(x.message)), JSON.stringify(emptyTierFallback.findings));
 });
 
+test("the retired role budget key is an unknown key for the manual scanner, not a silently accepted field", () => {
+	for (const budget of [{ maxTurns: 3 }, { contextBudget: 9 }, {}, null]) {
+		const scan = scanFixture({ roles: [tierRole({ capable: CAPABLE_TUPLE }, { budget })], agents: { "general-worker": HEADER_FREE } });
+		assert.ok(scan.findings.some((x) => x.rule === "ROLE_SHAPE" && /unknown key/.test(x.message)), JSON.stringify(scan.findings));
+	}
+});
+
 // Golden: the declared default of every shipped role equals the independent approved-preset oracle (user-approved snapshot; tier-only-baseline.json stays immutable
 // and its delta to the oracle is pinned by role-registry.test.ts). Tool permissions are the baseline's plus the separately approved release-engineer write grant.
 test("candidate declared defaults equal the independent approved-preset oracle for all 20 baseline roles; the additive planner mirrors architecture-specialist", () => {

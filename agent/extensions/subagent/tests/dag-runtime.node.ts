@@ -596,6 +596,41 @@ check("invalid tier at any position refuses the whole batch with no child, job o
 	});
 });
 
+check("the retired budget field is refused before any child: top level, every entry mode, and a user role config", async () => {
+	await withUserRoles(fixtureTiers, async () => {
+		const pi = fakePi(); subagentExtension(pi);
+		const tool = pi.tools.get("subagent")!;
+		assert.equal("budget" in (tool.parameters?.properties ?? {}), false, "budget is no longer advertised");
+		const entry = { agent: "backend-worker", task: "t" };
+		const shapes = [{ ...entry, budget: { maxTurns: 3 } }, { ...entry, budget: null }, { tasks: [{ ...entry, budget: {} }] }, { chain: [{ ...entry, budget: { contextBudget: 9 } }] }, { dag: [{ id: "a", ...entry, budget: { maxTurns: 1 } }] }];
+		for (const background of [false, true]) for (const shape of shapes) {
+			const result = await tool.execute("retired-budget", { background, agentScope: "both", ...shape }, undefined, undefined, dagCtx(makeRepo("retired-budget")));
+			assert.equal(result.isError, true, JSON.stringify(shape));
+			assert.match(result.content[0].text, /Unknown parameter budget/);
+		}
+		assert.equal(children().length, 0);
+		assert.equal(pi.sent.length, 0);
+	});
+	await withUserRoles([{ ...fixtureTiers[0], budget: { maxTurns: 2 } }], async () => {
+		const pi = fakePi(); subagentExtension(pi);
+		const result = await pi.tools.get("subagent")!.execute("retired-role-key", { background: false, agent: "backend-worker", task: "t" }, undefined, undefined, dagCtx(makeRepo("retired-role-key")));
+		assert.equal(result.isError, true);
+		assert.match(result.content[0].text, /Subagent roles unavailable.*unknown key budget/s);
+		assert.equal(children().length, 0);
+	});
+});
+
+check("live-layout roles.json refuses the retired budget key on legacy, neutral and tier entries but keeps other legacy entries silent", async () => {
+	const { roleRegistryViolation } = await import(new URL("../agents.ts", import.meta.url).href);
+	const legacy = { name: "alpha", provider: "fixture-provider", model: "m", fallbackModel: "", thinking: "low" };
+	const neutral = { name: "alpha", tools: "read" };
+	for (const base of [legacy, neutral, fixtureTiers[0]]) for (const budget of [{ maxTurns: 0 }, {}, null]) {
+		assert.match(roleRegistryViolation([{ ...base, budget }], false, true), /unknown key budget/, JSON.stringify({ ...base, budget }));
+		assert.match(roleRegistryViolation([{ ...base, budget }], false, false), /unknown key budget/);
+	}
+	for (const ok of [legacy, neutral, { ...legacy, extra: 1 }, "not-an-object", fixtureTiers[0]]) assert.equal(roleRegistryViolation([ok], false, true), null, JSON.stringify(ok));
+});
+
 check("omitted tier with a default missing from roles.json refuses discovery before any child spawns", async () => {
 	await withUserRoles([{ name: "backend-worker", defaultModelTier: "capable", modelTiers: { economy: { model: LAUNCH_ECONOMY.model, fallbackModel: "github-copilot/gpt-6-luna", thinking: "low" } } }], async () => {
 		const pi = fakePi(); subagentExtension(pi);

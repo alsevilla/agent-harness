@@ -8,7 +8,7 @@ export default function pauseGate(pi: ExtensionAPI) {
   if (!controlPath) return;
   let paused = true;
   let announced = false;
-  // A budget stop (or any other abort of the current run) must not hang behind a hold; a non-aborted user hold is unchanged.
+  // An aborted run must not hang behind a hold; a non-aborted user hold is unchanged.
   const boundary = async (_event?: unknown, ctx?: { signal?: AbortSignal }) => {
     for (;;) {
       if (ctx?.signal?.aborted) return;

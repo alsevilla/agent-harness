@@ -514,6 +514,7 @@ test("delivery envelope: round trip keeps the record under deliveryActions; lega
 		["protected branch", (r) => { r.branch = "main"; }],
 	];
 	for (const [name, edit] of cases) assert.throws(() => C.loadChildDelivery(tamper(edit)), undefined, name);
+	assert.throws(() => C.loadChildDelivery(tamper((r) => { r.disposal = {}; })), /disposal is retired/, "retired disposal field is rejected, not ignored");
 	const ttlCases: Array<[string, (r: Record<string, unknown>) => void]> = [
 		["legacy 30 min expiresAt", (r) => { r.expiresAt = (r.issuedAt as number) + LEGACY_TTL; }],
 		["null expiresAt", (r) => { r.expiresAt = null; }],

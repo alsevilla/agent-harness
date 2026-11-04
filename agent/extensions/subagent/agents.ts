@@ -7,7 +7,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { parseFallbackModels } from "./model-routing.ts";
-import { budgetViolation, type RoleBudget } from "./role-budget.ts";
 
 export type AgentScope = "user" | "project" | "both";
 export type ModelTier = "economy" | "capable";
@@ -29,8 +28,6 @@ export interface AgentConfig {
 	filePath: string;
 	defaultModelTier?: ModelTier;
 	modelTiers?: Partial<Record<ModelTier, TierModelConfig | LegacyTierModelConfig>>;
-	/** Optional child limits from roles.json (validated); absent means no budget and unchanged runtime behavior. */
-	budget?: RoleBudget;
 }
 
 export interface AgentDiscoveryResult {
@@ -87,12 +84,11 @@ interface RoleOverride {
 	modelTiers?: Partial<Record<ModelTier, TierModelConfig | LegacyTierModelConfig>>;
 	thinking?: string;
 	tools?: string[];
-	budget?: RoleBudget;
 	/** Legacy scalar or per-tier provider entry: keeps the flat omission projection and no default tier. */
 	legacy?: boolean;
 }
 
-const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools", "budget"];
+const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools"];
 const ROLE_TEXT_KEYS = ["provider", "model", "fallbackModel", "thinking"];
 const LEGACY_ROLE_KEYS = ["provider", "model", "fallbackModel", "thinking"];
 const TIER_KEYS = ["economy", "capable"];
@@ -184,11 +180,8 @@ export function roleRegistryViolation(registry: unknown, complete = false, newFo
 			if (newFormatOnly) continue;
 			return `entry ${index} is not an object`;
 		}
-		// A present budget is always validated, even where the live-profile mode skips legacy entries: it is never silently ignored.
-		if ("budget" in role) {
-			const violation = budgetViolation(role.budget, `entry ${index} budget`);
-			if (violation) return violation;
-		}
+		// The retired budget key is refused even where the live-profile mode skips legacy and neutral entries: never silently ignored.
+		if ("budget" in role) return `entry ${index} has unknown key budget`;
 		const format = entryFormat(role);
 		if (format === "mixed") return `entry ${index} mixes defaultModelTier or tier thinking with legacy provider, model, fallbackModel or thinking fields`;
 		if (newFormatOnly && format !== "tier") continue;
@@ -238,7 +231,6 @@ function normalizeRoleEntry(entry: Record<string, unknown>): RoleOverride {
 			defaultModelTier: entry.defaultModelTier as ModelTier | undefined,
 			modelTiers: entry.modelTiers === undefined ? undefined : canonicalTiers(entry.modelTiers),
 			tools: parseToolList(entry.tools),
-			...(entry.budget !== undefined ? { budget: entry.budget as RoleBudget } : {}),
 			legacy: false,
 		};
 	}
@@ -260,7 +252,6 @@ function normalizeRoleEntry(entry: Record<string, unknown>): RoleOverride {
 		modelTiers: entry.modelTiers !== undefined ? modelTiers : undefined,
 		thinking: typeof entry.thinking === "string" ? entry.thinking : undefined,
 		tools: parseToolList(entry.tools),
-		...(entry.budget !== undefined ? { budget: entry.budget as RoleBudget } : {}),
 		legacy: format === "legacy" ? true : undefined,
 	};
 }
@@ -289,7 +280,6 @@ function resolveRole(name: string, base: RoleOverride | undefined, overlay: Role
 	const defaultModelTier = legacy ? undefined : overlay.defaultModelTier ?? base?.defaultModelTier;
 	const modelTiers = overlay.modelTiers ?? base?.modelTiers;
 	const tools = overlay.tools ?? base?.tools;
-	const budget = overlay.budget ?? base?.budget; // replaced as one unit, like modelTiers
 	if (!legacy && (defaultModelTier !== undefined || Object.keys(modelTiers ?? {}).length > 0)) {
 		if (defaultModelTier === undefined) return { role: {}, error: `role "${name}" needs defaultModelTier` };
 		const tier = modelTiers?.[defaultModelTier];
@@ -302,7 +292,6 @@ function resolveRole(name: string, base: RoleOverride | undefined, overlay: Role
 				fallbackModel: tier.fallbackModel,
 				thinking: (tier as Partial<TierModelConfig>).thinking ?? overlay.thinking ?? base?.thinking,
 				tools,
-				...(budget !== undefined ? { budget } : {}),
 				legacy: false,
 			},
 		};
@@ -314,7 +303,6 @@ function resolveRole(name: string, base: RoleOverride | undefined, overlay: Role
 			modelTiers,
 			thinking: overlay.thinking ?? base?.thinking,
 			tools,
-			...(budget !== undefined ? { budget } : {}),
 			legacy,
 		},
 	};
@@ -376,7 +364,6 @@ function loadAgentsFromDir(
 				defaultModelTier: role?.defaultModelTier,
 				modelTiers: role?.modelTiers,
 				thinking: role?.thinking,
-				...(role?.budget !== undefined ? { budget: role.budget } : {}),
 				systemPrompt: body,
 				source,
 				filePath,
@@ -412,7 +399,6 @@ function loadAgentsFromDir(
 			defaultModelTier: role?.defaultModelTier,
 			modelTiers: role?.modelTiers,
 			thinking: role?.thinking ?? annotationText("thinking") ?? (typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined),
-			...(role?.budget !== undefined ? { budget: role.budget } : {}),
 			systemPrompt: body,
 			source,
 			filePath,
