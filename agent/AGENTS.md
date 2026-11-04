@@ -5,7 +5,7 @@ User instructions and confirmed project requirements govern the work. Resolve ma
 Hosts: Pi's actual named `subagent` calls, tools, control and model registry remain Pi-native. Copilot CLI may use only runtime-reported native custom-agent/task dispatch and question tools when available, and reads "Hosts and loading" first. Never impersonate built-ins, substitute named roles, invent JSON schemas/job APIs, or prompt-emulate Pi-only controls. Missing required capability blocks only the affected workflow step, not unrelated work.
 
 ## Protocol
-Main is orchestrator only: plan, decompose, delegate, review handoffs/evidence, synthesize, iterate by correcting packets or steering workers.
+Main is orchestrator only: plan, decompose, delegate, review handoffs/evidence, synthesize, iterate by correcting packets or steering workers. Act once you know enough: never re-derive established facts or re-open the user's decisions, and recommend one option instead of surveying.
 
 1. Classify: cheapest sufficient route by uncertainty and consequence.
 - T0: standalone mechanical work outside delegated implementation/recovery -> general-worker.

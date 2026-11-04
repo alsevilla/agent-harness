@@ -95,3 +95,36 @@ test("read-only role: writes into the candidate are refused (not grantable); rea
 	const writer = { scope: "child" as const, store: createGrantStore(), agentDir };
 	assert.equal(guardToolCall(writer, "bash", { command: "npm test > out.log" }, candidate), undefined, "a writing role is unaffected");
 });
+
+// Claude Code practices: read before edit, and no approval for a delete it cannot resolve.
+test("read before edit: a worker edits or overwrites an existing file only after reading it in this run; new files are fine", () => {
+	const dir = slash(path.join(root, "rbe"));
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(`${dir}/a.ts`, "x\n");
+	const g = { scope: "child" as const, store: createGrantStore(), agentDir, reads: new Set<string>() };
+	const r = guardToolCall(g, "edit", { path: "a.ts" }, dir) as { block: boolean; reason: string };
+	assert.ok(r?.block);
+	assert.match(r.reason, /^Blocked by harness safety guard \[READ_BEFORE_EDIT\] op [0-9a-f]{16}: edit .*a\.ts; read this file with the read tool in this run first/);
+	assert.ok((guardToolCall(g, "write", { path: `${dir}/a.ts` }, dir) as any)?.block, "overwrite counts too");
+	assert.equal(guardToolCall(g, "write", { path: `${dir}/new.ts` }, dir), undefined, "a new file needs no read");
+	assert.equal(guardToolCall(g, "read", { path: "a.ts" }, dir), undefined);
+	assert.equal(guardToolCall(g, "edit", { path: `${dir}/a.ts` }, dir), undefined, "relative read and absolute edit are the same file");
+	assert.equal(guardToolCall({ scope: "child" as const, store: createGrantStore(), agentDir }, "edit", { path: `${dir}/a.ts` }, dir), undefined, "only guards that track reads enforce it");
+});
+
+test("a delete it cannot resolve is never grantable; an exact target stays grantable", () => {
+	for (const bad of ["rm -rf $DIR/", "rm -rf /", "rm -rf ~", "rm -rf .", "rm -rf *", "Remove-Item -LiteralPath $env:TMP -Recurse -Force", "rd /s /q %TEMP%", "rm -rf `pwd`"]) {
+		const r = reason(main, bad);
+		assert.match(r, /PATH_AMBIGUOUS/, bad);
+		assert.match(r, /not grantable/, bad);
+		assert.match(r, /a delete never takes a variable, substitution, root, home/, bad);
+	}
+	for (const ok of ["rm -rf build", 'rm -rf "/w/worktrees/app/_scratch/t"']) assert.match(reason(main, ok), /\[DESTRUCTIVE_FS\][^:]*: rm; grantable/, ok);
+});
+test("read before edit never hides a secret or config refusal", () => {
+	const dir = slash(path.join(root, "rbe2"));
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(`${dir}/.env`, "X=1\n");
+	const g = { scope: "child" as const, store: createGrantStore(), agentDir, reads: new Set<string>() };
+	assert.match((guardToolCall(g, "write", { path: `${dir}/.env` }, dir) as any).reason, /\[SECRET\]/);
+});
