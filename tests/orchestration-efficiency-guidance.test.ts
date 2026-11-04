@@ -54,6 +54,7 @@ test("execute packet brief is a compact shared brief with decisions, interfaces,
 });
 
 const policy = read("agent/AGENTS.md");
+const policyDetail = read("agent/skills/engineering-harness/references/policy-detail.md"); // Phase 1: step detail moved out of the always-loaded policy
 const tokenEff = read("agent/skills/engineering-harness/references/token-efficiency.md");
 const lf = (text: string) => text.replace(/\r\n/g, "\n");
 
@@ -112,15 +113,16 @@ const BASE_AGENTS_CHARS = 11725; // fixed size of the pre-slimming AGENTS.md (LF
 const routingText = compact(routing);
 
 // Measured post-fix LF size is 10847 (~92.5% of base); the 10% goal would need dropping rules, which review forbade. Ratchet at the measured size so it cannot regrow.
-const AGENTS_RATCHET_CHARS = 10850;
+// Phase 1 (thin-orchestrator plan): AGENTS.md became a 7-step protocol plus a Never list; step detail moved to references/policy-detail.md.
+const AGENTS_RATCHET_CHARS = 6050;
 test("AGENTS.md stays >= 7% below the fixed base size and names no model", () => {
   const size = lf(policy).length;
   assert.ok(size <= AGENTS_RATCHET_CHARS && AGENTS_RATCHET_CHARS <= 0.93 * BASE_AGENTS_CHARS, `AGENTS.md ${size} chars > ${AGENTS_RATCHET_CHARS}`);
   assert.doesNotMatch(policy, /\b(?:claude|opus|sonnet|haiku|gpt-?\d*|gemini|openai|anthropic|codex|luna|sol)\b/i);
 });
 
-test("AGENTS.md keeps restored rule-meaning clauses", () => {
-  const text = compact(policy);
+test("AGENTS.md plus policy-detail keep restored rule-meaning clauses", () => {
+  const text = compact(policy + "\n" + policyDetail);
   for (const phrase of [
     "(code preparation only does not)",
     "static text is not evidence of live autonomous delivery",
@@ -133,8 +135,8 @@ test("AGENTS.md keeps restored rule-meaning clauses", () => {
   ]) assert.ok(text.includes(phrase), phrase);
 });
 
-test("AGENTS.md keeps the non-negotiable model-routing rules and points to routing.md", () => {
-  const text = compact(policy);
+test("AGENTS.md plus policy-detail keep the non-negotiable model-routing rules and points to routing.md", () => {
+  const text = compact(policy + "\n" + policyDetail);
   for (const phrase of [
     "Preserve declared role models/effort and supported fallback safeguards",
     "never arbitrary per-call model IDs",
@@ -210,4 +212,13 @@ test("README states latest-only host support separately from the version actuall
   assert.doesNotMatch(text, /tested baseline is Pi 1\.1\.0|Pi 1\.1\.0 \(tested baseline/);
   assert.doesNotMatch(compact(read("agent/extensions/subagent/README.md")), /targets Pi 1\.1\.0 \(tested baseline/);
   assert.doesNotMatch(compact(read("agent/VALIDATION.md")), /current tested baseline is Pi 1\.1\.0/);
+});
+
+test("every policy-detail section AGENTS.md names exists, and the detail file adds no gate of its own", () => {
+  const named = [...policy.matchAll(/"([A-Z][A-Za-z ]+)"/g)].map((m) => m[1]).filter((name) => name !== "Explicit Pi model tier");
+  assert.ok(named.length >= 6, `named sections: ${named.join(", ")}`);
+  const headings = new Set([...policyDetail.matchAll(/^## (.+)$/gm)].map((m) => m[1].trim()));
+  for (const name of named) assert.ok(headings.has(name), `AGENTS.md names a missing policy-detail section: ${name}`);
+  assert.match(compact(policyDetail), /adds no gate of its own/);
+  assert.match(compact(policy), /read only the section a step names, when it applies/);
 });

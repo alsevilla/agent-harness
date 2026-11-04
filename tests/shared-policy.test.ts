@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 const skillPath = resolve('agent/skills/engineering-harness/SKILL.md');
 const policyPath = resolve('agent/AGENTS.md');
 const policy = readFileSync(policyPath, 'utf8');
+const detail = readFileSync(resolve('agent/skills/engineering-harness/references/policy-detail.md'), 'utf8');
 const skill = readFileSync(skillPath, 'utf8');
 const readme = readFileSync(resolve('README.md'), 'utf8');
 const routing = readFileSync(resolve('agent/skills/engineering-harness/references/routing.md'), 'utf8');
@@ -27,7 +28,7 @@ test('shared policy preserves Pi controls and fails closed only at affected capa
   assert.match(text, /runtime-reported native custom-agent\/task dispatch and question tools when available/);
   assert.match(text, /never impersonate built-ins, substitute named roles, invent json schemas\/job apis, or prompt-emulate pi-only controls/);
   assert.match(text, /pi's actual named `subagent` calls, tools, control and model registry remain pi-native/);
-  assert.match(text, /copilot uses the github cli-selected model/);
+  assert.match(compact(detail), /copilot uses the github cli-selected model/); // moved to policy-detail "Runtime and models"
   assert.match(compact(routing), /`pi\.\*` and `roles\.json` are pi-only/); // relocated from AGENTS.md
   assert.match(text, /preserve user work, candidate\/worktree boundaries, security and project invariants/);
   assert.match(text, /readiness does not grant commit\/push\/merge\/publish\/deploy\/destructive-operation authority/);
@@ -51,7 +52,7 @@ test('shared policy preserves Pi controls and fails closed only at affected capa
   assert.match(preview, /no authentication, global activation, commit, push, merge or release was performed/);
 });
 test('shared policy retains role list without substituting host identities', () => {
-  const routing = compact(policy.slice(policy.indexOf('## Routing'), policy.indexOf('## Ownership')));
+  const routing = compact(policy.slice(policy.indexOf('## Protocol'), policy.indexOf('## Never')));
   assert.match(routing, /backend-worker for backend/);
   assert.match(routing, /database-worker for all database implementation/);
   assert.match(routing, /frontend-worker for all frontend ui/);

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const read = (p: string) => readFileSync(resolve(p), 'utf8');
 const compact = (text: string) => text.toLowerCase().replace(/\s+/g, ' ');
-const policy = compact(read('agent/AGENTS.md'));
+const policy = compact(read('agent/AGENTS.md') + '\n' + read('agent/skills/engineering-harness/references/policy-detail.md')); // delivery detail lives in policy-detail.md; authority rules stay in AGENTS.md
 const ship = compact(read('agent/skills/engineering-harness/ship/index.md'));
 const routing = compact(read('agent/skills/engineering-harness/references/routing.md'));
 const role = compact(read('agent/agents/release-engineer.md'));

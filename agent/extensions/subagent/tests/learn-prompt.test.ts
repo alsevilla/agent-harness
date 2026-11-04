@@ -144,7 +144,7 @@ test("release-engineer write is limited to named knowledge or release artifacts 
 const CANONICAL_LEARN_FILES = ["agent/agents/release-engineer.md", "agent/skills/engineering-harness/ship/index.md", "agent/skills/engineering-harness/worktree/index.md", "agent/skills/engineering-harness/learn/index.md"];
 
 test("LEARN runs before the final commit or PR; the old after-merge order is absent from every canonical copy", () => {
-	for (const rel of [...CANONICAL_LEARN_FILES, "agent/prompts/learn.md", "agent/AGENTS.md"]) {
+	for (const rel of [...CANONICAL_LEARN_FILES, "agent/prompts/learn.md", "agent/AGENTS.md", "agent/skills/engineering-harness/references/policy-detail.md"]) {
 		assert.doesNotMatch(read(rel), /After successful merge and task-owned artifact disposition/, `${rel}: old after-merge LEARN order`);
 	}
 	for (const rel of CANONICAL_LEARN_FILES) assert.match(read(rel), /Before the final commit or PR/, `${rel}: LEARN before final commit or PR`);
@@ -182,13 +182,13 @@ test("a LOCAL record sits outside every packet candidate, _evidence and _scratch
 });
 
 test("universal Git tracking, commit/PR-set and remote-integration requirements are removed from canonical LEARN, cleanup and knowledge text", () => {
-	const files = [...CANONICAL_LEARN_FILES, "agent/prompts/learn.md", "agent/AGENTS.md", "agent/skills/engineering-harness/knowledge/index.md"];
+	const files = [...CANONICAL_LEARN_FILES, "agent/prompts/learn.md", "agent/AGENTS.md", "agent/skills/engineering-harness/references/policy-detail.md", "agent/skills/engineering-harness/knowledge/index.md"];
 	const forbidden = [/must not be git-ignored/, /not git-ignored/, /reports no match/, /named in the commit\/PR set/, /become Git-tracked/, /untracked until that commit exists/, /Git-tracked and not ignored/, /included in the same PR/, /waits for SAVED with verified remote integration/, /remote verification of the record and index/, /local SAVED[^.\n]{0,80}never sufficient/, /authorized follow-up PR before cleanup/];
 	for (const rel of files) for (const pattern of forbidden) assert.doesNotMatch(read(rel), pattern, `${rel}: ${pattern}`);
 });
 
 test("shared publication is separate explicit authority, not a default completion gate", () => {
-	for (const rel of ["agent/skills/engineering-harness/learn/index.md", "agent/AGENTS.md", "agent/skills/engineering-harness/worktree/index.md"]) {
+	for (const rel of ["agent/skills/engineering-harness/learn/index.md", "agent/skills/engineering-harness/references/policy-detail.md", "agent/skills/engineering-harness/worktree/index.md"]) {
 		assert.match(read(rel), /Shared publication is separate explicit authority, not a default completion gate/, rel);
 	}
 });
@@ -237,7 +237,7 @@ test("learn prompt sequences LEARN before the final commit or PR, verifies the l
 test("release-engineer and AGENTS: local SAVED outside every cleanup target is the knowledge checkpoint; shared integration is separate and authorized only when requested", () => {
 	const role = read("agent/agents/release-engineer.md");
 	assert.match(role, /local SAVED[\s\S]{0,160}outside every cleanup target/);
-	const agents = read("agent/AGENTS.md");
+	const agents = read("agent/skills/engineering-harness/references/policy-detail.md"); // delivery detail moved from AGENTS.md (Phase 1)
 	assert.match(agents, /post-merge cleanup waits for SAVED \(local, outside every cleanup target, with readback\) or a NO LESSON checkpoint/);
 	assert.doesNotMatch(agents, /waits for its SAVED or NO LESSON checkpoint/);
 });

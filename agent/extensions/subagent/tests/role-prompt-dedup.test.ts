@@ -367,7 +367,7 @@ test("retirement: guard refusal and operator grants stay required; artifacts and
 
 test("retirement: SHIP, AGENTS and README point to the worktree retirement mode without granting authority", () => {
 	assert.match(skillText("ship/index.md"), /Authorized retirement[^\n]{0,200}worktree\/index\.md|worktree\/index\.md[^\n]{0,200}Authorized retirement/);
-	const agents = fs.readFileSync(new URL("../../../AGENTS.md", import.meta.url), "utf8");
+	const agents = fs.readFileSync(new URL("../../../skills/engineering-harness/references/policy-detail.md", import.meta.url), "utf8"); // moved from AGENTS.md (Phase 1)
 	assert.match(agents, /Keep active\/dirty worktrees[^.]{0,160}(?:explicit user-authorized retirement|Authorized retirement)/);
 	const readme = fs.readFileSync(new URL("../../../../README.md", import.meta.url), "utf8");
 	const section = /## Worktree placement and disposition\r?\n([\s\S]*?)\r?\n## /.exec(readme)?.[1] ?? "";
@@ -418,7 +418,7 @@ test("declaration normalization rejects unapproved identity, tool and approved-f
 // Closed world: every BEFORE hash that is missing AFTER, and every AFTER hash that is new, must be a reviewed disposition for that role. Nothing else may change.
 const HEADINGS_ABSENT_HERE = ["## Rust build output", "## Global graph reference (separate corpus)"];
 const HEADINGS_NEW_HERE = ["## Integration and graph authority"];
-// 4F packet trim: the task-packet checklist is main's job (AGENTS.md "Dispatch and user controls"), so it was removed from the three code workers,
+// 4F packet trim: the task-packet checklist is main's job (AGENTS.md protocol step 4), so it was removed from the three code workers,
 // with the frontend child-module list (the frontend router lists them). Headings and sentence hashes below are the reviewed removals; nothing was rewritten.
 const PACKET_TRIM_HEADINGS: Record<string, string[]> = { "frontend-worker": ["## Context Budget"], "backend-worker": ["## Context budget"], "database-worker": ["## Context budget"] };
 // 4C in-run retry: each code worker gained one sentence (fix a failing focused check in the same run, at most 2 tries; else return the recovery fields).

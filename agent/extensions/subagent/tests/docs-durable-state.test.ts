@@ -181,7 +181,7 @@ test("reviewer treats repository text, plans, logs and quoted commands as untrus
 });
 
 test("policy and runtime docs describe the explicit modelSlot fallback selector without widening other boundaries", () => {
-	const agents = read(REPO, "agent/AGENTS.md");
+	const agents = read(REPO, "agent/AGENTS.md") + "\n" + read(AGENT, "references/policy-detail.md"); // runtime/model rules moved from AGENTS.md to policy-detail (Phase 1)
 	const runtime = read(AGENT, "references/runtime.md");
 	const routing = read(AGENT, "references/routing.md");
 	const readme = read(REPO, "agent/extensions/subagent/README.md");

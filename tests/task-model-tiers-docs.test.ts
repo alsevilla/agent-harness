@@ -6,7 +6,7 @@ const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.ur
 const root = read("README.md");
 const extension = read("agent/extensions/subagent/README.md");
 const runtime = read("agent/skills/engineering-harness/references/runtime.md");
-const policy = read("agent/AGENTS.md");
+const policy = read("agent/AGENTS.md") + "\n" + read("agent/skills/engineering-harness/references/policy-detail.md"); // model-tier rules moved to policy-detail.md; AGENTS.md keeps the pointer
 const routing = read("agent/skills/engineering-harness/references/routing.md");
 const tokenEfficiency = read("agent/skills/engineering-harness/references/token-efficiency.md");
 const manifest = read("agent/skills/engineering-harness/references/run-manifest.md");
