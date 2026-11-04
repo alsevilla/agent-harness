@@ -45,7 +45,7 @@ test("frontend-worker adds React and TypeScript notes while the SolidJS rules st
   const text = read("frontend-worker");
   assert.match(text, /React[^\n]*TypeScript|TypeScript[^\n]*React/);
   assert.match(text, /SolidJS rules[^\n]*conditional/i);
-  assert.match(text, /## SolidJS-specific implementation/);
+  assert.match(text, /\*\*SolidJS notes:\*\* on a SolidJS project, when/);
 });
 
 test("observability-specialist states NRQL as New Relic's query language, not SQL", () => {
@@ -170,12 +170,19 @@ test("frontend-worker never requires a frontend catalog: every catalog path sits
   }
 });
 
+// Phase 4: the role body uses the shared Knows/loads | Before starting | Workflow | Where to look | Common failures sections.
+test("frontend-worker body uses the five shared role sections in order", () => {
+  const heads = [...read("frontend-worker").matchAll(/^## (.*)$/gm)].map((m) => m[1]);
+  const five = ["Knows/loads", "Before starting", "Workflow", "Where to look", "Common failures"];
+  assert.deepEqual(heads.filter((h) => five.includes(h)), five);
+});
+
 test("frontend-worker scopes SolidJS reactivity rules to SolidJS projects and keeps React semantics task-specific with cleanup and SSR", () => {
   const text = read("frontend-worker");
-  const solidRules = paragraphs(section(text, "SolidJS-specific implementation"))[0];
+  const solidRules = paragraphs(section(text, "Where to look")).find((p) => p.startsWith("**SolidJS notes:**")) ?? "";
   assert.match(solidRules, /SolidJS/);
   assert.match(solidRules, CONDITIONAL);
-  const react = text.slice(text.indexOf("**React and TypeScript notes"), text.indexOf("## SolidJS-specific implementation"));
+  const react = text.slice(text.indexOf("**React and TypeScript notes"), text.indexOf("**SolidJS notes:**"));
   assert.match(react, /cleanup/i);
   assert.match(react, /\bSSR\b|server[- ]render/i);
   assert.match(react, /\bwhen\b[^\n]*\bReact\b/);
