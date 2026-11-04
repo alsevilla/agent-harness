@@ -1,4 +1,4 @@
-# Pi engineering policy
+# Engineering harness policy
 
 User instructions and confirmed project requirements govern the work. Resolve material conflicts from authoritative evidence. Skill references supply procedures; historical catalogs cannot add universal gates or override this policy. Step detail: harness `references/policy-detail.md`; read only the section a step names, when it applies.
 

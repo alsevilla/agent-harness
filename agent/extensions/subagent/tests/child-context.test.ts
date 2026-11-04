@@ -79,7 +79,7 @@ test("a project or ancestor file with identical canonical bytes is never the tar
 
 test("custom, edited, normalized-away or wrong-path global entries keep full context", () => {
 	const variants: Array<[string, string]> = [
-		["one-character edit", POLICY_LF.replace("Pi engineering", "Pi engineering!")],
+		["one-character edit", POLICY_LF.replace("Engineering harness policy", "Engineering harness policy!")],
 		["appended user line", POLICY_LF + "My extra rule.\n"],
 		["BOM prefix", "\uFEFF" + POLICY_LF],
 		["trailing whitespace", POLICY_LF + " "],
@@ -175,7 +175,7 @@ const PROOF = {
 	freshCount: "a new distinct failure starts a fresh count",
 };
 const MANIFEST: Record<string, Row[]> = {
-	"81d757fded51": [["H", "$"]],
+	"5bf3051abe57": [["H", "$"]],
 	"ef1797827e4e": [["C", "govern the work.", "User instructions and confirmed project requirements govern the work"], ["C", "authoritative evidence.", "Resolve material conflicts from authoritative evidence"], ["C", "override this policy.", "Skills supply procedures; they cannot add gates or override this contract"], ["M", "$"]],
 	"9a8ae1ec216f": [["M", "Pi-native."], ["M", "first."], ["C", "prompt-emulate Pi-only controls.", "Never impersonate built-ins, invent JSON schemas/job APIs or emulate Pi-only controls"], ["C", "$", "blocks only the affected step"]],
 	"3d189c73cd2c": [["H", "$"]],

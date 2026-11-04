@@ -200,7 +200,7 @@ async function turn(session: any, requests: string[], text: string) {
 			await turn(session, requests, "after real compaction");
 			const system = requests[requests.length - 1];
 			expect(count(system, OPEN)).toBe(1);
-			expect(count(system, "# Pi engineering policy")).toBe(1);
+			expect(count(system, "# Engineering harness policy")).toBe(1);
 		} finally {
 			cleanup();
 		}
@@ -241,7 +241,7 @@ async function turn(session: any, requests: string[], text: string) {
 			await turn(session, requests, "first");
 			await turn(session, requests, "second");
 			expect(count(requests[1], OPEN)).toBe(1);
-			expect(count(requests[1], "# Pi engineering policy")).toBe(1);
+			expect(count(requests[1], "# Engineering harness policy")).toBe(1);
 		} finally {
 			cleanup();
 		}
@@ -267,7 +267,7 @@ async function turn(session: any, requests: string[], text: string) {
 		try {
 			await turn(session, requests, "first");
 			expect(count(requests[0], OPEN)).toBe(0);
-			expect(count(requests[0], "# Pi engineering policy")).toBe(1);
+			expect(count(requests[0], "# Engineering harness policy")).toBe(1);
 		} finally {
 			cleanup();
 		}
