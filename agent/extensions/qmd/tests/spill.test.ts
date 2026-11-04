@@ -1,9 +1,9 @@
 // Behavior tests for bounded QMD output recovery. Active tools, the QMD process and the Pi API are fakes; the filesystem is in-memory fake or real files under the scratch TEMP. Recovery commands are executed for real (node, and Git Bash when present) and each command's stdout is then decoded/sanitized independently the way SDK 1.5 bash does it; no SDK session, read tool, QMD or model is involved. Counts are controlled synthetic counts, not real cost/quality evidence.
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -71,7 +71,17 @@ function fakeRead(files: Map<string, Buffer>, p: string, offset: number) {
 // ---- recovery of very long lines: the advertised bash command is really executed, one process per chunk ----
 const NODE = process.execPath.replaceAll("\\", "/");
 const GIT_BASH = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "/bin/bash";
-const scratchDir = (name: string) => { const d = path.join(mkdtempSync(path.join(os.tmpdir(), "qmd-rec-")), name); mkdirSync(d, { recursive: true }); return d; };
+// Dedicated fixture root owned by this file: every real-file fixture lives below it, whatever the ambient temp dir is called. TEMP/TMP/TMPDIR point inside it so the producer's own os.tmpdir() spill files stay in it too; both are restored and the root removed afterwards.
+const FIXTURE_ROOT = mkdtempSync(path.join(os.tmpdir(), "qmd-spill-test-"));
+const probeTmp = path.join(FIXTURE_ROOT, "tmp");
+mkdirSync(probeTmp);
+const savedTmpEnv = { TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR };
+process.env.TEMP = process.env.TMP = process.env.TMPDIR = probeTmp;
+after(() => {
+  for (const [k, v] of Object.entries(savedTmpEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  rmSync(FIXTURE_ROOT, { recursive: true, force: true, maxRetries: 3 });
+});
+const scratchDir = (name: string) => { const d = path.join(mkdtempSync(path.join(FIXTURE_ROOT, "qmd-rec-")), name); mkdirSync(d, { recursive: true }); return d; };
 const realDeps = (dir: string) => ({ tmpdir: () => dir, nodePath: () => NODE });
 /** Splits a command into words; supports bare words, single quotes and a backslash-escaped character outside quotes (the `'\''` idiom the notice emits). */
 function shellWords(line: string) {
@@ -371,8 +381,6 @@ test("tmpdir is read per call", async () => {
 });
 
 // ---- producer-shaped wiring: real index.ts + spill.ts copied beside a synthetic config; fake Pi API and fake QMD process ----
-const probeTmp = os.tmpdir();
-assert.ok(probeTmp.includes("harness-usage-qa"), `refusing to run filesystem wiring tests outside the assigned scratch TEMP: ${probeTmp}`);
 const spawns: { args: string[] }[] = [];
 let nextOut: { stdout: string[]; code: number; stderr?: string } = { stdout: [], code: 0 };
 (globalThis as Record<string, unknown>).__qmdFakeSpawn = (_node: string, args: string[]) => {

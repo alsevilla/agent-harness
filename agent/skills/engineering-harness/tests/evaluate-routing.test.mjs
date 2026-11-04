@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as ev from "../scripts/evaluate-routing.mjs";
 
 const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
@@ -85,13 +85,28 @@ function writeTmp(name, content) {
 }
 
 describe("FixtureSpecimenTests", () => {
-	it("thirty_six_unique_cases_with_positive_and_near_miss", () => {
+	it("forty_unique_cases_with_24_positive_and_16_near_miss", () => {
 		const ids = loadFixture().cases.map((c) => c.id);
-		assert.equal(ids.length, 36);
-		assert.equal(new Set(ids).size, 36);
+		assert.equal(ids.length, 40);
+		assert.equal(new Set(ids).size, 40);
 		const kinds = loadFixture().cases.map((c) => c.kind);
 		assert.ok(kinds.filter((k) => k === "near_miss").length >= 3);
-		assert.ok(kinds.filter((k) => k === "positive").length >= 3);
+		assert.equal(kinds.filter((k) => k === "positive").length, 24);
+		assert.equal(kinds.filter((k) => k === "near_miss").length, 16);
+	});
+
+	it("catalog_cases_R37_to_R40_state_all_catalogs_discoverable_and_route_narrowly", () => {
+		const c = Object.fromEntries(loadFixture().cases.map((x) => [x.id, x]));
+		for (const id of ["R37", "R38", "R39", "R40"]) {
+			assert.match(c[id].context, /^Frontend, backend, browser and graphify skill catalogs are all discoverable\./, id);
+		}
+		assert.deepEqual([c.R37.expect.routes, c.R37.expect.roles_required, c.R37.expect.skills_required], [["T1_WORKER"], ["backend-worker"], ["backend"]]);
+		assert.deepEqual(c.R38.expect.skills_required, ["frontend", "frontend/solidjs-engineering"]);
+		assert.deepEqual([c.R39.expect.routes, c.R39.expect.roles_required, c.R39.expect.skills_required], [["T1_WORKER"], ["frontend-worker"], ["frontend"]]);
+		assert.deepEqual([c.R40.expect.routes, c.R40.expect.roles_required], [["DISCOVER_SCOUT_FIRST"], ["scout"]]);
+		assert.ok(!c.R40.expect.skills_forbidden.includes("graphify"), "graph query stays allowed");
+		assert.deepEqual(c.R37.expect.skills_forbidden, ["frontend", "browser", "graphify", "backend/rust-axum-engineering"]);
+		assert.deepEqual(c.R39.expect.skills_forbidden, ["frontend/design-dashboards", "frontend/ui-ux-pro-max", "browser"]);
 	});
 
 	it("main_edits_directly_only_in_labelled_no_usable_dispatch_fallback", () => {
@@ -208,7 +223,7 @@ describe("EvaluatorTests", () => {
 	it("perfect_predictions_pass", () => {
 		const rep = evaluateRows(perfectPredictions(loadFixture()));
 		assert.equal(rep.ok, true);
-		assert.equal(rep.matched, 36);
+		assert.equal(rep.matched, 40);
 		assert.equal(rep.accuracy, 1.0);
 		assert.equal(rep.critical_failures, 0);
 	});
@@ -242,7 +257,7 @@ describe("EvaluatorTests", () => {
 	it("single_critical_miss_not_hidden_by_high_aggregate", () => {
 		const fx = loadFixture();
 		const rep = evaluateRows(setRow(perfectPredictions(fx), "R05", { route: "T1_WORKER", roles: ["backend-worker"] }), fx);
-		assert.equal(rep.matched, 35);
+		assert.equal(rep.matched, 39);
 		assert.ok(rep.accuracy > 0.95);
 		assert.equal(rep.critical_failures, 1);
 		assert.equal(rep.ok, false);
@@ -327,7 +342,7 @@ describe("InputValidationTests", () => {
 	const assertInvalid = (text, label) => rejects(() => ev.parsePredictions(text, ids), label);
 	const textWith = (cid, changes) => { const rows = perfectPredictions(fx); setRow(rows, cid, changes); return toJsonl(rows); };
 
-	it("good_text_parses", () => { assert.equal(Object.keys(ev.parsePredictions(good, ids)).length, 36); });
+	it("good_text_parses", () => { assert.equal(Object.keys(ev.parsePredictions(good, ids)).length, 40); });
 	it("malformed_json_line", () => assertInvalid(good.slice(0, -2) + "\n"));
 	it("missing_case", () => assertInvalid(goodLines.slice(0, -1).join("\n") + "\n"));
 	it("duplicate_case", () => assertInvalid([...goodLines, goodLines[0]].join("\n") + "\n"));
@@ -394,6 +409,9 @@ describe("FixtureValidationTests", () => {
 });
 
 // --- native contract parity: evaluator constants vs the subagent TypeBox/DAG source ---
+const nativeHandoff = await import(pathToFileURL(path.join(SUBAGENT_DIR, "compact-handoff.ts")).href);
+const NATIVE_NOTICE_MIN = nativeHandoff.NOTICE_MIN; // derived value, recomputed from the native source
+const nativeBudgetViolation = (await import(pathToFileURL(path.join(SUBAGENT_DIR, "role-budget.ts")).href)).budgetViolation; // pure native validator
 function tsBlock(src, name) {
 	const m = new RegExp(`const ${name} = Type\\.Object\\(\\{\\n(.*?)^\\}([^\\n]*)`, "ms").exec(src);
 	return { keys: new Set([...m[1].matchAll(/^(?:\t| {4})(\w+):/gm)].map((x) => x[1])), tail: m[2], body: m[1] };
@@ -416,8 +434,18 @@ function nativeDrift(contract = ev.NATIVE) {
 	check("ChainItem keys", chain.keys, new Set(contract.ENTRY_KEYS));
 	check("DagNode keys", dag.keys, new Set(contract.DAG_KEYS));
 	check("SubagentParams keys", root.keys, new Set(contract.ROOT_KEYS));
-	const cleanupBlock = /const CLEANUP = .*?Type\.Null\(\)\]\)\);/s.exec(src);
-	check("CLEANUP schema keys", new Set([...cleanupBlock[0].matchAll(/\b(checkout|branch|base|pr|headSha|mergeCommit|quiescent): Type\./g)].map((x) => x[1])), new Set(contract.CLEANUP_KEYS));
+	const budgetSrc = readText(path.join(SUBAGENT_DIR, "role-budget.ts"));
+	check("role-budget BUDGET_KEYS", new Set([.../const BUDGET_KEYS = \[(.*?)\]/s.exec(budgetSrc)[1].matchAll(/"(\w+)"/g)].map((x) => x[1])), new Set(contract.BUDGET_KEYS));
+	check("root budget schema keys", new Set([.../^\tbudget: Type\.Optional.*?^\t\}, \{ additionalProperties/ms.exec(src)[0].matchAll(/^\t\t(\w+): Type\./gm)].map((x) => x[1])), new Set(contract.BUDGET_KEYS));
+	check("NOTICE_MIN", NATIVE_NOTICE_MIN, contract.NOTICE_MIN);
+	const cleanupBlock = /const CLEANUP = .*?Type\.Null\(\)\]\)\);/s.exec(src)[0];
+	// Every property name of the whole CLEANUP schema (request, lifecycle and both learn variants), not a hardcoded subset: a new native field drifts here.
+	check("CLEANUP schema keys (all levels)", new Set([...cleanupBlock.matchAll(/\b(\w+): (?:Type\.|StringEnum)/g)].map((x) => x[1])), new Set([...contract.CLEANUP_KEYS, ...contract.CLEANUP_OPTIONAL, ...contract.LIFECYCLE_KEYS, ...contract.LIFECYCLE_OPTIONAL, ...contract.LEARN_SAVED_KEYS, ...contract.LEARN_NO_LESSON_KEYS]));
+	check("CLEANUP closed objects", (cleanupBlock.match(/additionalProperties: false/g) ?? []).length, 4); // request, lifecycle, SAVED, NO LESSON
+	check("lifecycle actions", new Set([.../lifecycle: Type\.Optional\(Type\.Object\(\{ action: StringEnum\(\[(.*?)\] as const/s.exec(cleanupBlock)[1].matchAll(/"(\w+)"/g)].map((x) => x[1])), new Set(contract.LIFECYCLE_ACTIONS));
+	check("learn states", new Set([...cleanupBlock.matchAll(/state: Type\.Literal\("([^"]+)"\)/g)].map((x) => x[1])), new Set(contract.LEARN_STATES));
+	check("lifecycle required/optional key sets", [/"(action,learn,version)" : "(action,learn)"/.exec(safety)?.slice(1).join("|")].join(), [[...contract.LIFECYCLE_KEYS, ...contract.LIFECYCLE_OPTIONAL].sort().join(), [...contract.LIFECYCLE_KEYS].sort().join()].join("|"));
+	check("BARE_VERSION", /const BARE_VERSION = \/(.+)\/;/.exec(safety)[1], contract.VERSION.source);
 	check("CLEANUP_REQUEST_KEYS", new Set(/const CLEANUP_REQUEST_KEYS = "([^"]+)"/.exec(safety)[1].split(",")), new Set(contract.CLEANUP_KEYS));
 	check("cleanup role", /LEASE_ROLE = "([^"]+)"/.exec(safety)[1], contract.CLEANUP_ROLE);
 	check("BARE_SHA", /const BARE_SHA = \/(.+)\/;/.exec(safety)[1], contract.SHA.source);
@@ -592,6 +620,9 @@ describe("ModelTierTests", () => {
 			["ENTRY_KEYS", new Set(["not_a_native_field"])], ["DAG_KEYS", new Set(["id"])], ["ROOT_KEYS", new Set(["agent"])],
 			["CLEANUP_KEYS", new Set(["checkout"])], ["CLEANUP_ROLE", "general-worker"], ["SHA", /x/], ["MAX_TASKS", 9],
 			["MAX_DAG_NODES", 9], ["DAG_ID", /x/], ["SCOPES", new Set(["user"])], ["TIERS", new Set(["economy"])], ["SLOTS", new Set()],
+			["BUDGET_KEYS", new Set(["maxTurns"])], ["NOTICE_MIN", 867],
+			["CLEANUP_OPTIONAL", new Set()], ["LIFECYCLE_KEYS", new Set(["action"])], ["LIFECYCLE_OPTIONAL", new Set()], ["LEARN_SAVED_KEYS", new Set(["state"])],
+			["LEARN_NO_LESSON_KEYS", new Set(["state"])], ["LIFECYCLE_ACTIONS", new Set(["merge"])], ["LEARN_STATES", new Set(["SAVED"])], ["VERSION", /x/],
 		];
 		for (const [name, bad] of drifted) assert.ok(nativeDrift({ ...ev.NATIVE, [name]: bad }).length > 0, name);
 		assert.deepEqual(Object.keys(ev.NATIVE).sort(), drifted.map(([n]) => n).sort());
@@ -755,6 +786,110 @@ describe("NativeCallValidationTests", () => {
 			const make = maker(mode);
 			rejected({ [mode]: [make({ agent: "release-engineer" })], cleanup: { ...CLEANUP } }, `batch root ${mode}`);
 			rejected({ [mode]: [make({ agent: "release-engineer", cleanup: { ...CLEANUP } })] }, `per-entry ${mode}`);
+		}
+	});
+
+	const LEARN = { state: "SAVED", record: "C:/p/pi/docs/knowledge/local/h/l.md", index: "C:/p/pi/docs/knowledge/local/h/README.md", recordSha256: "a".repeat(64), indexSha256: "b".repeat(64) };
+	const lifecycleCall = (lifecycle) => cleanupCall({ cleanup: { ...CLEANUP, lifecycle } });
+
+	it("cleanup_lifecycle_accepts_exactly_the_native_shape", () => {
+		for (const lifecycle of [
+			{ action: "merge", learn: { ...LEARN } }, { action: "merge", learn: { state: "NO LESSON", reason: "nothing new" } },
+			{ action: "release", version: "v1.2.3", learn: { ...LEARN } }, { action: "release", version: "1.2.3", learn: { state: "NO LESSON", reason: "" } },
+		]) assert.equal(ev.parseCalls([lifecycleCall(lifecycle)], "calls")[0].agent, "release-engineer", JSON.stringify(lifecycle));
+		assert.equal(ev.parseCalls([cleanupCall()], "calls").length, 1); // legacy: no lifecycle
+	});
+
+	it("cleanup_lifecycle_refuses_missing_unknown_and_mistyped_fields", () => {
+		const ok = { action: "merge", learn: { ...LEARN } };
+		const { learn: _l, ...noLearn } = ok;
+		const { action: _a, ...noAction } = ok;
+		const { recordSha256: _r, ...noHash } = LEARN;
+		const { reason: _x, ...noReason } = { state: "NO LESSON", reason: "r" };
+		for (const [label, bad] of [
+			["null", null], ["list", []], ["string", "merge"], ["empty", {}], ["no learn", noLearn], ["no action", noAction],
+			["unknown key", { ...ok, force: true }], ["merge with version", { ...ok, version: "v1.2.3" }], ["release without version", { action: "release", learn: { ...LEARN } }],
+			["release bad version", { action: "release", version: "v1.2", learn: { ...LEARN } }], ["version number", { action: "release", version: 123, learn: { ...LEARN } }],
+			["bad action", { ...ok, action: "both" }], ["action number", { ...ok, action: 1 }], ["learn null", { ...ok, learn: null }], ["learn string", { ...ok, learn: "SAVED" }],
+			["learn BLOCKED", { ...ok, learn: { state: "BLOCKED", reason: "r" } }], ["learn no state", { ...ok, learn: { reason: "r" } }], ["learn state number", { ...ok, learn: { ...LEARN, state: 1 } }],
+			["saved missing hash", { ...ok, learn: noHash }], ["saved unknown key", { ...ok, learn: { ...LEARN, reason: "r" } }], ["saved record number", { ...ok, learn: { ...LEARN, record: 5 } }],
+			["saved hash null", { ...ok, learn: { ...LEARN, indexSha256: null } }], ["no lesson missing reason", { ...ok, learn: noReason }],
+			["no lesson reason number", { ...ok, learn: { state: "NO LESSON", reason: 7 } }], ["no lesson extra", { ...ok, learn: { state: "NO LESSON", reason: "r", record: "x" } }],
+		]) rejected(lifecycleCall(bad), label);
+		// The root cleanup stays closed and the lifecycle keeps the legacy launch constraints; only its own keys were added.
+		rejected({ ...cleanupCall(), cleanup: { ...CLEANUP, lifecycle: ok, force: true } }, "unknown cleanup key beside lifecycle");
+		rejected(cleanupCall({ agent: "general-worker", cleanup: { ...CLEANUP, lifecycle: ok } }), "other role with lifecycle");
+		rejected((({ cwd: _c, ...rest }) => rest)(lifecycleCall(ok)), "no cwd with lifecycle");
+	});
+
+	it("background_and_notice_limit_accept_native_values_in_every_mode", () => {
+		const limit = ev.NATIVE.NOTICE_MIN;
+		for (const call of [entry(), { tasks: [entry()] }, { chain: [entry()] }, { dag: [node("a")] }].map((c) => (c.task ? { ...c } : c))) {
+			const single = call.task !== undefined;
+			for (const extra of [{ noticeLimit: limit }, { noticeLimit: 100000, background: true }, { noticeLimit: Number.MAX_SAFE_INTEGER }]) {
+				assert.equal(ev.parseCalls([{ ...call, ...extra }], "calls").length, 1, JSON.stringify(extra) + (single ? " single" : " batch"));
+			}
+		}
+	});
+
+	it("notice_limit_refused_when_invalid_or_foreground", () => {
+		const limit = ev.NATIVE.NOTICE_MIN;
+		for (const [label, bad] of [["below min", limit - 1], ["zero", 0], ["negative", -1], ["string", "4000"], ["null", null], ["bool", true], ["object", {}], ["array", [limit]],
+			["unsafe", 2 ** 53], ["float token", 1000.5]]) rejected({ ...entry(), noticeLimit: bad }, label);
+		for (const call of [entry(), { tasks: [entry()] }, { chain: [entry()] }, { dag: [node("a")] }]) rejected({ ...call, noticeLimit: limit, background: false }, "foreground");
+		assert.equal(ev.parseCalls([{ ...entry(), noticeLimit: limit, background: true }], "calls").length, 1);
+	});
+
+	it("notice_limit_json_tokens_are_never_coerced", () => {
+		const parse = (token) => ev.parseCalls(ev.parseJson(`[{"agent":"scout","task":"t","noticeLimit":${token}}]`, "x"), "calls");
+		assert.equal(parse("868").length, 1);
+		for (const token of ["867", "\"4000\"", "99999999999999999999", "1e400", "868.5", "4000.25", "9007199254740992", "9007199254740992.0"]) rejects(() => parse(token), token, /noticeLimit/);
+		for (const token of ["NaN", "Infinity", "-Infinity"]) rejects(() => parse(token), token, /JSON constant/);
+		rejects(() => parse("1e"), "truncated exponent", /malformed JSON/);
+	});
+
+	it("notice_limit_json_value_semantics_equal_the_native_validator", () => {
+		// A token the native validator accepts after JSON.parse (868.0, 1e4, 4000e0) is accepted; none is coerced from a string. Compared per token against the real pure validator.
+		const parse = (token) => ev.parseCalls(ev.parseJson(`[{"agent":"scout","task":"t","noticeLimit":${token}}]`, "x"), "calls");
+		for (const token of ["868", "868.0", "1e4", "4000e0", "4E3", "9007199254740991", "9007199254740991.0", "867", "867.0", "8.68e2", "86.8e1", "868.5", "1e400", "\"4000\"", "true", "null", "[868]", "{}", "9007199254740992", "99999999999999999999", "-868", "-0"]) {
+			const native = nativeHandoff.validateNoticeLimit(JSON.parse(token)).ok;
+			let accepted = true;
+			try { parse(token); } catch (e) { assert.ok(e instanceof ev.RoutingEvalError, token); accepted = false; }
+			assert.equal(accepted, native, `noticeLimit ${token}: native ${native}`);
+		}
+	});
+
+	it("budget_accepted_only_for_single_mode_with_positive_safe_integers", () => {
+		for (const good of [{ maxTurns: 4 }, { contextBudget: 20000 }, { maxTurns: 1, contextBudget: Number.MAX_SAFE_INTEGER }]) {
+			assert.equal(ev.parseCalls([{ ...entry(), budget: good }], "calls").length, 1, JSON.stringify(good));
+		}
+		for (const [label, bad] of [["null", null], ["empty", {}], ["array", []], ["string", "4"], ["unknown key", { maxTurns: 1, maxCost: 2 }], ["zero", { maxTurns: 0 }],
+			["negative", { contextBudget: -5 }], ["string value", { maxTurns: "4" }], ["fraction", { maxTurns: 1.5 }], ["null value", { maxTurns: null }], ["unsafe", { maxTurns: 2 ** 53 }],
+			["bool", { maxTurns: true }]]) rejected({ ...entry(), budget: bad }, label);
+		for (const mode of ["tasks", "chain", "dag"]) {
+			const make = maker(mode);
+			rejected({ [mode]: [make()], budget: { maxTurns: 4 } }, `batch root ${mode}`);
+			rejected({ [mode]: [make()], budget: null }, `batch root null ${mode}`);
+			rejected({ [mode]: [make({ budget: { maxTurns: 4 } })] }, `per-entry ${mode}`);
+		}
+	});
+
+	it("budget_and_notice_limit_json_tokens_keep_integer_semantics", () => {
+		const parse = (token) => ev.parseCalls(ev.parseJson(`[{"agent":"scout","task":"t","budget":{"maxTurns":${token}}}]`, "x"), "calls");
+		assert.equal(parse("4").length, 1);
+		for (const token of ["0", "-1", "99999999999999999999", "4.5", "0.0", "1e400", "9007199254740992", "\"4\"", "1e-1"]) rejects(() => parse(token), token, /maxTurns/);
+		for (const token of ["NaN", "Infinity"]) rejects(() => parse(token), token, /JSON constant/);
+	});
+
+	it("budget_json_value_semantics_equal_the_native_validator", () => {
+		for (const key of ["maxTurns", "contextBudget"]) {
+			const parse = (token) => ev.parseCalls(ev.parseJson(`[{"agent":"scout","task":"t","budget":{"${key}":${token}}}]`, "x"), "calls");
+			for (const token of ["4", "4.0", "4e0", "4E0", "20000.0", "2e4", "9007199254740991", "9007199254740991.0", "0", "0.0", "-1", "-4.0", "4.5", "1e-1", "1e400", "\"4\"", "true", "null", "9007199254740992", "99999999999999999999"]) {
+				const native = nativeBudgetViolation(JSON.parse(`{"${key}":${token}}`), "budget") === null;
+				let accepted = true;
+				try { parse(token); } catch (e) { assert.ok(e instanceof ev.RoutingEvalError, token); accepted = false; }
+				assert.equal(accepted, native, `${key} ${token}: native ${native}`);
+			}
 		}
 	});
 
@@ -1033,8 +1168,14 @@ describe("DispatchLimitTests", () => {
 describe("ReadDiagnosticsTests", () => {
 	const R01 = "agent/skills/backend/SKILL.md";
 	const R21 = "agent/skills/engineering-harness/ship/index.md";
+	const R38_FRONTEND = "agent/skills/frontend/SKILL.md";
+	const R38_SOLID = "agent/skills/frontend/solidjs-engineering/index.md";
+	const R40_DISCOVER = "agent/skills/engineering-harness/discover/index.md";
+	const NEW_READS = { R37: [R01], R38: [R38_FRONTEND, R38_SOLID], R39: [R38_FRONTEND], R40: [R40_DISCOVER] };
+	const ALL_MAPPED = ["R01", "R21", "R37", "R38", "R39", "R40"];
 	const fx = loadFixture();
 	const obs = (events, complete = true) => ({ provenance: "unit-test synthetic trace", complete, events: events.map(([p, s]) => ({ path: p, status: s })) });
+	const newObs = (status = "full") => Object.fromEntries(Object.entries(NEW_READS).map(([id, ps]) => [id, obs(ps.map((p) => [p, status]))]));
 	const runReads = (byCase) => {
 		const rows = perfectPredictions(fx);
 		for (const [cid, value] of Object.entries(byCase)) caseRow(rows, cid).read_observations = value;
@@ -1045,12 +1186,14 @@ describe("ReadDiagnosticsTests", () => {
 		const c = byId(fx);
 		assert.deepEqual(c.R01.expect.required_reads, [R01]);
 		assert.deepEqual(c.R21.expect.required_reads, [R21]);
-		for (const p of [R01, R21]) assert.ok(fs.statSync(path.join(REPO_ROOT, p)).isFile(), p);
+		for (const [id, ps] of Object.entries(NEW_READS)) assert.deepEqual(c[id].expect.required_reads, ps, id);
+		for (const p of [R01, R21, R38_FRONTEND, R38_SOLID, R40_DISCOVER]) assert.ok(fs.statSync(path.join(REPO_ROOT, p)).isFile(), p);
+		assert.deepEqual(fx.cases.filter((x) => x.expect.required_reads).map((x) => x.id), ALL_MAPPED);
 	});
 
 	it("no_observation_is_unknown_not_zero", () => {
 		const d = evaluateRows(perfectPredictions(fx), fx).read_diagnostics;
-		assert.deepEqual([d.mapped_cases, d.measured_cases, d.unknown_cases], [2, 0, ["R01", "R21"]]);
+		assert.deepEqual([d.mapped_cases, d.measured_cases, d.unknown_cases], [6, 0, ALL_MAPPED]);
 		assert.equal(d.recall, null);
 		assert.equal(d.zero_rate, null);
 		assert.equal(d.zero_observed_cases, 0);
@@ -1058,25 +1201,32 @@ describe("ReadDiagnosticsTests", () => {
 
 	it("incomplete_observation_is_unknown_not_zero", () => {
 		const d = runReads({ R01: obs([], false), R21: obs([[R21, "full"]], false) }).read_diagnostics;
-		assert.deepEqual(d.unknown_cases, ["R01", "R21"]);
+		assert.deepEqual(d.unknown_cases, ALL_MAPPED);
 		assert.equal(d.zero_rate, null);
 		assert.equal(d.statuses.full, 1); // events are still tallied, never turned into a rate
 	});
 
 	it("complete_observations_report_recall_and_zero_rate", () => {
-		const d = runReads({ R01: obs([[R01, "full"]]), R21: obs([]) }).read_diagnostics;
-		assert.deepEqual([d.measured_cases, d.required_full, d.required_total], [2, 1, 2]);
-		assert.equal(d.recall, 0.5);
-		assert.deepEqual([d.zero_observed_cases, d.zero_rate], [1, 0.5]);
+		const d = runReads({ R01: obs([[R01, "full"]]), R21: obs([]), ...newObs() }).read_diagnostics;
+		assert.deepEqual([d.measured_cases, d.required_full, d.required_total], [6, 6, 7]);
+		assert.equal(d.recall, 6 / 7);
+		assert.deepEqual([d.zero_observed_cases, d.zero_rate], [1, 1 / 6]);
 		assert.deepEqual(d.unknown_cases, []);
 	});
 
 	it("only_a_full_successful_read_counts_other_statuses_are_distinct", () => {
 		const events = ["partial", "truncated", "failed", "injected", "retained"].map((s) => [R01, s]);
-		const d = runReads({ R01: obs(events), R21: obs([[R21, "full"]]) }).read_diagnostics;
-		assert.deepEqual([d.required_full, d.required_total, d.zero_observed_cases], [1, 2, 1]);
+		const d = runReads({ R01: obs(events), R21: obs([[R21, "full"]]), ...newObs() }).read_diagnostics;
+		assert.deepEqual([d.required_full, d.required_total, d.zero_observed_cases], [6, 7, 1]);
 		for (const s of ["partial", "truncated", "failed", "injected", "retained"]) assert.equal(d.statuses[s], 1, s);
-		assert.equal(d.statuses.full, 1);
+		assert.equal(d.statuses.full, 6);
+	});
+
+	it("multi_path_case_needs_every_required_path_fully_read", () => {
+		const partial = runReads({ R38: obs([[R38_FRONTEND, "full"], [R38_SOLID, "partial"]]) }).read_diagnostics;
+		assert.deepEqual([partial.measured_cases, partial.required_full, partial.required_total, partial.zero_observed_cases], [1, 1, 2, 0]);
+		const none = runReads({ R38: obs([[R38_SOLID, "truncated"]]) }).read_diagnostics;
+		assert.deepEqual([none.required_full, none.zero_observed_cases], [0, 1]);
 	});
 
 	it("paths_match_exactly", () => {
@@ -1086,8 +1236,8 @@ describe("ReadDiagnosticsTests", () => {
 
 	it("diagnostics_never_change_score_ok_or_critical", () => {
 		const base = evaluateRows(perfectPredictions(fx), fx);
-		const zero = runReads({ R01: obs([]), R21: obs([]) });
-		const full = runReads({ R01: obs([[R01, "full"]]), R21: obs([[R21, "full"]]) });
+		const zero = runReads({ R01: obs([]), R21: obs([]), ...newObs("failed") });
+		const full = runReads({ R01: obs([[R01, "full"]]), R21: obs([[R21, "full"]]), ...newObs() });
 		const strip = (rep) => Object.fromEntries(Object.entries(rep).filter(([k]) => k !== "read_diagnostics"));
 		assert.deepEqual(strip(base), strip(zero));
 		assert.deepEqual(strip(base), strip(full));
@@ -1096,7 +1246,7 @@ describe("ReadDiagnosticsTests", () => {
 
 	it("observation_without_a_required_map_is_tallied_only", () => {
 		const d = runReads({ R03: obs([["agent/skills/frontend/SKILL.md", "full"]]) }).read_diagnostics;
-		assert.deepEqual([d.observations, d.mapped_cases, d.statuses.full], [1, 2, 1]);
+		assert.deepEqual([d.observations, d.mapped_cases, d.statuses.full], [1, 6, 1]);
 		assert.equal(d.measured_cases, 0);
 	});
 
@@ -1142,7 +1292,7 @@ describe("CliTests", () => {
 	it("perfect_predictions_exit_zero", () => {
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("pred.jsonl", toJsonl(perfectPredictions(fx))));
 		assert.equal(r.status, 0, r.stderr);
-		assert.ok(r.stdout.includes("matched: 36/36"));
+		assert.ok(r.stdout.includes("matched: 40/40"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 		assert.ok(r.stdout.includes("does NOT prove runtime skill activation"));
 	});
@@ -1193,7 +1343,7 @@ describe("CliTests", () => {
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("crlf.jsonl", raw));
 		assert.equal(r.status, 0, r.stderr);
 		assert.ok(r.stdout.includes("sha256=" + crypto.createHash("sha256").update(raw).digest("hex")));
-		assert.ok(r.stdout.includes("matched: 36/36"));
+		assert.ok(r.stdout.includes("matched: 40/40"));
 	});
 
 	it("utf8_bom_and_invalid_utf8_predictions_exit_two", () => {
@@ -1234,7 +1384,7 @@ describe("CliTests", () => {
 		const r = runCli("--cases", optionalRoleFixture(1), "--self-check");
 		assert.equal(r.status, 0, r.stderr);
 		assert.ok(noTrace(r.stderr));
-		assert.ok(r.stdout.includes("matched: 36/36"));
+		assert.ok(r.stdout.includes("matched: 40/40"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 	});
 

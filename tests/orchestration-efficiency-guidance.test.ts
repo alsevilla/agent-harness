@@ -24,6 +24,13 @@ test("routing decides single versus parallel by independence, size, overhead and
   assert.match(text, /Choosing single is not a bypass/i);
 });
 
+test("routing: each parallel/DAG packet names its own unit id and owned files and says sibling units are not its work", () => {
+  const bullet = compact(routing).split("- ").find((b) => /^Enumerable independent batch/.test(b)) ?? "";
+  assert.match(bullet, /Each item's packet names its own unit id and owned files and states that sibling units are not its work\./);
+  assert.match(bullet, /disjoint ownership/);
+  assert.match(bullet, /parallelism does not downgrade T3\/T4 review or verification/);
+});
+
 test("routing keeps one investigation per unknown bug and recovery continues terminal jobs with a new narrowed same-role packet", () => {
   const routingText = compact(routing);
   assert.match(routingText, /One investigation per unknown bug/);

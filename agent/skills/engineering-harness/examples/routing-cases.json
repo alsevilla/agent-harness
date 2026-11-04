@@ -520,6 +520,66 @@
         "skills_required": [],
         "skills_forbidden": []
       }
+    },
+    {
+      "id": "R37",
+      "kind": "positive",
+      "question": "Add a required tenant_id check to the existing POST /v1/orders handler and its test; the request contract is already accepted.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. Backend service written in Go, not Rust/Axum. Single bounded handler plus its test; no UI, browser or code-graph work is involved.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["backend-worker"],
+        "roles_allowed": ["backend-worker"],
+        "skills_required": ["backend"],
+        "skills_forbidden": ["frontend", "browser", "graphify", "backend/rust-axum-engineering"],
+        "required_reads": ["agent/skills/backend/SKILL.md"]
+      }
+    },
+    {
+      "id": "R38",
+      "kind": "positive",
+      "question": "Move the approved filter selection state of the SolidJS orders table into a shared store, following the accepted design.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. The design is approved and there is no open UX judgment. Localized SolidJS state change; no backend, browser or code-graph work is involved.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["frontend-worker"],
+        "roles_allowed": ["frontend-worker"],
+        "skills_required": ["frontend", "frontend/solidjs-engineering"],
+        "skills_forbidden": ["backend", "browser", "graphify", "frontend/ui-ux-pro-max"],
+        "required_reads": ["agent/skills/frontend/SKILL.md", "agent/skills/frontend/solidjs-engineering/index.md"]
+      }
+    },
+    {
+      "id": "R39",
+      "kind": "near_miss",
+      "question": "Change the heading and button wording on the existing dashboard settings page to the approved copy.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. The page is not SolidJS. Copy-only change: no layout, flow, visual or accessibility judgment, so no dashboard design, UX or browser module is needed.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["frontend-worker"],
+        "roles_allowed": ["frontend-worker"],
+        "skills_required": ["frontend"],
+        "skills_forbidden": ["frontend/design-dashboards", "frontend/ui-ux-pro-max", "browser"],
+        "required_reads": ["agent/skills/frontend/SKILL.md"]
+      }
+    },
+    {
+      "id": "R40",
+      "kind": "near_miss",
+      "question": "Where is the function parseRetryPolicy defined?",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. A code graph is available and a graph query is allowed, but there is no authority to build or update a graph. Location question only; scout answers where, not why.",
+      "critical": false,
+      "expect": {
+        "routes": ["DISCOVER_SCOUT_FIRST"],
+        "roles_required": ["scout"],
+        "roles_allowed": ["scout"],
+        "skills_required": [],
+        "skills_forbidden": ["frontend", "backend", "browser"],
+        "required_reads": ["agent/skills/engineering-harness/discover/index.md"]
+      }
     }
   ]
 }

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import * as path from "node:path";
 
 /** sha256 of the reviewed canonical agent/AGENTS.md after CRLF->LF only (no trim, BOM strip or case folding). A policy edit must update this and the coverage manifest in tests/child-context.test.ts. */
-export const REVIEWED_POLICY_SHA256 = "d3894c3381828f98a24b10636fb40e98af137ade3e452954236c30872ef86318";
+export const REVIEWED_POLICY_SHA256 = "15bbdfce69d28b03e8b69d75d2898664b43777a866509504062725750eb4fbae";
 
 export const COMPACT_LEAF_CONTRACT = `# Pi leaf contract
 

@@ -45,7 +45,8 @@ import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
+import { formatOutcome, type LifecyclePlan } from "./lifecycle.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, derivedDisposal, checkPrBase, claimChildGuard, completeCleanupLifecycle, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -57,6 +58,10 @@ const safetyGrants = createGrantStore();
 const owners = new OwnerTracker();
 // cleanup scope id -> background job id of its launch, so an abort can cancel the live launch (never the reservation of a claimed child).
 const cleanupJobs = new Map<string, string>();
+// Opt-in lifecycle plans by cleanup scope id (memory only: a restart or shutdown drops them, which retains everything). Consumed once by the launch close; the runtime itself removes the artifact folders, never a shell.
+const lifecycles = new Map<string, LifecyclePlan>();
+const lifecycleHandlers: { notify?: (text: string) => void } = {};
+const artifactIds = (id: string) => [`${id}#e`, `${id}#s`];
 
 interface UsageStats {
 	input: number;
@@ -435,7 +440,7 @@ async function runAgentAttempt(
 		owners.begin({ workerId: ownerId, role: agent.source === "user" || agent.source === "package" ? agentName : `untrusted:${agentName}`, cwd: canonicalCwd(cwd ?? defaultCwd), jobId: dispatchDefaults.jobId });
 		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
 		args.push("--extension", guard.entry);
-		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
+		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); for (const a of artifactIds(claimedCleanup)) owners.markClaimed(a); }
 		let wasAborted = false;
 		let budgetMarker = undefined as Extract<BudgetMarker, { event: "exhausted" }> | undefined; // assigned from the stdout closure
 		const childEnvBase: Record<string, string | undefined> = {...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : ""};
@@ -579,6 +584,7 @@ async function runAgentAttempt(
             currentResult.budget = stopMarker ? { state: "exhausted", reason: stopMarker.reason, turns: stopMarker.turns, contextTokens: stopMarker.contextTokens, warn80: warnState(), limits: budget } : { state: "not_exhausted", warn80: warnState(), limits: budget };
             if (stopMarker) { logical?.markExhausted(); currentResult.stopReason = "aborted"; currentResult.errorMessage = `budget_exhausted:${stopMarker.reason}`; cleanExit = false; }
         }
+        if (isFailedResult(currentResult)) cleanExit = false; // exit 0 with an error/length/aborted stop is not a clean close
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, wasAborted ? "aborted" : isFailedResult(currentResult) ? "failed" : "completed", wasAborted ? "Subagent was aborted" : isFailedResult(currentResult) ? getResultOutput(currentResult) : undefined);
         if (wasAborted && dispatchDefaults.jobId) { currentResult.stopReason = "aborted"; currentResult.errorMessage = "Subagent was stopped"; return currentResult; }
 		if (wasAborted) throw new Error("Subagent was aborted");
@@ -633,7 +639,7 @@ async function runAgentAttempt(
         throw error;
     } finally {
         owners.end(ownerId);
-        if (claimedCleanup) { owners.closeClaimed(claimedCleanup, cleanExit); cleanupJobs.delete(claimedCleanup); }
+        if (claimedCleanup) { owners.closeClaimed(claimedCleanup, cleanExit); for (const a of artifactIds(claimedCleanup)) owners.closeClaimed(a, true); cleanupJobs.delete(claimedCleanup); finishLifecycle(claimedCleanup, cleanExit, defaultCwd); }
         release?.(); parentSignal?.removeEventListener("abort", parentAbort);
         if (controlDir) { for (const file of ["control.json", "control.json.next"]) try { fs.unlinkSync(path.join(controlDir, file)); } catch {} try { fs.rmdirSync(controlDir); } catch {} }
         if (tmpPromptPath)
@@ -662,7 +668,8 @@ const CLEANUP = Type.Optional(Type.Union([Type.Object({
 	checkout: Type.String({ description: "Exact absolute forward-slash path of the merged task checkout under worktrees/<repo>/<task>" }),
 	branch: Type.String(), base: Type.String(), pr: Type.Number(), headSha: Type.String({ description: "40-hex PR head the checkout is on" }), mergeCommit: Type.String({ description: "40-hex merge commit of the merged PR" }),
 	quiescent: Type.Boolean({ description: "Main's declaration that no worker, service or process uses the checkout; must be true" }),
-}, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are never removed." }), Type.Null()]));
+	lifecycle: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "The delivery the operator approved with disposal" }), version: Type.Optional(Type.String({ description: "release only: the released tag" })), learn: Type.Union([Type.Object({ state: Type.Literal("SAVED"), record: Type.String(), index: Type.String(), recordSha256: Type.String(), indexSha256: Type.String() }, { additionalProperties: false }), Type.Object({ state: Type.Literal("NO LESSON"), reason: Type.String() }, { additionalProperties: false })], { description: "Knowledge checkpoint: SAVED needs exact local record + index paths under the primary docs/knowledge/local (outside all three targets) with sha256 hashes the runtime re-reads; BLOCKED is refused" }) }, { additionalProperties: false, description: "Only with the operator's explicit disposal approval in this session's merge/release dialog: the runtime also removes exactly _scratch then _evidence of the task after the cleanup child closes cleanly. Absent keeps checkout-only behavior." })),
+}, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are removed only through lifecycle (explicit disposal approval)." }), Type.Null()]));
 
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
@@ -817,9 +824,20 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 	return ok(`Authorized ${LEASE_ROLE} to ${kind} ${target.branch} for this session.`);
 }
 
-interface DeliveryParams { action: "merge" | "release"; branch: string; base: string; pr: number; sha: string; cwd?: string; version?: string; latest?: boolean; artifact_dir?: string; bind?: { exclude?: string[]; expect?: string } }
+interface DeliveryParams { action: "merge" | "release"; branch: string; base: string; pr: number; sha: string; cwd?: string; version?: string; latest?: boolean; artifact_dir?: string; disposal?: { checkout: string; evidence: string; scratch: string }; bind?: { exclude?: string[]; expect?: string } }
 
 // Session-scoped merge OR release approval (never both in one grant), like a push lease: one TUI confirm per new action binding; an identical live binding returns without a dialog; live PR state and the candidate binding are re-verified after the dialog; no time expiry. Push, PR create and PR edit are automatic for the trusted release-engineer and are not carried here.
+// Called at the cleanup child's confirmed close. The plan is single-use; the runtime verifies and removes, then reports. A missing plan (restart, abort) does nothing.
+function finishLifecycle(id: string, cleanExit: boolean, mainCwd: string): void {
+	const plan = lifecycles.get(id);
+	if (!plan) return;
+	lifecycles.delete(id);
+	let text: string;
+	try { text = formatOutcome(completeCleanupLifecycle(plan, { cleanExit, owners, jobRunning: (j) => runtimeJobRunning(j), mainCwd }), plan); } catch (error) { text = `LIFECYCLE RETAINED: completion failed (${(error as Error).message}); targets were not removed by this step.`; }
+	try { lifecycleHandlers.notify?.(text); } catch { /* notification is best effort; the final receipt is the record */ }
+}
+let runtimeJobRunning: (jobId: string) => boolean = () => false;
+
 async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; delivery: DeliveryParams }, ctx: { cwd: string; ui: { confirm(title: string, message: string, options?: { timeout?: number }): Promise<boolean> } }) {
 	const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
 	const d = params.delivery;
@@ -844,9 +862,18 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	}
 	const binding = { role: LEASE_ROLE, candidate: target.candidate, pushUrl: target.pushUrl, repo, branch: target.branch, base: d.base, action: d.action, pr: d.pr, sha: d.sha, version: d.version, latest: d.latest, artifactDir: d.artifact_dir, ...(bound ? { bound } : {}) };
 	let artifactDir: string | undefined;
+	let disposal: DeliveryBinding["disposal"];
 	let superseded: ReturnType<typeof safetyGrants.findSuperseded>;
 	try {
 		artifactDir = d.artifact_dir === undefined ? undefined : validateArtifactDir(d.artifact_dir, target.candidate);
+		if (d.disposal !== undefined) {
+			const want = derivedDisposal(target.candidate);
+			if (!want || d.disposal.checkout !== want.checkout || d.disposal.evidence !== want.evidence || d.disposal.scratch !== want.scratch) throw new RangeError(`disposal must be exactly checkout ${want?.checkout}, evidence ${want?.evidence}, scratch ${want?.scratch}`);
+			validateArtifactDir(want.evidence, target.candidate);
+			validateArtifactDir(want.scratch, target.candidate);
+			disposal = want;
+		}
+		(binding as { disposal?: unknown }).disposal = disposal;
 		const live = safetyGrants.findDelivery(binding);
 		if (live) return { content: [{ type: "text" as const, text: `Already authorized: ${d.action} of PR #${d.pr} at ${d.sha.slice(0, 7)} for ${repo} is live for this PI session; no new dialog.` }], details: {} };
 		superseded = safetyGrants.findSuperseded(binding);
@@ -860,7 +887,8 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	const detail = d.action === "merge"
 		? `Action: MERGE only (squash, --match-head-commit ${d.sha}). Bound candidate state: HEAD ${bound?.head} on ${bound?.ref}; fingerprint ${bound?.fingerprint}; excluded paths: ${bound?.exclude.join(", ") || "none"}${superseded?.bound ? `; replaces bound state ${superseded.bound.head.slice(0, 7)}` : ""}. Refused if the live PR head or the candidate (HEAD, branch, staged, unstaged or untracked files) differs. Ignored files are outside the fingerprint; not race-free. This does not approve any release.`
 		: `Action: RELEASE only: tag ${d.version}${d.latest ? " as latest" : ""} at target ${d.sha} (the merge commit of PR #${d.pr}); refused if the tag already exists. This does not approve any merge.`;
-	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nPush URL: ${target.pushUrl}\n${identity}\n${detail}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\nScope: this PI session (no time expiry). No push, PR create/edit, other tags, force, delete, other refs, npm, deploy or API. Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit.`;
+	const disposalText = disposal === undefined ? "" : `\nDISPOSAL (explicit opt-in, this dialog only): after the delivery is verified live and a Learn checkpoint (SAVED with runtime-verified local record/index hashes, or NO LESSON) exists outside these paths, the runtime may remove EXACTLY:\n  checkout ${disposal.checkout}\n  _scratch ${disposal.scratch}\n  _evidence ${disposal.evidence}\nRemoved only if clean, idle, unlinked, no database/secret files and unchanged since the check; unknown ignored data and anything uncertain is RETAINED; known disposable caches only are ignored. Branches and commits are kept. A receipt is written outside these paths. ${d.action === "merge" ? "After this merge you cannot release from this checkout: choose disposal on the last delivery step." : ""} One use; no replay; restart or /revoke-authorization withdraws it. PR creation never triggers it.`;
+	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nPush URL: ${target.pushUrl}\n${identity}\n${detail}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\n${disposalText}\nScope: this PI session (no time expiry). No push, PR create/edit, other tags, force, other refs, npm, deploy or API; deletion only as the DISPOSAL block above states (none when absent). Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit.`;
 	const approved = await ctx.ui.confirm(d.action === "merge" ? "Authorize PR merge?" : "Authorize release creation?", text, { timeout: 120_000 });
 	if (!approved) return fail("Not authorized by the operator; no delivery grant minted.");
 	let again: ReturnType<typeof pushBranchTarget>;
@@ -892,13 +920,15 @@ export default function (pi: ExtensionAPI) {
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
 	pi.on("agent_settled", (event) => {
 		if (!event.aborted) return;
+		// Plans whose scope never left the parent store are withdrawn with it; a claimed child finishes (cancelled -> unclean -> retained).
+		for (const id of [...lifecycles.keys()]) if (safetyGrants.peekCleanup(id)) lifecycles.delete(id);
 		safetyGrants.revokeAll();
 		for (const jobId of cleanupJobs.values()) { try { runtimeRef?.cancel(jobId); } catch { /* already finished */ } }
 		cleanupJobs.clear();
 		owners.releaseUnclaimed();
 	});
-	pi.on("session_start", () => { cleanupJobs.clear(); owners.clear(); });
-	pi.on("session_shutdown", () => { safetyGrants.revokeAll(true); cleanupJobs.clear(); owners.clear(); });
+	pi.on("session_start", () => { cleanupJobs.clear(); lifecycles.clear(); owners.clear(); });
+	pi.on("session_shutdown", () => { safetyGrants.revokeAll(true); cleanupJobs.clear(); lifecycles.clear(); owners.clear(); });
 	pi.registerCommand("authorization", {
 		description: "Show session authorizations (read-only, secret-free): single-use grant counts, push and push+commit leases, delivery grants and their validity",
 		handler: async (_args, ctx) => {
@@ -925,6 +955,8 @@ export default function (pi: ExtensionAPI) {
     const decisions = new DecisionRelay();
     const runtime = new BackgroundWorkers(pi, monitor, decisions);
     runtimeRef = runtime;
+    runtimeJobRunning = (id) => runtime.jobs.get(id)?.state === "running";
+    lifecycleHandlers.notify = (text) => { void Promise.resolve(pi.sendMessage({ customType: "subagent-lifecycle", content: text, display: true }, { triggerTurn: false, deliverAs: "followUp" })).catch(() => undefined); };
     // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.
     const pendingText = () => { try { return formatCleanupPending(cleanupPending(safetyGrants, owners, (id) => runtime.jobs.get(id)?.state === "running")); } catch { return ""; } };
     runtime.pendingNote = pendingText;
@@ -1105,6 +1137,12 @@ export default function (pi: ExtensionAPI) {
                 const minted = prepareCleanup(params.cleanup, { store: safetyGrants, owners, primary: path.resolve(ctx.cwd, params.cwd), mainCwd: ctx.cwd, jobRunning: (id) => runtime.jobs.get(id)?.state === "running" });
                 if (!minted.ok) return refuse(minted.reason);
                 owners.reserve(minted.grant.candidate, minted.grant.issuedAt + CLEANUP_TTL_MS, minted.grant.id);
+                if (minted.lifecycle) {
+                    lifecycles.set(minted.grant.id, minted.lifecycle);
+                    const [e, s] = artifactIds(minted.grant.id);
+                    owners.reserve(minted.lifecycle.evidence, minted.grant.issuedAt + CLEANUP_TTL_MS, e);
+                    owners.reserve(minted.lifecycle.scratch, minted.grant.issuedAt + CLEANUP_TTL_MS, s);
+                }
                 dispatchDefaults.cleanupId = minted.grant.id;
             } else if (preparedDispatch?.cleanupId) dispatchDefaults.cleanupId = preparedDispatch.cleanupId;
             if (params.background !== false) {
@@ -1363,7 +1401,7 @@ export default function (pi: ExtensionAPI) {
         parameters: Type.Object({
             operations: Type.Optional(Type.Array(Type.Object({ kind: StringEnum(["shell", "write"] as const), value: Type.String({ description: "Exact shell command or file path" }) }), { minItems: 1, maxItems: MAX_GRANT_OPS })),
             push_branch: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch name; protected branches are refused" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), commits: Type.Optional(Type.Boolean({ description: "true also allows normal git commit -m or -F commits on this branch (policy-enforced only for release-engineer children)" })), artifact_dir: Type.Optional(Type.String({ description: "With commits true: absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding the -F message file" })) }, { description: "Exclusive with operations: one session release-engineer PR-branch push lease" })),
-            delivery: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "One action per grant: merge or release; separate approvals" }), branch: Type.String({ description: "Feature branch of the PR" }), base: Type.String({ description: "PR base branch, e.g. main" }), pr: Type.Number({ minimum: 1, description: "Exact PR number" }), sha: Type.String({ description: "40-hex SHA. merge: the reviewed PR head (must equal the candidate HEAD). release: the release target = merge commit of the PR" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), version: Type.Optional(Type.String({ description: "release only: approved tag, e.g. v1.2.3 (must not exist yet)" })), latest: Type.Optional(Type.Boolean({ description: "release only: approve --latest" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })), bind: Type.Optional(Type.Object({ exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 8, description: "Relative untracked output folders left out of the fingerprint; never tracked paths" })), expect: Type.Optional(Type.String({ description: "64-hex candidate fingerprint of the reviewed candidate; mint refused if the live state differs" })) }, { description: "merge only and mandatory (expect required): binds the grant to the candidate HEAD (= sha) and fingerprint verified at approval. Not allowed for release. Not race-free" })) }, { description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer merge OR release approval (no time expiry); legacy combined grants are rejected" })),
+            delivery: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "One action per grant: merge or release; separate approvals" }), branch: Type.String({ description: "Feature branch of the PR" }), base: Type.String({ description: "PR base branch, e.g. main" }), pr: Type.Number({ minimum: 1, description: "Exact PR number" }), sha: Type.String({ description: "40-hex SHA. merge: the reviewed PR head (must equal the candidate HEAD). release: the release target = merge commit of the PR" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), version: Type.Optional(Type.String({ description: "release only: approved tag, e.g. v1.2.3 (must not exist yet)" })), latest: Type.Optional(Type.Boolean({ description: "release only: approve --latest" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })), disposal: Type.Optional(Type.Object({ checkout: Type.String(), evidence: Type.String(), scratch: Type.String() }, { additionalProperties: false, description: "Optional explicit opt-in shown in this dialog: exactly the task checkout and its _evidence/<task> and _scratch/<task> (derived from the candidate; any other path is refused) may be disposed of after verified delivery and a Learn checkpoint. Absent grants nothing of the kind" })), bind: Type.Optional(Type.Object({ exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 8, description: "Relative untracked output folders left out of the fingerprint; never tracked paths" })), expect: Type.Optional(Type.String({ description: "64-hex candidate fingerprint of the reviewed candidate; mint refused if the live state differs" })) }, { description: "merge only and mandatory (expect required): binds the grant to the candidate HEAD (= sha) and fingerprint verified at approval. Not allowed for release. Not race-free" })) }, { description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer merge OR release approval (no time expiry); legacy combined grants are rejected" })),
             role: Type.Optional(Type.String({ description: "Child role the grant binds to; omit for main" })),
             ttl_minutes: Type.Optional(Type.Number({ minimum: 1, maximum: GRANT_TTL_MAX_MS / 60_000, description: "Default 30; rejected for push_branch and delivery (delivery is session-scoped; TTL unsupported)" })),
         }),

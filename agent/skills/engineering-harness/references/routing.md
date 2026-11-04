@@ -99,7 +99,7 @@ Scenarios:
 
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.
-- Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.
+- Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. Each item's packet names its own unit id and owned files and states that sibling units are not its work. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.
 - Ordered pipeline (stages known in advance, each needing the parent's actual result): use chain or DAG dependencies. Never parallelize dependent facts.
 - Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `debugger` first. No automatic self-looping helpers, new modes or unbounded retries.
 
