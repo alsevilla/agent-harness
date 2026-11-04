@@ -27,6 +27,32 @@ once in its description:
 
 🤖 Generated with [Pi](https://pi.dev), co-authored with [Codex](https://openai.com/codex) and [Claude](https://claude.ai)
 
+## Writing commits and pull requests
+Write for a reviewer who has not seen the task. Use plain words and short
+sentences, name files and commands in backticks, and say what changed and why
+before how. Leave out job IDs, full hashes, attempt history and raw logs; the
+REPORT or evidence file keeps those.
+
+Commit message: an imperative subject of at most 72 characters that names the
+change, not the activity ("Trim task-packet checklists from workers", not
+"Update agents"). In the body, give the reason first, then the change. Say
+plainly what deliberately stays the same when a reviewer would worry about it
+("The retry cap is unchanged."). The attribution block above stays last.
+
+Pull request description, in this order:
+1. One opening sentence with the outcome and where it comes from.
+2. `## Changes`: a table with one row per commit (short SHA, area, the change in
+   one or two sentences). A one-commit PR may use a short paragraph instead.
+3. A before/after table only when the effect is measurable (sizes, counts,
+   timings).
+4. `## Review notes`: one bullet per point that needs a decision, each starting
+   with a short bold lead. Cover any relaxed or changed rule, any check that could
+   not run and how the gap was covered, and anything deliberately left out with
+   the follow-up it needs. Skip the section when there is nothing to flag.
+5. `## Tests`: what actually ran, compared with the base, and why any remaining
+   failures are not caused by this change. Never claim a check that did not run.
+6. The attribution footer above, last.
+
 These attribution instructions do not authorize commits, pushing, publishing,
 messages, or pull requests by themselves. Explicit user instructions govern any
 requested exception. Pi has no built-in Claude-style attribution setting; these
