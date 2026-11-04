@@ -50,6 +50,10 @@ interface SpawnPlan {
 	events?: Event[];
 	exitCode?: number;
 	hang?: boolean;
+	epipe?: boolean;
+	stderr?: string;
+	ignoreTerm?: boolean;
+	onKill?: (signal: string) => void;
 	afterSpawn?: () => void;
 }
 interface Usage {
@@ -266,6 +270,62 @@ test("an external abort during a fallback rejects and launches no further fallba
 	spawnPlan = (model) => (model === LUNA ? { events: [], hang: true, afterSpawn: () => controller.abort() } : unavailable());
 	await assert.rejects(run(fx.nested, discover(fx.nested), "abortMid", controller.signal), /Subagent was aborted/);
 	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+});
+
+test("a user stop sends SIGTERM at once and SIGKILL after the 5 s grace to a child that ignores SIGTERM", { timeout: 15000 }, async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "stubborn", { model: PRIMARY });
+	const controller = new AbortController();
+	const kills: Array<[string, number]> = [];
+	let stoppedAt = 0;
+	spawnPlan = () => ({ events: [], hang: true, ignoreTerm: true, onKill: (signal) => kills.push([signal, Date.now() - stoppedAt]), afterSpawn: () => { stoppedAt = Date.now(); controller.abort(); } });
+	await assert.rejects(run(fx.nested, discover(fx.nested), "stubborn", controller.signal), /Subagent was aborted/);
+	assert.deepEqual(kills.map(([signal]) => signal), ["SIGTERM", "SIGKILL"]);
+	assert.ok(kills[0][1] < 1500, `SIGTERM came ${kills[0][1]} ms after the stop`);
+	assert.ok(kills[1][1] >= 4500 && kills[1][1] < 7000, `SIGKILL came ${kills[1][1]} ms after the stop`); // scheduling tolerance, not a real-time guarantee
+	assert.deepEqual(attempts, [PRIMARY]);
+});
+
+test("a child that exits before reading the prompt (prompt write EPIPE) is a bounded failed result with no fallback replay", { timeout: 10000 }, async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "earlyExit", { model: PRIMARY, fallbackModel: `"${LUNA}"` });
+	spawnPlan = () => ({ epipe: true, exitCode: 1, stderr: "Failed to load extension: boom\n" });
+	const result: any = await run(fx.nested, discover(fx.nested), "earlyExit");
+	assert.deepEqual(attempts, [PRIMARY]);
+	assert.equal(result.exitCode, 1);
+	assert.equal(result.stopReason, "error");
+	assert.match(result.errorMessage, /EPIPE/);
+	assert.equal(result.messages.length, 0);
+	assert.match(result.stderr, /Failed to load extension/);
+});
+
+// Generic abort handling at pause boundaries: an aborted run must settle instead of staying held until resume or process kill.
+test("pause gate releases an aborted run at every hold boundary but keeps non-aborted holds", { timeout: 10000 }, async () => {
+	const settles = (promise: Promise<unknown>, ms: number) => Promise.race([promise.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), ms))]);
+	const dir = fs.mkdtempSync(path.join(process.env.TEMP ?? os.tmpdir(), "pause-gate-"));
+	const control = path.join(dir, "control.json");
+	fs.writeFileSync(control, "1");
+	const handlers = new Map<string, (event: unknown, ctx: { signal: AbortSignal }) => Promise<void>>();
+	process.env.PI_SUBAGENT_CONTROL_FILE = control;
+	(((await import(new URL("../pause-gate.ts", import.meta.url).href)).default) as (p: unknown) => void)({ on: (name: string, fn: any) => handlers.set(name, fn) });
+	delete process.env.PI_SUBAGENT_CONTROL_FILE;
+	try {
+		for (const name of ["before_provider_request", "tool_call", "agent_before_settle", "before_agent_start"]) {
+			assert.equal(await settles(handlers.get(name)!({}, { signal: AbortSignal.abort() }), 1000), true, `${name} aborted`);
+		}
+		const held = handlers.get("before_provider_request")!({}, { signal: new AbortController().signal });
+		assert.equal(await settles(held, 300), false, "non-aborted hold stays held");
+		const controller = new AbortController();
+		const midHold = handlers.get("tool_call")!({}, { signal: controller.signal });
+		controller.abort(); // abort arrives while paused
+		assert.equal(await settles(midHold, 1000), true, "abort while held releases");
+		fs.writeFileSync(control, "0");
+		assert.equal(await settles(held, 1000), true, "resume releases the held boundary");
+	} finally {
+		fs.writeFileSync(control, "0"); // a failing run must not leave hold loops alive
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("an anthropic fallback without the subscription guard fails loudly instead of launching", async () => {

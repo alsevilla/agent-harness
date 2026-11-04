@@ -66,13 +66,10 @@ export class RpcWorker {
 // Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text or prompts; a named agent role is kept only as its agent name). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
 export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number }
 export interface UsageSlice extends UsageTotals { completed: number; failed: number; aborted: number }
-// Opt-in role-budget counts of settled logical jobs (numeric only). eligible = had an effective budget; exhausted = stopped at a budget limit; measurable = exhausted, or ran to completion with every configured limit observable (a context limit needs the completing attempt's latest child observation to be an available anchored SDK estimate); unknown = eligible and neither.
-export interface BudgetCounts { eligible: number; measurable: number; unknown: number; exhausted: number }
-const zeroBudget = (): BudgetCounts => ({ eligible: 0, measurable: 0, unknown: 0, exhausted: 0 });
-export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; budget?: BudgetCounts; roles?: Record<string, UsageSlice> }
+export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; roles?: Record<string, UsageSlice> }
 const zeroTotals = (): UsageTotals => ({ attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0 });
 const zeroSlice = (): UsageSlice => ({ ...zeroTotals(), completed: 0, failed: 0, aborted: 0 });
-export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), budget: zeroBudget(), roles: {} });
+export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), roles: {} });
 // Own-key insert: a role named __proto__ or constructor stays data on this map, never a prototype write.
 function roleSlice(scope: UsageScope, role: string): UsageSlice {
   const roles = (scope.roles ??= {});
@@ -85,17 +82,7 @@ export class LogicalUsage {
   private scope: UsageScope; private slice: "foreground" | "background";
   private role?: string;
   constructor(scope: UsageScope, background: boolean, role?: string) { this.scope = scope; this.slice = background ? "background" : "foreground"; this.role = role || undefined; scope.running++; }
-  private budget?: { contextCap: boolean; warned: boolean; observed: boolean; exhausted: boolean };
-  // A new physical attempt starts with no context observation: an earlier attempt's estimate is never proof for this child's context.
-  attempt() { if (this.open) { this.totals.attempts++; if (this.budget) this.budget.observed = false; } }
-  // Role budget, logical-job scoped so fallback attempts never reset the turn count or the warning-sent state.
-  enableBudget(contextCap: boolean) { this.budget ??= { contextCap, warned: false, observed: false, exhausted: false }; }
-  get turns() { return this.totals.turns; }
-  get budgetWarned() { return this.budget?.warned ?? false; }
-  noteWarned() { if (this.open && this.budget) this.budget.warned = true; }
-  // The child's latest reported observation of its current context: an available anchored SDK estimate (true) or unknown, e.g. after compaction (false).
-  noteContext(known: boolean) { if (this.open && this.budget) this.budget.observed = known; }
-  markExhausted() { if (this.open && this.budget) this.budget.exhausted = true; }
+  attempt() { if (this.open) this.totals.attempts++; }
   turn(usage: any) {
     if (!this.open) return;
     const t = this.totals; t.turns++;
@@ -115,13 +102,6 @@ export class LogicalUsage {
     const add = (dst: UsageSlice) => { for (const key of Object.keys(t) as (keyof UsageTotals)[]) dst[key] += t[key]; dst[status]++; };
     add(this.scope[this.slice]);
     if (this.role) add(roleSlice(this.scope, this.role));
-    const b = this.budget;
-    if (b) {
-      const c = (this.scope.budget ??= zeroBudget()); c.eligible++;
-      if (b.exhausted) { c.exhausted++; c.measurable++; } // known turn- or context-caused exhaustion stays known
-      else if (status === "completed" && (!b.contextCap || b.observed)) c.measurable++;
-      else c.unknown++; // failed/aborted without exhaustion, or a context cap whose completing attempt has no known latest observation: never counted as a known non-exhaustion
-    }
   }
 }
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -157,11 +137,6 @@ export function formatUsageSummary(scope: UsageScope): string {
   if (scope.running > 0) lines.push(`Pending: ${plural(scope.running, "agent task")} incl. queued, excluded until settled`);
   const roles = Object.entries(scope.roles ?? {}).filter(([, s]) => s.completed + s.failed + s.aborted > 0).sort(([a, x], [b, y]) => tokenTotal(y) - tokenTotal(x) || a.localeCompare(b));
   if (roles.length) lines.push("By role (foreground + background, most tokens first):", ...roles.map(([name, s]) => roleLine(name, s)));
-  const b = scope.budget;
-  if (b && b.eligible > 0) {
-    const rate = b.measurable > 0 ? `${((b.exhausted / b.measurable) * 100).toFixed(1)}% of measurable (${b.exhausted}/${b.measurable})${b.exhausted * 20 > b.measurable ? "; above the 5% informational flag" : ""}` : "n/a (no measurable job)";
-    lines.push(`Role budgets (opt-in; settled logical jobs this run): ${b.eligible} eligible, ${b.measurable} measurable, ${b.unknown} unknown, ${b.exhausted} exhausted; exhaustion rate ${rate}.`, "  Descriptive counts only: unknown jobs (failed or aborted without exhaustion, or a context limit with no known latest observation of the completing attempt) are not non-exhaustions; no sample-size or confidence claim; not a tuning or default rule.", "  Context coverage is the latest observation of the completing attempt (an anchored SDK estimate), not full historical coverage of every request; an earlier attempt or earlier turns never stand in for it.");
-  }
   return lines.join("\n");
 }
 

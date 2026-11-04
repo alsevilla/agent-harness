@@ -411,7 +411,6 @@ describe("FixtureValidationTests", () => {
 // --- native contract parity: evaluator constants vs the subagent TypeBox/DAG source ---
 const nativeHandoff = await import(pathToFileURL(path.join(SUBAGENT_DIR, "compact-handoff.ts")).href);
 const NATIVE_NOTICE_MIN = nativeHandoff.NOTICE_MIN; // derived value, recomputed from the native source
-const nativeBudgetViolation = (await import(pathToFileURL(path.join(SUBAGENT_DIR, "role-budget.ts")).href)).budgetViolation; // pure native validator
 function tsBlock(src, name) {
 	const m = new RegExp(`const ${name} = Type\\.Object\\(\\{\\n(.*?)^\\}([^\\n]*)`, "ms").exec(src);
 	return { keys: new Set([...m[1].matchAll(/^(?:\t| {4})(\w+):/gm)].map((x) => x[1])), tail: m[2], body: m[1] };
@@ -434,18 +433,10 @@ function nativeDrift(contract = ev.NATIVE) {
 	check("ChainItem keys", chain.keys, new Set(contract.ENTRY_KEYS));
 	check("DagNode keys", dag.keys, new Set(contract.DAG_KEYS));
 	check("SubagentParams keys", root.keys, new Set(contract.ROOT_KEYS));
-	const budgetSrc = readText(path.join(SUBAGENT_DIR, "role-budget.ts"));
-	check("role-budget BUDGET_KEYS", new Set([.../const BUDGET_KEYS = \[(.*?)\]/s.exec(budgetSrc)[1].matchAll(/"(\w+)"/g)].map((x) => x[1])), new Set(contract.BUDGET_KEYS));
-	check("root budget schema keys", new Set([.../^\tbudget: Type\.Optional.*?^\t\}, \{ additionalProperties/ms.exec(src)[0].matchAll(/^\t\t(\w+): Type\./gm)].map((x) => x[1])), new Set(contract.BUDGET_KEYS));
 	check("NOTICE_MIN", NATIVE_NOTICE_MIN, contract.NOTICE_MIN);
 	const cleanupBlock = /const CLEANUP = .*?Type\.Null\(\)\]\)\);/s.exec(src)[0];
-	// Every property name of the whole CLEANUP schema (request, lifecycle and both learn variants), not a hardcoded subset: a new native field drifts here.
-	check("CLEANUP schema keys (all levels)", new Set([...cleanupBlock.matchAll(/\b(\w+): (?:Type\.|StringEnum)/g)].map((x) => x[1])), new Set([...contract.CLEANUP_KEYS, ...contract.CLEANUP_OPTIONAL, ...contract.LIFECYCLE_KEYS, ...contract.LIFECYCLE_OPTIONAL, ...contract.LEARN_SAVED_KEYS, ...contract.LEARN_NO_LESSON_KEYS]));
-	check("CLEANUP closed objects", (cleanupBlock.match(/additionalProperties: false/g) ?? []).length, 4); // request, lifecycle, SAVED, NO LESSON
-	check("lifecycle actions", new Set([.../lifecycle: Type\.Optional\(Type\.Object\(\{ action: StringEnum\(\[(.*?)\] as const/s.exec(cleanupBlock)[1].matchAll(/"(\w+)"/g)].map((x) => x[1])), new Set(contract.LIFECYCLE_ACTIONS));
-	check("learn states", new Set([...cleanupBlock.matchAll(/state: Type\.Literal\("([^"]+)"\)/g)].map((x) => x[1])), new Set(contract.LEARN_STATES));
-	check("lifecycle required/optional key sets", [/"(action,learn,version)" : "(action,learn)"/.exec(safety)?.slice(1).join("|")].join(), [[...contract.LIFECYCLE_KEYS, ...contract.LIFECYCLE_OPTIONAL].sort().join(), [...contract.LIFECYCLE_KEYS].sort().join()].join("|"));
-	check("BARE_VERSION", /const BARE_VERSION = \/(.+)\/;/.exec(safety)[1], contract.VERSION.source);
+	check("CLEANUP schema keys (all levels)", new Set([...cleanupBlock.matchAll(/\b(\w+): (?:Type\.|StringEnum)/g)].map((x) => x[1])), new Set(contract.CLEANUP_KEYS));
+	check("CLEANUP closed objects", (cleanupBlock.match(/additionalProperties: false/g) ?? []).length, 1);
 	check("CLEANUP_REQUEST_KEYS", new Set(/const CLEANUP_REQUEST_KEYS = "([^"]+)"/.exec(safety)[1].split(",")), new Set(contract.CLEANUP_KEYS));
 	check("cleanup role", /LEASE_ROLE = "([^"]+)"/.exec(safety)[1], contract.CLEANUP_ROLE);
 	check("BARE_SHA", /const BARE_SHA = \/(.+)\/;/.exec(safety)[1], contract.SHA.source);
@@ -620,9 +611,7 @@ describe("ModelTierTests", () => {
 			["ENTRY_KEYS", new Set(["not_a_native_field"])], ["DAG_KEYS", new Set(["id"])], ["ROOT_KEYS", new Set(["agent"])],
 			["CLEANUP_KEYS", new Set(["checkout"])], ["CLEANUP_ROLE", "general-worker"], ["SHA", /x/], ["MAX_TASKS", 9],
 			["MAX_DAG_NODES", 9], ["DAG_ID", /x/], ["SCOPES", new Set(["user"])], ["TIERS", new Set(["economy"])], ["SLOTS", new Set()],
-			["BUDGET_KEYS", new Set(["maxTurns"])], ["NOTICE_MIN", 867],
-			["CLEANUP_OPTIONAL", new Set()], ["LIFECYCLE_KEYS", new Set(["action"])], ["LIFECYCLE_OPTIONAL", new Set()], ["LEARN_SAVED_KEYS", new Set(["state"])],
-			["LEARN_NO_LESSON_KEYS", new Set(["state"])], ["LIFECYCLE_ACTIONS", new Set(["merge"])], ["LEARN_STATES", new Set(["SAVED"])], ["VERSION", /x/],
+			["NOTICE_MIN", 867],
 		];
 		for (const [name, bad] of drifted) assert.ok(nativeDrift({ ...ev.NATIVE, [name]: bad }).length > 0, name);
 		assert.deepEqual(Object.keys(ev.NATIVE).sort(), drifted.map(([n]) => n).sort());
@@ -789,37 +778,10 @@ describe("NativeCallValidationTests", () => {
 		}
 	});
 
-	const LEARN = { state: "SAVED", record: "C:/p/pi/docs/knowledge/local/h/l.md", index: "C:/p/pi/docs/knowledge/local/h/README.md", recordSha256: "a".repeat(64), indexSha256: "b".repeat(64) };
-	const lifecycleCall = (lifecycle) => cleanupCall({ cleanup: { ...CLEANUP, lifecycle } });
-
-	it("cleanup_lifecycle_accepts_exactly_the_native_shape", () => {
-		for (const lifecycle of [
-			{ action: "merge", learn: { ...LEARN } }, { action: "merge", learn: { state: "NO LESSON", reason: "nothing new" } },
-			{ action: "release", version: "v1.2.3", learn: { ...LEARN } }, { action: "release", version: "1.2.3", learn: { state: "NO LESSON", reason: "" } },
-		]) assert.equal(ev.parseCalls([lifecycleCall(lifecycle)], "calls")[0].agent, "release-engineer", JSON.stringify(lifecycle));
-		assert.equal(ev.parseCalls([cleanupCall()], "calls").length, 1); // legacy: no lifecycle
-	});
-
-	it("cleanup_lifecycle_refuses_missing_unknown_and_mistyped_fields", () => {
-		const ok = { action: "merge", learn: { ...LEARN } };
-		const { learn: _l, ...noLearn } = ok;
-		const { action: _a, ...noAction } = ok;
-		const { recordSha256: _r, ...noHash } = LEARN;
-		const { reason: _x, ...noReason } = { state: "NO LESSON", reason: "r" };
-		for (const [label, bad] of [
-			["null", null], ["list", []], ["string", "merge"], ["empty", {}], ["no learn", noLearn], ["no action", noAction],
-			["unknown key", { ...ok, force: true }], ["merge with version", { ...ok, version: "v1.2.3" }], ["release without version", { action: "release", learn: { ...LEARN } }],
-			["release bad version", { action: "release", version: "v1.2", learn: { ...LEARN } }], ["version number", { action: "release", version: 123, learn: { ...LEARN } }],
-			["bad action", { ...ok, action: "both" }], ["action number", { ...ok, action: 1 }], ["learn null", { ...ok, learn: null }], ["learn string", { ...ok, learn: "SAVED" }],
-			["learn BLOCKED", { ...ok, learn: { state: "BLOCKED", reason: "r" } }], ["learn no state", { ...ok, learn: { reason: "r" } }], ["learn state number", { ...ok, learn: { ...LEARN, state: 1 } }],
-			["saved missing hash", { ...ok, learn: noHash }], ["saved unknown key", { ...ok, learn: { ...LEARN, reason: "r" } }], ["saved record number", { ...ok, learn: { ...LEARN, record: 5 } }],
-			["saved hash null", { ...ok, learn: { ...LEARN, indexSha256: null } }], ["no lesson missing reason", { ...ok, learn: noReason }],
-			["no lesson reason number", { ...ok, learn: { state: "NO LESSON", reason: 7 } }], ["no lesson extra", { ...ok, learn: { state: "NO LESSON", reason: "r", record: "x" } }],
-		]) rejected(lifecycleCall(bad), label);
-		// The root cleanup stays closed and the lifecycle keeps the legacy launch constraints; only its own keys were added.
-		rejected({ ...cleanupCall(), cleanup: { ...CLEANUP, lifecycle: ok, force: true } }, "unknown cleanup key beside lifecycle");
-		rejected(cleanupCall({ agent: "general-worker", cleanup: { ...CLEANUP, lifecycle: ok } }), "other role with lifecycle");
-		rejected((({ cwd: _c, ...rest }) => rest)(lifecycleCall(ok)), "no cwd with lifecycle");
+	it("cleanup_lifecycle_is_a_retired_unknown_key", () => {
+		const retired = { action: "merge", learn: { state: "NO LESSON", reason: "r" } };
+		rejected(cleanupCall({ cleanup: { ...CLEANUP, lifecycle: retired } }), "retired lifecycle");
+		assert.equal(ev.parseCalls([cleanupCall()], "calls").length, 1);
 	});
 
 	it("background_and_notice_limit_accept_native_values_in_every_mode", () => {
@@ -859,37 +821,12 @@ describe("NativeCallValidationTests", () => {
 		}
 	});
 
-	it("budget_accepted_only_for_single_mode_with_positive_safe_integers", () => {
-		for (const good of [{ maxTurns: 4 }, { contextBudget: 20000 }, { maxTurns: 1, contextBudget: Number.MAX_SAFE_INTEGER }]) {
-			assert.equal(ev.parseCalls([{ ...entry(), budget: good }], "calls").length, 1, JSON.stringify(good));
-		}
-		for (const [label, bad] of [["null", null], ["empty", {}], ["array", []], ["string", "4"], ["unknown key", { maxTurns: 1, maxCost: 2 }], ["zero", { maxTurns: 0 }],
-			["negative", { contextBudget: -5 }], ["string value", { maxTurns: "4" }], ["fraction", { maxTurns: 1.5 }], ["null value", { maxTurns: null }], ["unsafe", { maxTurns: 2 ** 53 }],
-			["bool", { maxTurns: true }]]) rejected({ ...entry(), budget: bad }, label);
+	it("retired_budget_field_is_rejected_in_every_call_shape", () => {
+		for (const bad of [{ maxTurns: 4 }, null, {}]) rejected({ ...entry(), budget: bad }, `single ${JSON.stringify(bad)}`);
 		for (const mode of ["tasks", "chain", "dag"]) {
 			const make = maker(mode);
 			rejected({ [mode]: [make()], budget: { maxTurns: 4 } }, `batch root ${mode}`);
-			rejected({ [mode]: [make()], budget: null }, `batch root null ${mode}`);
 			rejected({ [mode]: [make({ budget: { maxTurns: 4 } })] }, `per-entry ${mode}`);
-		}
-	});
-
-	it("budget_and_notice_limit_json_tokens_keep_integer_semantics", () => {
-		const parse = (token) => ev.parseCalls(ev.parseJson(`[{"agent":"scout","task":"t","budget":{"maxTurns":${token}}}]`, "x"), "calls");
-		assert.equal(parse("4").length, 1);
-		for (const token of ["0", "-1", "99999999999999999999", "4.5", "0.0", "1e400", "9007199254740992", "\"4\"", "1e-1"]) rejects(() => parse(token), token, /maxTurns/);
-		for (const token of ["NaN", "Infinity"]) rejects(() => parse(token), token, /JSON constant/);
-	});
-
-	it("budget_json_value_semantics_equal_the_native_validator", () => {
-		for (const key of ["maxTurns", "contextBudget"]) {
-			const parse = (token) => ev.parseCalls(ev.parseJson(`[{"agent":"scout","task":"t","budget":{"${key}":${token}}}]`, "x"), "calls");
-			for (const token of ["4", "4.0", "4e0", "4E0", "20000.0", "2e4", "9007199254740991", "9007199254740991.0", "0", "0.0", "-1", "-4.0", "4.5", "1e-1", "1e400", "\"4\"", "true", "null", "9007199254740992", "99999999999999999999"]) {
-				const native = nativeBudgetViolation(JSON.parse(`{"${key}":${token}}`), "budget") === null;
-				let accepted = true;
-				try { parse(token); } catch (e) { assert.ok(e instanceof ev.RoutingEvalError, token); accepted = false; }
-				assert.equal(accepted, native, `${key} ${token}: native ${native}`);
-			}
 		}
 	});
 

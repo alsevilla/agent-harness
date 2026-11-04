@@ -12,8 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { BackgroundWorkers, formatUsageSummary, LogicalUsage, newUsageScope, RpcWorker, type UsageScope } from "./background.ts";
-import { applyBudgetEnv, normalizeBudget, parseMarker, type BudgetMarker, type BudgetResult, type RoleBudget } from "./role-budget.ts";
+import { BackgroundWorkers, formatUsageSummary, LogicalUsage, RpcWorker, type UsageScope } from "./background.ts";
 import { WorkerMonitor } from "./monitor.ts";
 import { acquireWorkspace, releaseWorkspace, WorkspaceAdmissionError, type WorkspaceAccess, type WorkspaceLease } from "./workspace-admission.ts";
 import { spawn } from "node:child_process";
@@ -45,8 +44,7 @@ import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
-import { formatOutcome, type LifecyclePlan } from "./lifecycle.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, derivedDisposal, checkPrBase, claimChildGuard, completeCleanupLifecycle, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, assertBatchDisplayable, authorizableOp, bindDelivery, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -58,10 +56,6 @@ const safetyGrants = createGrantStore();
 const owners = new OwnerTracker();
 // cleanup scope id -> background job id of its launch, so an abort can cancel the live launch (never the reservation of a claimed child).
 const cleanupJobs = new Map<string, string>();
-// Opt-in lifecycle plans by cleanup scope id (memory only: a restart or shutdown drops them, which retains everything). Consumed once by the launch close; the runtime itself removes the artifact folders, never a shell.
-const lifecycles = new Map<string, LifecyclePlan>();
-const lifecycleHandlers: { notify?: (text: string) => void } = {};
-const artifactIds = (id: string) => [`${id}#e`, `${id}#s`];
 
 interface UsageStats {
 	input: number;
@@ -98,7 +92,6 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
-	budget?: BudgetResult; // present only when an effective role budget applied to this launch
 }
 
 interface SubagentDetails {
@@ -184,7 +177,6 @@ interface DispatchDefaults {
 	thinkingLevel?: ThinkingLevel;
 	prBase?: string; // validated per-entry trusted PR base; shared by every attempt (fallbacks, steering restarts) of this one launch
 	cleanupId?: string; // id of the main-minted cleanup scope of this one launch; only its first spawn claims it
-	budget?: RoleBudget; // effective validated role budget of this one single-mode launch (task over role); absent = disabled, launch unchanged
 }
 
 const WORKSPACE_WAITING = "Waiting for workspace";
@@ -205,8 +197,7 @@ async function runSingleAgent(
 	access: WorkspaceAccess = "write",
 ): Promise<SingleResult> {
 	// One usage job per logical request, charged to the scope captured at dispatch; it settles exactly once here.
-	const logical = dispatchDefaults.usageScope || dispatchDefaults.budget ? new LogicalUsage(dispatchDefaults.usageScope ?? newUsageScope(), Boolean(dispatchDefaults.jobId), agentName) : undefined;
-	if (dispatchDefaults.budget) logical?.enableBudget(dispatchDefaults.budget.contextBudget !== undefined);
+	const logical = dispatchDefaults.usageScope ? new LogicalUsage(dispatchDefaults.usageScope, Boolean(dispatchDefaults.jobId), agentName) : undefined;
 	try {
 		const result = await runSingleAgentJob(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, access, logical);
 		logical?.settle(result.stopReason === "aborted" ? "aborted" : isFailedResult(result) ? "failed" : "completed");
@@ -315,11 +306,6 @@ async function runAgentAttempt(
 	const args: string[] = ["--mode", "rpc", "--no-session", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates", "--offline"];
 	const inheritsDispatchConfig = !agent.model;
 	const model = attemptModel ?? agent.model ?? dispatchDefaults.model;
-	// Role budget (single mode): the turn count and warning state live on the logical job, so a fallback attempt never resets them.
-	const budget = dispatchDefaults.budget;
-	const turnsSpent = () => budget?.maxTurns !== undefined && logical !== undefined && logical.turns >= budget.maxTurns;
-	const warnState = (): "sent" | "not_delivered" => (logical?.budgetWarned ? "sent" : "not_delivered");
-	const spentResult = (): BudgetResult => { logical?.markExhausted(); return { state: "exhausted", reason: "turns", turns: logical?.turns, contextTokens: null, warn80: warnState(), limits: budget!, noNewAttempt: true }; };
 	const workerController = new AbortController();
     const parentSignal = signal;
     const parentAbort = () => workerController.abort();
@@ -347,13 +333,12 @@ async function runAgentAttempt(
         if (launch.state !== "launch") {
             release?.(); parentSignal?.removeEventListener("abort", parentAbort);
             const remaining = fallbackModels ?? getFallbackSequence(model, agent.fallbackModel);
-            const spent = launch.replayable && remaining.length > 0 && turnsSpent(); // exhaustion never starts another attempt
-            if (launch.replayable && remaining.length && !spent) {
+            if (launch.replayable && remaining.length) {
                 const fallback = await runAgentAttempt(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, lease, grantWindow, remaining[0], remaining.slice(1), logical);
                 fallback.stderr = `Model ${model} skipped (provider cooldown ${launch.state}); retried with ${remaining[0]}.\n${fallback.stderr}`;
                 return fallback;
             }
-            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, modelSource: "requested", requestedModel: model, observed: [], step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, attempts: [], ...tierFields(agent), ...(spent ? { budget: spentResult() } : {}) }; // attempts: [] = no child launched, so a caller's `?? [attemptOf(..)]` cannot invent one
+            return { agent: agentName, agentSource: agent.source, task, exitCode: 1, messages: [], stderr: `Model ${model} not launched: provider cooldown ${launch.state}.`, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 }, model, modelSource: "requested", requestedModel: model, observed: [], step, stopReason: "error", errorMessage: `provider cooldown ${launch.state}`, attempts: [], ...tierFields(agent) }; // attempts: [] = no child launched, so a caller's `?? [attemptOf(..)]` cannot invent one
         }
     }
     const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier, agent.modelSlot);
@@ -375,8 +360,6 @@ async function runAgentAttempt(
 	codeIntegrationsEnabled = configureCodeIntegrations(args, agent, dispatchDefaults.jobId ? [DECISION_TOOL] : []);
 	// Compact leaf contract, main never loads it. Inserted before the integration extensions: Serena/Graphify return a forced systemPrompt rendered at their turn, so this must run first.
 	if (childContextEligible(agent, codeIntegrationsEnabled)) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "child-context-entry.ts"));
-	// Budget controller: child-only, explicit, loaded only for an effective budget (a malformed capability env makes it fail to load, so the child exits before its first prompt).
-	if (budget) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "role-budget-entry.ts"));
 
     } catch (error) {
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, "failed", String(error));
@@ -440,11 +423,8 @@ async function runAgentAttempt(
 		owners.begin({ workerId: ownerId, role: agent.source === "user" || agent.source === "package" ? agentName : `untrusted:${agentName}`, cwd: canonicalCwd(cwd ?? defaultCwd), jobId: dispatchDefaults.jobId });
 		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
 		args.push("--extension", guard.entry);
-		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); for (const a of artifactIds(claimedCleanup)) owners.markClaimed(a); }
+		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
 		let wasAborted = false;
-		let budgetMarker = undefined as Extract<BudgetMarker, { event: "exhausted" }> | undefined; // assigned from the stdout closure
-		const childEnvBase: Record<string, string | undefined> = {...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : ""};
-		if (budget) applyBudgetEnv(childEnvBase, { budget, turnsBefore: logical?.turns ?? 0, warned: logical?.budgetWarned ?? false });
 
 		let removeAbort = () => {};
         const exitCode = await new Promise<number>((resolve) => {
@@ -453,7 +433,7 @@ async function runAgentAttempt(
 			dispatchDefaults.onSpawn?.();
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-                env: guard.childEnv(childEnvBase),
+                env: guard.childEnv({...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : ""}),
 				shell: false,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -469,14 +449,6 @@ async function runAgentAttempt(
                     if (worker && dispatchDefaults.jobId) dispatchDefaults.runtime?.attach(dispatchDefaults.jobId, worker.id, client, workerController);
                 }
             });
-            // Existing parent-owned termination: SIGTERM, then SIGKILL after 5 s if the child has not closed (user stop and budget fallback share it).
-			const terminate = () => {
-				proc.kill("SIGTERM");
-				const forceKill = setTimeout(() => {
-					if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
-				}, 5000);
-				forceKill.unref(); proc.once("close", () => clearTimeout(forceKill));
-			};
             let buffer = "";
             // One decoder per stream per spawn: a pipe chunk may end inside a multi-byte codepoint.
             const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
@@ -499,16 +471,6 @@ async function runAgentAttempt(
                     // Detached workers cannot leave an unanswered dialog hanging.
                     proc.stdin?.write(JSON.stringify({type: "extension_ui_response", id: event.id, cancelled: true}) + "\n");
                     currentResult.stderr += `Worker dialog canceled: ${event.method} ${event.title ?? ""}\n`;
-                }
-                if (event.type === "entry_appended" && budget) {
-                    const marker = parseMarker(event.entry); // only a well-formed numeric/enum marker from a budgeted child counts
-                    if (marker?.event === "warn80" && marker.status === "sent") logical?.noteWarned();
-                    if (marker?.event === "context") logical?.noteContext(marker.tokens !== null); // the child's own latest observation, replaced by each later one and reset per attempt
-                    if (marker?.event === "exhausted" && !budgetMarker) {
-                        budgetMarker = marker;
-                        // The child already aborted itself; the single existing window (SIGTERM now, SIGKILL after 5 s) bounds the stop. No extra wait before it.
-                        if (!wasAborted && proc.exitCode === null && proc.signalCode === null) terminate();
-                    }
                 }
                 if (event.type === "tool_execution_start") currentResult.toolActivity = true;
                 if (event.type === "agent_settled" && client) { client.close(); proc.stdin?.end(); if (worker) dispatchDefaults.runtime?.detach(worker.id); }
@@ -569,7 +531,14 @@ async function runAgentAttempt(
 			});
 
 			if (signal) {
-				const killProc = () => { wasAborted = true; terminate(); };
+				const killProc = () => {
+					wasAborted = true;
+					proc.kill("SIGTERM");
+					const forceKill = setTimeout(() => {
+						if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+					}, 5000);
+                    forceKill.unref(); proc.once("close", () => clearTimeout(forceKill));
+				};
 				if (signal.aborted) killProc();
 				else { signal.addEventListener("abort", killProc, { once: true }); removeAbort = () => signal?.removeEventListener("abort", killProc); }
 			}
@@ -578,17 +547,10 @@ async function runAgentAttempt(
 		removeAbort(); release?.(); release = undefined;
         currentResult.exitCode = exitCode;
         cleanExit = exitCode === 0 && !wasAborted;
-        // A budget stop is a controlled non-success: partial messages stay, nothing is accepted as done. A user stop that arrived first (wasAborted) wins.
-        const stopMarker = wasAborted ? undefined : budgetMarker;
-        if (budget) {
-            currentResult.budget = stopMarker ? { state: "exhausted", reason: stopMarker.reason, turns: stopMarker.turns, contextTokens: stopMarker.contextTokens, warn80: warnState(), limits: budget } : { state: "not_exhausted", warn80: warnState(), limits: budget };
-            if (stopMarker) { logical?.markExhausted(); currentResult.stopReason = "aborted"; currentResult.errorMessage = `budget_exhausted:${stopMarker.reason}`; cleanExit = false; }
-        }
         if (isFailedResult(currentResult)) cleanExit = false; // exit 0 with an error/length/aborted stop is not a clean close
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, wasAborted ? "aborted" : isFailedResult(currentResult) ? "failed" : "completed", wasAborted ? "Subagent was aborted" : isFailedResult(currentResult) ? getResultOutput(currentResult) : undefined);
         if (wasAborted && dispatchDefaults.jobId) { currentResult.stopReason = "aborted"; currentResult.errorMessage = "Subagent was stopped"; return currentResult; }
 		if (wasAborted) throw new Error("Subagent was aborted");
-		if (stopMarker) return currentResult; // exhaustion never triggers fallback, a model upgrade or a replay
 		const remainingFallbacks = fallbackModels ?? getFallbackSequence(model, agent.fallbackModel);
 		const retryResult = {
 			...currentResult,
@@ -600,12 +562,6 @@ async function runAgentAttempt(
 		// A child guard refusal replays only when this parent's own store still says replayable (no health is read from text).
 		const guardRefused = !wasAborted && !retryResult.toolActivity && retryResult.stopReason === "error" && model !== undefined && await guardRefusalReplayable(model, retryResult.errorMessage);
 		const nextModel = guardRefused ? remainingFallbacks[0] : nextFallbackModel(retryResult, remainingFallbacks, wasAborted);
-		if (nextModel && turnsSpent()) {
-			// The job's turn budget is already spent: no new attempt (fallback would otherwise reset the work the budget bounds).
-			currentResult.budget = spentResult();
-			currentResult.stderr += `${currentResult.stderr && !currentResult.stderr.endsWith("\n") ? "\n" : ""}budget_exhausted:turns: fallback attempt not started (turn budget spent).\n`;
-			return currentResult;
-		}
 		if (nextModel) {
 			const primaryError = getResultOutput(currentResult);
             const updates = worker ? dispatchDefaults.runtime?.steeringFor(worker.id) ?? [] : [];
@@ -639,7 +595,7 @@ async function runAgentAttempt(
         throw error;
     } finally {
         owners.end(ownerId);
-        if (claimedCleanup) { owners.closeClaimed(claimedCleanup, cleanExit); for (const a of artifactIds(claimedCleanup)) owners.closeClaimed(a, true); cleanupJobs.delete(claimedCleanup); finishLifecycle(claimedCleanup, cleanExit, defaultCwd); }
+        if (claimedCleanup) { owners.closeClaimed(claimedCleanup, cleanExit); cleanupJobs.delete(claimedCleanup); }
         release?.(); parentSignal?.removeEventListener("abort", parentAbort);
         if (controlDir) { for (const file of ["control.json", "control.json.next"]) try { fs.unlinkSync(path.join(controlDir, file)); } catch {} try { fs.rmdirSync(controlDir); } catch {} }
         if (tmpPromptPath)
@@ -668,8 +624,7 @@ const CLEANUP = Type.Optional(Type.Union([Type.Object({
 	checkout: Type.String({ description: "Exact absolute forward-slash path of the merged task checkout under worktrees/<repo>/<task>" }),
 	branch: Type.String(), base: Type.String(), pr: Type.Number(), headSha: Type.String({ description: "40-hex PR head the checkout is on" }), mergeCommit: Type.String({ description: "40-hex merge commit of the merged PR" }),
 	quiescent: Type.Boolean({ description: "Main's declaration that no worker, service or process uses the checkout; must be true" }),
-	lifecycle: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "The delivery the operator approved with disposal" }), version: Type.Optional(Type.String({ description: "release only: the released tag" })), learn: Type.Union([Type.Object({ state: Type.Literal("SAVED"), record: Type.String(), index: Type.String(), recordSha256: Type.String(), indexSha256: Type.String() }, { additionalProperties: false }), Type.Object({ state: Type.Literal("NO LESSON"), reason: Type.String() }, { additionalProperties: false })], { description: "Knowledge checkpoint: SAVED needs exact local record + index paths under the primary docs/knowledge/local (outside all three targets) with sha256 hashes the runtime re-reads; BLOCKED is refused" }) }, { additionalProperties: false, description: "Only with the operator's explicit disposal approval in this session's merge/release dialog: the runtime also removes exactly _scratch then _evidence of the task after the cleanup child closes cleanly. Absent keeps checkout-only behavior." })),
-}, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are removed only through lifecycle (explicit disposal approval)." }), Type.Null()]));
+}, { additionalProperties: false, description: "Removes only this checkout (git worktree remove, no force). Needs single mode, agent release-engineer, cwd = the primary checkout, outside the target. Artifact folders are never removed." }), Type.Null()]));
 
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
@@ -717,12 +672,6 @@ const SubagentParams = Type.Object({
 	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
 	prBase: PR_BASE,
 	cleanup: CLEANUP,
-	// Optional child limits, single mode only (task over role, per field). Null is listed so the SDK keeps it for runtime refusal.
-	budget: Type.Optional(Type.Union([Type.Object({
-		// Unknown, not Integer: the SDK coerces integer-typed arguments ("4" -> 4, 1.5 -> 1, nested null dropped) before execute, which would hide an invalid raw budget; execute enforces positive safe integers.
-		maxTurns: Type.Optional(Type.Unknown({ description: "Positive integer: max assistant turns of this logical job across fallback attempts. Cooperative stop at a request boundary." })),
-		contextBudget: Type.Optional(Type.Unknown({ description: "Positive integer: estimated tokens of the child's current context (SDK estimate, per attempt, not billed tokens). Unknown or unanchored context is never treated as 0." })),
-	}, { additionalProperties: false, description: "Single mode only; parallel, chain and dag reject it, and reject roles that carry a budget, before any launch." }), Type.Null()])),
 	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
@@ -824,23 +773,15 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 	return ok(`Authorized ${LEASE_ROLE} to ${kind} ${target.branch} for this session.`);
 }
 
-interface DeliveryParams { action: "merge" | "release"; branch: string; base: string; pr: number; sha: string; cwd?: string; version?: string; latest?: boolean; artifact_dir?: string; disposal?: { checkout: string; evidence: string; scratch: string }; bind?: { exclude?: string[]; expect?: string } }
+interface DeliveryParams { action: "merge" | "release"; branch: string; base: string; pr: number; sha: string; cwd?: string; version?: string; latest?: boolean; artifact_dir?: string; bind?: { exclude?: string[]; expect?: string } }
 
 // Session-scoped merge OR release approval (never both in one grant), like a push lease: one TUI confirm per new action binding; an identical live binding returns without a dialog; live PR state and the candidate binding are re-verified after the dialog; no time expiry. Push, PR create and PR edit are automatic for the trusted release-engineer and are not carried here.
-// Called at the cleanup child's confirmed close. The plan is single-use; the runtime verifies and removes, then reports. A missing plan (restart, abort) does nothing.
-function finishLifecycle(id: string, cleanExit: boolean, mainCwd: string): void {
-	const plan = lifecycles.get(id);
-	if (!plan) return;
-	lifecycles.delete(id);
-	let text: string;
-	try { text = formatOutcome(completeCleanupLifecycle(plan, { cleanExit, owners, jobRunning: (j) => runtimeJobRunning(j), mainCwd }), plan); } catch (error) { text = `LIFECYCLE RETAINED: completion failed (${(error as Error).message}); targets were not removed by this step.`; }
-	try { lifecycleHandlers.notify?.(text); } catch { /* notification is best effort; the final receipt is the record */ }
-}
-let runtimeJobRunning: (jobId: string) => boolean = () => false;
-
+const DELIVERY_KEYS = new Set(["action", "branch", "base", "pr", "sha", "cwd", "version", "latest", "artifact_dir", "bind"]);
 async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; delivery: DeliveryParams }, ctx: { cwd: string; ui: { confirm(title: string, message: string, options?: { timeout?: number }): Promise<boolean> } }) {
 	const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
 	const d = params.delivery;
+	const unknownKeys = Object.keys(d).filter((k) => !DELIVERY_KEYS.has(k));
+	if (unknownKeys.length) return fail(`delivery has unknown field(s): ${unknownKeys.join(", ")} (the disposal approval is retired); no delivery grant minted.`);
 	if (params.role !== undefined && params.role !== LEASE_ROLE) return fail(`delivery is only for role ${LEASE_ROLE}; no delivery grant minted.`);
 	if (params.ttl_minutes !== undefined) return fail("delivery grants are session-scoped; TTL unsupported (ttl_minutes rejected); no delivery grant minted.");
 	if (d.action !== "merge" && d.action !== "release") return fail("delivery.action must be merge or release; legacy combined delivery grants are not accepted; no delivery grant minted.");
@@ -862,18 +803,9 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	}
 	const binding = { role: LEASE_ROLE, candidate: target.candidate, pushUrl: target.pushUrl, repo, branch: target.branch, base: d.base, action: d.action, pr: d.pr, sha: d.sha, version: d.version, latest: d.latest, artifactDir: d.artifact_dir, ...(bound ? { bound } : {}) };
 	let artifactDir: string | undefined;
-	let disposal: DeliveryBinding["disposal"];
 	let superseded: ReturnType<typeof safetyGrants.findSuperseded>;
 	try {
 		artifactDir = d.artifact_dir === undefined ? undefined : validateArtifactDir(d.artifact_dir, target.candidate);
-		if (d.disposal !== undefined) {
-			const want = derivedDisposal(target.candidate);
-			if (!want || d.disposal.checkout !== want.checkout || d.disposal.evidence !== want.evidence || d.disposal.scratch !== want.scratch) throw new RangeError(`disposal must be exactly checkout ${want?.checkout}, evidence ${want?.evidence}, scratch ${want?.scratch}`);
-			validateArtifactDir(want.evidence, target.candidate);
-			validateArtifactDir(want.scratch, target.candidate);
-			disposal = want;
-		}
-		(binding as { disposal?: unknown }).disposal = disposal;
 		const live = safetyGrants.findDelivery(binding);
 		if (live) return { content: [{ type: "text" as const, text: `Already authorized: ${d.action} of PR #${d.pr} at ${d.sha.slice(0, 7)} for ${repo} is live for this PI session; no new dialog.` }], details: {} };
 		superseded = safetyGrants.findSuperseded(binding);
@@ -887,8 +819,7 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	const detail = d.action === "merge"
 		? `Action: MERGE only (squash, --match-head-commit ${d.sha}). Bound candidate state: HEAD ${bound?.head} on ${bound?.ref}; fingerprint ${bound?.fingerprint}; excluded paths: ${bound?.exclude.join(", ") || "none"}${superseded?.bound ? `; replaces bound state ${superseded.bound.head.slice(0, 7)}` : ""}. Refused if the live PR head or the candidate (HEAD, branch, staged, unstaged or untracked files) differs. Ignored files are outside the fingerprint; not race-free. This does not approve any release.`
 		: `Action: RELEASE only: tag ${d.version}${d.latest ? " as latest" : ""} at target ${d.sha} (the merge commit of PR #${d.pr}); refused if the tag already exists. This does not approve any merge.`;
-	const disposalText = disposal === undefined ? "" : `\nDISPOSAL (explicit opt-in, this dialog only): after the delivery is verified live and a Learn checkpoint (SAVED with runtime-verified local record/index hashes, or NO LESSON) exists outside these paths, the runtime may remove EXACTLY:\n  checkout ${disposal.checkout}\n  _scratch ${disposal.scratch}\n  _evidence ${disposal.evidence}\nRemoved only if clean, idle, unlinked, no database/secret files and unchanged since the check; unknown ignored data and anything uncertain is RETAINED; known disposable caches only are ignored. Branches and commits are kept. A receipt is written outside these paths. ${d.action === "merge" ? "After this merge you cannot release from this checkout: choose disposal on the last delivery step." : ""} One use; no replay; restart or /revoke-authorization withdraws it. PR creation never triggers it.`;
-	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nPush URL: ${target.pushUrl}\n${identity}\n${detail}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\n${disposalText}\nScope: this PI session (no time expiry). No push, PR create/edit, other tags, force, other refs, npm, deploy or API; deletion only as the DISPOSAL block above states (none when absent). Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit.`;
+	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nPush URL: ${target.pushUrl}\n${identity}\n${detail}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\nScope: this PI session (no time expiry). No push, PR create/edit, other tags, force, delete, other refs, npm, deploy or API. Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit.`;
 	const approved = await ctx.ui.confirm(d.action === "merge" ? "Authorize PR merge?" : "Authorize release creation?", text, { timeout: 120_000 });
 	if (!approved) return fail("Not authorized by the operator; no delivery grant minted.");
 	let again: ReturnType<typeof pushBranchTarget>;
@@ -920,15 +851,13 @@ export default function (pi: ExtensionAPI) {
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
 	pi.on("agent_settled", (event) => {
 		if (!event.aborted) return;
-		// Plans whose scope never left the parent store are withdrawn with it; a claimed child finishes (cancelled -> unclean -> retained).
-		for (const id of [...lifecycles.keys()]) if (safetyGrants.peekCleanup(id)) lifecycles.delete(id);
 		safetyGrants.revokeAll();
 		for (const jobId of cleanupJobs.values()) { try { runtimeRef?.cancel(jobId); } catch { /* already finished */ } }
 		cleanupJobs.clear();
 		owners.releaseUnclaimed();
 	});
-	pi.on("session_start", () => { cleanupJobs.clear(); lifecycles.clear(); owners.clear(); });
-	pi.on("session_shutdown", () => { safetyGrants.revokeAll(true); cleanupJobs.clear(); lifecycles.clear(); owners.clear(); });
+	pi.on("session_start", () => { cleanupJobs.clear(); owners.clear(); });
+	pi.on("session_shutdown", () => { safetyGrants.revokeAll(true); cleanupJobs.clear(); owners.clear(); });
 	pi.registerCommand("authorization", {
 		description: "Show session authorizations (read-only, secret-free): single-use grant counts, push and push+commit leases, delivery grants and their validity",
 		handler: async (_args, ctx) => {
@@ -955,8 +884,6 @@ export default function (pi: ExtensionAPI) {
     const decisions = new DecisionRelay();
     const runtime = new BackgroundWorkers(pi, monitor, decisions);
     runtimeRef = runtime;
-    runtimeJobRunning = (id) => runtime.jobs.get(id)?.state === "running";
-    lifecycleHandlers.notify = (text) => { void Promise.resolve(pi.sendMessage({ customType: "subagent-lifecycle", content: text, display: true }, { triggerTurn: false, deliverAs: "followUp" })).catch(() => undefined); };
     // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.
     const pendingText = () => { try { return formatCleanupPending(cleanupPending(safetyGrants, owners, (id) => runtime.jobs.get(id)?.state === "running")); } catch { return ""; } };
     runtime.pendingNote = pendingText;
@@ -1026,20 +953,9 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			// Optional child budgets: single native dispatch only. An invalid or unsupported request (including an inherited role budget) is refused before any spawn, never ignored or run uncapped.
-			const budgetRefuse = (why: string) => ({ content: [{ type: "text" as const, text: `Invalid budget: ${why}; nothing was launched.` }], details: makeDetails(mode)([]), isError: true });
-			if (hasChain || hasTasks || hasDag) {
-				if (params.budget !== undefined) return budgetRefuse("a task budget is only supported in single mode");
-				// The entries of the mode that actually dispatches (same precedence as `mode`): an empty inactive array must not shadow them.
-				for (const [i, entry] of (((mode === "dag" ? params.dag : mode === "chain" ? params.chain : params.tasks) ?? []) as Array<{ agent: string }>).entries()) {
-					if ("budget" in entry) return budgetRefuse(`entry ${i} budget is only supported in single mode`);
-					const role = agents.find((candidate) => candidate.name === entry.agent);
-					if (role?.budget !== undefined) return budgetRefuse(`role "${role.name}" has a role budget, which is only supported in single mode (parallel, chain and dag would run it uncapped)`);
-				}
-			} else if (hasSingle) {
-				const { effective, error } = normalizeBudget(agents.find((candidate) => candidate.name === params.agent)?.budget, params.budget);
-				if (error) return budgetRefuse(error);
-				if (effective) dispatchDefaults.budget = effective;
+			// Role budgets were removed: the retired `budget` parameter (top level or in any entry) is refused before any spawn, never silently ignored.
+			if ((params as { budget?: unknown }).budget !== undefined || [params.tasks, params.chain, params.dag].some((entries) => entries?.some((entry) => "budget" in entry))) {
+				return { content: [{ type: "text" as const, text: "Unknown parameter budget: role budgets were removed; nothing was launched." }], details: makeDetails(mode)([]), isError: true };
 			}
 
 			// Completion-notice limit: validated once at the outer call, before any prompt, runtime start or spawn. The prepared background re-entry carries background:false internally and must not be refused.
@@ -1137,12 +1053,6 @@ export default function (pi: ExtensionAPI) {
                 const minted = prepareCleanup(params.cleanup, { store: safetyGrants, owners, primary: path.resolve(ctx.cwd, params.cwd), mainCwd: ctx.cwd, jobRunning: (id) => runtime.jobs.get(id)?.state === "running" });
                 if (!minted.ok) return refuse(minted.reason);
                 owners.reserve(minted.grant.candidate, minted.grant.issuedAt + CLEANUP_TTL_MS, minted.grant.id);
-                if (minted.lifecycle) {
-                    lifecycles.set(minted.grant.id, minted.lifecycle);
-                    const [e, s] = artifactIds(minted.grant.id);
-                    owners.reserve(minted.lifecycle.evidence, minted.grant.issuedAt + CLEANUP_TTL_MS, e);
-                    owners.reserve(minted.lifecycle.scratch, minted.grant.issuedAt + CLEANUP_TTL_MS, s);
-                }
                 dispatchDefaults.cleanupId = minted.grant.id;
             } else if (preparedDispatch?.cleanupId) dispatchDefaults.cleanupId = preparedDispatch.cleanupId;
             if (params.background !== false) {
@@ -1401,7 +1311,7 @@ export default function (pi: ExtensionAPI) {
         parameters: Type.Object({
             operations: Type.Optional(Type.Array(Type.Object({ kind: StringEnum(["shell", "write"] as const), value: Type.String({ description: "Exact shell command or file path" }) }), { minItems: 1, maxItems: MAX_GRANT_OPS })),
             push_branch: Type.Optional(Type.Object({ branch: Type.String({ description: "Feature branch name; protected branches are refused" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), commits: Type.Optional(Type.Boolean({ description: "true also allows normal git commit -m or -F commits on this branch (policy-enforced only for release-engineer children)" })), artifact_dir: Type.Optional(Type.String({ description: "With commits true: absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding the -F message file" })) }, { description: "Exclusive with operations: one session release-engineer PR-branch push lease" })),
-            delivery: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "One action per grant: merge or release; separate approvals" }), branch: Type.String({ description: "Feature branch of the PR" }), base: Type.String({ description: "PR base branch, e.g. main" }), pr: Type.Number({ minimum: 1, description: "Exact PR number" }), sha: Type.String({ description: "40-hex SHA. merge: the reviewed PR head (must equal the candidate HEAD). release: the release target = merge commit of the PR" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), version: Type.Optional(Type.String({ description: "release only: approved tag, e.g. v1.2.3 (must not exist yet)" })), latest: Type.Optional(Type.Boolean({ description: "release only: approve --latest" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })), disposal: Type.Optional(Type.Object({ checkout: Type.String(), evidence: Type.String(), scratch: Type.String() }, { additionalProperties: false, description: "Optional explicit opt-in shown in this dialog: exactly the task checkout and its _evidence/<task> and _scratch/<task> (derived from the candidate; any other path is refused) may be disposed of after verified delivery and a Learn checkpoint. Absent grants nothing of the kind" })), bind: Type.Optional(Type.Object({ exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 8, description: "Relative untracked output folders left out of the fingerprint; never tracked paths" })), expect: Type.Optional(Type.String({ description: "64-hex candidate fingerprint of the reviewed candidate; mint refused if the live state differs" })) }, { description: "merge only and mandatory (expect required): binds the grant to the candidate HEAD (= sha) and fingerprint verified at approval. Not allowed for release. Not race-free" })) }, { description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer merge OR release approval (no time expiry); legacy combined grants are rejected" })),
+            delivery: Type.Optional(Type.Object({ action: StringEnum(["merge", "release"] as const, { description: "One action per grant: merge or release; separate approvals" }), branch: Type.String({ description: "Feature branch of the PR" }), base: Type.String({ description: "PR base branch, e.g. main" }), pr: Type.Number({ minimum: 1, description: "Exact PR number" }), sha: Type.String({ description: "40-hex SHA. merge: the reviewed PR head (must equal the candidate HEAD). release: the release target = merge commit of the PR" }), cwd: Type.Optional(Type.String({ description: "Candidate folder; default the session cwd" })), version: Type.Optional(Type.String({ description: "release only: approved tag, e.g. v1.2.3 (must not exist yet)" })), latest: Type.Optional(Type.Boolean({ description: "release only: approve --latest" })), artifact_dir: Type.Optional(Type.String({ description: "Absolute forward-slash folder under worktrees/<repo>/_scratch or _evidence/<task> holding --body-file/--notes-file" })), bind: Type.Optional(Type.Object({ exclude: Type.Optional(Type.Array(Type.String(), { maxItems: 8, description: "Relative untracked output folders left out of the fingerprint; never tracked paths" })), expect: Type.Optional(Type.String({ description: "64-hex candidate fingerprint of the reviewed candidate; mint refused if the live state differs" })) }, { description: "merge only and mandatory (expect required): binds the grant to the candidate HEAD (= sha) and fingerprint verified at approval. Not allowed for release. Not race-free" })) }, { additionalProperties: false, description: "Exclusive with operations and push_branch: session-scoped reusable release-engineer merge OR release approval (no time expiry); legacy combined grants are rejected" })),
             role: Type.Optional(Type.String({ description: "Child role the grant binds to; omit for main" })),
             ttl_minutes: Type.Optional(Type.Number({ minimum: 1, maximum: GRANT_TTL_MAX_MS / 60_000, description: "Default 30; rejected for push_branch and delivery (delivery is session-scoped; TTL unsupported)" })),
         }),

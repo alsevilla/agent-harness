@@ -286,6 +286,17 @@ test("envelope: strict loader fails closed on tampering; absence grants nothing"
 	// The real guard entry applying this envelope is exercised in cleanup-runtime.node.ts (child process).
 });
 
+test("retired lifecycle: a request carrying `lifecycle` is refused as an unknown field (never ignored) and an envelope scope carrying `disposal` fails closed", () => {
+	const t = makeTask();
+	const { res } = mint(t, { req: { lifecycle: { action: "merge", learn: { state: "NO LESSON", reason: "x" } } } });
+	assert.equal(res.ok, false);
+	assert.match(res.reason, /cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent/);
+	const s = setup();
+	const envelope = JSON.parse(s.text);
+	envelope.cleanupActions[0].disposal = { evidence: s.t.evidence, scratch: s.t.scratch };
+	assert.throws(() => C.loadChildCleanup(JSON.stringify(envelope)), /invalid cleanup scope/);
+});
+
 // Metadata-only discovery: wraps every Node fs and child_process entry point for the duration of one call and records what it touched.
 const IO = { fs: ["existsSync", "statSync", "lstatSync", "realpathSync", "readFileSync", "readdirSync", "openSync", "accessSync", "opendirSync"], cp: ["execFileSync", "spawnSync", "execSync", "spawn", "exec", "execFile", "fork"] };
 function recordIo<T>(fn: () => T): { result: T; calls: string[] } {

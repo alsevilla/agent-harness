@@ -14,18 +14,8 @@ const SENSITIVE = ["auth.json", "settings.json"];
 const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 const ROLE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 // Shape constants mirror the house reader (agents.ts): new-format keys, legacy flat keys, tier names, effort vocabulary and qualified IDs.
-const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools", "budget"];
+const ROLE_KEYS = ["name", "defaultModelTier", "provider", "model", "fallbackModel", "modelTiers", "thinking", "tools"];
 const LEGACY_ROLE_KEYS = ["provider", "model", "fallbackModel", "thinking"];
-// Mirrors role-budget.ts budgetViolation: plain object, known keys only, at least one field, positive safe integers.
-const BUDGET_KEYS = ["maxTurns", "contextBudget"];
-function budgetProblem(name, budget) {
-	const at = `${name}.budget`;
-	if (!isPlainObject(budget)) return `${at} must be an object with maxTurns and/or contextBudget`;
-	if (Object.keys(budget).some((key) => !BUDGET_KEYS.includes(key))) return `${at} has unknown key(s)`;
-	if (!BUDGET_KEYS.some((key) => key in budget)) return `${at} needs maxTurns or contextBudget`;
-	for (const key of BUDGET_KEYS) if (key in budget && !(typeof budget[key] === "number" && Number.isSafeInteger(budget[key]) && budget[key] > 0)) return `${at}.${key} must be a positive safe integer`;
-	return null;
-}
 const TIER_NAMES = ["economy", "capable"];
 const TIER_KEYS = ["model", "fallbackModel", "thinking"];
 const LEGACY_TIER_KEYS = ["provider", "model", "fallbackModel"];
@@ -137,7 +127,6 @@ function checkRole(r) {
 	const format = entryFormat(r);
 	const problems = [];
 	let slot = null;
-	if ("budget" in r) { const problem = budgetProblem(r.name, r.budget); if (problem) problems.push(problem); } // validated on every format, like the native reader
 	if (format === "mixed") problems.push(`${r.name} mixes defaultModelTier or tier thinking with legacy provider, model, fallbackModel or thinking fields`);
 	else {
 		const unknown = Object.keys(r).filter((key) => !ROLE_KEYS.includes(key)).length;
