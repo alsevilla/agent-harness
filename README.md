@@ -114,7 +114,7 @@ Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json
 
 ## Safety and delivery
 
-A `tool_call` guard runs on main and every worker. It blocks risky shell operations (publish, destructive git, forced deletes, links, privilege changes, process kills, launching Pi, curl-to-shell, unparseable commands) and any read, write or mention of secret files. A block message names the rule, the program, whether an approval can ever help, and the next step; it never echoes command arguments. The guard is lexical and best-effort, not an OS sandbox.
+A `tool_call` guard runs on main and every worker. It blocks risky shell operations (publish, destructive git, forced deletes, links, privilege changes, process kills, launching Pi, curl-to-shell, unparseable commands) and any read, write or mention of secret files. Read-only roles (no `edit`/`write` tool, or a `readOnly` launch) also cannot change their candidate checkout through the shell: redirections, file-writing commands, in-place edits, and mutating git or package commands into it are refused, while their REPORT and evidence files go to the packet's `_evidence`/`_scratch` paths. A block message names the rule, the program, whether an approval can ever help, and the next step; it never echoes command arguments. The guard is lexical and best-effort, not an OS sandbox.
 
 | Risk | What happens |
 | --- | --- |
@@ -129,6 +129,7 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 ## Context and cost
 
 - **Old results collapse.** In main's requests, the newest five subagent results stay word for word and older settled PASS results become one line each, in batches, so the cached prefix rarely changes. Main's own old large file and command outputs are masked the same way. `PI_SUBAGENT_HANDOFF_WINDOW=0` turns both off.
+- **Runtime state card.** While jobs run or worker decisions wait, each main request ends with one hidden line naming them, so a compacted conversation still knows what is in flight.
 - **Shared text first.** Every worker prompt starts with the same shared guidance, so roles with the same model and tools can reuse one cached prefix.
 - **Measure by cost per completed task.** `/subagent usage` shows it per role. Cache reads and writes dominate the bill, so fewer tokens alone is not a saving.
 
@@ -155,7 +156,7 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 
 ## Limits
 
-- Workers are not an OS sandbox; role permissions and `readOnly` are policy.
+- Workers are not an OS sandbox. The guard's read-only and secret rules are lexical and best-effort, not isolation.
 - Background admission, job ids and the DAG run per Pi process and in memory; after a reload or new session, old job ids are gone.
 - Only the latest Pi release is supported. The package is not published to npm.
 - Costs in `/subagent usage` are provider or catalog estimates, not a bill.

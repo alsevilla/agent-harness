@@ -1,11 +1,14 @@
 // Stage 1 child-only guard. Loaded after pause-gate and decision-relay in every child (main never loads it).
 // Reads PI_SAFETY_GRANTS once and removes it from the process environment before any tool can run; an invalid envelope blocks all tool calls.
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CHILD_GRANT_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
+import { CHILD_GRANT_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
 	delete process.env[CHILD_GRANT_ENV];
+	// Read-only role or launch: the candidate root it may not change. Read once and removed, like the grant envelope.
+	const readOnlyRoot = process.env[CHILD_READONLY_ENV] || undefined;
+	delete process.env[CHILD_READONLY_ENV];
 	const store = createGrantStore();
 	let invalid: string | undefined;
 	let gateCommits = false;
@@ -24,6 +27,6 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	}
 	pi.on("tool_call", (event, ctx) => {
 		if (invalid) return { block: true, reason: invalid };
-		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
+		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
 	});
 }

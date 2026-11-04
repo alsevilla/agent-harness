@@ -76,3 +76,22 @@ test("artifact folder: created at grant time inside the placement; never without
 	assert.throws(() => validateArtifactDir(slash(path.join(root, "proj", "elsewhere")), candidate, true), /worktr/);
 	assert.ok(!fs.existsSync(path.join(root, "proj", "elsewhere")), "nothing created outside the placement");
 });
+
+// Read-only roles: the child guard refuses changes to the candidate checkout, shell included; writes outside it stay allowed.
+test("read-only role: writes into the candidate are refused (not grantable); reads, tests and evidence writes outside it pass", () => {
+	const candidate = slash(path.join(root, "ro", "app"));
+	fs.mkdirSync(candidate, { recursive: true });
+	const evidence = slash(path.join(root, "ro", "worktrees", "app", "_evidence", "t"));
+	const ro = { scope: "child" as const, store: createGrantStore(), agentDir, readOnlyRoot: candidate };
+	const call = (command: string) => guardToolCall(ro, "bash", { command }, candidate) as { block: boolean; reason: string } | undefined;
+	for (const ok of ["git status", "git diff --stat", "npm test", "npm test 2>&1", `npm test > "${evidence}/test.log"`, `cat > "${evidence}/REPORT.md"`, "sed -n 1,5p a.ts", "git stash list"]) assert.equal(call(ok), undefined, ok);
+	for (const bad of ["npm test > out.log", "git commit -m x", "git checkout -- a.ts", "sed -i s/a/b/ a.ts", "cp a.ts b.ts", "echo x | tee a.ts", "npm install x", 'bash -c "echo x > a.ts"', "mkdir tmp"]) {
+		const r = call(bad);
+		assert.ok(r?.block, bad);
+		assert.match(r!.reason, /^Blocked by harness safety guard \[READ_ONLY_ROLE\] op [0-9a-f]{16}: .*; not grantable: this role is read-only/, bad);
+	}
+	assert.ok((guardToolCall(ro, "edit", { path: `${candidate}/a.ts` }, candidate) as any)?.block, "edit tool inside the candidate");
+	assert.equal(guardToolCall(ro, "write", { path: `${evidence}/notes.md` }, candidate), undefined, "write tool outside the candidate");
+	const writer = { scope: "child" as const, store: createGrantStore(), agentDir };
+	assert.equal(guardToolCall(writer, "bash", { command: "npm test > out.log" }, candidate), undefined, "a writing role is unaffected");
+});
