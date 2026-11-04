@@ -408,7 +408,7 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	finish(children()[0], "legacy single result");
 	const singleResult = await single;
 	assert.notEqual(singleResult.isError, true);
-	assert.equal(singleResult.details.results[0].modelTier, "economy"); // omitted new-format role labels its resolved default tier (economy after the approved preset update)
+	assert.equal(singleResult.details.results[0].modelTier, "capable"); // omitted new-format role labels its resolved default tier (capable after the approved preset update)
 	const batch = tool.execute("omitted-tier-batch", { background: false, agentScope: "both", tasks: [
 		{ agent: "backend-worker", task: "batch one", cwd: makeRepo("omitted-tier-batch-one") },
 		{ agent: "backend-worker", task: "batch two", cwd: makeRepo("omitted-tier-batch-two") },
@@ -419,7 +419,7 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	finish(children()[1], "batch one result"); finish(children()[2], "batch two result");
 	const batchResult = await batch;
 	assert.notEqual(batchResult.isError, true);
-	assert.deepEqual(batchResult.details.results.map((row: any) => row.modelTier), ["economy", "economy"]);
+	assert.deepEqual(batchResult.details.results.map((row: any) => row.modelTier), ["capable", "capable"]);
 	children().length = 0;
 	const launch = tool.execute("omitted-tier", { background: false, agentScope: "both", chain: [
 		{ agent: "backend-worker", task: "legacy omitted" },

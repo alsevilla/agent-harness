@@ -173,8 +173,8 @@ test("registry contains the approved tier pairs without changing default role fi
   }
   assert.equal(Object.values(expected).reduce((count, tiers) => count + tiers.length, 0), 13);
   const backendDefault = roles.find((role: { name: string }) => role.name === "backend-worker");
-  // User-approved preset update (approved-user-presets.json): backend-worker now defaults to its economy tier; capable stays configured and unchanged.
-  assert.equal(backendDefault.defaultModelTier, "economy");
+  // User-approved preset update (approved-user-presets.json): backend-worker defaults to its capable tier; economy stays configured and unchanged.
+  assert.equal(backendDefault.defaultModelTier, "capable");
   assert.equal(backendDefault.modelTiers.capable.model, approvedTier("backend-worker", "capable").model);
   assert.equal(backendDefault.modelTiers.capable.fallbackModel, approvedTier("backend-worker", "capable").fallbackModel[0]);
   assert.equal(roles.find((role: { name: string }) => role.name === "scout").modelTiers.capable, undefined);
@@ -214,11 +214,11 @@ test("written tier scenarios resolve through the real package registry to the co
       assert.deepEqual(resolved.fallbackModel, fallback, `${name}.${tier}: fallback`);
       assert.equal(resolved.thinking, thinking, `${name}.${tier}: thinking`);
     }
-    // Omission on an economy-default role runs economy, so high-risk work must request capable explicitly.
+    // Omission on a capable-default role runs capable; economy must be requested explicitly.
     const omitted = resolveModelTier(role("database-worker"));
-    assert.equal(omitted.modelTier, "economy");
-    assert.equal(omitted.model, committedTier("database-worker", "economy").model);
-    assert.deepEqual(omitted.fallbackModel, [committedTier("database-worker", "economy").fallbackModel].flat());
+    assert.equal(omitted.modelTier, "capable");
+    assert.equal(omitted.model, committedTier("database-worker", "capable").model);
+    assert.deepEqual(omitted.fallbackModel, [committedTier("database-worker", "capable").fallbackModel].flat());
     assert.equal(omitted.thinking, "low");
     // Roles without a configured capable tier are refused for capable: the selection is unresolved, not economy.
     for (const name of ["scout"]) assert.throws(() => resolveModelTier(role(name), "capable"), /not supported/, name);
@@ -262,9 +262,9 @@ test("package discovery normalizes tier registry data and field-wise user tier o
     const role = result.agents.find((item) => item.name === "backend-worker");
     assert.ok(role);
     assert.equal(role.source, "package");
-    assert.equal(role.model, committedTier("backend-worker", "economy").model, "the root model keeps the base default-tier projection (economy after the approved preset update)");
-    assert.deepEqual(role.modelTiers?.economy, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
-    assert.equal(role.modelTiers?.capable, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
+    assert.equal(role.model, committedTier("backend-worker", "capable").model, "the root model keeps the base default-tier projection (capable after the approved preset update)");
+    assert.deepEqual(role.modelTiers?.capable, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
+    assert.equal(role.modelTiers?.economy, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
     fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: {} }]));
     const emptyOverlay = discoverAgents(cwd, "both");
     assert.deepEqual(emptyOverlay.agents, [], "an explicit empty tier field replaces package tiers; the inherited capable default is then unconfigured, so the registry fails closed");
@@ -549,8 +549,8 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   const tools = toolsOnly.agents.find((agent) => agent.name === "backend-worker");
   assert.ok(tools);
   assert.deepEqual(tools.tools, ["read"]);
-  assert.equal(tools.model, committedTier("backend-worker", "economy").model);
-  assert.equal(tools.defaultModelTier, "economy", "a tools-only overlay inherits the base default tier");
+  assert.equal(tools.model, committedTier("backend-worker", "capable").model);
+  assert.equal(tools.defaultModelTier, "capable", "a tools-only overlay inherits the base default tier");
 
   const legacy = discoverWithUserRoles([{ name: "backend-worker", provider: "fixture-provider", model: "legacy-model", thinking: "low" }]);
   assert.equal(legacy.error, undefined);
@@ -558,7 +558,7 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   assert.ok(scalar);
   assert.equal(scalar.model, "fixture-provider/legacy-model");
   assert.equal(scalar.thinking, "low");
-  assert.deepEqual(scalar.fallbackModel, [committedTier("backend-worker", "economy").fallbackModel].flat());
+  assert.deepEqual(scalar.fallbackModel, [committedTier("backend-worker", "capable").fallbackModel].flat());
   assert.equal(scalar.defaultModelTier, undefined, "legacy omission projection carries no default tier");
 });
 
@@ -811,8 +811,8 @@ test("shipped tier census matches the approved data shape (informational; not a 
   const roles = RAW_ROLES();
   assert.equal(roles.length, 21); // 20 baseline + additive planner (economy default, both tiers)
   const defaults = roles.map((role) => role.defaultModelTier);
-  assert.equal(defaults.filter((tier) => tier === "economy").length, 20);
-  assert.equal(defaults.filter((tier) => tier === "capable").length, 1, "only Oracle defaults to capable; it has no economy tier");
+  assert.equal(defaults.filter((tier) => tier === "economy").length, 15);
+  assert.equal(defaults.filter((tier) => tier === "capable").length, 6, "Oracle plus the five worker roles default to capable");
   const entries = roles.flatMap((role) => Object.keys(role.modelTiers));
   assert.equal(entries.length, 40);
   assert.equal(entries.filter((tier) => tier === "economy").length, 20);
