@@ -121,3 +121,14 @@ test("cost per completed task counts failed and aborted cost against completed t
 	assert.doesNotMatch(text.split("\n").find((l) => l.includes("debugger:")) ?? "", /per completed task/, "no completed task: no ratio");
 	assert.match(text, /Foreground:[\s\S]*cost: \$0\.6000 SDK-estimated; \$0\.6000 per completed task/);
 });
+
+import { usageStatusLine } from "../background.ts";
+test("footer status line: context, tasks, cost per completed task and running jobs; nothing before anything is known", () => {
+	const scope = newUsageScope();
+	assert.equal(usageStatusLine(scope, null), undefined);
+	assert.equal(usageStatusLine(scope, 12000), "harness: ctx ~12,000 tok");
+	run(scope, "backend", false, 100, 10, 0.3);
+	run(scope, "backend", true, 100, 10, 0.1, "failed");
+	scope.running = 1;
+	assert.equal(usageStatusLine(scope, 45200), "harness: ctx ~45,200 tok · 2 tasks · $0.4000/completed task · 1 running");
+});
