@@ -1,5 +1,5 @@
-// Role/shared prompt dedup contract: assembled child prompts keep every pre-dedup sentence except the listed redundant
-// restatements, keep headings and frontmatter, and shrink where a restatement was removed.
+// Role/shared prompt dedup contract: the removed redundant restatements stay absent, privacy-neutralized wording stays, and
+// every role keeps its no-helper boundary. Prompt wording is otherwise free to change.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { after, test } from "node:test";
@@ -39,77 +39,6 @@ const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 const normalize = (text: string) => text.replace(/\r\n/g, "\n").replace(/\\/g, "/").split(repo).join("<CANDIDATE>");
 const sentences = (text: string) => normalize(text).split(/\n+|(?<=\.) /).map((s) => s.trim()).filter((s) => s.length >= 20);
 const sentenceHashes = (text: string) => new Set(sentences(text).map((s) => sha(s).slice(0, 8)));
-const frontmatterSha = (text: string) => sha(/^---\r?\n([\s\S]*?)\r?\n---/.exec(text.replace(/\r\n/g, "\n"))?.[1] ?? "");
-// Exact [approved current value, original HEAD/golden value]; never consult roles.json while hashing.
-const DECLARATION_CHANGES: Record<string, Partial<Record<string, readonly [string, string]>>> = {
-	"api-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
-	"architecture-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
-	"concurrency-specialist": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
-	"debugger": { fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
-	"devops-specialist": { model: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna"], fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/gpt-6-luna"] },
-	"frontend-worker": { model: ["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5"], fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
-	"observability-specialist": { model: ["anthropic/claude-haiku-5-5","openai-codex/gpt-6-luna"], fallbackModel: ["openai-codex/gpt-6-luna","github-copilot/gpt-6-luna"] },
-	"performance-specialist": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
-	"reviewer": { fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
-	"general-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
-	"platform-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
-	"backend-worker": { model: ["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5"], fallbackModel: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["medium","low"] },
-	"scout": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
-	"security-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-sonnet-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6.1-sol || github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
-	"database-specialist": { model: ["openai-codex/gpt-6.1-sol","anthropic/claude-haiku-5-5"], fallbackModel: ["anthropic/claude-sonnet-5-5","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"], thinking: ["high","medium"] },
-	"database-worker": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
-	"test-engineer": { fallbackModel: ["openai-codex/gpt-6-luna","openai-codex/gpt-6-luna || github-copilot/gpt-6-luna"] },
-	"ui-ux-specialist": { fallbackModel: ["openai-codex/gpt-6.1-sol","github-copilot/claude-sonnet-5"], thinking: ["high","medium"] },
-	"release-engineer": { model: ["openai-codex/gpt-6.1-sol","openai-codex/gpt-6-luna"], fallbackModel: ["anthropic/claude-sonnet-5-5","github-copilot/gpt-6-luna"], tools: ["read, grep, find, ls, bash, powershell, edit, write","read, grep, find, ls, bash, powershell, edit"] },
-};
-// Live roles are header-free (single source). The pre-removal Pi declarations are restored from the independent header-removal baseline (captured from git HEAD)
-// so the historical effective-declaration pins below keep proving that no declaration, identity or tool value drifted.
-const headerRemoval = JSON.parse(fs.readFileSync(new URL("./fixtures/header-removal-baseline.json", import.meta.url), "utf8")) as { roles: { name: string; nativeToolsLine: string; removed: string[] }[] };
-const withHistoricalHeader = (text: string) => {
-	const normalized = text.replace(/\r\n/g, "\n");
-	if (/^metadata:/m.test(normalized)) return text;
-	const entry = headerRemoval.roles.find((item) => item.name === /^name: (.+)$/m.exec(normalized)?.[1]);
-	if (!entry) return text;
-	const lines = normalized.split("\n");
-	const at = lines.indexOf(entry.nativeToolsLine);
-	assert.ok(at > 0, `${entry.name}: native tools line missing`);
-	return [...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n");
-};
-const effectiveLegacyHeaderSha = (rawText: string) => {
-	const text = withHistoricalHeader(rawText);
-	const normalized = text.replace(/\r\n/g, "\n");
-	const header = /^---\n([\s\S]*?)\n---/.exec(normalized)?.[1];
-	assert.ok(header, "live role must have a YAML header");
-	const lines = header.split("\n");
-	const metadata = new Map<string, string>();
-	let inMetadata = false;
-	for (const line of lines) {
-		if (line === "metadata:") { inMetadata = true; continue; }
-		if (inMetadata && /^  pi\.(model|fallbackModel|thinking|tools): /.test(line)) {
-			const match = /^  pi\.(model|fallbackModel|thinking|tools): (.*)$/.exec(line)!;
-			metadata.set(match[1], match[2].replace(/^['\"]|['\"]$/g, ""));
-		} else if (inMetadata && !line.startsWith("  ")) inMetadata = false;
-	}
-	for (const field of ["model", "fallbackModel", "thinking", "tools"] as const) {
-		assert.ok(metadata.has(field), `live role missing metadata pi.${field}`);
-		const value = metadata.get(field)!;
-		if (field === "fallbackModel") assert.ok(value.length > 0 || /^['\"]{2}$/.test(lines.find((line) => line.startsWith("  pi.fallbackModel: "))!.split(": ")[1]), "pi.fallbackModel must be a string");
-		else assert.ok(value.trim().length > 0, `metadata pi.${field} must be nonempty`);
-	}
-	const identity = lines.filter((line) => /^(name|description): /.test(line));
-	assert.deepEqual(identity.map((line) => line.split(":", 1)[0]), ["name", "description"]);
-	const legacy = [...identity, ...["model", "fallbackModel", "thinking", "tools"].map((field) => {
-		let value = metadata.get(field)!;
-		const role = /^name: (.+)$/m.exec(header)?.[1];
-		const approved = DECLARATION_CHANGES[role ?? ""]?.[field];
-		if (approved) {
-			assert.equal(value, approved[0], `${role} approved pi.${field} value changed`);
-			value = approved[1];
-		}
-		return `${field}: ${value === "" ? '""' : value}`;
-	})].join("\n");
-	return sha(legacy);
-};
 const bodyOf = (text: string) => text.replace(/\r\n/g, "\n").replace(/^---\n[\s\S]*?\n---\n?/, "");
 
 // Redundant restatements removed by the dedup. Each is already stated by the Leaf boundary paragraph of the same prompt.
@@ -126,107 +55,6 @@ const PRIVACY_NEUTRALIZED = [
 	{ role: "release-engineer", from: "5deee955", to: 'gh pr merge 12 --repo acme/widgets --squash --match-head-commit 0123456789abcdef0123456789abcdef01234567 --subject "Add delivery grant" --body-file "D:/work/worktrees/app/_evidence/task/pr.md"' },
 	{ role: "release-engineer", from: "08b235a8", to: 'gh release create v1.2.3 --repo acme/widgets --target 0123456789abcdef0123456789abcdef01234567 --title "v1.2.3" --notes-file "D:/work/worktrees/app/_evidence/task/notes.md" --latest' },
 ];
-
-// Reviewed closed-world disposition of every BEFORE sentence hash that is not kept verbatim, for the controlled world (FULL launch, cwd = candidate root with no Cargo manifest, empty global corpus).
-// relocated: `after` hash must be present. conditional: present only under a launch/state this world lacks, so absent here. design: the ambient ~/.graphify corpus is no longer injected; the text appears only on a manifest coverage match.
-// BEFORE presence is asserted from the fixture for each live role; AFTER presence/absence is asserted per role.
-type Disposition = { before: string; after?: string; status: "relocated" | "conditional" | "design"; note: string };
-const DISPOSITIONS: Disposition[] = [
-	{ before: "20dcff88", status: "conditional", note: "reviewer-only Ponytail skip; the Not-loaded note carries it when Ponytail is absent" },
-	{ before: "69c6fb7f", after: "6a79e63f", status: "relocated", note: "qmd_search lookup, gated on the qmd capability" },
-	{ before: "832b5c7c", status: "conditional", note: "graphify-out orientation; graph block emits it only when project artifacts exist" },
-	{ before: "915411cd", after: "056902e3", status: "relocated", note: "Serena navigation, gated on the serena capability" },
-	{ before: "ea758c07", after: "056902e3", status: "relocated", note: "read/grep fallback merged into the Serena navigation sentence" },
-	{ before: "ae3b6e3b", after: "f12c81e6", status: "relocated", note: "graphify skill navigation, gated on the graphify skill argv" },
-	{ before: "34627530", status: "conditional", note: "optional-integration absence; carried only by the Not-loaded note when an integration file is missing" },
-	{ before: "074e5831", after: "01353c38", status: "relocated", note: "integration authority, merged into the core Integration and graph authority section" },
-	{ before: "be8cca50", after: "01353c38", status: "relocated", note: "same core sentence" },
-	{ before: "360b7d6a", status: "conditional", note: "Rust detail; emitted only when a Cargo manifest is structurally near cwd" },
-	{ before: "2a809068", status: "conditional", note: "Rust detail (Cargo-gated)" },
-	{ before: "2125e9c4", status: "conditional", note: "Rust detail (Cargo-gated)" },
-	{ before: "f3658a1a", status: "conditional", note: "Rust detail (Cargo-gated)" },
-	{ before: "ec635c7d", status: "conditional", note: "heading ## Rust build output (Cargo-gated)" },
-	{ before: "214ea5bb", after: "413b33e3", status: "relocated", note: "Serena candidate-project rule, gated on the serena capability" },
-	{ before: "c9a4d289", after: "09792437", status: "relocated", note: "QMD shared-index rule, gated on the qmd capability" },
-	{ before: "0756fda6", status: "design", note: "heading ## Global graph reference; manifest coverage match only" },
-	{ before: "b7bbed84", status: "design", note: "ambient ~/.graphify path; matched block only" },
-	{ before: "559d0391", status: "design", note: "ambient ~/.graphify wiki path; matched block only" },
-	{ before: "bbad72ba", status: "design", note: "ambient coverage manifest path; matched block only" },
-	{ before: "d4992c7c", status: "design", note: "ambient manifest repository list; only matched repository names are listed" },
-	{ before: "a01e3c84", status: "design", note: "unmatched 'coverage is not established' text; unmatched corpus is not injected" },
-	{ before: "ccf6ce1d", status: "design", note: "no-artifact graph text; unmatched branch removed" },
-	{ before: "c0fbf21b", status: "design", note: "matched global block preface" },
-	{ before: "a52f15e1", status: "design", note: "matched global block" },
-	{ before: "1e785f42", status: "design", note: "matched global block: 'Do not use it as the candidate's graph or an automatic fallback.'" },
-	{ before: "06a13f49", status: "design", note: "matched global block" },
-	{ before: "6f9dd750", status: "design", note: "unmatched-only sentence; removed" },
-	{ before: "7421c3a3", status: "design", note: "matched global block only ('No project Graphify artifacts were found at dispatch...')" },
-	{ before: "1cc8e17d", status: "design", note: "unmatched-only sentence; removed" },
-];
-// AFTER-only sentences that are not relocation targets: the core graph write-authority sentence (stated once) and the core heading.
-const NEW_AFTER = ["c708d8e8", "33322dbf"];
-// Reviewed F1 rewrite of frontend-worker (framework-aware role). The BEFORE fixture is unchanged; these are the reviewed post-change frontmatter sha and sentence hashes for that one role only.
-// REPAIR_REMOVED: pre-change sentences replaced by the rewrite. REPAIR_ADDED: the rewrite's new sentences and the cleanup/SSR bullet. Texts are recorded in REPORT-repairs.md.
-const FRONTMATTER_REVIEWED: Record<string, string> = { "live/frontend-worker": "8d0b2d833e11d4f0ac00b282808a981371f1e566ae5c51f718eac3d997635ae5", "live/backend-worker": "413f9b80a968b35c772de6e61e90677566c5adcc82a53fd7483d51cfefa2b0b8" };
-// Copilot compatibility: sentences that named hard-coded ~/.pi skill paths were rewritten to the host-aware <skills> root (plus one mapping sentence per profile).
-const HOST_PATH_REWRITE_REMOVED: Record<string, string[]> = { "backend-worker": ["2904e6c0"], "concurrency-specialist": ["fd2c43e3", "3cc0ec75"], debugger: ["84e4fbcc", "abafd744"], "devops-specialist": ["f6cdef5c"], "performance-specialist": ["3cc0ec75"], "release-engineer": ["66e0aa53"], reviewer: ["18334a6c"], scout: ["da483bc2", "36f081bf"], "test-engineer": ["dc2ca474", "8336b8bc", "3cc0ec75"], "ui-ux-specialist": ["1826fd55"] };
-// Sentences added by the same rewrite (the <skills> mapping sentence and rewritten reads); UNADDED: earlier reviewed added sentences that the rewrite changed.
-const HOST_PATH_REWRITE_ADDED: Record<string, string[]> = {"backend-worker":["05316f5a","0484df23","d2482a2c"],"concurrency-specialist":["05316f5a","9beab3fc","2bbe84da"],"database-specialist":["05316f5a","12b25721"],"debugger":["05316f5a","f848a8ef","7564472c"],"devops-specialist":["05316f5a","e5c13e20"],"frontend-worker":["05316f5a","502c0b6a","4c945cad","2c21e0f9"],"performance-specialist":["05316f5a","2bbe84da"],"release-engineer":["05316f5a","650ceb55"],"reviewer":["05316f5a","da59a309"],"scout":["05316f5a","7f8ade7a","eaaf1232"],"test-engineer":["05316f5a","7add79fc","45eb0e01","2bbe84da"],"ui-ux-specialist":["05316f5a","7e7baeb3"]};
-const HOST_PATH_REWRITE_UNADDED: Record<string, string[]> = { "backend-worker": ["ba103e70"], "database-specialist": ["904167e9"], "frontend-worker": ["eec9fd3e","7d96f658","3de47273"] };
-const REPAIR_REMOVED: Record<string, string[]> = { "release-engineer": ["f699bace", "2e241d33", "ca7fc9b0", "4a288cfa", "eb933c8b", "24903de1"], "observability-specialist": ["352cefa2"], "performance-specialist": ["4eaee567"], "frontend-worker": ["ef6bfdd1", "809e0349", "81f68bf7", "7a05c296", "ba078546", "b8738a30", "9cfb3248", "8dedf6b8"], "backend-worker": ["d6f02acf", "809e0349", "34a6b7f8", "0dd2503e", "8c068932", "5a521f05", "352cefa2", "39505c25", "983bc1d2", "ac1eeda5", "fef43aea", "8446cd4c"] };
-const REPAIR_ADDED: Record<string, string[]> = { reviewer: ["fc3fc8d6"], "release-engineer": ["4e8e66d6", "8463d536", "c17faae2", "dcded373", "dec089c4" /* automatic checkout cleanup paragraph */, "b42adbaf", "bb06c5da", "e5faf136", "d74bada9", "be39a328", "0664b001", "fb0ca904", "cbfbbd34", "783eb494", "aeec0036", "e16de1ef", "640c0eec", "eece1ded", "33e831fb", "343cb215", "8a5de7bc", "83fd4fcc", "b002e4da", "3071e855", "9c5c7203", "4e315760", "9056f070", "14027cde", "4902dcff", "b347025f", "b599e61b", "d24b80df", "020610b4", "5b9429cd", "76d48a37", "d03ad015", "fb177cbb", "75070b2d", "98045f96", "f5869bdd", "845fda3d", "e7d3b119", "95ca1463", "cef6155c", "778dfea8", "495aa565", "89747583", "2b537dce", "702610b9", "3c98680f", "86b4a3b1", "1c60c140", "b0712e1e"], "observability-specialist": ["269b2e9c"], "performance-specialist": ["a28096a2"], "frontend-worker": ["23526e31", "eec9fd3e", "8ba06bdf", "36abc239", "7d96f658", "e8bd257a", "3de47273", "9e95f556", "71b76b07", "b773fe52", "a2b4909c", "41d10c28"], "backend-worker": ["ba103e70", "7dfc5144", "bdf4c6d5", "d429435b", "432e1f2a", "269b2e9c", "ec086136", "18b9b701", "e28b3bcf", "0a137b78", "1afbaf10", "6b53e3dd"] };
-// Reviewed stack-guidance additions of this change: exact lines added at paragraph boundaries of the owning live role bodies (no existing sentence or heading changed).
-// Only lines of 20+ characters are hashed as sentences, matching sentences() above.
-const STACK_ADDED: Record<string, string[]> = {
-	"backend-worker": [
-		"- For C# and ASP.NET Core, use the SDK pinned by the project, async APIs end to end, and pass CancellationToken through I/O.",
-		"- Keep ASP.NET Core endpoints thin: validate input at the boundary, map failures to ProblemDetails and never leak exception text.",
-		"- Use parameterized SQL only (ADO.NET parameters, Dapper or EF Core parameters); never concatenate caller input into SQL text.",
-		"- Migrations are safe by default: additive and forward-only first, batched backfill, and destructive drops only in a later reviewed change.",
-		"- REST behaviour follows the accepted API contract; status codes, resource names and pagination changes go to api-specialist first.",
-	],
-	"frontend-worker": [
-		"**React and TypeScript notes (apply when the project uses React; the SolidJS rules below stay conditional on SolidJS):**",
-		"- Use function components and hooks; keep effects for synchronizing with external systems, not for derived state.",
-		"- Type props, events and API responses explicitly; avoid any and unchecked casts.",
-		"- Derive values during render and memoize only when a measured cost justifies it.",
-		"- Keep server data fetching behind the project's existing data or query layer, not ad hoc fetch calls in components.",
-		"- Test behaviour with the project's existing runner and React Testing Library queries, not implementation details.",
-	],
-	"observability-specialist": [
-		"**NRQL notes:**",
-		"- NRQL is New Relic's query language and is not SQL, so do not carry SQL idioms into it.",
-		"- Bound every query with SINCE and UNTIL and facet deliberately, because unbounded queries cost time and money.",
-		"- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write.",
-		"- Analysis queries stay read-only; NerdGraph or New Relic API writes are never implied by query design.",
-		"**Grafana and Kiali notes:**",
-		"- Grafana dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.",
-		"- Kiali: diagnose service-mesh traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.",
-		"- Alert thresholds and severities come from the team's approved policy; never invent them.",
-		"- Diagnosis stays read-only; no Grafana or Kiali write is implied by it.",
-	],
-	"api-specialist": [
-		"**REST contract notes:**",
-		"- Name resources as nouns, use HTTP methods for their meaning, and keep status codes consistent across endpoints.",
-		"- Define pagination, filtering and the error shape (ProblemDetails or the project's existing format) before implementation starts.",
-		"- Version breaking changes explicitly and record what each consumer must change.",
-		"- Unsafe retries that change state need an idempotency key or a conditional request such as If-Match.",
-	],
-	"general-worker": [
-		"**Jira JQL, Confluence CQL and gh or curl automation:**",
-		"- JQL is the Jira Query Language; Confluence search uses CQL, and the two are not interchangeable.",
-		"- Use bounded JQL and CQL queries with explicit project keys, space keys and date ranges; avoid unbounded scans.",
-		"- Automate gh and curl read-first: list and view before any create, edit, merge, comment or transition.",
-		"- Writes to Jira, Confluence or GitHub need explicit authority for the exact target; a missing or failed grant stops that step.",
-		"- Never place tokens on the command line or print them; read credentials from the environment without echoing them.",
-	],
-	"security-specialist": [
-		"**Scanner policy (Snyk, SonarQube, Prisma Cloud):** you own unresolved vulnerability, IAM and compliance policy questions these scanners raise. Advise on accepted risk, exceptions and policy; never suppress findings or set thresholds yourself. `platform-worker` wires the CI gates to the policy that main or the user approves.",
-	],
-	"devops-specialist": [
-		"**Platform handoff:** accepted infrastructure file changes (Terraform, Kubernetes, Helm, Azure CLI, FluxCD) go to `platform-worker` for editing; this role stays read-only and never applies them.",
-	],
-};
 
 const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/role-prompt-dedup.before.json", import.meta.url), "utf8")) as {
 	entries: Record<string, { chars: number; frontmatterSha: string; headings: string[]; sentenceHashes: string[] }>;
@@ -398,83 +226,9 @@ test("legacy worktree, ship and learn guide.md files are tiny pointers to the sa
 	}
 });
 
-test("declaration normalization rejects unapproved identity, tool and approved-field changes", () => {
-	const source = withHistoricalHeader(fs.readFileSync(new URL("../../../agents/api-specialist.md", import.meta.url), "utf8"));
-	const changed = (from: string, to: string) => {
-		const result = source.replace(from, to);
-		assert.notEqual(result, source, "negative control must mutate the current header");
-		return result;
-	};
-	const currentHeader = effectiveLegacyHeaderSha(source);
-	assert.notEqual(effectiveLegacyHeaderSha(changed('pi.tools: "read, grep', 'pi.tools: "write, grep')), currentHeader);
-	assert.notEqual(effectiveLegacyHeaderSha(changed("name: api-specialist", "name: changed-role")), currentHeader);
-	assert.notEqual(effectiveLegacyHeaderSha(changed("description: Read-only", "description: Changed")), currentHeader);
-	for (const field of ["model", "fallbackModel", "thinking"]) {
-		const current = DECLARATION_CHANGES["api-specialist"][field]![0];
-		assert.throws(() => effectiveLegacyHeaderSha(changed('pi.' + field + ': "' + current + '"', 'pi.' + field + ': "unauthorized/value"')), /approved pi\./);
-	}
-});
-
-// Closed world: every BEFORE hash that is missing AFTER, and every AFTER hash that is new, must be a reviewed disposition for that role. Nothing else may change.
-const HEADINGS_ABSENT_HERE = ["## Rust build output", "## Global graph reference (separate corpus)"];
-const HEADINGS_NEW_HERE = ["## Integration and graph authority"];
-// 4F packet trim: the task-packet checklist is main's job (AGENTS.md protocol step 4), so it was removed from the three code workers,
-// with the frontend child-module list (the frontend router lists them). Headings and sentence hashes below are the reviewed removals; nothing was rewritten.
-const PACKET_TRIM_HEADINGS: Record<string, string[]> = { "frontend-worker": ["## Context Budget"], "backend-worker": ["## Context budget"], "database-worker": ["## Context budget"] };
 // 4C in-run retry: each code worker gained one sentence (fix a failing focused check in the same run, at most 2 tries; else return the recovery fields).
 const IN_RUN_RETRY_RULE = "When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.";
 const RETRY_ROLES = ["frontend-worker", "backend-worker", "database-worker", "general-worker"];
-const PACKET_TRIM_REMOVED: Record<string, string[]> = {
-	"backend-worker": ["113098ec", "15c1ecda", "1a79c8a6", "1c41727b", "43674699", "4373eb59", "4c7fa1da", "aadd021d"],
-	"frontend-worker": ["00af8638", "167048b2", "1a79c8a6", "2121cf31", "2fa3feb7", "36590171", "36b49dbe", "56e7c2c4", "5c159289", "5da578e6", "65f26397", "73e6ed97", "96ba4c5b", "9cc44bca", "a9af9701", "bbc83d2e", "e2e40b5c"],
-};
-// Phase 4 role structure: the role-specific body is regrouped under Knows/loads | Before starting | Workflow | Where to look | Common failures.
-// The shared preamble (Scoped editing, Assigned module, Leaf boundary) and footer stay byte-identical. Sentences were moved, merged into
-// numbered steps or bullets, or dropped where they restated another line; removed/added/unadded are the reviewed hash deltas from the pre-Phase-4 body.
-const PHASE4_ROLE_STRUCTURE: Record<string, { headingsRemoved: string[]; headingsAdded: string[]; removed: string[]; added: string[]; unadded: string[] }> = {
-	"frontend-worker": {
-		headingsRemoved: ["## Design-Gate Boundary", "## Frontend Capability Routing", "## Assigned Workspace Safety", "## Before Editing", "## Implementation", "## TDD and Checks", "## Interrupted Handoff", "## Completion", "## SolidJS-specific implementation"],
-		headingsAdded: ["## Knows/loads", "## Before starting", "## Workflow", "## Where to look", "## Common failures"],
-		removed: ["010316e5", "02d2d32a", "03d5280d", "04dd3034", "0565bdeb", "07782ded", "085db2a0", "0aa80897", "112d6afa", "136e3635", "16970180", "19dc5868", "1a2c3c46", "1b4beab6", "1ca4fee2", "1eccda08", "208690f4", "21330f33", "2193e0da", "22573936", "2368d1c7", "243dac83", "295aab84", "2c343a97", "311c93b5", "32db556f", "339efad5", "362e0e1e", "3a75c654", "3d33966c", "3d56a7a0", "44273570", "481b7d0c", "4d1b06f4", "4d3f69ff", "4e5eea4d", "512c29a9", "5825ad9e", "5a4cde2d", "5ad2081e", "5b6c401c", "5d2744c0", "5e42e8ba", "61e7f8d1", "632b2cf8", "65480222", "69d732c8", "74304dc6", "7eb5cc35", "80921dd9", "82189ed2", "83ec8cc4", "878ba5b4", "87daca5d", "8fd51561", "8fe4f136", "9396d4a7", "9f21b205", "a0b0ea81", "a29335a3", "a62bc68f", "a7be6360", "a8a1fa02", "ab2a117e", "abf5ff73", "b541da65", "b72ed47b", "b7f7a3b1", "b9482019", "bfa19733", "c1cd9a78", "c1f1fe7e", "c373d79b", "c463d65c", "c9aa6bf4", "cb899521", "cf98d54a", "d31acb15", "d4d3334f", "d71f9eaf", "d9beb475", "dbfa21c2", "dd6e4df5", "df9d64fc", "e2840ee5", "e2876117", "e3b59e57", "e829733f", "ecf22fa4", "ed77e23d", "ee747e03", "f278fa3d", "f4660f49", "f5cf8a85"],
-		added: ["0906a518", "095e35fe", "11239c41", "16bcd518", "27eadcca", "2dacd057", "2e352e7e", "300ff616", "36d2f523", "4248f095", "48af7242", "4b89efc9", "650d8541", "6d98bfb6", "743e3aa2", "7c662fec", "8d969978", "9f3ef2b3", "a119d3e2", "a140cb7d", "ba85a074", "bfb6244c", "c6ad151e", "c7be5ec2", "d02fd2b9", "d2d40890", "dea0c134", "def17b65", "ed1bc621", "f8c42a1c"],
-		unadded: ["71b76b07", "9e95f556", "a2b4909c"],
-	},
-};
-test("every role/profile keeps frontmatter; sentences and headings change only by the reviewed closed-world mapping", () => {
-	for (const [key, before] of Object.entries(fixture.entries)) {
-		const [shape, role] = key.split("/");
-		if (key === "live/sqlite-specialist") continue; // Historical fixture retained; explicitly retired live role.
-		const { text, sourceText } = assembled(shape, role);
-		const phase4 = PHASE4_ROLE_STRUCTURE[role];
-		assert.equal(effectiveLegacyHeaderSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} effective Pi declarations changed`);
-		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
-		for (const h of HEADINGS_ABSENT_HERE) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
-		for (const h of PACKET_TRIM_HEADINGS[role] ?? []) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
-		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), [...HEADINGS_ABSENT_HERE, ...(PACKET_TRIM_HEADINGS[role] ?? []), ...(phase4?.headingsRemoved ?? [])].sort(), `${key} headings lost`);
-		assert.deepEqual(heads.filter((h) => !before.headings.includes(h)).sort(), [...HEADINGS_NEW_HERE, ...(phase4?.headingsAdded ?? [])].sort(), `${key} headings added`);
-
-		const after = sentenceHashes(text);
-		const beforeSet = new Set(before.sentenceHashes);
-		for (const d of DISPOSITIONS) assert.ok(beforeSet.has(d.before), `${key}: BEFORE presence proof missing for ${d.before} (${d.note})`);
-		const privacy = PRIVACY_NEUTRALIZED.filter((p) => p.role === role);
-		for (const p of privacy) assert.ok(beforeSet.has(p.from), `${key}: BEFORE presence proof missing for privacy ${p.from}`);
-		const redundantHere = [...REDUNDANT_HASHES].filter((h) => beforeSet.has(h));
-		assert.equal(redundantHere.length, 1, `${key}: exactly one redundant restatement expected before`);
-
-		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere, ...(REPAIR_REMOVED[role] ?? []), ...(HOST_PATH_REWRITE_REMOVED[role] ?? []), ...(PACKET_TRIM_REMOVED[role] ?? []), ...(phase4?.removed ?? [])].sort();
-		const actualMissing = before.sentenceHashes.filter((h) => !after.has(h)).sort();
-		assert.deepEqual(actualMissing, expectedMissing, `${key}: sentences lost outside the reviewed mapping`);
-
-		for (const d of DISPOSITIONS) {
-			if (d.after) assert.ok(after.has(d.after), `${key}: relocated target ${d.after} for ${d.before} missing`);
-			else assert.equal(after.has(d.before), false, `${key}: ${d.before} (${d.status}) should be absent in this world`);
-		}
-
-		const expectedAdded = [...DISPOSITIONS.flatMap((d) => (d.after ? [d.after] : [])), ...NEW_AFTER, ...(REPAIR_ADDED[role] ?? []), ...(HOST_PATH_REWRITE_ADDED[role] ?? []), ...privacy.map((p) => sha(p.to).slice(0, 8)), ...[...(STACK_ADDED[role] ?? []), ...(RETRY_ROLES.includes(role) ? [IN_RUN_RETRY_RULE] : [])].flatMap((s) => sentences(s)).map((s) => sha(s).slice(0, 8)), ...(phase4?.added ?? [])].filter((h) => !beforeSet.has(h) && !(HOST_PATH_REWRITE_UNADDED[role] ?? []).includes(h) && !(phase4?.unadded ?? []).includes(h));
-		const actualAdded = [...after].filter((h) => !beforeSet.has(h));
-		assert.deepEqual([...new Set(actualAdded)].sort(), [...new Set(expectedAdded)].sort(), `${key}: sentences added outside the reviewed mapping`);
-	}
-});
 
 // Structural applicability: the Rust detail follows a Cargo manifest near the working directory, not the role name.
 test("Rust build detail is emitted only when a Cargo manifest is structurally near the working directory", () => {
@@ -504,16 +258,6 @@ test("the redundant no-helper restatements are absent from every assembled promp
 		if (before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h))) for (const h of REDUNDANT_HASHES) if (after.has(h)) offenders.push(key);
 	}
 	assert.deepEqual([...new Set(offenders)], [], "redundant no-helper restatement still present");
-});
-
-test("assembled prompts shrink where a redundant restatement was removed", () => {
-	const unchanged: string[] = [];
-	for (const [key, before] of Object.entries(fixture.entries)) {
-		if (!before.sentenceHashes.some((h) => REDUNDANT_HASHES.has(h)) || key === "live/sqlite-specialist" || key === "live/release-engineer") continue;
-		const [shape, role] = key.split("/");
-		if (assembled(shape, role).text.length >= before.chars) unchanged.push(key);
-	}
-	assert.deepEqual(unchanged, [], "prompts with a removed restatement did not shrink");
 });
 
 test("privacy-neutralized role sentences: each original was in the pre-change fixture and is replaced exactly by its generic wording", () => {

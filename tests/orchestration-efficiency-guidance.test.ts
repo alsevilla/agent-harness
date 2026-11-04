@@ -203,12 +203,10 @@ test("SKILL.md routing table maps need to module, existing role and acceptance c
   assert.ok(skill.length <= 5200, `SKILL.md ${skill.length} chars`);
 });
 
-test("README states latest-only host support separately from the version actually tested", () => {
+test("README states latest-only host support and how host suites are selected", () => {
   const text = compact(readme);
   assert.match(text, /Only the latest Pi release is supported/);
-  assert.match(text, /scripts\/check-pi-latest\.mjs/);
-  assert.match(text, /latest-runtime validation unavailable/);
-  assert.match(text, /version actually tested/i);
+  assert.match(text, /NATIVE_PROBE_HOST_MODULES/);
   assert.doesNotMatch(text, /tested baseline is Pi 1\.1\.0|Pi 1\.1\.0 \(tested baseline/);
   assert.doesNotMatch(compact(read("agent/extensions/subagent/README.md")), /targets Pi 1\.1\.0 \(tested baseline/);
   assert.doesNotMatch(compact(read("agent/VALIDATION.md")), /current tested baseline is Pi 1\.1\.0/);

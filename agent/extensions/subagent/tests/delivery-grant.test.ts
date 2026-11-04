@@ -435,7 +435,7 @@ test("artifact directory alias: a junction standing in for the artifact director
 
 test("artifact directory 8.3 short name: a short-name alias of the artifact directory is refused", (t) => {
 	const longWin = ART_DIR.replace(/\//g, "\\");
-	const shortName = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${longWin}').ShortPath`], { encoding: "utf8", windowsHide: true }).stdout.trim();
+	const shortName = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${longWin}').ShortPath`], { encoding: "utf8", windowsHide: true }).stdout?.trim(); // no powershell.exe off Windows: skipped below
 	if (!shortName || shortName.toLowerCase() === longWin.toLowerCase()) { t.skip("NOT RUN: no 8.3 short name exists for the artifact directory on this volume"); return; }
 	assert.throws(() => C.validateArtifactDir(slash(shortName), CAND), /^RangeError: artifact directory is an alias or link \(8\.3 short name\)$/, "8.3 alias refused with its own reason");
 });
