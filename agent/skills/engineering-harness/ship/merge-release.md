@@ -2,7 +2,7 @@
 
 Read this only when the task names an existing explicit merge or release delivery action grant. PR merge and release creation have no automatic path; without such a grant, stop and return BLOCKED to main.
 
-- `merge`: exact PR + approved head SHA, fingerprint-bound.
+- `merge`: exact PR + approved head SHA, bound to the candidate fingerprint the runtime computed and showed at approval. One approval covers the merge, the LEARN checkpoint and the post-merge cleanup that follow; only a release needs its own.
 - `release`: exact PR, version and target SHA; the tag must not exist. Only the approved release version is tagged.
 - Each needs its own operator approval; one never authorizes the other, and neither is inferred from commit, push, PR or merge. Single-use operation grants are not accepted for them. Task authority and guard refusal protections still apply.
 - A named grant has no time expiry: it lasts until `/revoke-authorization` or session end; pause and abort do not clear it.

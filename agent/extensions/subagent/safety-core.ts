@@ -556,6 +556,8 @@ export interface GrantStore {
 	findCleanup(candidate: string): CleanupGrant | undefined;
 	takeCleanup(id: string): boolean;
 	cleanupCount(): number;
+	addArtifactCleanup(entries: ArtifactCleanup[]): void;
+	takeArtifactCleanup(target: string): ArtifactCleanup | undefined;
 }
 
 function validateRecord(value: unknown): GrantRecord {
@@ -570,10 +572,12 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 	let leases: PushLease[] = [];
 	let delivery: DeliveryGrant[] = [];
 	let cleanup: CleanupGrant[] = [];
+	let artifacts: ArtifactCleanup[] = [];
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
 		cleanup = cleanup.filter((c) => t - c.issuedAt <= CLEANUP_TTL_MS);
+		artifacts = artifacts.filter((a) => t - a.issuedAt <= CLEANUP_TTL_MS);
 		return t;
 	};
 	return {
@@ -615,6 +619,19 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		cleanupCount() {
 			live();
 			return cleanup.length;
+		},
+		// Artifact folders of a checkout whose exact removal the guard just allowed: one entry per folder, single use, same TTL.
+		addArtifactCleanup(entries) {
+			live();
+			for (const e of entries) {
+				artifacts = artifacts.filter((a) => normPath(a.path) !== normPath(e.path));
+				artifacts.push({ ...e });
+			}
+		},
+		takeArtifactCleanup(target) {
+			live();
+			const index = artifacts.findIndex((a) => normPath(a.path) === normPath(target));
+			return index < 0 ? undefined : artifacts.splice(index, 1)[0];
 		},
 		mint({ role, candidate, ops, ttlMs = GRANT_TTL_DEFAULT_MS }) {
 			if (!Array.isArray(ops) || ops.length < 1 || ops.length > MAX_GRANT_OPS) throw new RangeError(`a batch carries 1 to ${MAX_GRANT_OPS} operations`);
@@ -1381,7 +1398,7 @@ function deliveryAllows(store: GrantStore, decision: Extract<Decision, { action:
 }
 
 // ---- Post-merge CHECKOUT cleanup (narrow): exactly `git worktree remove "<abs path>"` for one merged, clean, task-owned checkout, run by a main-launched release-engineer in the primary checkout, outside the target.
-// Main's request is only a selector plus a quiescence declaration: the scope is minted after independent live checks and every check runs again before the guard allows the one command. Artifact folders (_scratch/_evidence) are never covered: they are reported RETAINED.
+// Main's request is only a selector plus a quiescence declaration: the scope is minted after independent live checks and every check runs again before the guard allows the one command. Its artifact folders (_scratch/_evidence) follow under the same scope once the checkout is gone (see ARTIFACT cleanup below).
 export const CLEANUP_TTL_MS = 10 * 60_000;
 const MAX_CLEANUP_GRANTS = 4;
 const CLEANUP_WALK_MAX = 20_000;
@@ -1558,7 +1575,70 @@ function cleanupAllows(store: GrantStore, decision: Extract<Decision, { action: 
 		if (!grant || (live.now?.() ?? Date.now()) - grant.issuedAt > CLEANUP_TTL_MS) return false;
 		if (normPath(decision.op.cwd) !== normPath(grant.primary) || overlaps(decision.op.cwd, grant.candidate)) return false;
 		if (verifyCleanup(grant, live) !== undefined) return false;
-		return store.takeCleanup(grant.id);
+		if (!store.takeCleanup(grant.id)) return false;
+		const issuedAt = live.now?.() ?? Date.now();
+		store.addArtifactCleanup(artifactFolders(grant.candidate).map((folder) => ({ path: folder, candidate: grant.candidate, primary: grant.primary, issuedAt })));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// ---- Post-merge ARTIFACT cleanup: after the guard allowed the exact checkout removal, the same scope covers that task's two artifact
+// folders, <worktrees>/<repo>/_evidence/<task> and _scratch/<task>, with one exact removal each. A folder is removable only once the checkout
+// and its registration are gone, from the primary as cwd, and only when it is a plain directory holding no links, hard links or special files.
+export interface ArtifactCleanup { path: string; candidate: string; primary: string; issuedAt: number }
+
+/** The two artifact folders of a task checkout `<group>/<task>`: `<group>/_evidence/<task>` and `<group>/_scratch/<task>`. */
+export function artifactFolders(candidate: string): string[] {
+	const c = slashed(candidate).replace(/\/+$/, "");
+	const task = path.posix.basename(c);
+	const group = path.posix.dirname(c);
+	return ["_evidence", "_scratch"].map((kind) => `${group}/${kind}/${task}`);
+}
+
+// Exact whole-command forms, one folder each: bash `rm -rf "<abs path>"`, PowerShell `Remove-Item -LiteralPath "<abs path>" -Recurse -Force`.
+export function parseArtifactRemoval(command: string): string | undefined {
+	const t = tokenizeDelivery(command);
+	if (!t) return undefined;
+	const bare = (i: number, word: string) => t[i].quoted === "" && t[i].text === word;
+	let target: Tok | undefined;
+	if (t.length === 3 && bare(0, "rm") && bare(1, "-rf")) target = t[2];
+	else if (t.length === 5 && bare(0, "Remove-Item") && bare(1, "-LiteralPath") && bare(3, "-Recurse") && bare(4, "-Force")) target = t[2];
+	if (!target || target.quoted !== '"' || target.text.length > 240 || !PATH_ARG.test(target.text) || badSegments(target.text)) return undefined;
+	return target.text;
+}
+
+/** Live proof for one artifact folder; returns a refusal reason, or undefined when the folder may be removed. Any read problem refuses. */
+export function verifyArtifactCleanup(a: ArtifactCleanup): string | undefined {
+	try {
+		if (redirectedGitEnvironment()) return "git environment is redirected";
+		if (fs.existsSync(a.candidate)) return "the task checkout still exists; remove it first";
+		const list = gitRead(a.primary, ["worktree", "list", "--porcelain"]);
+		if (!list) return "registrations could not be read";
+		if (list.some((line) => line.startsWith("worktree ") && normPath(line.slice(9)) === normPath(a.candidate))) return "the task checkout is still registered";
+		const st = fs.lstatSync(a.path);
+		if (!st.isDirectory() || st.isSymbolicLink()) return "artifact folder is not a plain directory";
+		if (normPath(slashed(fs.realpathSync.native(a.path))) !== normPath(a.path)) return "artifact folder is an alias or link";
+		return walkCheckout(a.path);
+	} catch {
+		return "artifact folder state could not be read";
+	}
+}
+
+// Child guard: exact form, only DESTRUCTIVE_FS, cwd is the primary and outside the folder, entry present and fresh, live proof holds. Consumes the entry.
+function artifactCleanupAllows(store: GrantStore, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive): boolean {
+	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "DESTRUCTIVE_FS") return false;
+	const target = parseArtifactRemoval(decision.op.command);
+	if (!target) return false;
+	try {
+		const entry = store.takeArtifactCleanup(target);
+		if (!entry) return false;
+		const fresh = (live.now?.() ?? Date.now()) - entry.issuedAt <= CLEANUP_TTL_MS;
+		const placed = normPath(decision.op.cwd) === normPath(entry.primary) && !overlaps(decision.op.cwd, entry.path);
+		if (fresh && placed && verifyArtifactCleanup(entry) === undefined) return true;
+		store.addArtifactCleanup([entry]); // a refused attempt consumes nothing
+		return false;
 	} catch {
 		return false;
 	}
@@ -1578,7 +1658,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 			seen.add(normPath(candidate));
 			const task = path.posix.basename(candidate);
 			const group = path.posix.dirname(candidate);
-			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "artifact folders are never deleted automatically: a knowledge checkpoint cannot prove their contents disposable" }));
+			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "removed by the same cleanup after the checkout, once the knowledge checkpoint is SAVED outside every target or NO LESSON" }));
 			const why = owners.check(candidate, jobRunning);
 			out.push(why === undefined ? { state: "PENDING_UNVERIFIED", checkout: candidate, request: { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha }, retainedArtifacts } : { state: "RETAINED", checkout: candidate, reason: why, retainedArtifacts });
 		} catch { /* unknown state is not pending */ }
@@ -1810,6 +1890,7 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, live)) return undefined;
 	if (guard.scope === "child" && cleanupAllows(guard.store, decision, live)) return undefined;
+	if (guard.scope === "child" && artifactCleanupAllows(guard.store, decision, live)) return undefined;
 	const how = decision.grantable ? "needs an explicit operator grant (request_authorization is for a genuinely blocked risky command such as merge or release, not ordinary commit, feature push or PR create)" : "not grantable to a model: use the operator out-of-band";
 	return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: ${how}${unsupportedCommitHint(decision)}.` };
 }

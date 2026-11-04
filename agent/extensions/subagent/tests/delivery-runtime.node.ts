@@ -577,12 +577,12 @@ test("merge approval (simulated TUI): the dialog shows PR, SHA, bound state and 
 	} finally { t.cleanup(); fs.rmSync(other.dir, { recursive: true, force: true }); }
 });
 
-test("merge approval (simulated TUI): unbound, mismatched-SHA, detached or other-branch candidates, a bad expect and a moved PR head are refused with no dialog", { timeout: 240_000 }, async () => {
+test("merge approval (simulated TUI): mismatched-SHA, detached or other-branch candidates, a bad expect and a moved PR head are refused with no dialog", { timeout: 240_000 }, async () => {
 	const { dir, repoDir } = boundRepo();
 	const good = mergeReq(repoDir, "g1");
 	const good_args = (good.args as any).delivery;
 	const bad = (id: string, d: Record<string, unknown>) => ({ tool: "request_authorization", args: { delivery: { ...good_args, ...d } }, id });
-	const steps = [bad("m1", { bind: undefined }), bad("m2", { bind: { expect: "0".repeat(64) } }), bad("m3", { sha: "1".repeat(40) }), bad("m4", { pr: undefined }), bad("m5", { version: "v1.2.3" })];
+	const steps = [bad("m2", { bind: { expect: "0".repeat(64) } }), bad("m3", { sha: "1".repeat(40) }), bad("m4", { pr: undefined }), bad("m5", { version: "v1.2.3" })];
 	const s = await openMain([...steps, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
 	try {
 		const r = (await s.session.prompt("probe"), s.results());
