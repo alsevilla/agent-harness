@@ -28,6 +28,6 @@ After a verified merge (including squash/rebase), release engineer owns safe cle
 Before the final commit or PR, main selects LEARN when warranted. The knowledge-disposition checkpoint (SAVED, NO LESSON or BLOCKED) is canonical in `../learn/index.md`. Post-merge cleanup follows the knowledge gate in `../worktree/index.md`: a local SAVED checkpoint outside every deletion target, or a NO LESSON checkpoint; shared publication is verified only when separately authorized. Archiving a report or fixture is evidence, not learning completion.
 
 Do not repair product source in SHIP. Return implementation defects to main for the appropriate writer. Do not run SHIP for ordinary coding completion.
-Load `references/extended.md` for release-critical workflows.
+Load `references/extended.md` for release-critical workflows. When the task names a merge or release action grant, the delivering `release-engineer` also reads `merge-release.md` (exact command shapes).
 
 Resolve relative references from this module folder. This procedure supplies guidance; the selected `release-engineer` role still must actually run.

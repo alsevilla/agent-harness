@@ -655,10 +655,12 @@ test("artifact file refusal reasons are exact; a real regular fixture passes", (
 
 test("docs: release-engineer and subagent README show approved command shapes that parse; root README risk row covers delivery", () => {
 	const repo = path.resolve(import.meta.dirname, "..", "..", "..", "..");
-	for (const file of [path.join(repo, "agent", "agents", "release-engineer.md"), path.join(repo, "agent", "extensions", "subagent", "README.md")]) {
-		const shapes = fs.readFileSync(file, "utf8").split(/\r?\n/).map((l) => l.trim()).filter((l) => /^(git push origin |gh pr (create|edit|merge) |gh release create )/.test(l));
+	// release-engineer lists the automatic shapes; merge and release shapes load from ship/merge-release.md only when a grant is named.
+	const roleAndShip = [path.join(repo, "agent", "agents", "release-engineer.md"), path.join(repo, "agent", "skills", "engineering-harness", "ship", "merge-release.md")].map((f) => fs.readFileSync(f, "utf8")).join("\n");
+	for (const [file, text] of [["release-engineer.md + ship/merge-release.md", roleAndShip], [path.join(repo, "agent", "extensions", "subagent", "README.md"), fs.readFileSync(path.join(repo, "agent", "extensions", "subagent", "README.md"), "utf8")]]) {
+		const shapes = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^(git push origin |gh pr (create|edit|merge) |gh release create )/.test(l));
 		assert.ok(shapes.length >= 5, `${file}: approved command shapes listed (${shapes.length})`);
-		assert.doesNotMatch(fs.readFileSync(file, "utf8"), /fixed 30 min|30-minute release|Expiry: fixed/, `${file}: no 30-minute delivery expiry remains`);
+		assert.doesNotMatch(text, /fixed 30 min|30-minute release|Expiry: fixed/, `${file}: no 30-minute delivery expiry remains`);
 		for (const shape of shapes) assert.ok(shape.startsWith("git push origin ") ? C.parseNormalPush(shape) : C.parseDeliveryCommand(shape), `${file}: ${shape}`);
 	}
 	const row = fs.readFileSync(path.join(repo, "README.md"), "utf8").split(/\r?\n/).find((l) => l.includes("request_authorization") && l.includes("push_branch"));
