@@ -1,5 +1,5 @@
 ## WORKTREE procedure
-Use only when isolation is already justified. Main owns placement and disposition.
+Use only when isolation is already justified: parallel writers on separate candidates, uncommitted user work in the primary checkout, a live process (server, live database, path-bound tooling) that depends on the primary checkout, or main must stay on the base branch while a background candidate runs. Otherwise the candidate is a feature branch in the primary checkout, created or switched to before launch, and no worktree cleanup follows. Main owns placement and disposition.
 
 Before mutation, confirm primary repository, accepted base, candidate, ownership
 and active workers. Preserve user work and reuse a suitable existing checkout.

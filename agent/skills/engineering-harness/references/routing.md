@@ -106,7 +106,7 @@ Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independe
 ### Single versus parallel
 Decide per batch before dispatch by independence, task size, setup or context overhead and reconciliation cost. These are judgments; no runtime metric or saving is established by this rule.
 - Choose one writer (single) when items share files or ownership, a later item needs an earlier result, the task size is small against each child's setup or context overhead (packet, role context, integrations), or reconciliation cost (merging outputs, resolving conflicts, rerunning shared checks) would be about as large as the work.
-- Parallel only when items are independent and enumerable, ownership is disjoint, each item's task size is large against its setup or context overhead, and reconciliation cost is mechanical (disjoint files, one summary).
+- Parallel only when items are independent and enumerable, ownership is disjoint (each parallel writer gets its own worktree; one checkout admits one writer at a time), each item's task size is large against its setup or context overhead, and reconciliation cost is mechanical (disjoint files, one summary).
 - Choosing single is not a bypass: it never removes a mandatory role, specialist gate, independent verification or review, or tier rule. Main still runs each required gate.
 - One investigation per unknown bug: several symptoms of one suspected cause, or one file's edits, go to one debugger or one writer, not one worker per symptom. Split only where causes or ownership are independent.
 
