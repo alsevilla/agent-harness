@@ -225,6 +225,7 @@ function launchCapabilities(args: string[]) {
 }
 
 /** The child system prompt. Core guidance is unconditional once; Rust, navigation, candidate-retrieval, graph and unavailable-integration sections are emitted only from actual launch evidence. */
+const SHARED_CHILD_PREFIX = CORE_GUIDANCE.replace(/^\n+/, "") + COMPACT_HANDOFF_INSTRUCTIONS;
 export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: string }, options: ChildPromptOptions): string {
   const cap = launchCapabilities(options.launchArgs ?? []);
   let integrations = "";
@@ -236,5 +237,7 @@ export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: s
       graphReferenceGuidance(options.cwd, options.globalGraphDirectory ?? path.join(os.homedir(), ".graphify")) +
       unavailableIntegrationGuidance(agent.name, options.qmdExtension ?? QMD_EXTENSION);
   }
-  return agent.systemPrompt + CORE_GUIDANCE + (cargoManifestNearby(options.cwd) ? RUST_BUILD_GUIDANCE : "") + integrations + packageResourceGuidance(options.packageRoot) + COMPACT_HANDOFF_INSTRUCTIONS;
+  // Cache shape: provider prompt caches reuse only an exact prefix, so the text every role shares comes first, the role body next,
+  // and the parts that depend on the working directory or launch last. Roles with the same model and tools then share one cached prefix.
+  return SHARED_CHILD_PREFIX + "\n" + agent.systemPrompt + (cargoManifestNearby(options.cwd) ? RUST_BUILD_GUIDANCE : "") + integrations + packageResourceGuidance(options.packageRoot);
 }

@@ -337,7 +337,11 @@ test("assembled child prompt: core headings once in every shape; navigation and 
   const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
   const plain = repoAt("assembled-plain");
   const live = assembled(plain, { launchArgs: FULL_LAUNCH });
-  assert.ok(live.startsWith("ROLE BODY"));
+  // Cache shape: shared guidance and the handoff format first, then the role body, then cwd/launch-dependent parts.
+  assert.ok(live.startsWith("## Shell syntax"));
+  assert.ok(live.indexOf("## Final handoff to main") < live.indexOf("ROLE BODY"), "handoff format is in the shared prefix");
+  assert.ok(live.indexOf("ROLE BODY") < live.indexOf("## Code navigation integrations"), "launch-dependent parts follow the role body");
+  assert.equal(assembled(repoAt("assembled-other"), { launchArgs: FULL_LAUNCH }).slice(0, live.indexOf("ROLE BODY")), live.slice(0, live.indexOf("ROLE BODY")), "the shared prefix does not depend on the working directory");
   for (const heading of ["## Shell syntax", "## Artifact placement", "## Integration and graph authority", "## Code navigation integrations", "## Candidate navigation and shared retrieval", "## Final handoff to main"]) assert.equal(live.split(heading).length - 1, 1, heading);
   assert.equal(live.split(rule).length - 1, 1);
   assert.equal(live.includes("## Rust build output"), false, "no Cargo manifest, so no Rust detail");
