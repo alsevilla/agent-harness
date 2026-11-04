@@ -151,7 +151,7 @@ test("every generic role receives standard code navigation integrations", () => 
 
 test("registry contains the approved tier pairs without changing default role fields", () => {
   const expected: Record<string, { economy: [string, string]; capable?: [string, string] }> = {
-    "backend-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "backend-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
     "frontend-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
     "database-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"] },
     "general-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
@@ -195,7 +195,7 @@ test("written tier scenarios resolve through the real package registry to the co
       return found;
     };
     const scenarios: Array<[string, "economy" | "capable", string, string, string]> = [
-      ["backend-worker", "economy", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5", "medium"], // bounded backend change
+      ["backend-worker", "economy", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna", "medium"], // bounded backend change
       ["frontend-worker", "economy", "anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna", "medium"], // bounded presentational change
       ["database-worker", "capable", "openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5", "low"], // consequential migration
       ["platform-worker", "capable", "anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol", "low"], // consequential infrastructure
@@ -257,7 +257,7 @@ test("package discovery normalizes tier registry data and field-wise user tier o
     const role = result.agents.find((item) => item.name === "backend-worker");
     assert.ok(role);
     assert.equal(role.source, "package");
-    assert.equal(role.model, "openai-codex/gpt-6-luna", "the root model keeps the base default-tier projection (economy after the approved preset update)");
+    assert.equal(role.model, "anthropic/claude-haiku-5-5", "the root model keeps the base default-tier projection (economy after the approved preset update)");
     assert.deepEqual(role.modelTiers?.economy, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
     assert.equal(role.modelTiers?.capable, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
     fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: {} }]));
@@ -515,8 +515,8 @@ test("partial tier overlays inherit the base default and replace modelTiers atom
   const economy = inherited.agents.find((agent) => agent.name === "backend-worker");
   assert.ok(economy);
   assert.equal(economy.defaultModelTier, "economy");
-  assert.equal(economy.model, "openai-codex/gpt-6-luna");
-  assert.deepEqual(economy.fallbackModel, ["anthropic/claude-haiku-5-5"]);
+  assert.equal(economy.model, "anthropic/claude-haiku-5-5");
+  assert.deepEqual(economy.fallbackModel, ["openai-codex/gpt-6-luna"]);
   assert.equal(economy.thinking, "medium");
   assert.deepEqual(economy.tools, BACKEND_TOOLS);
 
@@ -544,7 +544,7 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   const tools = toolsOnly.agents.find((agent) => agent.name === "backend-worker");
   assert.ok(tools);
   assert.deepEqual(tools.tools, ["read"]);
-  assert.equal(tools.model, "openai-codex/gpt-6-luna");
+  assert.equal(tools.model, "anthropic/claude-haiku-5-5");
   assert.equal(tools.defaultModelTier, "economy", "a tools-only overlay inherits the base default tier");
 
   const legacy = discoverWithUserRoles([{ name: "backend-worker", provider: "fixture-provider", model: "legacy-model", thinking: "low" }]);
@@ -553,7 +553,7 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   assert.ok(scalar);
   assert.equal(scalar.model, "fixture-provider/legacy-model");
   assert.equal(scalar.thinking, "low");
-  assert.deepEqual(scalar.fallbackModel, ["anthropic/claude-haiku-5-5"]);
+  assert.deepEqual(scalar.fallbackModel, ["openai-codex/gpt-6-luna"]);
   assert.equal(scalar.defaultModelTier, undefined, "legacy omission projection carries no default tier");
 });
 
