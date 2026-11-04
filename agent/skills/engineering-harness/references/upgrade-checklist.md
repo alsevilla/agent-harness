@@ -17,7 +17,7 @@ Mark each item PASS, FAIL, NOT RUN or N/A (with reason). PASS needs the named co
 
 ## 2. Handoffs and token efficiency
 - Child final report keeps STATUS, CHECKS, RISKS and EVIDENCE; FAIL, NOT RUN and blockers are never trimmed.
-- Background completion notices stay at most 4,000 characters; an `INCOMPLETE HANDOFF` notice is not PASS evidence.
+- Background completion notices are one JSON object (`pi.subagent.completion.v1`), at most 4,000 serialized characters unless the root `noticeLimit` (>= the derived minimum) says otherwise; a partial notice keeps the legacy `INCOMPLETE HANDOFF` marker inside its JSON note; the `state` is execution state, never PASS evidence, and `bg-N@epoch` targets from before a reload or session change are unavailable, not another job.
 - Retained-job `subagent_control` `result` (last 64 finished) is lossless; compare with the child report.
 - Chain `{previous}` passes full final text, not an excerpt.
 - Foreground single, chain and parallel output keeps every text block of the final assistant message (`getFinalOutput` → `extractFinalText`) and a failed child's distinct ERROR/STDERR diagnostics; the former 50KB foreground parallel cap is removed (user-approved). Automatic background completion stays bounded (4,000-character rule above). Evidence is fake-runtime/unit only; no live provider proof.
