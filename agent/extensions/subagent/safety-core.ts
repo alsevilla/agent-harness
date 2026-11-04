@@ -288,6 +288,13 @@ function classifyVariants(text: string, out: Set<RiskRule>): void {
 	}
 }
 
+export function unresolvedDeleteTarget(arg: string): boolean {
+	const a = arg.trim();
+	if (/[$`]|%[A-Za-z_][A-Za-z0-9_]*%/.test(a)) return true; // shell, PowerShell or cmd variable or substitution: unknown until run
+	const p = a.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+	return /^(\/|[A-Za-z]:|[A-Za-z]:\/?|~|\.|\.\.|\*|\/\*|[A-Za-z]:\/\*|~\/\*|\.\/\*)$/.test(p);
+}
+
 // Classifies one command segment (already split on separators). Wrappers and nested shells recurse with a depth bound.
 function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number): void {
 	const tokens = stripPrefix(rawTokens);
@@ -357,7 +364,12 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 		if (sub === "config" && lower.some((a) => a.includes("_authtoken") || a.startsWith("//"))) add(out, "PKG_PUBLISH_AUTH");
 		return;
 	}
-	if (DELETE_CMDS.has(name)) return add(out, "DESTRUCTIVE_FS");
+	if (DELETE_CMDS.has(name)) {
+		// A delete whose target is a variable, substitution, glob at a root, or a root, home or current/parent folder can remove far more
+		// than intended (rm -rf $DIR/ with an empty DIR is rm -rf /). No approval makes that safe, so it is PATH_AMBIGUOUS, never grantable.
+		if (args.filter((a) => !a.startsWith("-")).some(unresolvedDeleteTarget)) add(out, "PATH_AMBIGUOUS");
+		return add(out, "DESTRUCTIVE_FS");
+	}
 	if (name === "find" && (lower.includes("-delete") || (lower.includes("-exec") && lower.includes("rm")))) return add(out, "DESTRUCTIVE_FS");
 	if (name === "ln" || name === "mklink") return add(out, "LINKS");
 	if (name === "fsutil" && lower.some((a) => a === "hardlink" || a === "reparsepoint")) return add(out, "LINKS");
@@ -2026,7 +2038,7 @@ const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or gi
 const RULE_ADVICE: Partial<Record<RiskRule, string>> = {
 	SECRET: `agents never read or write secret files (.env*, keys, credentials, .ssh/.aws/.gnupg) or name them in a command; to check .env settings run node "${REDACTED_ENV_SCRIPT}" "<absolute .env path>" (secret-like values hidden); .env.example, .env.sample and .env.template are ordinary files when named alone`,
 	OPAQUE_UNPARSEABLE: "the guard cannot parse this command (inline scripts with nested quotes, eval, encoded or deeply nested commands); write the script to a file in the task's _scratch folder and run it by path or pipe it on stdin (for example betterwright run < \"<absolute file>\")",
-	PATH_AMBIGUOUS: "use an exact absolute path without aliases, links or 8.3 short names",
+	PATH_AMBIGUOUS: "use an exact absolute path without aliases, links or 8.3 short names; a delete never takes a variable, substitution, root, home, '.', '..' or bare glob target",
 };
 function programOf(op: GuardOp): string {
 	if (op.kind !== "shell") return `${op.kind} ${op.path}`;
@@ -2052,7 +2064,7 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget; readOnlyRoot?: string }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget; readOnlyRoot?: string; reads?: Set<string> }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
 	if (guard.scope === "child" && guard.readOnlyRoot !== undefined) {
 		const why = readOnlyViolation(toolName, input, cwd, guard.readOnlyRoot);
@@ -2063,7 +2075,21 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	}
 	if (redactedEnvRead(toolName, input)) return undefined;
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
-	if (decision.action === "allow") return undefined;
+	if (decision.action === "allow") {
+		if (guard.reads !== undefined && toolName === "read" && typeof input?.path === "string") guard.reads.add(normPath(slashed(path.resolve(cwd, piPathInput(input.path)))));
+		// Only an edit the guard would otherwise allow: a secret or config write keeps its own, unfixable reason.
+		// Read before edit: a worker may edit or overwrite an existing file only after reading it in this run, so it never changes what it has not seen.
+		if (guard.reads !== undefined && (toolName === "edit" || toolName === "write") && typeof input?.path === "string") {
+			const target = normPath(slashed(path.resolve(cwd, piPathInput(input.path))));
+			let exists = false;
+			try { exists = fs.statSync(target).isFile(); } catch { exists = false; }
+			if (exists && !guard.reads.has(target)) {
+				const digest = createHash("sha256").update(`${toolName}\0${target}`).digest("hex").slice(0, 16);
+				return { block: true, reason: `Blocked by harness safety guard [READ_BEFORE_EDIT] op ${digest}: ${toolName} ${target}; read this file with the read tool in this run first, then ${toolName} it (no grant is needed).` };
+			}
+		}
+		return undefined;
+	}
 	// A single-use record never carries PR merge or release create (defense in depth for envelopes or stores that hold one): only the action grants do.
 	if (decision.grantable && !(decision.op.kind === "shell" && isMergeOrRelease(decision.op.command)) && guard.store.consume(guard.scope, canonicalCwd(cwd), decision.op)) return undefined;
 	if (guard.scope === "child" && normalTrustedPush(guard.pushTarget, decision, liveUrl)) return undefined;

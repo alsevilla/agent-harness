@@ -25,8 +25,9 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	} catch {
 		invalid = "Blocked by harness safety guard: invalid child grant envelope; all tool calls refused.";
 	}
+	const reads = new Set<string>(); // files this worker has read in this run (read before edit)
 	pi.on("tool_call", (event, ctx) => {
 		if (invalid) return { block: true, reason: invalid };
-		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
+		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot, reads }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
 	});
 }

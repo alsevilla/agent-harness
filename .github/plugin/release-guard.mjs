@@ -1,4 +1,5 @@
-// Native Copilot preToolUse guard: DENY-ONLY, best-effort speed bump for merge/release/tag publication via shell tools.
+// Native Copilot preToolUse guard: DENY-ONLY, best-effort speed bump for merge/release/tag publication via shell tools, plus the harness
+// guard's never-run rules (secret files, unparseable commands, curl-to-shell, privilege, config writes, package auth); see the end of this file.
 // Not authorization: it never allows or asks, has no env/file override, and cannot see through obfuscation, scripts or direct API clients.
 // A hook timeout fails open and plugin hooks can be disabled; the real boundary is user-owned branch protection/rulesets and token scope.
 const MAX_INPUT_BYTES = 64 * 1024;
@@ -129,4 +130,31 @@ function protectedStatement(ws) {
   return false;
 }
 const hit = parse(args.command, input.toolName.toLowerCase() === "powershell").some(protectedStatement);
-if (hit) process.stdout.write(`${JSON.stringify({ permissionDecision: "deny", permissionDecisionReason: REASON })}\n`);
+if (hit) {
+  process.stdout.write(`${JSON.stringify({ permissionDecision: "deny", permissionDecisionReason: REASON })}\n`);
+  process.exit(0);
+}
+
+// Harness safety rules, shared with Pi's guard (agent/extensions/subagent/safety-core.ts, loaded with Node's built-in type stripping).
+// Deny-only: the rules Pi never lets an agent run, plus curl-to-shell, privilege/persistence, config/hook writes and package auth.
+// Everything Pi lets an operator approve (deletes, destructive git, links, process kills, push, PR create) is left to Copilot's own
+// approval prompt. If the shared module cannot load (an older Node), this layer is skipped and says so on stderr; the release rules above still apply.
+const COPILOT_DENY = new Set(["SECRET", "OPAQUE_UNPARSEABLE", "PATH_AMBIGUOUS", "CURL_SHELL", "PRIVILEGE_PERSIST", "CONFIG_WRITE", "PKG_PUBLISH_AUTH"]);
+let core;
+try {
+  core = await import(new URL("../../agent/extensions/subagent/safety-core.ts", import.meta.url).href);
+} catch (error) {
+  console.error(`copilot-release-guard: harness safety rules not loaded (${error.message.split("\n")[0]}); merge/release rules still apply`);
+  process.exit(0);
+}
+const shell = input.toolName.toLowerCase();
+if (core.redactedEnvRead(shell, { command: args.command })) process.exit(0);
+const rules = core.classifyShell(args.command).rules.filter((rule) => COPILOT_DENY.has(rule));
+if (rules.length) {
+  const advice = rules.includes("SECRET")
+    ? `secret files (.env*, keys, credentials) are never read or written by the agent; to check .env settings run node "${core.REDACTED_ENV_SCRIPT}" "<absolute .env path>"`
+    : rules.includes("OPAQUE_UNPARSEABLE")
+      ? "the command cannot be checked (inline scripts with nested quotes, eval, encoded commands); put the script in a file and run it by path"
+      : "this harness never lets an agent run it; run it yourself outside the agent session if it is really needed";
+  process.stdout.write(`${JSON.stringify({ permissionDecision: "deny", permissionDecisionReason: `Blocked by harness safety guard [${rules.join(", ")}] (Copilot): ${advice}.` })}\n`);
+}

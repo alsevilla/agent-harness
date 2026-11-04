@@ -82,6 +82,7 @@ function main(argv) {
 		const skipped = selected.filter((f) => NEEDS_PI_HOST.includes(f));
 		if (skipped.length) console.log(`# SKIPPED ${skipped.length} suites that need an installed Pi host (none at ~/.pi/agent/install/releases; set NATIVE_PROBE_HOST_MODULES to run them):\n${skipped.map((f) => `#   ${f}`).join("\n")}`);
 		selected = selected.filter((f) => !NEEDS_PI_HOST.includes(f));
+		if (!selected.length) { console.log("# nothing left to run without a Pi host"); return 0; } // node --test with no files would run every file it finds
 	}
 	const env = testEnv();
 	const result = spawnSync(process.execPath, ["--experimental-transform-types", "--disable-warning=ExperimentalWarning", "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "--test", `--test-concurrency=${CONCURRENCY}`, ...selected], { cwd: ROOT, env, stdio: "inherit" });

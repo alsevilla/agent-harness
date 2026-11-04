@@ -18,6 +18,7 @@ test("main policy keeps its never-rules and stays short", () => {
 		"Merge needs its own explicit approval naming the exact PR and the approved candidate HEAD SHA",
 		"Do not weaken valid tests",
 		"never accept PASS from a digest",
+		"Act once you know enough: never re-derive established facts or re-open the user's decisions",
 	]) assert.ok(text.includes(rule), rule);
 	assert.ok(policy.length <= 6500, `AGENTS.md is ${policy.length} chars; it is read on every main turn`);
 });

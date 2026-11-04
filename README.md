@@ -114,7 +114,7 @@ Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json
 
 ## Safety and delivery
 
-A `tool_call` guard runs on main and every worker. It blocks risky shell operations (publish, destructive git, forced deletes, links, privilege changes, process kills, launching Pi, curl-to-shell, unparseable commands) and any read, write or mention of secret files. Read-only roles (no `edit`/`write` tool, or a `readOnly` launch) also cannot change their candidate checkout through the shell: redirections, file-writing commands, in-place edits, and mutating git or package commands into it are refused, while their REPORT and evidence files go to the packet's `_evidence`/`_scratch` paths. A block message names the rule, the program, whether an approval can ever help, and the next step; it never echoes command arguments. The guard is lexical and best-effort, not an OS sandbox.
+A `tool_call` guard runs on main and every worker. It blocks risky shell operations (publish, destructive git, forced deletes, links, privilege changes, process kills, launching Pi, curl-to-shell, unparseable commands) and any read, write or mention of secret files. Read-only roles (no `edit`/`write` tool, or a `readOnly` launch) also cannot change their candidate checkout through the shell: redirections, file-writing commands, in-place edits, and mutating git or package commands into it are refused, while their REPORT and evidence files go to the packet's `_evidence`/`_scratch` paths. Two rules follow Claude Code practice: a worker edits or overwrites an existing file only after reading it in that run, and a delete whose target is a variable, substitution, root, home, `.` or bare glob (`rm -rf $DIR/`) can never be approved. A block message names the rule, the program, whether an approval can ever help, and the next step; it never echoes command arguments. The guard is lexical and best-effort, not an OS sandbox.
 
 | Risk | What happens |
 | --- | --- |
@@ -149,9 +149,10 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 | Asset | Status |
 | --- | --- |
 | Source release | v1.11.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
+| Copilot CLI | Latest release only; no older version is supported |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated |
 | Delivery | Merge and release are unsupported on Copilot; an `ask_user` answer is not authorization |
-| Guard | A deny-only, best-effort `preToolUse` hook; it is not OS isolation, so keep branch protection or rulesets and least-privilege tokens |
+| Guard | A deny-only, best-effort `preToolUse` hook: merge and release, plus the harness guard's never-run rules (secret files, unparseable commands, curl-to-shell, privilege, config writes, package auth); other risky commands go to Copilot's own approval. It is not OS isolation, so keep branch protection or rulesets and least-privilege tokens |
 | Prompts | Not exported; `/learn` and the manual prompts are Pi-only |
 
 ## Limits
