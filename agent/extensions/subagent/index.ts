@@ -39,7 +39,7 @@ import { registerMainPolicy } from "./main-policy.ts";
 import { registerHandoffWindow } from "./handoff-window.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
-import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics } from "./compact-handoff.ts";
+import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
@@ -111,13 +111,18 @@ function isFailedResult(result: SingleResult): boolean {
 	return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted" || isIncompleteStop(result);
 }
 
+function imageNote(result: SingleResult): string {
+	const missing = unopenedImages(result.task, result.messages);
+	return missing.length ? `\n\nRUNTIME CHECK (not worker text): the worker never opened ${missing.length === 1 ? "this image" : "these images"} named in its task: ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? ", ..." : ""}. Treat its visual claims as unverified.` : "";
+}
+
 function getResultOutput(result: SingleResult): string {
 	// INCOMPLETE keeps every text block of the final message plus its terminal diagnostics: the partial report is the evidence.
-	if (isIncompleteStop(result)) return markupNotice(withTerminalDiagnostics(extractFinalText(result.messages), result), result) || "(no output)";
+	if (isIncompleteStop(result)) return (markupNotice(withTerminalDiagnostics(extractFinalText(result.messages), result), result) || "(no output)") + imageNote(result);
 	if (isFailedResult(result)) {
-		return [...failureDiagnostics(result).map((d, i) => (i === 0 ? d.value : `${d.label}: ${d.value}`)), getFinalOutput(result.messages)].filter(Boolean).join("\n\n") || "(no output)";
+		return ([...failureDiagnostics(result).map((d, i) => (i === 0 ? d.value : `${d.label}: ${d.value}`)), getFinalOutput(result.messages)].filter(Boolean).join("\n\n") || "(no output)") + imageNote(result);
 	}
-	return markupNotice(getFinalOutput(result.messages), result) || "(no output)";
+	return (markupNotice(getFinalOutput(result.messages), result) || "(no output)") + imageNote(result);
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(

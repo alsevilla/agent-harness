@@ -11,7 +11,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: DECISION_TOOL,
 		label: "Request decision",
-		description: "Ask the orchestrator to decide a question that blocks the next write. Returns answered only with a recorded answer; otherwise cancelled. It grants no tool, scope, server, commit or deploy permission.",
+		description: "Ask the orchestrator to decide a question that blocks the next write and that the packet leaves open. Never ask for what the packet already decides (its write path, assigned REPORT or artifact files, named scope). Returns answered only with a recorded answer; otherwise cancelled. It grants no tool, scope, server, commit or deploy permission.",
 		promptGuidelines: [
 			"Call request_decision BEFORE any write that depends on the answer, never in parallel with sibling mutations.",
 			"Options are recommendations; a freeform answer is valid and must not be mapped onto an option.",

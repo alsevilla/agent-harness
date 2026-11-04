@@ -11,7 +11,7 @@ STATUS: PASS | FAIL | INCONCLUSIVE | BLOCKED | ESCALATE, then one sentence of ou
 NEXT: done, or one justified next action
 RISKS: material blockers, limits and unknowns for the assigned contract, or none
 EVIDENCE: one primary absolute path to your assigned REPORT when it exists, otherwise existing exact path(s), or none
-Full detail goes to the assigned REPORT file, not the reply: hashes, counts, manifests and logs, changed files, commands with exit codes, candidate identity, complete warnings. Name the file; do not paste its contents, whole logs, stack traces or diffs unless they are the evidence itself.
+Keep the whole reply under 3,000 characters: a background notice carries about 4,000 including its fields and cuts the rest, which costs main an extra result fetch. Full detail goes to the assigned REPORT file, not the reply: hashes, counts, manifests and logs, changed files, commands with exit codes, candidate identity, complete warnings. Name the file; do not paste its contents, whole logs, stack traces or diffs unless they are the evidence itself.
 Verdicts: a required check not run is INCONCLUSIVE; an actual failure is FAIL. A check outside your assignment (for example browser or live behavior not assigned) is NOT ASSESSED: name it in RISKS only when material to interpreting the result. It does not lower an automated-only PASS and creates no approval gate.
 This format takes precedence over any longer "Return:" list or word limit in your role prompt; that list belongs in the REPORT file.
 This is guidance only: full details requested by the user or needed for correctness take precedence.
@@ -227,4 +227,19 @@ export function expandRetainedResult(jobResult: any): string | null {
 	const results = jobResult?.details?.results;
 	if (!Array.isArray(results) || results.length === 0) return null;
 	return results.map(retainedEntryBlock).join("\n\n---\n\n");
+}
+
+// Image check: absolute image paths named in the task, compared with the paths the worker actually opened with read.
+// Runtime evidence, not child text: main cannot view images itself, so a visual claim about an unopened image is unverified.
+const IMAGE_PATH = /(?<![\w:/.\\])(?:[A-Za-z]:)?[\\/][^\s"'`<>|*?]*\.(?:png|jpe?g|webp|gif|bmp)\b/gi;
+const foldImage = (p: string) => { const s = p.replace(/\\/g, "/"); return process.platform === "win32" ? s.toLowerCase() : s; };
+export function unopenedImages(task: string, messages: readonly unknown[]): string[] {
+	const named = [...new Set((String(task ?? "").match(IMAGE_PATH) ?? []).map((p) => p.replace(/\\/g, "/")))];
+	if (!named.length) return [];
+	const opened = new Set<string>();
+	for (const m of messages ?? []) {
+		if ((m as any)?.role !== "assistant" || !Array.isArray((m as any).content)) continue;
+		for (const part of (m as any).content) if (part?.type === "toolCall" && part.name === "read" && typeof part.arguments?.path === "string") opened.add(foldImage(part.arguments.path));
+	}
+	return named.filter((p) => !opened.has(foldImage(p)));
 }

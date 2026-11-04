@@ -338,7 +338,7 @@ test("assembled child prompt: core headings once in every shape; navigation and 
   const plain = repoAt("assembled-plain");
   const live = assembled(plain, { launchArgs: FULL_LAUNCH });
   // Cache shape: shared guidance and the handoff format first, then the role body, then cwd/launch-dependent parts.
-  assert.ok(live.startsWith("## Shell syntax"));
+  assert.ok(live.startsWith("## Packet facts"));
   assert.ok(live.indexOf("## Final handoff to main") < live.indexOf("ROLE BODY"), "handoff format is in the shared prefix");
   assert.ok(live.indexOf("ROLE BODY") < live.indexOf("## Code navigation integrations"), "launch-dependent parts follow the role body");
   assert.equal(assembled(repoAt("assembled-other"), { launchArgs: FULL_LAUNCH }).slice(0, live.indexOf("ROLE BODY")), live.slice(0, live.indexOf("ROLE BODY")), "the shared prefix does not depend on the working directory");

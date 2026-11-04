@@ -124,7 +124,7 @@ test("child system prompt carries the compact handoff guidance in the shared pre
 	spawnPlan = () => ({ events: [reply(["STATUS: PASS"])], exitCode: 0 });
 	await tool!.execute("call-guide", { agent: "guided", task: "check", background: false }, undefined, undefined, context(root));
 	const prompt = spawnLog.find((entry) => entry.appendPrompt)?.appendPrompt ?? "";
-	assert.match(prompt, /^## Shell syntax/);
+	assert.match(prompt, /^## Packet facts/);
 	assert.ok(prompt.indexOf("## Final handoff to main") < prompt.indexOf("You are guided."));
 	assert.match(prompt, /## Final handoff to main/);
 	assert.match(prompt, /^STATUS: PASS \| FAIL \| INCONCLUSIVE \| BLOCKED \| ESCALATE\b/m);

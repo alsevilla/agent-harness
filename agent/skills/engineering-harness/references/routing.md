@@ -91,6 +91,8 @@ Scenarios:
 - general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> omit `modelTier` (default tier, capable); security-sensitive automation -> explicit `capable`.
 - backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; explicit `capable` (also its default, so omission runs capable too), the owning specialist first when a decision is open.
 - frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy.
+- frontend-worker: layout, spacing, alignment, overflow or responsive fix judged by how it renders -> no explicit economy (its default capable tier), with browser evidence when the task needs it; a fix that cannot be seen rendered is INCONCLUSIVE, not PASS.
+- ui-ux-specialist: reviewing screenshots or deciding a layout -> explicit `capable` (its default is economy).
 - database-worker: consequential migration or persistence change -> explicit `capable` (also its default, so omission runs capable too).
 - platform-worker: consequential infrastructure change -> explicit `capable` (also its default).
 - test-engineer: data-integrity verification -> explicit `capable` (its default is economy).
