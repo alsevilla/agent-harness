@@ -56,6 +56,13 @@ export class OwnerTracker {
 		this.records.clear();
 		this.releaseUnclaimed();
 	}
+	// Artifact folders (opt-in lifecycle): refuses only on a recorded active/paused worker or running job touching the path; no record means no known owner, and the quiescent declaration covers the rest.
+	busy(target: string, jobRunning: (jobId: string) => boolean): string | undefined {
+		const touching = [...this.records.values()].filter((r) => overlaps(r.cwd, target));
+		if (touching.some((r) => !r.ended)) return "an owner worker is still active or paused";
+		if (touching.some((r) => r.jobId !== undefined && jobRunning(r.jobId))) return "an owner job is still running or paused";
+		return undefined;
+	}
 	// Fixed refusal reason, or undefined when every recorded worker touching the folder is terminal and a delivery owner is on record. No record at all is unknown, never idle.
 	check(candidate: string, jobRunning: (jobId: string) => boolean): string | undefined {
 		const touching = [...this.records.values()].filter((r) => overlaps(r.cwd, candidate));

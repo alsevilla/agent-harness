@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertExcludeUntracked, candidateFingerprint, git as hardenedGit, preflight as checkoutPreflight, assertNoRepoFsmonitor, validateExclude } from "./candidate-fingerprint.ts";
 import { overlaps, type OwnerTracker } from "./cleanup-state.ts";
+import { buildManifest, classifyIgnored, completeLifecycle, isInside, receiptDirOf, verifyLearn, writeReceipt, type LifecycleDeps, type LifecycleOutcome, type LifecyclePlan } from "./lifecycle.ts";
 
 export type RiskRule =
 	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
@@ -544,6 +545,9 @@ export interface GrantStore {
 	findDelivery(binding: DeliveryBinding): DeliveryGrant | undefined;
 	findSuperseded(binding: DeliveryBinding): DeliveryGrant | undefined;
 	copyDelivery(candidate: string): DeliveryGrant[];
+	// Opt-in lifecycle consent: peek the session grant that carries a disposal for this exact delivery, and consume it (removed whole, so restart/consumption/revoke all leave no authority and nothing replays).
+	findDisposal(candidate: string, action: DeliveryAction, pr: number, sha: string): DeliveryGrant | undefined;
+	takeDelivery(grant: DeliveryBinding): boolean;
 	importDelivery(incoming: DeliveryGrant[]): void;
 	deliveryCount(): number;
 	summary(now: number): { count: number; main: number; roleBound: number; shell: number; write: number; read: number; nextExpiry?: number };
@@ -719,6 +723,17 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		copyDelivery(candidate) {
 			live();
 			return delivery.filter((d) => normPath(d.candidate) === normPath(candidate) && artifactStillLive(d)).map((d) => ({ ...d }));
+		},
+		findDisposal(candidate, action, pr, sha) {
+			live();
+			const found = delivery.find((d) => d.disposal !== undefined && normPath(d.candidate) === normPath(candidate) && d.action === action && d.pr === pr && d.sha === sha);
+			return found ? { ...found } : undefined;
+		},
+		takeDelivery(grant) {
+			const index = delivery.findIndex((d) => sameBinding(d, grant));
+			if (index < 0) return false;
+			delivery.splice(index, 1);
+			return true;
 		},
 		importDelivery(incoming) {
 			delivery.push(...incoming.map((d) => validateDelivery(d)));
@@ -1006,10 +1021,26 @@ const TEXT_LIMIT = { title: 120, subject: 120, body: 500 } as const;
 export interface BoundState { head: string; ref: string; fingerprint: string; exclude: string[] }
 // Separate approvals, one action each. merge: PR + reviewed HEAD sha + mandatory bound (bound.head === sha). release: PR + version + target sha (the merge commit), never bound. Push, PR create and PR edit are automatic and no grant carries them.
 export type DeliveryAction = "merge" | "release";
-export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; action: DeliveryAction; pr: number; sha: string; version?: string; latest?: boolean; artifactDir?: string; bound?: BoundState }
+// Optional explicit opt-in to dispose of exactly this task's checkout, _evidence/<task> and _scratch/<task> after verified delivery and Learn. Part of grant equality: a grant without it never authorizes disposal, and it never authorizes a different path set.
+export interface Disposal { checkout: string; evidence: string; scratch: string }
+export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; action: DeliveryAction; pr: number; sha: string; version?: string; latest?: boolean; artifactDir?: string; disposal?: Disposal; bound?: BoundState }
 export interface DeliveryGrant extends DeliveryBinding { issuedAt: number }
 // Live readers, injectable for offline tests. Production uses the real git/gh calls below.
-export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number; now?(): number }
+export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number; tagCommit?(pushUrl: string, tag: string): string | undefined; now?(): number }
+
+// Strict reading of `git ls-remote --tags <url> refs/tags/<tag> refs/tags/<tag>^{}`: exactly the direct ref (lightweight: the commit; annotated: the tag object) and optionally its single peeled ref. The peeled commit wins; anything else (extra refs, duplicates, malformed lines, peeled without direct) is undefined.
+export function parseTagCommit(stdout: unknown, tag: string): string | undefined {
+	if (typeof stdout !== "string") return undefined;
+	let direct: string | undefined;
+	let peeled: string | undefined;
+	for (const line of stdout.split(/\r?\n/)) {
+		if (line === "") continue;
+		const m = /^([0-9a-f]{40})\trefs\/tags\/(.+?)(\^\{\})?$/.exec(line);
+		if (!m || m[2] !== tag) return undefined;
+		if (m[3]) { if (peeled !== undefined) return undefined; peeled = m[1]; } else { if (direct !== undefined) return undefined; direct = m[1]; }
+	}
+	return direct === undefined ? undefined : peeled ?? direct;
+}
 
 // A record whose artifact directory vanished stays stored but is not copied to a child (the envelope would otherwise fail closed as a whole).
 function artifactStillLive(d: DeliveryGrant): boolean {
@@ -1078,6 +1109,27 @@ export function checkArtifactFile(file: string, artifactDir: string): string | u
 	return undefined;
 }
 
+// The only disposal path set for a candidate: <group>/<task> plus <group>/_evidence/<task> and <group>/_scratch/<task>, group = <parent>/worktrees/<repo>. Undefined when the candidate is not so placed.
+export function derivedDisposal(candidate: string): Disposal | undefined {
+	const c = slashed(candidate);
+	const task = path.posix.basename(c);
+	const group = path.posix.dirname(c);
+	if (!TASK_SEGMENT.test(task) || /[. ]$/.test(task) || path.posix.basename(path.posix.dirname(group)) !== "worktrees") return undefined;
+	return { checkout: c, evidence: `${group}/_evidence/${task}`, scratch: `${group}/_scratch/${task}` };
+}
+
+// Structural only (no filesystem): exact keys, and every path equals the derived one. Existence is checked at mint (validateArtifactDir), never on child import.
+function validateDisposal(input: unknown, candidate: string): Disposal {
+	const v = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+	const want = derivedDisposal(candidate);
+	if (!want || Object.keys(v).sort().join() !== "checkout,evidence,scratch") throw new RangeError("disposal needs exactly checkout, evidence and scratch under worktrees/<repo>");
+	for (const k of ["checkout", "evidence", "scratch"] as const) {
+		const p = v[k];
+		if (typeof p !== "string" || p.length > 240 || !PATH_ARG.test(p) || badSegments(p) || p.split("/").some((s) => /~\d/.test(s)) || normPath(p) !== normPath(want[k])) throw new RangeError(`disposal.${k} must be exactly ${want[k]}`);
+	}
+	return Object.freeze({ checkout: v.checkout as string, evidence: v.evidence as string, scratch: v.scratch as string });
+}
+
 function normalizeBinding(input: unknown): DeliveryBinding {
 	const b = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
 	if (b.role !== LEASE_ROLE) throw new RangeError("delivery is for release-engineer children only");
@@ -1108,6 +1160,7 @@ function normalizeBinding(input: unknown): DeliveryBinding {
 		if (b.bound !== undefined) throw new RangeError("a release grant is not fingerprint-bound");
 	}
 	if (b.artifactDir !== undefined) out.artifactDir = validateArtifactDir(b.artifactDir as string, candidate);
+	if (b.disposal !== undefined) out.disposal = validateDisposal(b.disposal, candidate);
 	return out;
 }
 
@@ -1140,7 +1193,7 @@ function sameBinding(a: DeliveryBinding, b: DeliveryBinding): boolean {
 
 // Scope: everything except the bound state.
 export function sameScope(a: DeliveryBinding, b: DeliveryBinding): boolean {
-	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.action === b.action && a.pr === b.pr && a.sha === b.sha && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
+	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.action === b.action && a.pr === b.pr && a.sha === b.sha && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir)) && (a.disposal === undefined ? b.disposal === undefined : b.disposal !== undefined && normPath(a.disposal.checkout) === normPath(b.disposal.checkout) && normPath(a.disposal.evidence) === normPath(b.disposal.evidence) && normPath(a.disposal.scratch) === normPath(b.disposal.scratch));
 }
 
 export function loadChildDelivery(text: string): DeliveryGrant[] {
@@ -1359,6 +1412,10 @@ function defaultDeliveryLive(liveUrl: (candidate: string, branch: string) => str
 			const run = childProcess.spawnSync("git", ["ls-remote", "--exit-code", "--tags", pushUrl, `refs/tags/${tag}`], { cwd: NEUTRAL_EXEC_CWD, encoding: "utf8", timeout: GH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
 			return run.error || run.signal || run.status === null ? -1 : run.status;
 		},
+		tagCommit: (pushUrl, tag) => {
+			const run = childProcess.spawnSync("git", ["ls-remote", "--tags", pushUrl, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { cwd: NEUTRAL_EXEC_CWD, encoding: "utf8", timeout: GH_TIMEOUT_MS, windowsHide: true, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+			return run.error || run.signal || run.status !== 0 ? undefined : parseTagCommit(run.stdout, tag);
+		},
 	};
 }
 
@@ -1386,9 +1443,10 @@ const MAX_CLEANUP_GRANTS = 4;
 const CLEANUP_WALK_MAX = 20_000;
 const TASK_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const CLEANUP_KEYS = "base,branch,candidate,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role";
+const CLEANUP_KEYS_DISPOSAL = "base,branch,candidate,disposal,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role";
 const CLEANUP_REQUEST_KEYS = "base,branch,checkout,headSha,mergeCommit,pr,quiescent";
 const PR_CLEANUP_FIELDS = "number,state,baseRefName,headRefName,headRefOid,isCrossRepository,mergeCommit";
-export interface CleanupGrant { id: string; role: string; candidate: string; primary: string; pushUrl: string; repo: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string; issuedAt: number }
+export interface CleanupGrant { id: string; role: string; candidate: string; primary: string; pushUrl: string; repo: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string; issuedAt: number; disposal?: { evidence: string; scratch: string } }
 
 const slashed = (p: string) => p.replace(/\\/g, "/");
 
@@ -1406,7 +1464,8 @@ function cleanupPlacement(candidate: unknown, primary: unknown): boolean {
 
 function normalizeCleanup(input: unknown): CleanupGrant {
 	const v = (input && typeof input === "object" && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
-	if (Object.keys(v).sort().join() !== CLEANUP_KEYS) throw new TypeError("invalid cleanup scope");
+	const keys = Object.keys(v).sort().join();
+	if (keys !== CLEANUP_KEYS && keys !== CLEANUP_KEYS_DISPOSAL) throw new TypeError("invalid cleanup scope");
 	if (v.role !== LEASE_ROLE || typeof v.id !== "string" || !/^[0-9a-f-]{36}$/.test(v.id) || !cleanupPlacement(v.candidate, v.primary)) throw new TypeError("invalid cleanup scope");
 	assertPushUrl(v.pushUrl as string);
 	const repo = parseRepoFromPushUrl(v.pushUrl);
@@ -1414,7 +1473,14 @@ function normalizeCleanup(input: unknown): CleanupGrant {
 	if (repo === undefined || v.repo !== repo || !baseBranchOk(v.base) || v.base === branch) throw new TypeError("invalid cleanup scope");
 	if (typeof v.pr !== "number" || !Number.isSafeInteger(v.pr) || v.pr < 1 || v.pr > 999999999) throw new TypeError("invalid cleanup scope");
 	if (typeof v.headSha !== "string" || !BARE_SHA.test(v.headSha) || typeof v.mergeCommit !== "string" || !BARE_SHA.test(v.mergeCommit) || typeof v.issuedAt !== "number" || !Number.isFinite(v.issuedAt)) throw new TypeError("invalid cleanup scope");
-	return { id: v.id, role: LEASE_ROLE, candidate: v.candidate as string, primary: v.primary as string, pushUrl: v.pushUrl as string, repo, branch, base: v.base, pr: v.pr, headSha: v.headSha, mergeCommit: v.mergeCommit, issuedAt: v.issuedAt };
+	const out: CleanupGrant = { id: v.id, role: LEASE_ROLE, candidate: v.candidate as string, primary: v.primary as string, pushUrl: v.pushUrl as string, repo, branch, base: v.base, pr: v.pr, headSha: v.headSha, mergeCommit: v.mergeCommit, issuedAt: v.issuedAt };
+	if (v.disposal !== undefined) {
+		const d = (v.disposal && typeof v.disposal === "object" && !Array.isArray(v.disposal) ? v.disposal : {}) as Record<string, unknown>;
+		const want = derivedDisposal(out.candidate);
+		if (!want || Object.keys(d).sort().join() !== "evidence,scratch" || typeof d.evidence !== "string" || typeof d.scratch !== "string" || normPath(d.evidence) !== normPath(want.evidence) || normPath(d.scratch) !== normPath(want.scratch)) throw new TypeError("invalid cleanup scope");
+		out.disposal = { evidence: d.evidence, scratch: d.scratch };
+	}
+	return out;
 }
 
 // Absent key grants nothing; a present but malformed one fails the whole envelope closed.
@@ -1506,8 +1572,12 @@ export function verifyCleanup(g: CleanupGrant, live: DeliveryLive = defaultDeliv
 		if (walked) return walked;
 		let status: string[];
 		try { status = hardenedGit(candidate, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--ignore-submodules=none"]).toString("utf8").split(" ").filter(Boolean); } catch { return "git status could not be read"; }
-		if (status.some((line) => line.startsWith("!!"))) return "ignored content is retained: unknown ignored data is never assumed disposable";
-		if (status.length) return "tracked or untracked changes are present";
+		const ignored = status.filter((line) => line.startsWith("!!"));
+		if (ignored.length && !g.disposal) return "ignored content is retained: unknown ignored data is never assumed disposable";
+		// Opt-in lifecycle only: known disposable caches pass; anything else ignored is retained with its path.
+		const kept = classifyIgnored(ignored.map((line) => line.slice(3)));
+		if (kept.length) return `ignored content is retained: ${kept[0].path} (${kept[0].reason})`;
+		if (status.length > ignored.length) return "tracked or untracked changes are present";
 		return undefined;
 	} catch {
 		return "live state could not be read";
@@ -1517,12 +1587,12 @@ export function verifyCleanup(g: CleanupGrant, live: DeliveryLive = defaultDeliv
 export interface CleanupDeps { store: GrantStore; owners: OwnerTracker; live?: DeliveryLive; primary: string; mainCwd: string; jobRunning(jobId: string): boolean }
 
 // Main-side mint, called from the subagent launch. The request is a selector and a quiescence declaration, never proof: ownership comes from the runtime tracker, everything else from live git and gh.
-export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true; grant: CleanupGrant } | { ok: false; reason: string } {
+export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true; grant: CleanupGrant; lifecycle?: LifecyclePlan } | { ok: false; reason: string } {
 	const refuse = (reason: string) => ({ ok: false as const, reason });
 	const live = deps.live ?? defaultDeliveryLive(livePushUrl);
 	try {
 		const r = (request && typeof request === "object" && !Array.isArray(request) ? request : {}) as Record<string, unknown>;
-		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent");
+		if (Object.keys(r).filter((k) => r[k] !== undefined && k !== "lifecycle").sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent");
 		if (r.quiescent !== true) return refuse("main must declare the checkout quiescent (quiescent: true)");
 		if (typeof r.checkout !== "string" || !cleanupPlacement(r.checkout, slashed(canonicalCwd(deps.primary)))) return refuse("checkout is not exactly worktrees/<repo>/<task> of the launch primary");
 		const candidate = slashed(canonicalCwd(r.checkout));
@@ -1534,14 +1604,55 @@ export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true;
 		const branch = validatePushBranch(r.branch as string);
 		const pushUrl = live.pushUrl(candidate, branch);
 		if (pushUrl === undefined) return refuse("the checkout has no verifiable origin binding");
-		const grant = normalizeCleanup({ id: randomUUID(), role: LEASE_ROLE, candidate, primary, pushUrl, repo: parseRepoFromPushUrl(pushUrl), branch, base: r.base, pr: r.pr, headSha: r.headSha, mergeCommit: r.mergeCommit, issuedAt: live.now?.() ?? Date.now() });
+		// Opt-in lifecycle: needs this session's explicit disposal approval for exactly this delivery; absent, the legacy checkout-only flow applies unchanged.
+		const lc = r.lifecycle === undefined ? undefined : (r.lifecycle && typeof r.lifecycle === "object" && !Array.isArray(r.lifecycle) ? r.lifecycle : {}) as Record<string, unknown>;
+		let consent: DeliveryGrant | undefined;
+		if (lc) {
+			if (Object.keys(lc).filter((k) => lc[k] !== undefined).sort().join() !== (lc.action === "release" ? "action,learn,version" : "action,learn")) return refuse("lifecycle needs exactly action (merge or release), learn and, for release, version");
+			if (lc.action !== "merge" && lc.action !== "release") return refuse("lifecycle.action must be merge or release");
+			if (lc.action === "release" && (typeof lc.version !== "string" || !BARE_VERSION.test(lc.version))) return refuse("lifecycle.version must be a release tag");
+			consent = deps.store.findDisposal(candidate, lc.action, r.pr as number, (lc.action === "merge" ? r.headSha : r.mergeCommit) as string);
+			const want = derivedDisposal(candidate);
+			if (!consent?.disposal || !want || consent.branch !== branch || consent.base !== r.base || consent.version !== lc.version || consent.pushUrl !== pushUrl || normPath(consent.disposal.evidence) !== normPath(want.evidence) || normPath(consent.disposal.scratch) !== normPath(want.scratch)) return refuse("no explicit disposal approval in this session for exactly this delivery and these paths");
+		}
+		const want = lc ? derivedDisposal(candidate) : undefined;
+		const grant = normalizeCleanup({ id: randomUUID(), role: LEASE_ROLE, candidate, primary, pushUrl, repo: parseRepoFromPushUrl(pushUrl), branch, base: r.base, pr: r.pr, headSha: r.headSha, mergeCommit: r.mergeCommit, issuedAt: live.now?.() ?? Date.now(), ...(want ? { disposal: { evidence: want.evidence, scratch: want.scratch } } : {}) });
 		if (deps.owners.reserved(candidate)) return refuse("a cleanup for this checkout is already pending");
 		const owner = deps.owners.check(candidate, deps.jobRunning);
 		if (owner) return refuse(owner);
 		const why = verifyCleanup(grant, live);
 		if (why) return refuse(why);
+		if (!lc || !consent || !want) {
+			deps.store.addCleanupGrant(grant);
+			return { ok: true, grant };
+		}
+		const targets = [candidate, want.evidence, want.scratch];
+		for (const t of [want.evidence, want.scratch]) {
+			if (deps.owners.reserved(t)) return refuse("a lifecycle for this task is already pending");
+			const busy = deps.owners.busy(t, deps.jobRunning);
+			if (busy) return refuse(`${busy} (${t})`);
+			validateArtifactDir(t, candidate);
+		}
+		if ([main, slashed(process.cwd())].some((c) => targets.some((t) => isInside(c, t)))) return refuse("a session folder lies inside a target");
+		if (lc.action === "release" && live.tagStatus(pushUrl, lc.version as string) !== 0) return refuse("the release tag does not exist on the remote; delivery is not verified");
+		if (lc.action === "release") {
+			const tagged = live.tagCommit?.(pushUrl, lc.version as string);
+			if (tagged === undefined) return refuse("the release tag could not be resolved to a single commit on the remote; delivery is not verified");
+			if (tagged !== r.mergeCommit) return refuse("the release tag does not point at the approved merge commit; delivery is not verified");
+		}
+		const learnOpts = learnOptionsFor(primary, targets);
+		const proof = verifyLearn(lc.learn, learnOpts);
+		if (!proof.ok) return refuse(proof.reason);
+		const scratchM = buildManifest(want.scratch);
+		if (!scratchM.ok) return refuse(`_scratch retained: ${scratchM.reason}`);
+		const evidenceM = buildManifest(want.evidence);
+		if (!evidenceM.ok) return refuse(`_evidence retained: ${evidenceM.reason}`);
+		const plan: LifecyclePlan = { id: grant.id, action: lc.action, version: lc.version as string | undefined, pr: grant.pr, branch, headSha: grant.headSha, mergeCommit: grant.mergeCommit, primary, candidate, evidence: want.evidence, scratch: want.scratch, receiptDir: receiptDirOf(candidate), learnInput: lc.learn, learn: proof.summary, manifests: { scratch: scratchM.manifest, evidence: evidenceM.manifest } };
+		// Receipt failure fails closed BEFORE any authority is consumed or minted.
+		try { writeReceipt(plan.receiptDir, `intent-${plan.id}.json`, { v: 1, id: plan.id, action: plan.action, version: plan.version, pr: plan.pr, branch, headSha: plan.headSha, mergeCommit: plan.mergeCommit, learn: plan.learn, targets, manifests: { scratch: { digest: scratchM.manifest.digest, entries: scratchM.manifest.entries.length }, evidence: { digest: evidenceM.manifest.digest, entries: evidenceM.manifest.entries.length } }, issuedAt: new Date(grant.issuedAt).toISOString() }, targets); } catch { return refuse("the lifecycle intent receipt could not be written outside the targets (fail closed)"); }
+		if (!deps.store.takeDelivery(consent)) return refuse("the disposal approval is no longer live");
 		deps.store.addCleanupGrant(grant);
-		return { ok: true, grant };
+		return { ok: true, grant, lifecycle: plan };
 	} catch (error) {
 		return refuse(error instanceof RangeError || error instanceof TypeError ? `cleanup request is invalid: ${error.message}` : "live state could not be read");
 	}
@@ -1563,23 +1674,53 @@ function cleanupAllows(store: GrantStore, decision: Extract<Decision, { action: 
 	}
 }
 
-export interface CleanupPendingEntry { state: "PENDING_UNVERIFIED" | "RETAINED"; checkout: string; reason?: string; request?: { checkout: string; branch: string; base: string; pr: number; headSha: string }; retainedArtifacts: { path: string; reason: string }[] }
+// Local Learn files must be gitignored by the primary (git check-ignore); the read-only query needs no environment beyond what verifyCleanup already refused to be redirected.
+function learnOptionsFor(primary: string, targets: string[]) {
+	return { primary, targets, ignored: (file: string) => childProcess.spawnSync("git", ["check-ignore", "-q", "--", file], { cwd: primary, windowsHide: true, stdio: "ignore", timeout: GH_TIMEOUT_MS }).status === 0 };
+}
+
+// Runtime-side completion, called by the launch only after the cleanup child's confirmed close. Everything is rechecked live; the runtime (not a shell) removes the artifact paths.
+export function completeCleanupLifecycle(plan: LifecyclePlan, o: { cleanExit: boolean; owners: OwnerTracker; jobRunning(jobId: string): boolean; mainCwd: string; now?: () => number }): LifecycleOutcome {
+	const targets = [plan.candidate, plan.evidence, plan.scratch];
+	const deps: LifecycleDeps = {
+		cleanExit: o.cleanExit,
+		busy: (t) => o.owners.busy(t, o.jobRunning),
+		checkoutGone: () => {
+			try { fs.lstatSync(plan.candidate); return "checkout path still exists"; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "checkout path state could not be read"; }
+			const list = gitRead(plan.primary, ["worktree", "list", "--porcelain"]);
+			if (!list) return "registrations could not be read";
+			return list.some((l) => l.startsWith("worktree ") && normPath(l.slice(9)) === normPath(plan.candidate)) ? "checkout is still registered" : undefined;
+		},
+		learnRecheck: () => { const p = verifyLearn(plan.learnInput, { ...learnOptionsFor(plan.primary, targets), recheck: true }); return p.ok ? undefined : p.reason; },
+		cwds: [slashed(canonicalCwd(o.mainCwd)), slashed(process.cwd())],
+		now: o.now ?? Date.now,
+	};
+	return completeLifecycle(plan, deps);
+}
+
+export interface CleanupPendingEntry { state: "PENDING_UNVERIFIED" | "RETAINED"; checkout: string; reason?: string; request?: { checkout: string; branch: string; base: string; pr: number; headSha?: string; mergeCommit?: string }; lifecycle?: { action: DeliveryAction; version?: string; evidence: string; scratch: string; requires: string }; retainedArtifacts: { path: string; reason: string }[] }
 
 // Discovery is advisory and must stay cheap: a bounded projection of in-memory runtime records (merge delivery grants this session issued, owner tracker). ZERO Git, gh, subprocess or filesystem I/O, because it runs on every background completion and list. It never claims READY or MERGED and omits mergeCommit and launchCwd: main obtains those with its own explicit live PR query when it schedules cleanup, and prepareCleanup and the child guard independently re-verify everything live.
 export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunning: (jobId: string) => boolean): CleanupPendingEntry[] {
 	const out: CleanupPendingEntry[] = [];
+	// Scope-aware selection: per checkout, every distinct disposal-scoped grant is listed (keyed by action, PR, sha, version) and the unscoped merge entry only when no scoped grant exists, so an unscoped grant never hides a scoped one regardless of order.
+	const key = (d: DeliveryGrant) => `${normPath(d.candidate.replace(/\\/g, "/").replace(/\/+$/, ""))}|${d.disposal ? `${d.action}:${d.pr}:${d.sha}:${d.version ?? ""}` : "unscoped"}`;
+	const all = store.listDelivery().filter((d) => d.action === "merge" || d.disposal !== undefined);
+	const scopedCandidates = new Set(all.filter((d) => d.disposal).map((d) => normPath(d.candidate.replace(/\\/g, "/").replace(/\/+$/, ""))));
 	const seen = new Set<string>();
-	for (const d of store.listDelivery()) {
-		if (d.action !== "merge") continue;
+	for (const d of all) {
 		try {
 			const candidate = d.candidate.replace(/\\/g, "/").replace(/\/+$/, "");
-			if (seen.has(normPath(candidate))) continue;
-			seen.add(normPath(candidate));
+			if (!d.disposal && scopedCandidates.has(normPath(candidate))) continue;
+			if (seen.has(key(d))) continue;
+			seen.add(key(d));
 			const task = path.posix.basename(candidate);
 			const group = path.posix.dirname(candidate);
-			const retainedArtifacts = ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "artifact folders are never deleted automatically: a knowledge checkpoint cannot prove their contents disposable" }));
+			const lifecycle = d.disposal ? { action: d.action, ...(d.version ? { version: d.version } : {}), evidence: d.disposal.evidence, scratch: d.disposal.scratch, requires: "Learn SAVED (record, index, sha256 hashes) or NO LESSON, then cleanup request.lifecycle; main must schedule it after the delivery worker is terminal" } : undefined;
 			const why = owners.check(candidate, jobRunning);
-			out.push(why === undefined ? { state: "PENDING_UNVERIFIED", checkout: candidate, request: { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha }, retainedArtifacts } : { state: "RETAINED", checkout: candidate, reason: why, retainedArtifacts });
+			// A scoped entry that is still PENDING lists none (its disposal approval covers them); anything RETAINED or unscoped keeps them.
+			const retainedArtifacts = lifecycle && why === undefined ? [] : ["_evidence", "_scratch"].map((kind) => ({ path: `${group}/${kind}/${task}`, reason: "artifact folders are never deleted automatically: a knowledge checkpoint cannot prove their contents disposable" }));
+			out.push(why === undefined ? { state: "PENDING_UNVERIFIED", checkout: candidate, request: d.action === "merge" ? { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, headSha: d.sha } : { checkout: candidate, branch: d.branch, base: d.base, pr: d.pr, mergeCommit: d.sha }, ...(lifecycle ? { lifecycle } : {}), retainedArtifacts } : { state: "RETAINED", checkout: candidate, reason: why, retainedArtifacts });
 		} catch { /* unknown state is not pending */ }
 	}
 	return out;
@@ -1587,7 +1728,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay; artifact folders are always retained.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay; artifact folders are retained unless an entry carries `lifecycle` (the operator opted into exact checkout+_evidence+_scratch disposal in that delivery dialog): then main first needs a Learn checkpoint (SAVED with record/index paths and sha256 hashes, or NO LESSON) and passes it as cleanup.lifecycle {action, version?, learn}; the runtime itself removes the artifact folders after the cleanup child closes cleanly and reports the outcome. This list schedules nothing and proves nothing.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
 export interface ChildGuardLaunch {

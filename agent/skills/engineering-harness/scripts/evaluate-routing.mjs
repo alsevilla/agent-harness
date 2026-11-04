@@ -52,9 +52,20 @@ const TIER_CHOICES = set("economy", "capable", "omitted"); // omitted: modelTier
 export const SLOTS = set("fallback"); // optional per-entry modelSlot; requires an explicit modelTier
 const NATIVE_ENTRY_KEYS = set("agent", "task", "cwd", "readOnly", "modelTier", "modelSlot", "prBase");
 const NATIVE_DAG_KEYS = new Set([...NATIVE_ENTRY_KEYS, "id", "dependsOn"]);
-const NATIVE_ROOT_KEYS = set("background", "modelTier", "modelSlot", "agent", "task", "tasks", "chain", "agentScope", "dag",
-	"readOnly", "confirmProjectAgents", "cwd", "prBase", "cleanup");
+const NATIVE_ROOT_KEYS = set("background", "noticeLimit", "modelTier", "modelSlot", "prBase", "cleanup", "budget", "agent", "task", "tasks", "chain",
+	"agentScope", "dag", "readOnly", "confirmProjectAgents", "cwd");
+const NATIVE_BUDGET_KEYS = set("maxTurns", "contextBudget"); // role-budget.ts BUDGET_KEYS
+export const NATIVE_NOTICE_MIN = 868; // NOTICE_MIN in compact-handoff.ts (derived there from the worst-case notice skeleton; the parity test recomputes it)
 const NATIVE_CLEANUP_KEYS = set("checkout", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent"); // CLEANUP schema / CLEANUP_REQUEST_KEYS
+// Optional cleanup.lifecycle exactly as the CLEANUP schema (index.ts) and prepareCleanup (safety-core.ts) type it. Shape only: live receipts, hashes, paths, owners and the disposal approval stay runtime checks the evaluator cannot verify.
+const NATIVE_CLEANUP_OPTIONAL = set("lifecycle");
+const NATIVE_LIFECYCLE_KEYS = set("action", "learn");
+const NATIVE_LIFECYCLE_OPTIONAL = set("version"); // release only (merge with a version is refused by prepareCleanup)
+const NATIVE_LEARN_SAVED_KEYS = set("state", "record", "index", "recordSha256", "indexSha256");
+const NATIVE_LEARN_NO_LESSON_KEYS = set("state", "reason");
+const NATIVE_LIFECYCLE_ACTIONS = set("merge", "release");
+const NATIVE_LEARN_STATES = set("SAVED", "NO LESSON"); // BLOCKED is refused by the schema
+const NATIVE_VERSION = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/; // BARE_VERSION in safety-core.ts
 const NATIVE_CLEANUP_ROLE = "release-engineer"; // the only role whose single-mode launch accepts `cleanup` (LEASE_ROLE)
 const NATIVE_SHA = /^[0-9a-f]{40}$/; // BARE_SHA; `$` without the m flag matches only at the very end (no trailing-newline slack)
 const BATCH_MODES = ["tasks", "chain", "dag"];
@@ -65,8 +76,10 @@ const NATIVE_SCOPES = set("user", "project", "both");
 /** The native-contract constants, for the parity test (ES module exports are read-only, so the test drifts copies of this object). */
 export const NATIVE = Object.freeze({
 	ENTRY_KEYS: NATIVE_ENTRY_KEYS, DAG_KEYS: NATIVE_DAG_KEYS, ROOT_KEYS: NATIVE_ROOT_KEYS, CLEANUP_KEYS: NATIVE_CLEANUP_KEYS,
+	CLEANUP_OPTIONAL: NATIVE_CLEANUP_OPTIONAL, LIFECYCLE_KEYS: NATIVE_LIFECYCLE_KEYS, LIFECYCLE_OPTIONAL: NATIVE_LIFECYCLE_OPTIONAL, LEARN_SAVED_KEYS: NATIVE_LEARN_SAVED_KEYS,
+	LEARN_NO_LESSON_KEYS: NATIVE_LEARN_NO_LESSON_KEYS, LIFECYCLE_ACTIONS: NATIVE_LIFECYCLE_ACTIONS, LEARN_STATES: NATIVE_LEARN_STATES, VERSION: NATIVE_VERSION,
 	CLEANUP_ROLE: NATIVE_CLEANUP_ROLE, SHA: NATIVE_SHA, MAX_TASKS: NATIVE_MAX_TASKS, MAX_DAG_NODES: NATIVE_MAX_DAG_NODES,
-	DAG_ID: NATIVE_DAG_ID, SCOPES: NATIVE_SCOPES, TIERS, SLOTS,
+	DAG_ID: NATIVE_DAG_ID, SCOPES: NATIVE_SCOPES, TIERS, SLOTS, BUDGET_KEYS: NATIVE_BUDGET_KEYS, NOTICE_MIN: NATIVE_NOTICE_MIN,
 });
 const ID_RE = /^R[0-9]{2,3}$/;
 const SKILL_RE = /^[a-z0-9][a-z0-9/-]*$/;
@@ -107,6 +120,9 @@ class JsonFloat {
 	constructor(token) { this.token = token; this.value = Number(token); }
 }
 const isInt = (v) => (typeof v === "number" && Number.isInteger(v)) || typeof v === "bigint";
+/** New native fields only (noticeLimit, budget): the parsed numeric VALUE as the native validators see it after JSON.parse (868.0, 1e4 and 4e0 are safe integers); strings, null and BigInt (unsafe) never coerce. Legacy fixture numbers keep isInt. */
+const nativeNumber = (v) => (v instanceof JsonFloat ? v.value : v);
+const isNativeSafeInt = (v) => typeof nativeNumber(v) === "number" && Number.isSafeInteger(nativeNumber(v));
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && [Object.prototype, null].includes(Object.getPrototypeOf(v));
 
 function strRepr(s) {
@@ -371,10 +387,27 @@ function flag(value, where) {
 	return value;
 }
 
+/** Shape of `cleanup.lifecycle`: strings are only typed (the schema has no length/pattern); the runtime re-verifies paths, hashes and consent. */
+function lifecycle(value, where) {
+	const lc = obj(value, NATIVE_LIFECYCLE_KEYS, where, NATIVE_LIFECYCLE_OPTIONAL);
+	choice(lc.action, NATIVE_LIFECYCLE_ACTIONS, `${where}.action`);
+	if (lc.action === "merge" && has(lc, "version")) throw fail(`${where}.version: only a release lifecycle carries a version`);
+	if (lc.action === "release") {
+		if (typeof lc.version !== "string" || !NATIVE_VERSION.test(lc.version)) throw fail(`${where}.version: a release lifecycle needs a release tag, got ${pyRepr(lc.version)}`);
+	}
+	const learn = lc.learn;
+	if (!isObj(learn)) throw fail(`${where}.learn: expected object`);
+	choice(learn.state, NATIVE_LEARN_STATES, `${where}.learn.state`);
+	const keys = learn.state === "SAVED" ? NATIVE_LEARN_SAVED_KEYS : NATIVE_LEARN_NO_LESSON_KEYS;
+	obj(learn, keys, `${where}.learn`);
+	for (const key of keys) if (typeof learn[key] !== "string") throw fail(`${where}.learn.${key}: expected string, got ${pyRepr(learn[key])}`);
+}
+
 /** Shape of the root `cleanup` request as the runtime mints it (offline: no live PR, git or authorization claim is made). */
 function cleanup(call, at) {
 	const where = `${at}.cleanup`;
-	const value = obj(call.cleanup, NATIVE_CLEANUP_KEYS, where);
+	const value = obj(call.cleanup, NATIVE_CLEANUP_KEYS, where, NATIVE_CLEANUP_OPTIONAL);
+	if (has(value, "lifecycle")) lifecycle(value.lifecycle, `${where}.lifecycle`);
 	for (const key of ["checkout", "branch", "base"]) text(value[key], `${where}.${key}`);
 	const pr = value.pr;
 	if (!isInt(pr) || !(pr >= 1 && pr <= 999999999)) throw fail(`${where}.pr: expected a positive integer PR number`);
@@ -384,6 +417,15 @@ function cleanup(call, at) {
 	if (value.quiescent !== true) throw fail(`${where}.quiescent: main must declare the checkout quiescent (true)`);
 	if (call.agent !== NATIVE_CLEANUP_ROLE) throw fail(`${at}.cleanup: only a single-mode launch of ${NATIVE_CLEANUP_ROLE} accepts it`);
 	if (!has(call, "cwd") || has(call, "prBase") || call.readOnly === true) throw fail(`${at}.cleanup: needs cwd (the primary checkout), no prBase and not readOnly`);
+}
+
+/** Root `budget` as normalizeBudget accepts it: plain object, known keys only, at least one, positive safe integers (null is refused). */
+function budget(value, where) {
+	if (value === null) throw fail(`${where}: null is refused by the runtime`);
+	const b = obj(value, NO_KEYS, where, NATIVE_BUDGET_KEYS);
+	const given = Object.keys(b);
+	if (!given.length) throw fail(`${where}: needs maxTurns or contextBudget`);
+	for (const key of given) if (!isNativeSafeInt(b[key]) || nativeNumber(b[key]) <= 0) throw fail(`${where}.${key}: expected a positive safe integer, got ${pyRepr(b[key])}`);
 }
 
 /** Validate one tasks/chain/dag entry like the native TypeBox schema and dag validator. */
@@ -470,10 +512,15 @@ export function parseCalls(value, where) {
 		if (has(call, "background")) flag(call.background, `${at}.background`);
 		if (has(call, "agentScope")) choice(call.agentScope, NATIVE_SCOPES, `${at}.agentScope`);
 		if (has(call, "confirmProjectAgents")) flag(call.confirmProjectAgents, `${at}.confirmProjectAgents`);
+		if (has(call, "noticeLimit")) { // background jobs only (also batch modes); a raw value is never coerced
+			const limit = call.noticeLimit;
+			if (!isNativeSafeInt(limit) || nativeNumber(limit) < NATIVE_NOTICE_MIN) throw fail(`${at}.noticeLimit: expected a safe integer >= ${NATIVE_NOTICE_MIN}, got ${pyRepr(limit)}`);
+			if (call.background === false) throw fail(`${at}.noticeLimit: applies only to background jobs; refused with background:false`);
+		}
 		const base = dispatches.length;
 		if (batch.length) {
 			const mode = batch[0];
-			for (const key of ["modelTier", "modelSlot", "agent", "task", "prBase", "cleanup"]) {
+			for (const key of ["modelTier", "modelSlot", "agent", "task", "prBase", "cleanup", "budget"]) {
 				if (has(call, key)) throw fail(`${at}.${key}: single-mode field; batch modes set it per entry`);
 			}
 			for (const key of ["cwd", "readOnly"]) {
@@ -499,6 +546,7 @@ export function parseCalls(value, where) {
 			slot(call, at);
 			if (has(call, "prBase")) text(call.prBase, `${at}.prBase`);
 			if (has(call, "cleanup")) cleanup(call, at);
+			if (has(call, "budget")) budget(call.budget, `${at}.budget`);
 			dispatches.push({ agent: choice(call.agent, ROLES, `${at}.agent`), tier: t, before: new Set() });
 		}
 		if (call.agentScope === "project" && dispatches.slice(base).some((d) => d.tier !== null)) {
