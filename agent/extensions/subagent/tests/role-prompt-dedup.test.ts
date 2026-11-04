@@ -418,6 +418,13 @@ test("declaration normalization rejects unapproved identity, tool and approved-f
 // Closed world: every BEFORE hash that is missing AFTER, and every AFTER hash that is new, must be a reviewed disposition for that role. Nothing else may change.
 const HEADINGS_ABSENT_HERE = ["## Rust build output", "## Global graph reference (separate corpus)"];
 const HEADINGS_NEW_HERE = ["## Integration and graph authority"];
+// 4F packet trim: the task-packet checklist is main's job (AGENTS.md "Dispatch and user controls"), so it was removed from the three code workers,
+// with the frontend child-module list (the frontend router lists them). Headings and sentence hashes below are the reviewed removals; nothing was rewritten.
+const PACKET_TRIM_HEADINGS: Record<string, string[]> = { "frontend-worker": ["## Context Budget"], "backend-worker": ["## Context budget"], "database-worker": ["## Context budget"] };
+const PACKET_TRIM_REMOVED: Record<string, string[]> = {
+	"backend-worker": ["113098ec", "15c1ecda", "1a79c8a6", "1c41727b", "43674699", "4373eb59", "4c7fa1da", "aadd021d"],
+	"frontend-worker": ["00af8638", "167048b2", "1a79c8a6", "2121cf31", "2fa3feb7", "36590171", "36b49dbe", "56e7c2c4", "5c159289", "5da578e6", "65f26397", "73e6ed97", "96ba4c5b", "9cc44bca", "a9af9701", "bbc83d2e", "e2e40b5c"],
+};
 test("every role/profile keeps frontmatter; sentences and headings change only by the reviewed closed-world mapping", () => {
 	for (const [key, before] of Object.entries(fixture.entries)) {
 		const [shape, role] = key.split("/");
@@ -426,7 +433,8 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 		assert.equal(effectiveLegacyHeaderSha(sourceText), FRONTMATTER_REVIEWED[key] ?? before.frontmatterSha, `${key} effective Pi declarations changed`);
 		const heads = [...text.matchAll(/^## .*$/gm)].map((m) => m[0]);
 		for (const h of HEADINGS_ABSENT_HERE) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
-		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), HEADINGS_ABSENT_HERE.slice().sort(), `${key} headings lost`);
+		for (const h of PACKET_TRIM_HEADINGS[role] ?? []) assert.ok(before.headings.includes(h), `${key}: BEFORE presence proof missing for ${h}`);
+		assert.deepEqual(before.headings.filter((h) => !heads.includes(h)).sort(), [...HEADINGS_ABSENT_HERE, ...(PACKET_TRIM_HEADINGS[role] ?? [])].sort(), `${key} headings lost`);
 		assert.deepEqual(heads.filter((h) => !before.headings.includes(h)).sort(), HEADINGS_NEW_HERE, `${key} headings added`);
 
 		const after = sentenceHashes(text);
@@ -437,7 +445,7 @@ test("every role/profile keeps frontmatter; sentences and headings change only b
 		const redundantHere = [...REDUNDANT_HASHES].filter((h) => beforeSet.has(h));
 		assert.equal(redundantHere.length, 1, `${key}: exactly one redundant restatement expected before`);
 
-		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere, ...(REPAIR_REMOVED[role] ?? []), ...(HOST_PATH_REWRITE_REMOVED[role] ?? [])].sort();
+		const expectedMissing = [...DISPOSITIONS.map((d) => d.before), ...privacy.map((p) => p.from), ...redundantHere, ...(REPAIR_REMOVED[role] ?? []), ...(HOST_PATH_REWRITE_REMOVED[role] ?? []), ...(PACKET_TRIM_REMOVED[role] ?? [])].sort();
 		const actualMissing = before.sentenceHashes.filter((h) => !after.has(h)).sort();
 		assert.deepEqual(actualMissing, expectedMissing, `${key}: sentences lost outside the reviewed mapping`);
 

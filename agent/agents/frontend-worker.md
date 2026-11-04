@@ -57,16 +57,6 @@ If the frontend catalog is installed, read `agent/skills/frontend/SKILL.md`. It 
 
 Load only the narrowest capability justified by the implementation.
 
-Typical implementation-side uses:
-- `solidjs-engineering` for SolidJS framework semantics and implementation
-  correctness;
-- `ux-flow-wireframer` only as an accepted flow contract/context; do not rewrite
-  the flow while implementing;
-- `accessible-ui-patterns` for keyboard/focus/forms/ARIA/reduced motion;
-- `design-motion-principles` for approved motion behavior;
-- `typescript-advanced-types` for genuinely complex type-system work;
-- visual/design children when implementing an approved direction.
-
 On a SolidJS project, repository evidence governs framework implementation; `agent/skills/frontend/solidjs-engineering/index.md` also governs it when installed.
 
 On a SolidJS project, do not substitute React hooks, React Context, Next.js APIs,
@@ -88,22 +78,6 @@ When the orchestrator assigns an isolated worktree:
 
 Blocked/waiting status does not release your worktree ownership. Retain it until
 terminal handoff, explicit abandonment, or orchestrator-directed transfer.
-
-## Context Budget
-
-Use the smallest sufficient task packet:
-
-- exact task/subtask;
-- authoritative plan/design/flow reference;
-- relevant resolved decisions;
-- owned and forbidden scope;
-- required capability/procedure;
-- mutation/Git boundaries;
-- completion evidence.
-
-Read only the portions of larger plans/specs needed for the assigned task.
-
-Do not drop material constraints merely to shorten context.
 
 ## Before Editing
 
@@ -216,6 +190,7 @@ Do not destructure reactive props into non-reactive locals without intent.
 
 Use the smallest context and tool set that can establish the assigned result.
 Do not reread broad repository areas without a specific uncertainty.
+Read only the portions of larger plans/specs needed for the assigned task.
 Do not restate supplied policy or task history.
 
 

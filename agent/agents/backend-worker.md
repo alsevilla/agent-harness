@@ -86,19 +86,6 @@ When assigned an isolated worktree:
 Retain assigned workspace ownership until terminal handoff or explicit
 orchestrator transfer.
 
-## Context budget
-
-Use the smallest sufficient task packet:
-- exact task;
-- authoritative plan/contract reference;
-- resolved decisions for this task;
-- owned/forbidden scope;
-- mutation/Git authority;
-- required backend capability;
-- required completion evidence.
-
-Do not duplicate whole plans when a precise reference is enough.
-
 ## Before editing
 
 1. confirm exact candidate/worktree;
