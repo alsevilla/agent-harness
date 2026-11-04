@@ -36,6 +36,7 @@ import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "
 import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
+import { registerHandoffWindow } from "./handoff-window.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics } from "./compact-handoff.ts";
@@ -847,6 +848,7 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 export default function (pi: ExtensionAPI) {
 	let runtimeRef: BackgroundWorkers | undefined;
 	registerProviderCooldown(pi);
+	registerHandoffWindow(pi); // request-only: older settled PASS results shortened; PI_SUBAGENT_HANDOFF_WINDOW=0 turns it off
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
 	pi.on("agent_settled", (event) => {

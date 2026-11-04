@@ -75,6 +75,14 @@ For user roles, `roles.json` is canonical for `defaultModelTier`, the `modelTier
 
 Single, parallel, chain and DAG launches, foreground or background, share one process-local admission. Each run resolves its `cwd` to a canonical checkout (`realpath`, then the nearest ancestor with `.git`), so a subdirectory or junction of one checkout uses the same claim queue. A run acquires its claim before the provider check and before spawning; a run cancelled while queued spawns nothing. Access defaults to `write` (exclusive). A DAG node with `readOnly: true` requests `read`, a trusted caller declaration that is never inferred from tools or the shell. Readers share a checkout; a writer waits for and excludes everyone; a reader queued behind a waiting writer also waits (FIFO, no reader barging). Release is token-fenced. Background jobs also share a four-slot capacity per Pi process, and a paused job that is still queued releases its slot. The queue is process-local: it does not coordinate separate Pi processes or machines.
 
+## Older results in main's requests
+Main's context would otherwise grow by one full handoff per subagent result. Before each model request in the main session, the extension shortens older results in that request only; the saved transcript is never changed.
+
+- The newest 5 results (foreground `subagent` results and background completion notices that carry a `STATUS` line) stay word for word.
+- Older ones are shortened in batches of 5, to one line: `[older subagent result, shortened: <job or tool> <agents>] STATUS … | NEXT … | EVIDENCE … | may be outdated; full report: EVIDENCE or subagent_control result`. A shortened line never changes afterwards, so the cached request prefix changes once per batch, not on every result.
+- Never shortened: any non-PASS `STATUS`, any `RISKS` other than `none`, errors, failed, aborted or partial (`INCOMPLETE HANDOFF`) background notices, launch receipts, and any result the one-line form would not at least halve.
+- `PI_SUBAGENT_HANDOFF_WINDOW` sets the window: `0` turns this off (today's behavior); integers of 5 or more are accepted; anything else uses 5.
+
 ## Live inspector
 
 The main panel is hidden until workers exist. It shows session totals and active worker rows:
