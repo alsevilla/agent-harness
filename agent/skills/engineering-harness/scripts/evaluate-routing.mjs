@@ -53,7 +53,10 @@ export const SLOTS = set("fallback"); // optional per-entry modelSlot; requires 
 const NATIVE_ENTRY_KEYS = set("agent", "task", "cwd", "readOnly", "modelTier", "modelSlot", "prBase");
 const NATIVE_DAG_KEYS = new Set([...NATIVE_ENTRY_KEYS, "id", "dependsOn"]);
 const NATIVE_ROOT_KEYS = set("background", "noticeLimit", "modelTier", "modelSlot", "prBase", "cleanup", "agent", "task", "tasks", "chain",
-	"agentScope", "dag", "readOnly", "confirmProjectAgents", "cwd");
+	"agentScope", "dag", "readOnly", "confirmProjectAgents", "cwd", "shape");
+// shape.ts mirror: a recorded `shape` call is the fixed-order chain it expands to (a parity test compares both).
+const SHAPE_WORKERS = set("backend-worker", "database-worker", "frontend-worker", "platform-worker", "general-worker");
+const SHAPE_PACKETS = { T1: [["worker"], []], T2: [["debugger", "worker"], ["test", "review"]], T3: [["worker", "test"], ["planner", "specialist", "review"]] };
 export const NATIVE_NOTICE_MIN = 868; // NOTICE_MIN in compact-handoff.ts (derived there from the worst-case notice skeleton; the parity test recomputes it)
 const NATIVE_CLEANUP_KEYS = set("checkout", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent"); // CLEANUP schema / CLEANUP_REQUEST_KEYS
 const NATIVE_CLEANUP_ROLE = "release-engineer"; // the only role whose single-mode launch accepts `cleanup` (LEASE_ROLE)
@@ -454,6 +457,31 @@ function dagOf(items, where) {
 	return nodes.map((node) => ({ agent: node.agent, tier: node.tier, beforeLocal: new Set([...ancestors.get(node.id)].map((a) => index.get(a))) }));
 }
 
+/** Expand a recorded `shape` into the chain entries the native tool runs; refuses what shape.ts refuses. */
+export function shapeChain(shape, at) {
+	if (!isObj(shape)) throw fail(`${at}: expected object`);
+	const rules = Object.hasOwn(SHAPE_PACKETS, shape.name) ? SHAPE_PACKETS[shape.name] : null;
+	if (!rules) throw fail(`${at}.name: expected T1, T2 or T3`);
+	if (!SHAPE_WORKERS.has(shape.worker)) throw fail(`${at}.worker: expected an implementation worker`);
+	const packets = isObj(shape.packets) ? shape.packets : {};
+	for (const key of Object.keys(packets)) {
+		if (![...rules[0], ...rules[1]].includes(key)) throw fail(`${at}.packets.${key}: not part of ${shape.name}`);
+		if (typeof packets[key] !== "string" || !packets[key].trim()) throw fail(`${at}.packets.${key}: expected non-empty text`);
+	}
+	for (const key of rules[0]) if (!has(packets, key)) throw fail(`${at}.packets.${key}: required for ${shape.name}`);
+	if (has(shape, "specialist") && (shape.name !== "T3" || typeof shape.specialist !== "string" || !/^[a-z][a-z-]*-specialist$/.test(shape.specialist))) throw fail(`${at}.specialist: T3 only, a *-specialist role`);
+	if (has(shape, "specialist") !== has(packets, "specialist")) throw fail(`${at}.specialist: specialist and its packet go together`);
+	const gate = shape.name === "T3" ? { modelTier: "capable" } : {};
+	const steps = [];
+	if (has(packets, "planner")) steps.push({ agent: "planner", modelTier: "economy" });
+	if (has(packets, "debugger")) steps.push({ agent: "debugger" });
+	if (has(packets, "specialist")) steps.push({ agent: shape.specialist });
+	steps.push({ agent: shape.worker });
+	if (has(packets, "test")) steps.push({ agent: "test-engineer", ...gate });
+	if (has(packets, "review")) steps.push({ agent: "reviewer", ...gate });
+	return steps.map((step) => ({ ...step, task: "shape packet" }));
+}
+
 /**
  * Validate recorded native `subagent` call arguments; return dispatches {agent, tier, before}.
  * `before` holds indexes of dispatches in the same call guaranteed to complete first: earlier chain steps and
@@ -468,6 +496,11 @@ export function parseCalls(value, where) {
 		if (!isObj(call)) throw fail(`${at}: expected object`);
 		const unknown = Object.keys(call).filter((k) => !NATIVE_ROOT_KEYS.has(k)).sort(cpCompare);
 		if (unknown.length) throw fail(`${at}: unrecognized fields ${pyRepr(unknown)}`);
+		if (has(call, "shape")) {
+			if (has(call, "chain")) throw fail(`${at}: shape already is a chain; provide one or the other`);
+			const { shape, ...rest } = call;
+			call = { ...rest, chain: shapeChain(shape, `${at}.shape`) };
+		}
 		const batch = BATCH_MODES.filter((m) => has(call, m));
 		const single = has(call, "agent") || has(call, "task");
 		if (batch.length + (single ? 1 : 0) !== 1) throw fail(`${at}: expected exactly one of agent+task, tasks, chain or dag`);
