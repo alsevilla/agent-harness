@@ -5,7 +5,7 @@ Read only when investigating token consumption, oversized results, repetitive ro
 ## Orchestrator
 - Keep task goal, acceptance criteria, exact candidate and authority boundaries.
 - Choose a narrow role once; reuse the decision until new evidence changes risk.
-- Main does not read code, logs or evidence itself: delegate reads to the narrowest read-only role as one question-driven read packet per decision point; the leaf reads the referenced evidence. Do not re-read full code, worker logs or the skill catalog after a successful handoff.
+- Main reads at most 3 named files and runs only read-only `git status`/`rev-parse`/`diff --stat`/`log -1` itself (a known file goes straight to one worker, no scout; a HEAD SHA question is answered by main). Every other read, search and code/test run is delegated to the narrowest read-only role as one question-driven read packet per decision point; the leaf reads the referenced evidence. Do not re-read full code, worker logs or the skill catalog after a successful handoff.
 - Scout and digest replies carry verbatim snippets and path:line for failures, blockers, security/data risks and PASS claims; main never accepts PASS from a digest, mandatory VERIFY/REVIEW read REPORTs themselves, and evidence reuse stays hash-based.
 - Skip `scout` when exact source scope is already known; avoid routine `oracle` or reviewer calls.
 - Let implementation workers run focused relevant checks; reserve independent roles for critical risks per existing policy. Never skip justified independent checks.

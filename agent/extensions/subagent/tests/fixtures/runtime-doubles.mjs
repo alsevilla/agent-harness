@@ -14,9 +14,12 @@ export function spawn(_command, args, options) {
 	child.exitCode = null;
 	child.signalCode = null;
 	let closed = false;
+	// A real child process holds a ref'd handle until it exits; without one, a hanging fake lets the event loop drain before an unref'd kill timer fires.
+	const alive = setInterval(() => {}, 1 << 30);
 	const close = (code) => {
 		if (closed) return;
 		closed = true;
+		clearInterval(alive);
 		child.exitCode = code;
 		child.emit("close", code);
 	};
@@ -24,7 +27,7 @@ export function spawn(_command, args, options) {
 	child.kill = (signal) => {
 		activePlan?.onKill?.(signal ?? "SIGTERM"); // optional per-plan kill observer
 		if (activePlan?.ignoreTerm && signal !== "SIGKILL") return; // a child that survives SIGTERM until SIGKILL
-		child.signalCode = "SIGTERM";
+		child.signalCode = signal ?? "SIGTERM";
 		queueMicrotask(() => close(null));
 	};
 	const stdin = new EventEmitter();

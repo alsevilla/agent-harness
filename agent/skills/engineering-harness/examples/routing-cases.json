@@ -580,6 +580,35 @@
         "skills_forbidden": ["frontend", "backend", "browser"],
         "required_reads": ["agent/skills/engineering-harness/discover/index.md"]
       }
+    },
+    {
+      "id": "R41",
+      "kind": "near_miss",
+      "question": "Fix the off-by-one in limitOffset in src/api/pagination.ts so the last page is not dropped.",
+      "context": "The user named the exact file and function, so source scope is already known: no scout or discovery launch. Main may read that one named file itself; the fix and its focused check go to one backend worker.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["backend-worker"],
+        "roles_allowed": ["backend-worker"],
+        "skills_required": [],
+        "skills_forbidden": [],
+        "max_dispatches": {"backend-worker": 1}
+      }
+    },
+    {
+      "id": "R42",
+      "kind": "near_miss",
+      "question": "What is the HEAD SHA of the current candidate branch?",
+      "context": "A read-only `git rev-parse HEAD` in the known candidate answers it. Main runs this git check itself; no scout or worker launch.",
+      "critical": false,
+      "expect": {
+        "routes": ["LOCAL_DONE"],
+        "roles_required": [],
+        "roles_allowed": [],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
     }
   ]
 }

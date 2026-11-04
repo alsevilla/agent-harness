@@ -34,6 +34,7 @@ When the orchestrator assigns an isolated worktree, all writes must resolve insi
 
 ## TDD and checks
 For meaningful behavior, run a focused test or check and establish the expected failure before production edits when feasible. Then implement, rerun to GREEN and run relevant regression checks. Report RED and GREEN commands and results, or a justified exception with replacement evidence. Worker checks are not independent verification. An already-passing test is not RED evidence; investigate the mismatch. Do not weaken valid expectations.
+When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.
 
 ## Completion
 Return: exact candidate/worktree; files changed; behavior implemented; tests/checks and results; missing evidence; unresolved decisions or risks; commit SHA only if commit authority was granted and used.

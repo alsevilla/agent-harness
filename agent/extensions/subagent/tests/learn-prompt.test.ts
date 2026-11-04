@@ -149,6 +149,7 @@ test("LEARN runs before the final commit or PR; the old after-merge order is abs
 	}
 	for (const rel of CANONICAL_LEARN_FILES) assert.match(read(rel), /Before the final commit or PR/, `${rel}: LEARN before final commit or PR`);
 	assert.match(read("agent/AGENTS.md"), /LEARN[^\n]{0,200}before the final commit or PR/);
+	assert.match(read("agent/AGENTS.md"), /LEARN[^\n]{0,120}in the delivery `release-engineer` launch/); // one launch, not a separate LEARN job
 	assert.match(read("agent/prompts/learn.md"), /before the final commit or PR/);
 });
 
