@@ -1,9 +1,10 @@
 import * as fs from "node:fs";
+import { randomBytes } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
 import { servedReported } from "./provenance.ts";
-import { boundBackgroundCompletion, expandRetainedResult } from "./compact-handoff.ts";
+import { expandRetainedResult, formatCompletionNotice, validateNoticeLimit } from "./compact-handoff.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
 export class RpcWorker {
@@ -163,14 +164,16 @@ export class BackgroundWorkers {
   usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
   pendingNote?: () => string; // runtime-derived CLEANUP_PENDING text (never child text); empty when nothing is pending
   private sequence = 0;
+  readonly epoch: string; // opaque per-runtime id: notices name bg-N@epoch, so an old notice can never select a new runtime's reused bg-N
   private slots = 0;
   private queue: {signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void; abort: () => void}[] = [];
   private pi: ExtensionAPI;
   readonly monitor: WorkerMonitor;
   private decisions: DecisionRelay;
   // Explicit fields, not parameter properties (strip-only Node must load this file).
-  constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay()) {
-    this.pi = pi; this.monitor = monitor; this.decisions = decisions;
+  constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay(), epoch = randomBytes(6).toString("hex")) {
+    if (!/^[A-Za-z0-9]{1,16}$/.test(epoch)) throw new Error("epoch must be 1-16 letters or digits");
+    this.pi = pi; this.monitor = monitor; this.decisions = decisions; this.epoch = epoch;
     pi.on("session_start", () => this.reset());
     pi.on("session_shutdown", () => this.reset());
   }
@@ -199,7 +202,9 @@ export class BackgroundWorkers {
       else this.slots--;
     };
   }
-  start(run: (signal: AbortSignal, jobId: string) => Promise<any>) {
+  start(run: (signal: AbortSignal, jobId: string) => Promise<any>, options?: {noticeLimit?: number}) {
+    const limit = validateNoticeLimit(options?.noticeLimit);
+    if (!limit.ok) throw new Error(limit.error);
     if ([...this.jobs.values()].filter(j => j.state === "running").length >= 16) throw new Error("16 background jobs are already active; finish or stop a job first");
     const id = `bg-${++this.sequence}`;
     const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: []};
@@ -221,13 +226,16 @@ export class BackgroundWorkers {
         const note = this.pendingNote?.() ?? "";
         if (note) await this.pi.sendMessage({customType: "subagent-cleanup-pending", content: note, display: true, details: {jobId: id}}, {triggerTurn: false, deliverAs: "followUp"});
       } catch { /* a failed read is not pending state */ }
-      try {
-        await this.pi.sendMessage({customType: "subagent-completion", content: boundBackgroundCompletion(`Subagent job ${id} ${job.state}. Workers: ${job.workerIds.join(", ") || "none"}.\n${output}`, id), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
-      } catch { /* Session can close while its completion is being delivered. */ }
+      if (job.generation !== this.generation) return; // a reset during the cleanup callback: no stale prune or send
+      // Retention (latest 64 finished, earliest-STARTED evicted first) runs before the notice with no await in between, so availability is the retained set at emission.
       const finished = [...this.jobs.values()].filter(j => j.state !== "running");
       for (const old of finished.slice(0, Math.max(0, finished.length - 64))) {
         this.jobs.delete(old.id); for (const workerId of old.workerIds) this.steering.delete(workerId);
       }
+      try {
+        const retained = this.jobs.get(id) === job; // a snapshot at emission, not a promise: a queued message may be read after later eviction or reset
+        await this.pi.sendMessage({customType: "subagent-completion", content: formatCompletionNotice({job: id, state: job.state, workers: job.workerIds, target: retained ? `${id}@${this.epoch}` : null, text: output}, limit.value), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
+      } catch { /* Session can close while its completion is being delivered. */ }
     })();
     return job;
   }
@@ -365,7 +373,14 @@ export class BackgroundWorkers {
     })}));
   }
   result(target: string) {
-    const job = this.jobs.get(target); if (!job) throw new Error("Unknown job " + target);
+    const shown = JSON.stringify(String(target).slice(0, 80));
+    const noOutcome = " No outcome is implied: do not infer PASS or FAIL and do not rerun the task automatically; report to the user.";
+    const qualified = /^(bg-\d+)@(.+)$/.exec(target);
+    if (qualified && qualified[2] !== this.epoch) throw new Error(`Result unavailable for ${shown}: it names another Pi runtime (epoch mismatch); this runtime's bg-N, if any, is a different job and is not returned.${noOutcome}`);
+    const id = qualified ? qualified[1] : target;
+    const job = this.jobs.get(id);
+    if (!job) throw new Error(`Result unavailable for ${shown}: not retained by this Pi runtime (never started here, evicted beyond the latest 64 finished jobs, cleared by new/resume/fork/reload, or from another runtime epoch).${noOutcome}`);
+    target = id;
     if (!job.result) return {content: [{type: "text", text: `Job ${target} is still running. Continue other work; completion will arrive automatically.`}]};
     const full = expandRetainedResult(job.result); // explicit recovery is lossless and never bounded
     return full === null ? job.result : {...job.result, content: [{type: "text", text: full}]};

@@ -39,7 +39,7 @@ import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlo
 import { registerMainPolicy } from "./main-policy.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
-import { PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, withTerminalDiagnostics } from "./compact-handoff.ts";
+import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
@@ -704,6 +704,8 @@ const DagNode = Type.Object({
 
 const SubagentParams = Type.Object({
     background: Type.Optional(Type.Boolean({description: "Default true: return a job ID immediately; completion arrives automatically. Set false to explicitly wait for the entire task.", default: true})),
+	// Unknown, not Integer: the SDK coerces integer-typed arguments ("4000" -> 4000, 1.5 -> 1) before execute, which would hide an invalid raw value; execute enforces a safe integer >= the derived minimum.
+	noticeLimit: Type.Optional(Type.Unknown({ description: `Background jobs only: total serialized size limit (UTF-16 units) of this job's JSON completion notice. Safe integer, at least the derived minimum (${NOTICE_MIN}); default 4000. Refused with background:false. Full results stay retrievable with subagent_control result.` })),
 	modelTier: Type.Optional(Type.Union([Type.Literal("economy"), Type.Literal("capable"), Type.Null()], { description: "Optional Pi model tier for a single task; select per entry in batch modes." })),
 	modelSlot: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Null()], { description: "Optional explicit Pi fallback start for a single task; requires modelTier. Select per entry in batch modes." })),
 	prBase: PR_BASE,
@@ -1008,6 +1010,14 @@ export default function (pi: ExtensionAPI) {
 				if (effective) dispatchDefaults.budget = effective;
 			}
 
+			// Completion-notice limit: validated once at the outer call, before any prompt, runtime start or spawn. The prepared background re-entry carries background:false internally and must not be refused.
+			const noticeLimit = validateNoticeLimit(params.noticeLimit);
+			if (!preparedDispatch && params.noticeLimit !== undefined) {
+				const noticeRefuse = (why: string) => ({ content: [{ type: "text" as const, text: `Invalid noticeLimit: ${why}; nothing was launched.` }], details: makeDetails(mode)([]), isError: true });
+				if (!noticeLimit.ok) return noticeRefuse(noticeLimit.error);
+				if (params.background === false) return noticeRefuse("it applies only to background jobs (a foreground result is returned in full); omit it or run in the background");
+			}
+
 			// Validated before any project prompt, runtime start or launch: an invalid graph spawns nothing.
 			let dagNodes: DagNodeSpec[] | undefined;
 			if (hasDag) {
@@ -1103,7 +1113,7 @@ export default function (pi: ExtensionAPI) {
                 const unknown = requests.filter(t => !agents.some(a => a.name === t.agent)).map(t => t.agent);
                 if (unknown.length) return {isError: true, content: [{type: "text", text: "Unknown agents: " + unknown.join(", ")}], details: makeDetails("single")([])};
                 if (signal?.aborted) throw new Error("Dispatch was aborted");
-                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected, cleanupId: dispatchDefaults.cleanupId }));
+                const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected, cleanupId: dispatchDefaults.cleanupId }), {noticeLimit: noticeLimit.ok ? noticeLimit.value : undefined});
                 if (dispatchDefaults.cleanupId) cleanupJobs.set(dispatchDefaults.cleanupId, job.id);
                 return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + ". This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop."}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
             }
@@ -1380,8 +1390,8 @@ export default function (pi: ExtensionAPI) {
     });
     pi.registerTool({
         name: "subagent_control", label: "Subagent control",
-        description: "Manage existing background jobs. list returns job/worker IDs and current activity. steer sends a new instruction to an active worker at its next tool boundary; use its unique worker ID when a job has multiple workers. pause enforces a hold after the current tool/model call; resume continues the same worker. Pause a job to hold all active workers and later chain steps. A steering message alone is model advice, not an enforced stop. cancel stops a worker or job. result retrieves a finished job. Completions arrive automatically, so do not busy-poll. Never restart or duplicate a running worker just to steer it. decisions lists worker decision requests; answer or decline a requestId only with its traceable basis or reason. Answers never resume a paused job; steer never answers a decision.",
-        parameters: Type.Object({action: StringEnum(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline"] as const), target: Type.Optional(Type.String({description: "Job ID bg-N, full worker ID, #N, or decision requestId dec-…"})), message: Type.Optional(Type.String()), answer: Type.Optional(Type.String({description: "Freeform answer text (action answer)"})), basis: Type.Optional(StringEnum(["user_answer", "existing_authorization"] as const)), reference: Type.Optional(Type.String({description: "Traceable source of the answer or authorization"})), reason: Type.Optional(Type.String({description: "Why the request is declined (action decline)"}))}),
+        description: "Manage existing background jobs. list returns job/worker IDs and current activity. steer sends a new instruction to an active worker at its next tool boundary; use its unique worker ID when a job has multiple workers. pause enforces a hold after the current tool/model call; resume continues the same worker. Pause a job to hold all active workers and later chain steps. A steering message alone is model advice, not an enforced stop. cancel stops a worker or job. result retrieves a finished job: target is the exact bg-N@epoch from a completion notice (a bare bg-N means this runtime's current job); a job not retained by this runtime is reported unavailable with no outcome, never re-run. Completions arrive automatically, so do not busy-poll. Never restart or duplicate a running worker just to steer it. decisions lists worker decision requests; answer or decline a requestId only with its traceable basis or reason. Answers never resume a paused job; steer never answers a decision.",
+        parameters: Type.Object({action: StringEnum(["list", "steer", "pause", "resume", "cancel", "result", "decisions", "answer", "decline"] as const), target: Type.Optional(Type.String({description: "Job ID bg-N or bg-N@epoch (exact target from a completion notice), full worker ID, #N, or decision requestId dec-…"})), message: Type.Optional(Type.String()), answer: Type.Optional(Type.String({description: "Freeform answer text (action answer)"})), basis: Type.Optional(StringEnum(["user_answer", "existing_authorization"] as const)), reference: Type.Optional(Type.String({description: "Traceable source of the answer or authorization"})), reason: Type.Optional(Type.String({description: "Why the request is declined (action decline)"}))}),
         async execute(_id, params) {
             try {
                 if (params.action === "list") { const note = pendingText(); return {content: [{type: "text", text: JSON.stringify(runtime.list())}, ...(note ? [{type: "text" as const, text: note}] : [])]}; }

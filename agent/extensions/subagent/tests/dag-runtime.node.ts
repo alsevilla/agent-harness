@@ -1331,8 +1331,11 @@ check("background dag: completion is bounded to 4000 chars and subagent_control 
 	finish(children()[1], "B".repeat(3000) + "\nSTATUS: PASS");
 	await waitFor(() => pi.sent.length === 1, "completion delivered");
 	assert.ok(pi.sent[0].content.length <= 4000, "automatic completion is bounded");
-	assert.match(pi.sent[0].content, /INCOMPLETE HANDOFF/);
-	const recovered = await control.execute("recover", { action: "result", target: jobId }, undefined, undefined, ctx);
+	const notice = JSON.parse(pi.sent[0].content);
+	assert.equal(notice.result.shown, "partial", "the oversized DAG output is marked partial");
+	assert.equal(notice.runtime.state, "completed", "runtime execution state, not task acceptance");
+	assert.equal(notice.result.retrieve.target.split("@")[0], jobId);
+	const recovered = await control.execute("recover", { action: "result", target: notice.result.target }, undefined, undefined, ctx);
 	const text = recovered.content[0].text;
 	assert.ok(text.includes("A".repeat(3000)) && text.includes("B".repeat(3000)), "every node's full output is recovered");
 	assert.ok(text.includes('node "a"') && text.includes('node "b"'), "each node is headed by its node id");
