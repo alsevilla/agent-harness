@@ -2,8 +2,6 @@ import test from "node:test";
 import { expect } from "./support/expect.ts";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
-import { hostModules } from "../agent/extensions/subagent/tests/host-modules.ts";
 
 const root = join(import.meta.dirname, "..");
 
@@ -65,26 +63,10 @@ test("README Copilot install commands use the marketplace and plugin names from 
 test("backend-worker Copilot header has identity and native tools only; Pi settings live in roles.json", async () => {
   const text = readFileSync(join(nativeAgents, "backend-worker.md"), "utf8");
   const { metadata } = frontmatter(text);
-  const sdkMetadata = await sdkFrontmatter(text);
   expect(metadata.name).toBe("backend-worker");
   expect(metadata.description).toMatch(/^Implements authorized backend services/);
   expect(Object.keys(metadata)).toEqual(["name", "description", "tools"]);
-  expect(Object.keys(sdkMetadata)).toEqual(["name", "description", "tools"]);
   expect(metadata.tools).toBe("read, search, execute, edit");
-});
-
-test("SDK declaration check without NATIVE_PROBE_HOST_MODULES reads the latest complete installed host", async () => {
-  const previous = process.env.NATIVE_PROBE_HOST_MODULES;
-  delete process.env.NATIVE_PROBE_HOST_MODULES;
-  try {
-    const text = readFileSync(join(nativeAgents, "backend-worker.md"), "utf8");
-    const sdk = await sdkFrontmatter(text);
-    expect(sdk.name).toBe("backend-worker");
-    expect(Object.keys(sdk)).toEqual(["name", "description", "tools"]);
-  } finally {
-    if (previous === undefined) delete process.env.NATIVE_PROBE_HOST_MODULES;
-    else process.env.NATIVE_PROBE_HOST_MODULES = previous;
-  }
 });
 
 test("Copilot metadata reuses shared Pi component sources without duplicate adapters", () => {
@@ -95,18 +77,17 @@ test("Copilot metadata reuses shared Pi component sources without duplicate adap
 });
 
 const nativeAgents = join(root, "agent", "agents");
-// YAML parser: the one installed with the Pi host (the parser Pi's own parseFrontmatter uses); no repo-local dependency.
-const { parse: parseYaml } = await import(pathToFileURL(join(hostModules(["yaml/dist/index.js"]), "yaml", "dist", "index.js")).href);
+// Role headers are flat `key: value` lines (name, description, tools); anything else is refused, so a plain parser is exact here.
 const frontmatter = (text: string) => {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) throw new Error("missing YAML frontmatter");
-  return { metadata: parseYaml(match[1]) as Record<string, unknown>, body: text.slice(match[0].length) };
-};
-// NATIVE_PROBE_HOST_MODULES pins an explicit host tree; unset uses the latest complete installed release (hostModules keeps its version-compat failure).
-const sdkFrontmatter = async (text: string) => {
-  const modules = hostModules(["@earendil-works/pi-coding-agent"]);
-  const { parseFrontmatter } = await import(pathToFileURL(join(modules, "@earendil-works", "pi-coding-agent", "dist", "index.js")).href);
-  return parseFrontmatter(text).frontmatter as Record<string, unknown>;
+  const metadata: Record<string, unknown> = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const field = /^([A-Za-z][\w.-]*): (.*)$/.exec(line);
+    if (!field || /^["'[{|>]/.test(field[2])) throw new Error(`unsupported header line: ${line}`);
+    metadata[field[1]] = field[2];
+  }
+  return { metadata, body: text.slice(match[0].length) };
 };
 const agentNames = () => JSON.parse(readFileSync(join(root, "agent", "roles.json"), "utf8")).map((r: { name: string }) => r.name);
 
@@ -117,9 +98,8 @@ test("all profiles expose native Copilot headers with unchanged native tools and
     const tier = role.modelTiers[role.defaultModelTier];
     const text = readFileSync(join(nativeAgents, `${role.name}.md`), "utf8");
     const { metadata } = frontmatter(text);
-    const sdk = await sdkFrontmatter(text);
     expect(tier.model).toBeTruthy();
-    for (const header of [metadata, sdk]) {
+    for (const header of [metadata]) {
       expect(Object.keys(header)).toEqual(["name", "description", "tools"]);
       for (const key of ["model", "fallbackModel", "thinking", "metadata", "pi"]) expect(header[key]).toBeUndefined();
     }

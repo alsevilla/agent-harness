@@ -336,7 +336,10 @@ test("a linked ancestor (junction) is never traversed: tracked parent, untracked
 	git(repo, "checkout", "--", "dir");
 	assert.doesNotThrow(() => C.bindDelivery(repo, "feat/x"), "restored real directory binds");
 	assert.ok(asLinkAllowed(outside, path.join(repo, "lnk")));
-	bindFails(repo, /link/); // untracked linked directory: Git's discovery would traverse it
+	// Untracked linked directory: a Windows junction is traversed by Git's discovery, so binding refuses it. A POSIX symlink is
+	// recorded as one link entry and never walked, so binding may accept it as long as no outside byte reaches the fingerprint.
+	if (process.platform === "win32") bindFails(repo, /link/);
+	else assert.ok(!JSON.stringify(F.candidateFingerprint(repo)).includes(outsideDigest), "POSIX symlink is recorded as a link, never walked");
 	fs.unlinkSync(path.join(repo, "lnk"));
 	assert.ok(asLinkAllowed(outside, path.join(repo, "ignored")));
 	assert.doesNotThrow(() => C.bindDelivery(repo, "feat/x"), "an ignored link is not traversed by Git and is not walked");

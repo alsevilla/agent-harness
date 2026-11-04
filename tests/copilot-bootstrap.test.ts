@@ -49,7 +49,8 @@ test("reader emits shared installed policy context from an unrelated cwd", () =>
   }
 });
 
-test("configured PowerShell hook uses its installed root from an unrelated cwd", () => {
+const hasPwsh = !spawnSync("pwsh", ["-NoLogo", "-NoProfile", "-Command", "exit 0"]).error;
+test("configured PowerShell hook uses its installed root from an unrelated cwd", { skip: hasPwsh ? false : "NOT RUN: pwsh is not installed" }, () => {
   const hooks = JSON.parse(readFileSync(join(root, ".github", "plugin", "hooks.json"), "utf8"));
   const scratch = mkdtempSync(join(tmpdir(), "copilot-bootstrap-hook-"));
   const installedRoot = join(scratch, "plugin ü with spaces");

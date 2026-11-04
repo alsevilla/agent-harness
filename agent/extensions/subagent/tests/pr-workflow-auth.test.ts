@@ -77,7 +77,8 @@ test("M6 ordinary trusted commit (-m, quoted -F), feature push and PR create nee
 
 test("A1 origin repo-name artifact group is accepted next to the legacy primary-basename group", () => {
 	const g = trusted();
-	for (const group of ["widgets", "pi-like", "WIDGETS"]) {
+	// Paths fold case only on Windows (foldPath), so the upper-case spelling is the same group there and a different folder elsewhere.
+	for (const group of ["widgets", "pi-like", ...(process.platform === "win32" ? ["WIDGETS"] : [])]) {
 		const f = artifact(group);
 		assert.equal(run(g, `git commit -F "${f}"`), undefined, `commit -F ${group}`);
 		assert.equal(run(g, prCreate(f)), undefined, `pr body-file ${group}`);

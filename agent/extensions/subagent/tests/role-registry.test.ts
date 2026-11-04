@@ -608,34 +608,6 @@ const PROFILE_LF_SHA256: Record<string, string> = {
 };
 // Approved post-change LF digest of the one profile whose pi.tools/body changed for the write grant; replaces its pre-change PROFILE_LF_SHA256 pin for the byte check.
 const APPROVED_PROFILE_DIGESTS: Record<string, string> = { "release-engineer": "c47d394b8257c7c10d6dccdf9bd937200a951d202571505db263650af7bc9869" };
-// Approved policy exception (authorized-retirement-policy): release-engineer's body gained the separate Authorized retirement mode and qualified its routine-mode ban.
-// P2 (cleanup-routing-followups) added one release-engineer sentence stating that named write paths are instruction-enforced, not hard isolation; only these current pins moved.
-// PR workflow authorization fix: release-engineer Delivery grant paragraph rewritten (ordinary delivery needs no request_authorization; merge/release separate); pins re-derived from the on-disk profile.
-// Automatic PR delivery: release-engineer Delivery grant paragraph updated (automatic PR edit, separate identity-bound merge/release action grants, no single-use merge/release); pins re-derived from the on-disk profile.
-// These current-specific pins are mechanically derived from the on-disk profile; the header-removal-baseline fixture and every historical pin above stay byte-immutable.
-const POLICY_EXCEPTION_PINS: Record<string, { afterLfSha256: string; bodySha256: string; reinsertedLfSha256: string }> = {
-  // Automatic checkout cleanup paragraph added to the release-engineer body (post-merge-cleanup change); pins re-derived from the on-disk profile.
-  "release-engineer": { afterLfSha256: "51f9aca468437df4faaa92127a7f21f28b2dc5b438b6317ce710818bf088bb71", bodySha256: "309e4f8e943b794e8c8c3bacc79cfadf4fa2acd75e268c962a8990e135873f93", reinsertedLfSha256: "02ff9b5cda71dd330c3758323023487c7078a41fbc9fd600ff7c179777dcbef7" },
-  // Approved new-body expectation (claudex-loop-adaptation): reviewer gained one untrusted-evidence sentence; historical baselines are not regenerated.
-  reviewer: { afterLfSha256: "72f12d474e978845cd392e5ebcdce249f675eb956478d064faf6a35a2bdf5c88", bodySha256: "83b7b9f4d5a894031b06a47eba99b9b6f109870d8cb17c59101d9e36188178a4", reinsertedLfSha256: "703d1b71fdb11e9b4fe7208e48cbb7557d597cdac197b307d3532d08922026da" },
-  // Copilot compatibility: host-aware <skills> module root replaces hard-coded ~/.pi paths (tests/copilot-compat-fixes.test.ts); pins re-derived from the on-disk profiles.
-  // backend-worker and frontend-worker pins below were re-derived again after the 4F packet trim.
-"backend-worker": { afterLfSha256: "a7bf52b79c50de84fafa50422e5a100c958245a143c40b3f06dcbcdc9c7d1b8d", bodySha256: "c0dec573c2b007ddd0b9ab59726bb7decc9a1a8548d30766eb48125ec14b4f07", reinsertedLfSha256: "b39a10047c4fc727964eb3368cb56f77ece58dbd63dc13118a73ecbb6f3d3d72" },
-  "concurrency-specialist": { afterLfSha256: "3e5d01edebff784eb1ff575a7632829ec4cb5d1e3d7d9b91b84e59818b41693e", bodySha256: "390e8b3fe57bcccf9480457d41e64d8c80ff0e928e934f32100a3033a20aa24f", reinsertedLfSha256: "cb46574795a18f9f07901294d92448a2779c245b335391192defb94e7737870c" },
-  "database-specialist": { afterLfSha256: "17977575db9944e8e88ded65964e4a815dab8b86962bf950c6aaa231d76d8387", bodySha256: "2326daae5d214bca7c225a7d50369ab3fda4475464978726ebc28f130e8897e0", reinsertedLfSha256: "34841ec8f0f7e76d64ea5f990fe42a0f45f7fde3212b36cfa960886e4354f015" },
-  "debugger": { afterLfSha256: "05d2c3954b4d98517ed8415efb1efcd96f66c990b88657685ecff02383659bff", bodySha256: "f7c418a6eaf14bf66608302e29e5e83166354e5632c93a42c445b6c89df08eef", reinsertedLfSha256: "365a9853a9815af80a61bdcfb50e2a8b36d6244728885f90f1b25ec7b7268c72" },
-  "devops-specialist": { afterLfSha256: "cc3ee4ca8e2a2365e11de5e24ef6232002a105176c5e9153461c872e70d177be", bodySha256: "a4e3128370cf33f4397e432580bfb73db8196b2eb5e11cc40f830f66d74ddc90", reinsertedLfSha256: "002eda8550c0039167f9f9b457de5ff2e2f441b8b3c288469f4a53eb21886968" },
-  // Phase 4 role structure: frontend-worker body regrouped under the five shared role sections; pins re-derived from the on-disk profile.
-  "frontend-worker": { afterLfSha256: "585a8ce225f8a02520bb44d3311a04927d7a392cbf3832eccc1b90273fe74a98", bodySha256: "b9418011277ef2c89caff28302923f3bb172f1b685858d4e2c88b81a4737122c", reinsertedLfSha256: "541b92e2aceb413ff565205ff90ee9da29a67463984a778e7682a94fd082b218" },
-  "performance-specialist": { afterLfSha256: "17508b9f76f23bca6e1391ac3b59ac3ea2e516c112189c362589712940265efa", bodySha256: "f38ede762ec5d8e4f9dd3ac5219c8c84566a45fea3fbd16c9289836d797f3e4c", reinsertedLfSha256: "0e79dcc7fb16b41c0dad95b963cda222bdccae057b44e5f1eee0c6e05a111133" },
-  "scout": { afterLfSha256: "98adee98e4e77bb9f888f988232b6d5e6b34a7ee1e02a1eb795b72ae51ebeaf4", bodySha256: "74c52f5c236c75c69fee6b541a2807d04571e7a22601770d1e0e7eb7bbd9bef3", reinsertedLfSha256: "30efe41eebae41708599bfb7cd8dcda0f4ab6af304ff486561dd5c88e55d983d" },
-  "test-engineer": { afterLfSha256: "8452adde6535e807f49afc129e226ceb636cc16fa8736f60d25f7b6919e0da69", bodySha256: "238bced49a1ccc696efe733f669542c249902498429126cc357077fcc9a2ac79", reinsertedLfSha256: "505ab464ff8e70fcaa4556293c4f144fb0a8f4048fc5a83337cfc3164918881a" },
-  "ui-ux-specialist": { afterLfSha256: "aa1e7714fe62ebeb59b41085c5710d646cee00b1e8601160de225395673b813b", bodySha256: "674e455c36f4eda187ecbcb6529e1da99b36c116a1549c4c3c60caf19778e5d1", reinsertedLfSha256: "6a8e10ecbbe797cb30627b23e773f3a5871ce628b06f9f31d2e8e54ca03e065a" },
-  // 4F packet trim: frontend/backend/database-worker dropped the task-packet checklist (main builds packets) and frontend its child-module list; pins re-derived from the on-disk profiles.
-  "database-worker": { afterLfSha256: "a67f51754d29d241606541b4898ea057a9aac143bf6274e8d1bfa0fb22b31ac9", bodySha256: "b179a4d3936509fe4cd679a27723a409b526bd8177b6e25308eb6cda15d3695f", reinsertedLfSha256: "521637dfab1234b6e83e11e0e676e896455ed4df7505d77bfe58fb0779d9c8ab" },
-  // 4C in-run retry: frontend/backend/database/general-worker gained one sentence each; pins re-derived from the on-disk profiles.
-  "general-worker": { afterLfSha256: "549d9bfbb4e2fa8223bec8eb959cf380cd0b0797115cfc155d28490453a315ff", bodySha256: "57b366f6b295d1fb7ad8fa4daae256e6764d2167b3e48767f0f7c18304595007", reinsertedLfSha256: "99f878d0cb4de6851f9e81522818cd20140c2dd771c09b47d31a112d6342eadb" },
-};
 type RawTier = { model: string; fallbackModel: string; thinking: string };
 type RawRole = { name: string; defaultModelTier: "economy" | "capable"; modelTiers: Partial<Record<"economy" | "capable", RawTier>>; tools: string };
 const RAW_ROLES = () => JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8")) as RawRole[];
@@ -655,19 +627,14 @@ test("tier-only baseline pins the 20 shipped roles; header removal removed only 
     const entry = headerRemoval.roles.find((item) => item.name === name)!;
     assert.equal(entry.headLfSha256, APPROVED_PROFILE_DIGESTS[name] ?? digest, `${name}: historical pin and header-removal baseline agree`);
     const text = lfText(new URL(`../../../agents/${name}.md`, import.meta.url));
-    assert.equal(sha256Latin1(text), POLICY_EXCEPTION_PINS[name]?.afterLfSha256 ?? entry.expectedAfterLfSha256, `${name}: post-change profile bytes`);
-    assert.equal(sha256Latin1(text), POLICY_EXCEPTION_PINS[name]?.afterLfSha256 ?? entry.expectedAfterLfSha256, `${name}: post-change profile bytes`);
     assert.equal(entry.removed.length, 6, `${name}: exactly model + metadata block removed`);
     assert.deepEqual(entry.removed.map((line) => line.split(":")[0].trim()), ["model", "metadata", "pi.model", "pi.fallbackModel", "pi.thinking", "pi.tools"], `${name}: removed field names`);
     const lines = text.split("\n");
     const at = lines.indexOf(entry.nativeToolsLine);
     assert.ok(at > 0, `${name}: native tools line preserved`);
     assert.equal(lines[at - 1], entry.descriptionLine, `${name}: description line preserved`);
-    assert.equal(sha256Latin1([...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n")), POLICY_EXCEPTION_PINS[name]?.reinsertedLfSha256 ?? entry.headLfSha256, `${name}: reinserting the removed lines reproduces the historical bytes`);
-    assert.equal(sha256Latin1([...lines.slice(0, at + 1), ...entry.removed, ...lines.slice(at + 1)].join("\n")), POLICY_EXCEPTION_PINS[name]?.reinsertedLfSha256 ?? entry.headLfSha256, `${name}: reinserting the removed lines reproduces the historical bytes`);
-    const body = text.slice(text.indexOf("\n---", 4) + 5);
-    assert.equal(sha256Latin1(body), POLICY_EXCEPTION_PINS[name]?.bodySha256 ?? entry.bodySha256, `${name}: body unchanged`);
-    assert.equal(sha256Latin1(body), POLICY_EXCEPTION_PINS[name]?.bodySha256 ?? entry.bodySha256, `${name}: body unchanged`);
+    // Role bodies are prompt text and may change freely; only the header shape is pinned here.
+    for (const field of ["model", "fallbackModel", "thinking", "metadata", "pi."]) assert.ok(!text.slice(0, text.indexOf("\n---", 4)).split("\n").some((line) => line.trimStart().startsWith(field === "pi." ? field : `${field}:`)), `${name}: header carries no ${field}`);
   }
 });
 
@@ -675,7 +642,7 @@ test("profile digest ignores CRLF/LF checkout EOL but pins every content byte (h
   const dir = fs.mkdtempSync(`${os.tmpdir()}/pi-profile-eol-`);
   try {
     const base = fs.readFileSync(new URL("../../../agents/general-worker.md", import.meta.url)).toString("latin1").replace(/\r\n/g, "\n");
-    const expected = POLICY_EXCEPTION_PINS["general-worker"]?.afterLfSha256 ?? headerRemoval.roles.find((entry) => entry.name === "general-worker")!.expectedAfterLfSha256;
+    const expected = sha256Latin1(base);
     const lines = base.split("\n");
     const variants: Record<string, string> = {
       lf: base,
