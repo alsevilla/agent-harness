@@ -82,6 +82,7 @@ Main's context would otherwise grow by one full handoff per subagent result. Bef
 - The newest 5 results (foreground `subagent` results and background completion notices that carry a `STATUS` line) stay word for word.
 - Older ones are shortened in batches of 5, to one line: `[older subagent result, shortened: <job or tool> <agents>] STATUS … | NEXT … | EVIDENCE … | may be outdated; full report: EVIDENCE or subagent_control result`. A shortened line never changes afterwards, so the cached request prefix changes once per batch, not on every result.
 - Never shortened: any non-PASS `STATUS`, any `RISKS` other than `none`, errors, failed, aborted or partial (`INCOMPLETE HANDOFF`) background notices, launch receipts, and any result the one-line form would not at least halve.
+- Main's own large tool outputs (`read`, `bash`, `grep`, `find`, `ls`, 2,000 characters or more) follow the same window and batching: older ones become `[older <tool> output, shortened: <file or command>] N characters; run it again if you still need the content`. Errors and shorter outputs stay word for word.
 - `PI_SUBAGENT_HANDOFF_WINDOW` sets the window: `0` turns this off (today's behavior); integers of 5 or more are accepted; anything else uses 5.
 
 ## Live inspector

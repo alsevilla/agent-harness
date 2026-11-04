@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatCompletionNotice } from "../compact-handoff.ts";
-import { collapseHandoffs, collapsedLine, DEFAULT_HANDOFF_WINDOW, HANDOFF_WINDOW_ENV, handoffWindowFromEnv, registerHandoffWindow } from "../handoff-window.ts";
+import { collapseHandoffs, collapsedLine, DEFAULT_HANDOFF_WINDOW, HANDOFF_WINDOW_ENV, handoffWindowFromEnv, maskToolOutputs, registerHandoffWindow, shortenContext } from "../handoff-window.ts";
 
 type Msg = Record<string, any>;
 const reply = (status: string, risks = "none", extra = "") => `STATUS: ${status}\nNEXT: done\nRISKS: ${risks}\nEVIDENCE: /w/_evidence/t/REPORT.md${extra}`;
@@ -116,4 +116,37 @@ test("wiring: registers one context handler that returns a request-only list, or
 	const none = new Map<string, unknown>();
 	assert.equal(registerHandoffWindow({ on: (name: string, fn: unknown) => none.set(name, fn) } as never, { [HANDOFF_WINDOW_ENV]: "0" }), 0);
 	assert.equal(none.size, 0);
+});
+
+// Main's own large tool outputs: masked in batches like subagent results, with a stub naming the file or command.
+const call = (n: number, name: string, args: object): Msg => ({ role: "assistant", content: [{ type: "toolCall", id: `t${n}`, name, arguments: args }], timestamp: n });
+const out = (n: number, name: string, size = 3000, extra: object = {}): Msg => ({ role: "toolResult", toolCallId: `t${n}`, toolName: name, content: [{ type: "text", text: "x".repeat(size) }], isError: false, timestamp: n, ...extra });
+const reads = (count: number) => Array.from({ length: count }, (_, i) => [call(i, "read", { path: `/w/src/f${i}.ts` }), out(i, "read")]).flat();
+const masked = (m: Msg) => textOf(m).startsWith("[older ");
+
+test("tool outputs: nothing until a full batch is past the window; then the oldest batch becomes one stub naming the file", () => {
+	assert.equal(maskToolOutputs(reads(9), 5), undefined);
+	assert.equal(maskToolOutputs(reads(10), 0), undefined, "off");
+	const result = maskToolOutputs(reads(10), 5)!;
+	const results = result.filter((m) => m.role === "toolResult");
+	assert.deepEqual(results.map(masked), [true, true, true, true, true, false, false, false, false, false]);
+	assert.equal(textOf(results[0]), "[older read output, shortened: /w/src/f0.ts] 3,000 characters; run it again if you still need the content");
+});
+
+test("tool outputs: errors, short outputs, other tools and subagent results are never masked; input is not mutated", () => {
+	const keep = [out(90, "read", 3000, { isError: true }), out(91, "read", 500), out(92, "edit"), out(93, "subagent")];
+	const messages = deepFreeze([...keep, ...reads(10)]);
+	const result = maskToolOutputs(messages, 5)!;
+	for (let i = 0; i < keep.length; i++) assert.equal(result[i], messages[i]);
+	assert.equal(result.filter(masked).length, 5);
+	const bash = maskToolOutputs([call(100, "bash", { command: "git log --stat" }), out(100, "bash"), ...reads(9)], 5)!;
+	assert.match(textOf(bash[1]), /^\[older bash output, shortened: git log --stat\]/);
+});
+
+test("shortenContext applies both rules to one request and leaves it alone when neither applies", () => {
+	const messages = [...Array.from({ length: 10 }, (_, i) => fg(i)), ...reads(10)];
+	const result = shortenContext(messages, 5)!;
+	assert.equal(result.filter(shortened).length, 5);
+	assert.equal(result.filter((m) => m.role === "toolResult" && m.toolName === "read" && masked(m)).length, 5);
+	assert.equal(shortenContext([user("hi"), ...reads(3)], 5), undefined);
 });
