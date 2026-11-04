@@ -85,14 +85,20 @@ function writeTmp(name, content) {
 }
 
 describe("FixtureSpecimenTests", () => {
-	it("forty_unique_cases_with_24_positive_and_16_near_miss", () => {
+	it("forty_two_unique_cases_with_24_positive_and_18_near_miss", () => {
 		const ids = loadFixture().cases.map((c) => c.id);
-		assert.equal(ids.length, 40);
-		assert.equal(new Set(ids).size, 40);
+		assert.equal(ids.length, 42);
+		assert.equal(new Set(ids).size, 42);
 		const kinds = loadFixture().cases.map((c) => c.kind);
 		assert.ok(kinds.filter((k) => k === "near_miss").length >= 3);
 		assert.equal(kinds.filter((k) => k === "positive").length, 24);
-		assert.equal(kinds.filter((k) => k === "near_miss").length, 16);
+		assert.equal(kinds.filter((k) => k === "near_miss").length, 18);
+	});
+
+	it("main_read_carve_out_cases_R41_R42_launch_no_scout", () => {
+		const c = Object.fromEntries(loadFixture().cases.map((x) => [x.id, x]));
+		assert.deepEqual([c.R41.expect.routes, c.R41.expect.roles_allowed, { ...c.R41.expect.max_dispatches }], [["T1_WORKER"], ["backend-worker"], { "backend-worker": 1 }]);
+		assert.deepEqual([c.R42.expect.routes, c.R42.expect.roles_required, c.R42.expect.roles_allowed], [["LOCAL_DONE"], [], []]);
 	});
 
 	it("catalog_cases_R37_to_R40_state_all_catalogs_discoverable_and_route_narrowly", () => {
@@ -223,7 +229,7 @@ describe("EvaluatorTests", () => {
 	it("perfect_predictions_pass", () => {
 		const rep = evaluateRows(perfectPredictions(loadFixture()));
 		assert.equal(rep.ok, true);
-		assert.equal(rep.matched, 40);
+		assert.equal(rep.matched, 42);
 		assert.equal(rep.accuracy, 1.0);
 		assert.equal(rep.critical_failures, 0);
 	});
@@ -257,7 +263,7 @@ describe("EvaluatorTests", () => {
 	it("single_critical_miss_not_hidden_by_high_aggregate", () => {
 		const fx = loadFixture();
 		const rep = evaluateRows(setRow(perfectPredictions(fx), "R05", { route: "T1_WORKER", roles: ["backend-worker"] }), fx);
-		assert.equal(rep.matched, 39);
+		assert.equal(rep.matched, 41);
 		assert.ok(rep.accuracy > 0.95);
 		assert.equal(rep.critical_failures, 1);
 		assert.equal(rep.ok, false);
@@ -342,7 +348,7 @@ describe("InputValidationTests", () => {
 	const assertInvalid = (text, label) => rejects(() => ev.parsePredictions(text, ids), label);
 	const textWith = (cid, changes) => { const rows = perfectPredictions(fx); setRow(rows, cid, changes); return toJsonl(rows); };
 
-	it("good_text_parses", () => { assert.equal(Object.keys(ev.parsePredictions(good, ids)).length, 40); });
+	it("good_text_parses", () => { assert.equal(Object.keys(ev.parsePredictions(good, ids)).length, 42); });
 	it("malformed_json_line", () => assertInvalid(good.slice(0, -2) + "\n"));
 	it("missing_case", () => assertInvalid(goodLines.slice(0, -1).join("\n") + "\n"));
 	it("duplicate_case", () => assertInvalid([...goodLines, goodLines[0]].join("\n") + "\n"));
@@ -1081,7 +1087,7 @@ describe("DispatchLimitTests", () => {
 		assert.equal(rep.violations.dispatch_unobserved, 1);
 		assert.equal(rep.violations.dispatch_over, 0);
 		assert.equal(rep.ok, false);
-		assert.deepEqual([rep.dispatch_cases, rep.dispatch_observed], [3, 2]);
+		assert.deepEqual([rep.dispatch_cases, rep.dispatch_observed], [4, 3]);
 	});
 
 	it("fixture_validation", () => {
@@ -1229,7 +1235,7 @@ describe("CliTests", () => {
 	it("perfect_predictions_exit_zero", () => {
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("pred.jsonl", toJsonl(perfectPredictions(fx))));
 		assert.equal(r.status, 0, r.stderr);
-		assert.ok(r.stdout.includes("matched: 40/40"));
+		assert.ok(r.stdout.includes("matched: 42/42"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 		assert.ok(r.stdout.includes("does NOT prove runtime skill activation"));
 	});
@@ -1280,7 +1286,7 @@ describe("CliTests", () => {
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("crlf.jsonl", raw));
 		assert.equal(r.status, 0, r.stderr);
 		assert.ok(r.stdout.includes("sha256=" + crypto.createHash("sha256").update(raw).digest("hex")));
-		assert.ok(r.stdout.includes("matched: 40/40"));
+		assert.ok(r.stdout.includes("matched: 42/42"));
 	});
 
 	it("utf8_bom_and_invalid_utf8_predictions_exit_two", () => {
@@ -1321,7 +1327,7 @@ describe("CliTests", () => {
 		const r = runCli("--cases", optionalRoleFixture(1), "--self-check");
 		assert.equal(r.status, 0, r.stderr);
 		assert.ok(noTrace(r.stderr));
-		assert.ok(r.stdout.includes("matched: 40/40"));
+		assert.ok(r.stdout.includes("matched: 42/42"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 	});
 
@@ -1351,7 +1357,7 @@ describe("CliTests", () => {
 		assert.deepEqual([row.roles, row.calls], [[], []]);
 		const r = runCli("--cases", file, "--predictions", writeTmp("optional-zero.jsonl", toJsonl(rows)));
 		assert.equal(r.status, 0, r.stderr);
-		assert.ok(r.stdout.includes("dispatch_cases: 3 (with calls provided: 3)"));
+		assert.ok(r.stdout.includes("dispatch_cases: 4 (with calls provided: 4)"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 	});
 

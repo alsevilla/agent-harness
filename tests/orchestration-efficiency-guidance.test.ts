@@ -60,8 +60,9 @@ const lf = (text: string) => text.replace(/\r\n/g, "\n");
 test("AGENTS.md states a thin orchestrator with delegated reads, carve-outs and a dispatch-less fallback, naming no model", () => {
   const text = compact(policy);
   assert.match(text, /Main is orchestrator only: plan, decompose, delegate/);
-  assert.match(text, /Delegate every file read, search, code\/test run and command inspection \(incl\. git\/hash identity\) to the narrowest read-only role, batched: one question-driven packet per decision point/);
-  assert.match(text, /Main reads only platform-loaded policy, invoked modules, handoff replies, `subagent_control` results and its own PLAN\/DECISION\/evidence notes/);
+  assert.match(text, /Main may read up to 3 named files and run read-only `git status`\/`rev-parse`\/`diff --stat`\/`log -1`; delegate every other read, search, code\/test run and command inspection to the narrowest read-only role, batched: one question-driven packet per decision point/);
+  assert.doesNotMatch(text, /Main may (?:read|run)[^.;]*(?:search|grep|test|build)/i); // searches and code/test runs stay delegated
+  assert.match(text, /Main otherwise reads only platform-loaded policy, invoked modules, handoff replies, `subagent_control` results and its own PLAN\/DECISION\/evidence notes/);
   assert.match(text, /T0: standalone mechanical work[^.]*-> general-worker/);
   assert.match(text, /only when the host reports no usable dispatch[^.]*reads[^.]*standalone T0 edits; implementation, VERIFY, REVIEW, SHIP and delegated recovery stay blocked/i);
   assert.doesNotMatch(text, /main may edit/i);
