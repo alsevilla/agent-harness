@@ -38,8 +38,9 @@ test("every code worker fixes a failing focused check in the same run, at most t
 	for (const role of ["frontend-worker", "backend-worker", "database-worker", "general-worker"]) assert.equal(read(`agent/agents/${role}.md`).split(rule).length, 2, role);
 });
 
-// Phase 4: roles moved to the shared structure list their five sections in this order.
-const FIVE_SECTION_ROLES = ["frontend-worker", "backend-worker", "database-worker"];
+// Phase 4: every role lists the five shared sections in this order. release-engineer keeps its delivery/SHIP/LEARN layout (its merge and
+// release shapes moved to ship/merge-release.md instead).
+const FIVE_SECTION_ROLES = roles.filter((role) => role !== "release-engineer");
 test("restructured roles use the five shared sections in order", () => {
 	const five = ["Knows/loads", "Before starting", "Workflow", "Where to look", "Common failures"];
 	for (const role of FIVE_SECTION_ROLES) {
