@@ -19,7 +19,6 @@
     "devops-specialist.default",
     "devops-specialist.economy",
     "devops-specialist.capable",
-    "frontend-worker.default",
     "observability-specialist.economy",
     "observability-specialist.capable",
     "oracle.capable",
@@ -29,13 +28,15 @@
     "reviewer.default",
     "reviewer.economy",
     "reviewer.capable",
-    "backend-worker.default",
+    "general-worker.default",
+    "platform-worker.default",
     "security-specialist.default",
     "security-specialist.economy",
     "security-specialist.capable",
     "database-specialist.default",
     "database-specialist.economy",
     "database-specialist.capable",
+    "database-worker.default",
     "database-worker.economy",
     "test-engineer.economy",
     "ui-ux-specialist.default",
@@ -188,7 +189,7 @@
     },
     {
       "name": "frontend-worker",
-      "defaultModelTier": "economy",
+      "defaultModelTier": "capable",
       "tiers": {
         "economy": {
           "model": "anthropic/claude-haiku-5-5",
@@ -320,7 +321,7 @@
     },
     {
       "name": "general-worker",
-      "defaultModelTier": "economy",
+      "defaultModelTier": "capable",
       "tiers": {
         "economy": {
           "model": "anthropic/claude-haiku-5-5",
@@ -349,7 +350,7 @@
     },
     {
       "name": "platform-worker",
-      "defaultModelTier": "economy",
+      "defaultModelTier": "capable",
       "tiers": {
         "economy": {
           "model": "anthropic/claude-haiku-5-5",
@@ -378,7 +379,7 @@
     },
     {
       "name": "backend-worker",
-      "defaultModelTier": "economy",
+      "defaultModelTier": "capable",
       "tiers": {
         "economy": {
           "model": "openai-codex/gpt-6-luna",
@@ -484,7 +485,7 @@
     },
     {
       "name": "database-worker",
-      "defaultModelTier": "economy",
+      "defaultModelTier": "capable",
       "tiers": {
         "economy": {
           "model": "anthropic/claude-haiku-5-5",

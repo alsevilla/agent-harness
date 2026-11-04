@@ -171,8 +171,9 @@ test("registry contains the approved tier pairs without changing default role fi
   }
   assert.equal(Object.values(expected).reduce((count, tiers) => count + Object.keys(tiers).length, 0), 13);
   const backendDefault = roles.find((role: { name: string }) => role.name === "backend-worker");
-  // User-approved preset update (approved-user-presets.json): backend-worker now defaults to its economy tier; capable stays configured and unchanged.
-  assert.equal(backendDefault.defaultModelTier, "economy");
+  // User-approved preset update (approved-user-presets.json): implementation workers default to their capable tier; economy stays configured and unchanged.
+  assert.equal(backendDefault.defaultModelTier, "capable");
+  assert.equal(backendDefault.modelTiers.economy.model, "openai-codex/gpt-6-luna");
   assert.equal(backendDefault.modelTiers.capable.model, "anthropic/claude-sonnet-5-5");
   assert.equal(backendDefault.modelTiers.capable.fallbackModel, "openai-codex/gpt-6.1-sol");
   assert.equal(roles.find((role: { name: string }) => role.name === "scout").modelTiers.capable, undefined);
@@ -248,7 +249,7 @@ test("package discovery normalizes tier registry data and field-wise user tier o
   const cwd = fs.mkdtempSync(`${os.tmpdir()}/pi-tier-overlay-`);
   const user = `${cwd}/user`;
   fs.mkdirSync(`${user}/agents`, { recursive: true });
-  fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: { economy: { provider: "fixture-provider", model: "fixture-primary", fallbackModel: "fixture-fallback" } } }]));
+  fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: { capable: { provider: "fixture-provider", model: "fixture-primary", fallbackModel: "fixture-fallback" } } }]));
   const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = user;
   try {
@@ -257,13 +258,13 @@ test("package discovery normalizes tier registry data and field-wise user tier o
     const role = result.agents.find((item) => item.name === "backend-worker");
     assert.ok(role);
     assert.equal(role.source, "package");
-    assert.equal(role.model, "openai-codex/gpt-6-luna", "the root model keeps the base default-tier projection (economy after the approved preset update)");
-    assert.deepEqual(role.modelTiers?.economy, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
-    assert.equal(role.modelTiers?.capable, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
+    assert.equal(role.model, "anthropic/claude-sonnet-5-5", "the root model keeps the base default-tier projection (capable after the approved preset update)");
+    assert.deepEqual(role.modelTiers?.capable, { model: "fixture-provider/fixture-primary", fallbackModel: ["fixture-fallback"] });
+    assert.equal(role.modelTiers?.economy, undefined, "the optional modelTiers field is replaced atomically by the user overlay");
     fs.writeFileSync(`${user}/roles.json`, JSON.stringify([{ name: "backend-worker", modelTiers: {} }]));
     const emptyOverlay = discoverAgents(cwd, "both");
-    assert.deepEqual(emptyOverlay.agents, [], "an explicit empty tier field replaces package tiers; the inherited economy default is then unconfigured, so the registry fails closed");
-    assert.match(emptyOverlay.error ?? "", /defaultModelTier "economy" is not configured/);
+    assert.deepEqual(emptyOverlay.agents, [], "an explicit empty tier field replaces package tiers; the inherited capable default is then unconfigured, so the registry fails closed");
+    assert.match(emptyOverlay.error ?? "", /defaultModelTier "capable" is not configured/);
   } finally {
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
@@ -349,7 +350,7 @@ test("database-worker uses implementation-worker metadata and database ownership
   const role = roles.find((r: { name: string }) => r.name === "database-worker");
   assert.ok(role);
   const tier = role.modelTiers[role.defaultModelTier];
-  assert.deepEqual({ defaultModelTier: role.defaultModelTier, model: tier.model, fallbackModel: tier.fallbackModel, thinking: tier.thinking, tools: role.tools }, { defaultModelTier: "economy", model: "anthropic/claude-haiku-5-5", fallbackModel: "openai-codex/gpt-6-luna", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" });
+  assert.deepEqual({ defaultModelTier: role.defaultModelTier, model: tier.model, fallbackModel: tier.fallbackModel, thinking: tier.thinking, tools: role.tools }, { defaultModelTier: "capable", model: "openai-codex/gpt-6.1-sol", fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" });
   const text = fs.readFileSync(new URL("../../../agents/database-worker.md", import.meta.url), "utf8");
   assert.match(text, /schema.*migrations.*transactions/is);
   assert.match(text, /database-specialist/i);
@@ -544,8 +545,8 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   const tools = toolsOnly.agents.find((agent) => agent.name === "backend-worker");
   assert.ok(tools);
   assert.deepEqual(tools.tools, ["read"]);
-  assert.equal(tools.model, "openai-codex/gpt-6-luna");
-  assert.equal(tools.defaultModelTier, "economy", "a tools-only overlay inherits the base default tier");
+  assert.equal(tools.model, "anthropic/claude-sonnet-5-5");
+  assert.equal(tools.defaultModelTier, "capable", "a tools-only overlay inherits the base default tier");
 
   const legacy = discoverWithUserRoles([{ name: "backend-worker", provider: "fixture-provider", model: "legacy-model", thinking: "low" }]);
   assert.equal(legacy.error, undefined);
@@ -553,7 +554,7 @@ test("tools-only and legacy scalar overlays keep their existing projection", () 
   assert.ok(scalar);
   assert.equal(scalar.model, "fixture-provider/legacy-model");
   assert.equal(scalar.thinking, "low");
-  assert.deepEqual(scalar.fallbackModel, ["anthropic/claude-haiku-5-5"]);
+  assert.deepEqual(scalar.fallbackModel, ["openai-codex/gpt-6.1-sol"]);
   assert.equal(scalar.defaultModelTier, undefined, "legacy omission projection carries no default tier");
 });
 

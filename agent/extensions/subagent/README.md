@@ -24,7 +24,7 @@ Each canonical role's tier presets live in Pi's existing `agent/roles.json` besi
 ```json
 {
   "name": "backend-worker",
-  "defaultModelTier": "economy",
+  "defaultModelTier": "capable",
   "modelTiers": {
     "economy": {
       "model": "openai-codex/gpt-6-luna",

@@ -88,11 +88,11 @@ Pi-only, main-owned judgment. Add `modelSlot: "fallback"` to one entry (with an 
 Scenarios:
 - backend-worker: add one validated field to an existing endpoint whose schema and focused tests are named in the packet -> explicit economy.
 - frontend-worker: adjust presentational state of an existing component whose design is already approved and whose focused tests are named -> explicit economy.
-- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> omit `modelTier` (default tier); security-sensitive automation -> explicit `capable`.
-- backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; explicit `capable` (its default is economy; omission would run economy), the owning specialist first when a decision is open.
+- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> omit `modelTier` (default tier, capable); security-sensitive automation -> explicit `capable`.
+- backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; explicit `capable` (also its default, so omission runs capable too), the owning specialist first when a decision is open.
 - frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy.
-- database-worker: consequential migration or persistence change -> explicit `capable` (its default is economy; omission would run economy).
-- platform-worker: consequential infrastructure change -> explicit `capable` (its default is economy).
+- database-worker: consequential migration or persistence change -> explicit `capable` (also its default, so omission runs capable too).
+- platform-worker: consequential infrastructure change -> explicit `capable` (also its default).
 - test-engineer: data-integrity verification -> explicit `capable` (its default is economy).
 - reviewer or test-engineer: T3/T4 gate (mandatory independent VERIFY/REVIEW for material risk) -> explicit `capable` (their default is economy; omission would run economy).
 - scout (economy only): high-risk task -> unresolved, main decides or a specialist route; no capable tier exists and omission runs economy.
