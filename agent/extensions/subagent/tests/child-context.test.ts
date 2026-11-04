@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// The public SDK is not installed in this repo: resolve it to a data module exposing only getAgentDir (as role-prompt-dedup does).
+// The public SDK is not installed in this repo: resolve it to a data module exposing only getAgentDir.
 const GLOBAL_DIR = path.join(os.tmpdir(), "child-context-agent-dir");
 (globalThis as any).__childContextAgentDir = () => GLOBAL_DIR;
 registerHooks({
