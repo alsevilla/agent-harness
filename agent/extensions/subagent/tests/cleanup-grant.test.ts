@@ -344,7 +344,7 @@ test("pending discovery is a cheap runtime-metadata projection: 4 merge grants, 
 	assert.equal(first.state, "PENDING_UNVERIFIED");
 	assert.deepEqual(first.request, { checkout: tasks[0].dir, branch: tasks[0].branch, base: "main", pr: 12, headSha: tasks[0].head });
 	assert.deepEqual(first.retainedArtifacts.map((x: any) => x.path).sort(), [tasks[0].evidence, tasks[0].scratch].sort());
-	assert.ok(first.retainedArtifacts.every((x: any) => /never deleted automatically/.test(x.reason) && !("exists" in x)), "no existence claim");
+	assert.ok(first.retainedArtifacts.every((x: any) => /removed by the same cleanup after the checkout/.test(x.reason) && !("exists" in x)), "no existence claim");
 	const held: any = byDir.get(tasks[1].dir);
 	assert.equal(held.state, "RETAINED");
 	assert.match(held.reason, /owner/);
@@ -695,4 +695,42 @@ test("F3 owner tracker: a claimed reservation survives releaseUnclaimed and clea
 	assert.throws(() => o.begin({ workerId: "d", role: "general-worker", cwd: P }), /cleanup/, "an aborted or failed close retains until TTL (grandchild state unknown)");
 	o.closeClaimed("id1", true);
 	o.begin({ workerId: "e", role: "general-worker", cwd: P });
+});
+
+// Artifact folders follow the checkout under the same scope: allowed only after the checkout is gone, exact forms, once each.
+const RM = (p: string) => `rm -rf ${q(p)}`;
+const PS_RM = (p: string) => `Remove-Item -LiteralPath ${q(p)} -Recurse -Force`;
+function withArtifacts(t: Task) {
+	for (const dir of [t.evidence, t.scratch]) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(`${dir}/REPORT.md`, "evidence\n"); }
+}
+
+test("artifact folders: denied while the checkout exists; after its removal each exact form is allowed once from the primary", () => {
+	const s = setup();
+	withArtifacts(s.t);
+	const g = guardOf(s.child, live(view(s.t)));
+	assert.ok(blocked(run(g, RM(s.t.evidence))), "no artifact entry before the checkout removal is allowed");
+	assert.equal(run(g, REMOVE(s.t.dir)), undefined);
+	assert.ok(blocked(run(g, RM(s.t.evidence))), "checkout still on disk: denied");
+	const r = execAllowed(s.t);
+	assert.equal(r.status, 0, r.stderr);
+	assert.ok(blocked(run(g, RM(s.t.evidence), s.t.evidence)), "cwd inside the folder");
+	assert.ok(blocked(run(g, RM(s.t.evidence), PROJ)), "cwd is not the primary");
+	assert.equal(run(g, RM(s.t.evidence)), undefined, "bash form allowed after refused attempts consumed nothing");
+	assert.ok(blocked(run(g, RM(s.t.evidence))), "replay");
+	assert.equal(C.guardToolCall(g, "powershell", { command: PS_RM(s.t.scratch) }, PRIMARY, C.livePushUrl), undefined, "PowerShell form");
+	assert.ok(blocked(run(g, RM(`${WT}/_evidence/other-task`))), "another task's folder is never covered");
+});
+
+test("artifact folders: non-exact forms, links inside, expired entries and the main scope stay denied", () => {
+	const s = setup();
+	withArtifacts(s.t);
+	const g = guardOf(s.child, live(view(s.t)));
+	assert.equal(run(g, REMOVE(s.t.dir)), undefined);
+	assert.equal(execAllowed(s.t).status, 0);
+	for (const command of [`rm -r ${q(s.t.evidence)}`, `rm -rf ${s.t.evidence}`, `rm -rf ${q(s.t.evidence)} ${q(s.t.scratch)}`, `rm -rf ${q(`${s.t.evidence}/..`)}`, `Remove-Item -LiteralPath ${q(s.t.scratch)} -Recurse`]) assert.ok(blocked(run(g, command)), command);
+	assert.ok(blocked(C.guardToolCall({ scope: "main", store: s.child, agentDir: AGENT_DIR, live: live(view(s.t)) }, "bash", { command: RM(s.t.evidence) }, PRIMARY)), "main scope");
+	fs.symlinkSync(root, `${s.t.scratch}/outside`, "junction");
+	assert.ok(blocked(run(g, RM(s.t.scratch))), "a link inside the folder retains it");
+	clock.value += C.CLEANUP_TTL_MS + 1;
+	try { assert.ok(blocked(run(g, RM(s.t.evidence))), "expired"); } finally { clock.value = T0; }
 });
