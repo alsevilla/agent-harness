@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatUsageSummary, LogicalUsage, newUsageScope, type UsageScope } from "../background.ts";
+import { formatUsageSummary, LogicalUsage, mainContextTokens, newUsageScope, type UsageScope } from "../background.ts";
 
 type Status = "completed" | "failed" | "aborted";
 
@@ -96,4 +96,17 @@ test("a job settles into its launch scope after reset and charges no other scope
 
 test("a scope without named roles shows no By role section", () => {
 	assert.equal(formatUsageSummary(newUsageScope()).includes("By role"), false);
+});
+
+test("main context line: the SDK estimate is shown when available, unknown otherwise, and never invented as 0", () => {
+	assert.equal(mainContextTokens({ getContextUsage: () => ({ tokens: 48210.4 }) }), 48210);
+	for (const ctx of [{}, { getContextUsage: () => undefined }, { getContextUsage: () => ({ tokens: null }) }, { getContextUsage: () => ({ tokens: "500" }) }, { getContextUsage: () => ({ tokens: -1 }) }, { getContextUsage: () => { throw new Error("no session"); } }]) {
+		assert.equal(mainContextTokens(ctx as never), null);
+	}
+	const scope = newUsageScope();
+	assert.ok(formatUsageSummary(scope, 48210).endsWith("\nMain context: ~48,210 tokens (SDK estimate)"));
+	assert.ok(formatUsageSummary(scope, null).endsWith("\nMain context: unknown"));
+	run(scope, "backend", false, 100, 20, 0.5);
+	assert.ok(formatUsageSummary(scope, 900).endsWith("\nMain context: ~900 tokens (SDK estimate)"), "shown after the role breakdown");
+	assert.equal(formatUsageSummary(scope).includes("Main context"), false, "callers without a reading keep the old text");
 });
