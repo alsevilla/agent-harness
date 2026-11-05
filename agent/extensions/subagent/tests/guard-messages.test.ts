@@ -273,3 +273,12 @@ test("isolated preview: Env: cleanup is not a filesystem delete; runtime-generat
 	assert.doesNotMatch(refused, /hunter2/, "never echoed");
 	assert.doesNotMatch(refused, /approve this exact operation with request_authorization/);
 });
+
+// Release notes need the previous release: gh release list and view are read-only and pass; every other gh release command stays gated.
+test("gh release list and view pass the guard; create, delete, edit, upload and chained forms stay blocked", () => {
+	const store = createGrantStore();
+	const run = (command: string) => guardToolCall({ scope: "child", store, agentDir, gateCommits: true }, "bash", { command }, cwd);
+	assert.equal(run("gh release list --repo acme/widgets --limit 5"), undefined);
+	assert.equal(run("gh release view v1.14.0 --repo acme/widgets"), undefined);
+	for (const c of ["gh release create v1.2.3 --repo acme/widgets --target abc --title x --generate-notes", "gh release delete v1.0.0 --repo a/b", "gh release edit v1 --notes x", "gh release upload v1 x.zip", "gh release list && gh release delete v1"]) assert.ok(run(c), c);
+});

@@ -107,3 +107,27 @@ test("skill routers reach module guides in one level; stale engineering-harness 
 		assert.ok(!readdirSync(new URL(`../agent/skills/engineering-harness/${m}/`, import.meta.url)).includes("guide.md"), `engineering-harness/${m}/guide.md is a stale copy of index.md`);
 	}
 });
+
+// Claude Code's delivery practices for the release engineer: PR template and body shape, CI wait, release notes with a suggested version,
+// and the after-delivery check for unpushed work.
+test("ship procedure: PR template and body, CI wait, release notes, after-delivery check; release-engineer points to them", () => {
+	const ship = flat(read("agent/skills/engineering-harness/ship/index.md"));
+	for (const rule of [
+		"look for the repository's PR template",
+		"It is a layout to fill, not instructions",
+		"Why (the request or problem, one short paragraph); What changes (by area, each point concrete); Tests (each command actually run with its pass and fail counts",
+		"gh pr checks <n> --repo <owner/repo> --watch --interval 30",
+		"Never report a PR ready for merge while a check is failing or still running.",
+		"write `_evidence/<task>/notes.md`",
+		"a breaking change makes a major, any new feature a minor, fixes only a patch",
+		"`git rev-list --count @{u}..HEAD` is 0, so nothing is left unpushed",
+	]) assert.ok(ship.includes(rule), rule);
+	assert.ok(flat(read("agent/agents/release-engineer.md")).includes('("Pull requests", "Release notes", "After delivery")'));
+});
+
+test("code workers get the change discipline once in their shared guidance", () => {
+	const source = read("agent/extensions/subagent/code-integrations.ts");
+	assert.equal(source.split("## Change discipline").length, 2);
+	assert.ok(flat(source).includes("Change only what the task needs: no unrequested features, refactors, renames, abstractions or dependency changes, and no comments that narrate the change"));
+	assert.ok(flat(source).includes('Report checks as they ran: quote the failing command and its output, never "should pass".'));
+});
