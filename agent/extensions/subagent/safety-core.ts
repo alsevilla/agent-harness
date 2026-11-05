@@ -2057,17 +2057,49 @@ export function psWriteTargets(args: string[]): string[] {
 }
 const RO_SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
 const shownTarget = (target: string) => (target.length > 120 ? `${target.slice(0, 119)}…` : target);
-/** Why a write target is refused: inside the candidate, or not resolvable here (a variable or substitution); undefined when allowed. */
+// Windows drive-letter paths resolve with Windows rules on every host (C:/a and C:\a are one path; a relative path joins a C: cwd).
+const DRIVE = /^[A-Za-z]:[\\/]/;
+function resolveTarget(cwd: string, target: string): string {
+	return slashed(DRIVE.test(target) || DRIVE.test(cwd) ? path.win32.resolve(cwd, target) : path.resolve(cwd, target));
+}
+const protectedRoot = (root: string) => slashed(DRIVE.test(root) ? path.win32.resolve(root) : path.resolve(root)).replace(/\/+$/, "");
+/** Why a write target is refused: inside the candidate, not resolvable here, or missing; undefined when allowed. Names the resolved destination and the protected root. */
 function roTarget(what: string, target: string, cwd: string, root: string): string | undefined {
+	if (target === "") return `${what} with no target the guard can read; write to the literal absolute _scratch or _evidence path from the packet (protected root ${protectedRoot(root)})`;
 	if (/[$`%]/.test(target) && !/^(\$null)$/i.test(target)) return `${what} to a target with a variable or substitution the guard cannot resolve (${shownTarget(target)}); use the literal absolute _scratch or _evidence path from the packet`;
-	return insideRoot(target, cwd, root) ? `${what} into the candidate checkout (${shownTarget(target)})` : undefined;
+	return insideRoot(target, cwd, root) ? `${what} into the candidate checkout (${shownTarget(target)} resolves to ${shownTarget(resolveTarget(cwd, target))}, inside protected root ${protectedRoot(root)})` : undefined;
 }
 function insideRoot(target: string, cwd: string, root: string): boolean {
 	if (/[$`%]/.test(target) || target === "") return true; // unexpandable here: assume the candidate (fail closed)
 	if (/^(\/dev\/null|nul|\$null)$/i.test(target) || /^&\d$/.test(target)) return false;
-	const full = normPath(slashed(path.resolve(cwd, target)));
-	const r = normPath(slashed(root)).replace(/\/+$/, "");
+	const full = normPath(resolveTarget(cwd, target));
+	const r = normPath(protectedRoot(root));
 	return full === r || full.startsWith(`${r}/`);
+}
+// Field report: 'cat > <_scratch>/run.js <<'EOF' … EOF' was refused as "redirects output into the candidate checkout ()" because the
+// heredoc body (JavaScript such as "page.evaluate(() =>") was checked as shell, and a line ending in "=>" looked like a redirect with
+// no target. A heredoc body is data unless a shell reads it; PowerShell here-strings are string literals.
+const HEREDOC = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/g;
+const SHELL_NAME = "(?:\\S*[\\\\/])?(?:bash|sh|zsh|dash|ksh|pwsh|powershell)(?:\\.exe)?\\b";
+export function withoutDataBodies(text: string): string {
+	const literal = text.replace(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g, "'here-string'");
+	const lines = literal.split(/\r?\n/);
+	const out: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		out.push(line);
+		for (const m of line.matchAll(HEREDOC)) {
+			const reader = line.slice(0, m.index).split(/[;&|]+/).pop() ?? "";
+			// A shell runs the body when it reads the heredoc (bash <<EOF) or when the reader's output is piped into one (cat <<EOF | bash).
+			const shell = new RegExp(`^\\s*${SHELL_NAME}`, "i").test(reader) || new RegExp(`\\|\\s*${SHELL_NAME}`, "i").test(line.slice(m.index));
+			const end = m[3];
+			let j = i + 1;
+			while (j < lines.length && (m[1] ? lines[j].replace(/^\t+/, "") : lines[j]) !== end) j++;
+			if (shell) continue; // a shell reads these lines: keep them as commands
+			lines.splice(i + 1, Math.max(0, j - i - 1)); // drop the body, keep the delimiter line
+		}
+	}
+	return out.join("\n");
 }
 function readOnlyShell(text: string, cwd: string, root: string, depth = 0): string | undefined {
 	if (depth > 3) return "command nesting is too deep to check";
@@ -2104,7 +2136,7 @@ export function readOnlyViolation(toolName: string, input: Record<string, unknow
 		return insideRoot(p, cwd, root) ? `${toolName} changes a file in the candidate checkout` : undefined;
 	}
 	if (toolName !== "bash" && toolName !== "powershell") return undefined;
-	return readOnlyShell(String(input?.command ?? ""), cwd, root);
+	return readOnlyShell(withoutDataBodies(String(input?.command ?? "")), cwd, root);
 }
 
 // ---- User permission rules: <agent dir>/harness-permissions.json, written by the user only (agents cannot: it is a CONFIG_WRITE path).
