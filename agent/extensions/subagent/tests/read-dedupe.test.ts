@@ -51,7 +51,8 @@ test("only workers load it: the child guard entry wires tool_result and compacti
 });
 
 // "Does a Language Server Save Tokens for Coding Agents?" (2608.13568): named targets are cheaper to read or grep directly.
-test("Serena guidance: read or grep a named file or symbol directly; Serena for every reference or unfamiliar code", () => {
+test("Serena guidance: read or grep a named file or symbol; grep for renames and every occurrence; Serena for noisy matches or unfamiliar code", () => {
 	const source = fs.readFileSync(new URL("../code-integrations.ts", import.meta.url), "utf8");
-	assert.match(source, /When the packet names the file or symbol, read or grep it directly\. Use Serena symbol overview, lookup and references to find every reference or caller, or to explore unfamiliar code/);
+	assert.match(source, /When the packet names the file or symbol, read or grep it directly\. Use grep for renames and every occurrence: it also finds comments and strings, which symbol references miss\. Use Serena symbol overview, lookup and references when grep matches are noisy \(definitions vs calls\) or to explore unfamiliar code/);
+	assert.doesNotMatch(source, /Use Serena[^"]*to find every reference or caller/, "language-server references bought precision, not savings, and missed rename sites");
 });

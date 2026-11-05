@@ -15,6 +15,7 @@ export interface WorkerRecord {
   startedAt: number; endedAt?: number; spawned: boolean; output: string; events: string[];
   textBlocks?: Record<number, string>;
   tools: ToolActivity[]; graphReferences: number;
+  ponytail?: boolean; // Ponytail extension in the launch arguments (it injects mode text; it has no tool calls to count)
   integrations: Record<string, { calls: number; returned: number; errors: number }>;
   transcript: TranscriptEntry[]; assistantSequence: number; currentAssistant?: string;
 }
@@ -57,11 +58,12 @@ function toolCommand(name: string, args: any): string {
 function resultText(result: any): string {
   return clean((result?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n")).slice(-12000);
 }
-function integrationLabel(r: WorkerRecord): string {
-  const parts = ["serena", "graphify"].map(name => {
+export function integrationLabel(r: WorkerRecord): string {
+  const parts = r.ponytail ? ["ponytail: loaded"] : [];
+  parts.push(...["serena", "graphify"].map(name => {
     const stats = r.integrations[name];
     return name + ": " + (stats?.calls ? stats.calls + " calls · " + stats.returned + " returned · " + stats.errors + " errors" : "no calls observed");
-  });
+  }));
   if (r.graphReferences) parts.push("graph references: " + r.graphReferences + " reads");
   return parts.join(" | ");
 }
