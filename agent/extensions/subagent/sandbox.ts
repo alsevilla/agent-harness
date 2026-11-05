@@ -1,6 +1,6 @@
 // Opt-in OS sandbox for workers: Linux uses bubblewrap and macOS uses Seatbelt (sandbox-exec), as Claude Code and Codex do there. The whole filesystem is mounted read-only and only the
 // folders a worker needs are writable: its candidate checkout (writing roles only), the task's _evidence and _scratch folders, the temp
-// folder (the parent's prompt and control files), the provider-cooldown state and the cargo target folder. Network stays on: the worker's
+// folder (the parent's prompt and control files), and the provider-cooldown state. Network stays on: the worker's
 // own Pi process must reach the model API. This turns the guard's lexical write rules into enforced ones; it is not network isolation.
 //   PI_SUBAGENT_SANDBOX unset or "off": no sandbox (default). "on": sandbox when bwrap works, else launch with a note.
 //   "require": refuse to launch when the sandbox is unavailable. PI_SUBAGENT_SANDBOX_WRITABLE: extra writable paths (path-delimited).
@@ -72,8 +72,6 @@ export function sandboxPlan(opts: { cwd: string; readOnly: boolean; agentDir: st
 		...artifactRoots(opts.cwd),
 		os.tmpdir(),
 		path.join(opts.agentDir, "run-state"),
-		...(env.CARGO_TARGET_DIR ? [env.CARGO_TARGET_DIR] : []),
-		...(env.PI_CARGO_TARGET_ROOT ? [env.PI_CARGO_TARGET_ROOT] : []),
 		...(env[SANDBOX_WRITABLE_ENV] ?? "").split(path.delimiter).filter(Boolean),
 	];
 	const writable: string[] = [];

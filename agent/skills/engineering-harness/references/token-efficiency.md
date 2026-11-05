@@ -57,7 +57,7 @@ Measure orchestrator input/output tokens separately from child tokens and provid
 - Scope: guidance only: no collector, recorder, schema or budget is added; read the records that already exist.
 
 ### Static prompt size (characters, not tokens)
-`node --experimental-strip-types scripts/measure-child-prompt.mjs --label <name> --out <absolute dir outside the repository> [--agent-dir <empty absolute dir outside the repository>]` writes `measure-<name>.json` and each assembled prompt for five roles, in live and package shapes, against a Cargo and a non-Cargo candidate. `--agent-dir` measures the missing-integration profile; a non-reviewer launch is refused when Ponytail is absent, as in `index.ts`. The script reports characters and hashes only; it does not count tokens.
+`node --experimental-strip-types scripts/measure-child-prompt.mjs --label <name> --out <absolute dir outside the repository> [--agent-dir <empty absolute dir outside the repository>]` writes `measure-<name>.json` and each assembled prompt for five roles, in live and package shapes. `--agent-dir` measures the missing-integration profile; a non-reviewer launch is refused when Ponytail is absent, as in `index.ts`. The script reports characters and hashes only; it does not count tokens.
 
 ### Benchmark procedure (only when authorized; paid runs are not part of this repository)
 1. Fix constraints for both arms: model and fallback per role, thinking level, task packet, acceptance checks, cwd fixture, integration availability and cache state (cold or warm).

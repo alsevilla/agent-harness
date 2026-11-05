@@ -42,7 +42,6 @@ import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
-import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
@@ -439,7 +438,7 @@ async function runAgentAttempt(
 		let removeAbort = () => {};
         const exitCode = await new Promise<number>((resolve) => {
 			// Opt-in OS sandbox (Linux, bubblewrap): read-only filesystem except the folders this worker may write. Refused or noted per mode.
-			const boxed = sandboxInvocation(getPiInvocation(args), { cwd: cwd ?? defaultCwd, readOnly: readOnlyRoot !== undefined, agentDir: getAgentDir(), env: { ...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd) } });
+			const boxed = sandboxInvocation(getPiInvocation(args), { cwd: cwd ?? defaultCwd, readOnly: readOnlyRoot !== undefined, agentDir: getAgentDir(), env: process.env });
 			if (!boxed.ok) { currentResult.stopReason = "error"; currentResult.errorMessage = boxed.reason; resolve(1); return; }
 			if (boxed.note) currentResult.stderr += `${boxed.note}\n`;
 			const invocation = { command: boxed.command, args: boxed.args };
@@ -447,7 +446,7 @@ async function runAgentAttempt(
 			dispatchDefaults.onSpawn?.();
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-                env: guard.childEnv({...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : "", [CHILD_READONLY_ENV]: readOnlyRoot ?? ""}),
+                env: guard.childEnv({...process.env, PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : "", [CHILD_READONLY_ENV]: readOnlyRoot ?? ""}),
 				shell: false,
 				stdio: ["pipe", "pipe", "pipe"],
 			});

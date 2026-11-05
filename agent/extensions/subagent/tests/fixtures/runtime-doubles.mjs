@@ -105,9 +105,6 @@ export function packageResourceGuidance() {
 export function unavailableIntegrationGuidance() {
 	return "";
 }
-export function cargoEnvDefaults() {
-	return {};
-}
 export function StringEnum() {
 	return {};
 }

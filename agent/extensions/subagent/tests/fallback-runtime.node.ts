@@ -20,7 +20,6 @@ const indexDependencies = new Set([
 	"typebox",
 	"./monitor.ts",
 	"./code-integrations.ts",
-	"./build-env.ts",
 ]);
 
 // Launch-state stub for the provider cooldown entry: its pi-ai/compat import is not resolvable from this node test.

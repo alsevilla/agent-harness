@@ -33,7 +33,7 @@ test("unavailable sandbox: on launches with a note, require refuses", () => {
 	assert.match((req as any).reason, /PI_SUBAGENT_SANDBOX=require but .*nothing was launched/);
 });
 
-test("writable set: the checkout only for writers; artifact folders, temp, run-state, cargo target and extras for all", () => {
+test("writable set: the checkout only for writers; artifact folders, temp, run-state and extras for all", () => {
 	const [evidence, scratch] = artifactRoots(primary);
 	assert.equal(evidence, path.join(root, "proj", "worktrees", "app", "_evidence"));
 	const task = path.join(root, "proj", "worktrees", "app", "t1");
