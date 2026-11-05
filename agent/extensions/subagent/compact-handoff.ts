@@ -21,6 +21,7 @@ The main orchestrator owns delegations, approvals, and phase routing.
 `;
 
 import { attemptsNote, modelProvenance } from "./provenance.ts";
+import { foldCase } from "./path-case.ts";
 
 export const BACKGROUND_COMPLETION_LIMIT = 4000; // default notice limit (total serialized UTF-16 length); the `noticeLimit` argument overrides it per job
 
@@ -232,7 +233,7 @@ export function expandRetainedResult(jobResult: any): string | null {
 // Image check: absolute image paths named in the task, compared with the paths the worker actually opened with read.
 // Runtime evidence, not child text: main cannot view images itself, so a visual claim about an unopened image is unverified.
 const IMAGE_PATH = /(?<![\w:/.\\])(?:[A-Za-z]:)?[\\/][^\s"'`<>|*?]*\.(?:png|jpe?g|webp|gif|bmp)\b/gi;
-const foldImage = (p: string) => { const s = p.replace(/\\/g, "/"); return process.platform === "win32" ? s.toLowerCase() : s; };
+const foldImage = (p: string) => foldCase(p.replace(/\\/g, "/"));
 export function unopenedImages(task: string, messages: readonly unknown[]): string[] {
 	const named = [...new Set((String(task ?? "").match(IMAGE_PATH) ?? []).map((p) => p.replace(/\\/g, "/")))];
 	if (!named.length) return [];

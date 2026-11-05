@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 import * as core from "../safety-core.ts";
+import { foldsCase } from "../path-case.ts";
 
 const C = core as any;
 const SCRATCH = fs.realpathSync.native(process.env.PR_AUTH_TEST_SCRATCH ?? os.tmpdir());
@@ -77,8 +78,8 @@ test("M6 ordinary trusted commit (-m, quoted -F), feature push and PR create nee
 
 test("A1 origin repo-name artifact group is accepted next to the legacy primary-basename group", () => {
 	const g = trusted();
-	// Paths fold case only on Windows (foldPath), so the upper-case spelling is the same group there and a different folder elsewhere.
-	for (const group of ["widgets", "pi-like", ...(process.platform === "win32" ? ["WIDGETS"] : [])]) {
+	// Paths fold case on Windows and macOS (path-case.ts), so the upper-case spelling is the same group there and a different folder on Linux.
+	for (const group of ["widgets", "pi-like", ...(foldsCase() ? ["WIDGETS"] : [])]) {
 		const f = artifact(group);
 		assert.equal(run(g, `git commit -F "${f}"`), undefined, `commit -F ${group}`);
 		assert.equal(run(g, prCreate(f)), undefined, `pr body-file ${group}`);

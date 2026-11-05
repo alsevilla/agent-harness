@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertExcludeUntracked, candidateFingerprint, git as hardenedGit, preflight as checkoutPreflight, assertNoRepoFsmonitor, validateExclude } from "./candidate-fingerprint.ts";
 import { overlaps, type OwnerTracker } from "./cleanup-state.ts";
+import { foldCase } from "./path-case.ts";
 
 export type RiskRule =
 	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
@@ -472,9 +473,9 @@ export function canonicalCwd(cwd: string): string {
 	}
 }
 
-// Command text is case-exact; only the Windows path (cwd or target) is case-folded.
+// Command text is case-exact; paths (cwd or target) are case-folded where the OS ignores case (Windows, macOS; see path-case.ts).
 function foldPath(p: string): string {
-	return process.platform === "win32" ? p.toLowerCase() : p;
+	return foldCase(p);
 }
 
 function keyOf(op: GuardOp): string {

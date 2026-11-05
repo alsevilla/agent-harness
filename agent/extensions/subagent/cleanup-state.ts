@@ -1,7 +1,8 @@
 // Runtime owner tracking for post-merge checkout cleanup: which worker ran in which folder, and until when. Memory only; a fresh session knows nothing, and unknown ownership always refuses.
+import { foldCase } from "./path-case.ts";
 const fold = (p: string): string => {
 	const s = p.replace(/[\\]/g, "/").replace(/\/+$/, "");
-	return process.platform === "win32" ? s.toLowerCase() : s;
+	return foldCase(s);
 };
 // Equal, or one contains the other: a worker above a target is as live as one inside it.
 export const overlaps = (a: string, b: string): boolean => {

@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { foldCase } from "./path-case.ts";
 
 /** Walk up from cwd to the nearest directory containing `.git` (a folder, or a file in a worktree). */
 function checkoutRoot(cwd: string): string | undefined {
@@ -25,7 +26,7 @@ export function cargoEnvDefaults(cwd: string, env: NodeJS.ProcessEnv = process.e
   if (root && env.CARGO_TARGET_DIR === undefined) {
     const top = checkoutRoot(cwd);
     if (top) {
-      const id = crypto.createHash("sha1").update(process.platform === "win32" ? path.resolve(top).toLowerCase() : path.resolve(top)).digest("hex").slice(0, 8);
+      const id = crypto.createHash("sha1").update(foldCase(path.resolve(top))).digest("hex").slice(0, 8);
       defaults.CARGO_TARGET_DIR = path.join(root, `${path.basename(top)}-${id}`);
     }
   }

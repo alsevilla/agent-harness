@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
 import { cargoEnvDefaults } from "../build-env.ts";
+import { foldsCase } from "../path-case.ts";
 
 const fixtures: string[] = [];
 after(() => {
@@ -49,7 +50,7 @@ function fsIsCaseInsensitive(): boolean {
   }
 }
 
-test("checkout hash preserves case on case-sensitive platforms", { skip: process.platform === "win32" || fsIsCaseInsensitive() }, () => {
+test("checkout hash preserves case on case-sensitive platforms", { skip: foldsCase() || fsIsCaseInsensitive() }, () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "build-env-case-"));
   fixtures.push(base);
   const upper = path.join(base, "A", "repo"), lower = path.join(base, "a", "repo");

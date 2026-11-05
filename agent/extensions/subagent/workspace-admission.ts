@@ -2,6 +2,7 @@
 // Not a cross-Pi-process guarantee; separate processes need isolated worktrees.
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { foldCase } from "./path-case.ts";
 
 export type WorkspaceAccess = "read" | "write";
 export interface WorkspaceAdmissionOptions {
@@ -32,7 +33,7 @@ type Entry = { readers: Set<symbol>; writer?: symbol; queue: Claim[] };
 const workspaces = new Map<string, Entry>();
 
 function canonicalKey(dir: string): string {
-	return process.platform === "win32" ? dir.toLowerCase() : dir; // NTFS is case-insensitive; other platforms keep case
+	return foldCase(dir); // Windows and macOS ignore case; Linux keeps it (path-case.ts)
 }
 
 // Synchronous by design: identity is fixed before any await or provider work.
