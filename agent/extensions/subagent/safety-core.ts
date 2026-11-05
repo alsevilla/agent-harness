@@ -1006,7 +1006,7 @@ export function authorizationStatus(store: GrantStore, now: number): string {
 	if (store.cleanupCount()) lines.push(`cleanup scopes: ${store.cleanupCount()} (single-use, 10 min, checkout removal only; artifacts are never covered)`);
 	const deliveries = store.listDelivery();
 	lines.push(deliveries.length ? `merge/release grants: ${deliveries.length} (approved scope, session only)` : "merge/release grants: none");
-	for (const d of deliveries) lines.push(`- ${d.action}: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr}, SHA ${d.sha.slice(0, 7)}${d.action === "release" ? `, version ${d.version}, latest ${d.latest ? "yes" : "no"}` : ""}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}${d.bound ? `, fp ${d.bound.fingerprint.slice(0, 12)}, excl ${d.bound.exclude.length} (not rechecked in status)` : ""}`);
+	for (const d of deliveries) lines.push(`- ${d.action}: repo ${d.repo}, branch ${d.branch}, base ${d.base}, PR ${d.pr}, SHA ${d.sha.slice(0, 7)}${d.action === "release" ? `, version ${d.version}, latest ${d.latest ? "yes" : "no"}${d.afterMerge ? ", target: the PR's merge commit" : ""}` : ""}, artifact dir ${d.artifactDir ?? "none"}, ${validityOf(d.candidate, d.branch, d.pushUrl)}${d.bound ? `, fp ${d.bound.fingerprint.slice(0, 12)}, excl ${d.bound.exclude.length} (not rechecked in status), follows later commits on top when clean and checks pass` : ""}`);
 	return lines.join("\n");
 }
 
@@ -1090,12 +1090,15 @@ const TEXT_LIMIT = { title: 120, subject: 120, body: 500 } as const;
 
 // Fingerprint binding (mandatory for a merge grant): HEAD attached to ref, the candidate fingerprint and the exclusions it was computed with.
 export interface BoundState { head: string; ref: string; fingerprint: string; exclude: string[] }
-// Separate approvals, one action each. merge: PR + reviewed HEAD sha + mandatory bound (bound.head === sha). release: PR + version + target sha (the merge commit), never bound. Push, PR create and PR edit are automatic and no grant carries them.
+// One action per grant. merge: PR + reviewed HEAD sha + mandatory bound (bound.head === sha); it follows the PR: later commits on top of
+// sha merge too when the clean local candidate equals the live PR head and no check failed. release: PR + version + target sha (the merge
+// commit), never bound; or afterMerge (minted with the merge in one approval): sha is the approved PR head and the target must be the PR's
+// live merge commit. Push, PR create and PR edit are automatic and no grant carries them.
 export type DeliveryAction = "merge" | "release";
-export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; action: DeliveryAction; pr: number; sha: string; version?: string; latest?: boolean; artifactDir?: string; bound?: BoundState }
+export interface DeliveryBinding { role: string; candidate: string; pushUrl: string; repo: string; branch: string; base: string; action: DeliveryAction; pr: number; sha: string; version?: string; latest?: boolean; afterMerge?: boolean; artifactDir?: string; bound?: BoundState }
 export interface DeliveryGrant extends DeliveryBinding { issuedAt: number }
 // Live readers, injectable for offline tests. Production uses the real git/gh calls below.
-export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number; now?(): number }
+export interface DeliveryLive { bound?(candidate: string, exclude: string[]): BoundState; follow?(candidate: string, exclude: string[], approved: string): FollowState; env(): Record<string, string | undefined>; pushUrl(candidate: string, branch: string): string | undefined; ghJson(args: string[]): unknown; tagStatus(pushUrl: string, tag: string): number; now?(): number }
 
 // A record whose artifact directory vanished stays stored but is not copied to a child (the envelope would otherwise fail closed as a whole).
 function artifactStillLive(d: DeliveryGrant): boolean {
@@ -1184,7 +1187,7 @@ function normalizeBinding(input: unknown): DeliveryBinding {
 	if (typeof b.sha !== "string" || !BARE_SHA.test(b.sha)) throw new RangeError("a 40-hex SHA is required");
 	const out: DeliveryBinding = { role: LEASE_ROLE, candidate, pushUrl: b.pushUrl as string, repo, branch, base: b.base, action: b.action, pr: b.pr, sha: b.sha };
 	if (b.action === "merge") {
-		if (b.version !== undefined || b.latest !== undefined) throw new RangeError("a merge grant carries no release fields");
+		if (b.version !== undefined || b.latest !== undefined || b.afterMerge !== undefined) throw new RangeError("a merge grant carries no release fields");
 		if (b.bound === undefined) throw new RangeError("a merge grant needs the verified candidate fingerprint binding");
 		out.bound = normalizeBound(b.bound, branch);
 		if (out.bound.head !== out.sha) throw new RangeError("merge SHA must equal the bound candidate HEAD");
@@ -1196,6 +1199,10 @@ function normalizeBinding(input: unknown): DeliveryBinding {
 			out.latest = true;
 		}
 		if (b.bound !== undefined) throw new RangeError("a release grant is not fingerprint-bound");
+		if (b.afterMerge !== undefined && b.afterMerge !== false) {
+			if (b.afterMerge !== true) throw new RangeError("afterMerge must be a boolean");
+			out.afterMerge = true;
+		}
 	}
 	if (b.artifactDir !== undefined) out.artifactDir = validateArtifactDir(b.artifactDir as string, candidate);
 	if (b.disposal !== undefined) throw new RangeError("delivery disposal is retired and not accepted");
@@ -1231,7 +1238,7 @@ function sameBinding(a: DeliveryBinding, b: DeliveryBinding): boolean {
 
 // Scope: everything except the bound state.
 export function sameScope(a: DeliveryBinding, b: DeliveryBinding): boolean {
-	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.action === b.action && a.pr === b.pr && a.sha === b.sha && a.version === b.version && a.latest === b.latest && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
+	return normPath(a.candidate) === normPath(b.candidate) && a.pushUrl === b.pushUrl && a.repo === b.repo && a.branch === b.branch && a.base === b.base && a.action === b.action && a.pr === b.pr && a.sha === b.sha && a.version === b.version && a.latest === b.latest && a.afterMerge === b.afterMerge && (a.artifactDir === undefined ? b.artifactDir === undefined : b.artifactDir !== undefined && normPath(a.artifactDir) === normPath(b.artifactDir));
 }
 
 export function loadChildDelivery(text: string): DeliveryGrant[] {
@@ -1253,6 +1260,25 @@ export function readBoundState(candidate: string, exclude: string[]): BoundState
 	const f = candidateFingerprint(candidate, exclude);
 	if (f.unsupported.length > 0) throw new Error("candidate has unsupported entries");
 	return { head: f.head, ref: ref[0], fingerprint: f.value, exclude: [...exclude] };
+}
+
+// Live state for a merge of a later PR head: HEAD, its ref, whether the candidate is clean (no staged, unstaged or untracked path outside
+// the grant's exclusions) and whether HEAD descends from the approved SHA (commits on top, no rewrite). Throws like readBoundState.
+export interface FollowState { head: string; ref: string; clean: boolean; descends: boolean }
+export function readFollowState(candidate: string, exclude: string[], approved: string): FollowState {
+	if (redirectedGitEnvironment()) throw new Error("git environment is redirected");
+	const top = gitRead(candidate, ["rev-parse", "--show-toplevel"]);
+	if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(canonicalCwd(candidate))) throw new Error("not the repository root of the candidate");
+	const ref = gitRead(candidate, ["symbolic-ref", "-q", "HEAD"]);
+	if (ref?.length !== 1) throw new Error("HEAD is not attached to a branch");
+	const f = candidateFingerprint(candidate, exclude);
+	return { head: f.head, ref: ref[0], clean: f.records.length === 0 && f.unsupported.length === 0, descends: descendsFrom(candidate, approved, f.head) };
+}
+
+/** Whether head is approved or a descendant of it in the candidate's history. */
+export function descendsFrom(candidate: string, approved: string, head: string): boolean {
+	if (!BARE_SHA.test(approved) || !BARE_SHA.test(head)) return false;
+	return approved === head || gitExit(candidate, ["merge-base", "--is-ancestor", approved, head]) === 0;
 }
 
 // Mint-time binding: the branch must be checked out (what a push sends is then the bound commit); optional expect ties the grant to a fingerprint the operator already verified.
@@ -1374,8 +1400,17 @@ export function parseDeliveryCommand(command: string): DeliveryCommand | undefin
 }
 
 function prView(pr: number, repo: string, live: DeliveryLive): Record<string, unknown> | undefined {
-	const view = live.ghJson(["pr", "view", String(pr), "--repo", repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository"]);
+	const view = live.ghJson(["pr", "view", String(pr), "--repo", repo, "--json", "state,baseRefName,headRefName,headRefOid,isCrossRepository,statusCheckRollup"]);
 	return view && typeof view === "object" ? (view as Record<string, unknown>) : undefined;
+}
+
+// No failed, cancelled or still-running check on the PR head (a repository without checks passes). Any other shape refuses.
+const CHECK_OK = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+export function checksPass(view: Record<string, unknown> | undefined): boolean {
+	const rollup = view?.statusCheckRollup;
+	if (rollup === undefined || rollup === null) return true;
+	if (!Array.isArray(rollup)) return false;
+	return rollup.every((c: any) => c && typeof c === "object" && (c.__typename === "StatusContext" ? c.state === "SUCCESS" : c.status === "COMPLETED" && CHECK_OK.has(c.conclusion)));
 }
 
 // Structural ownership: open, same-repo (strictly isCrossRepository === false; missing or null refuses) and head is the expected feature branch. The base is checked by the caller.
@@ -1390,6 +1425,18 @@ function boundHolds(g: DeliveryGrant, live: DeliveryLive): boolean {
 	try {
 		const now = (live.bound ?? readBoundState)(g.candidate, [...b.exclude]);
 		return now.ref === b.ref && now.head === b.head && now.fingerprint === b.fingerprint;
+	} catch {
+		return false;
+	}
+}
+
+// A later PR head under a merge grant: the clean local candidate on the approved branch is at that head, which descends from the approved SHA.
+function followHolds(g: DeliveryGrant, head: string, live: DeliveryLive): boolean {
+	const b = g.bound;
+	if (!b) return false;
+	try {
+		const now = (live.follow ?? readFollowState)(g.candidate, [...b.exclude], g.sha);
+		return now.ref === b.ref && now.head === head && now.clean && now.descends;
 	} catch {
 		return false;
 	}
@@ -1411,13 +1458,14 @@ function matchDelivery(g: DeliveryGrant, c: DeliveryCommand | undefined, live: D
 	const fileOk = (file?: string) => file === undefined || (g.artifactDir !== undefined && checkArtifactFile(file, g.artifactDir) === undefined);
 	switch (c.kind) {
 		case "merge": {
-			if (c.pr !== g.pr || c.sha !== g.sha || !fileOk(c.bodyFile)) return false;
+			if (c.pr !== g.pr || !fileOk(c.bodyFile)) return false;
 			const view = prView(c.pr, g.repo, live);
-			return openSameRepo(view, g.branch) && view.baseRefName === g.base && view.headRefOid === c.sha && boundHolds(g, live);
+			if (!openSameRepo(view, g.branch) || view.baseRefName !== g.base || view.headRefOid !== c.sha || !checksPass(view)) return false;
+			return c.sha === g.sha ? boundHolds(g, live) : followHolds(g, c.sha, live);
 		}
 		case "release": {
 			// A tag that already exists (status 0) or an unreadable remote refuses: --target is never trusted on an existing tag. No time-based fallback.
-			if (g.version !== c.tag || c.target !== g.sha || (c.latest && g.latest !== true) || !fileOk(c.notesFile)) return false;
+			if (g.version !== c.tag || (!g.afterMerge && c.target !== g.sha) || (c.latest && g.latest !== true) || !fileOk(c.notesFile)) return false;
 			if (live.tagStatus(g.pushUrl, c.tag) !== 2) return false;
 			return mergedMatches(g, c.target, live);
 		}
@@ -1435,6 +1483,10 @@ export function verifyDeliveryTarget(g: DeliveryBinding, live: DeliveryLive = de
 			return view.headRefOid === g.sha ? undefined : "PR head does not equal the approved SHA";
 		}
 		if (live.tagStatus(g.pushUrl, g.version as string) !== 2) return "release tag already exists or cannot be checked";
+		if (g.afterMerge) {
+			const view = prView(g.pr, g.repo, live);
+			return openSameRepo(view, g.branch) && view.baseRefName === g.base ? undefined : "PR is not open, same-repo, on this branch and base";
+		}
 		return mergedMatches(g, g.sha, live) ? undefined : "approved PR is not merged with the approved target SHA";
 	} catch {
 		return "live GitHub state could not be read";

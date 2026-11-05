@@ -195,7 +195,7 @@ const MANIFEST: Record<string, Row[]> = {
 	"fdffa867e40f": [["H", "$"]],
 	"0e75dea22997": [["C", "shell commands.", "Never launch helpers or agents, including through shell commands"], ["C", "code/tests.", "read-only roles do not change candidate code or tests"], ["C", "explicit user reassignment.", "stay worker-owned until explicit user reassignment"], ["C", "$", "Preserve existing writes"]],
 	"5424a43ead7e": [["C", "project invariants.", "security and project invariants"], ["C", "$", "Readiness never grants commit, push, merge, publish, deploy or destructive-operation authority"]],
-	"a492ba438e58": [["M", "no-publication instruction."], ["C", "HEAD SHA", PROOF.exactPr], ["C", "fingerprint);", PROOF.fingerprint], ["C", "target SHA;", "release needs a separate approval naming version and target SHA"], ["C", "the other,", "neither authorizes the other"], ["C", "earlier approval,", "nothing is inferred from commit, push, PR or an earlier approval"], ["C", "$", PROOF.singleUse]],
+	"312a0edd285b": [["M", "no-publication instruction."], ["C", "HEAD SHA", PROOF.exactPr], ["C", "fingerprint;", PROOF.fingerprint], ["C", "once per PR);", "it also covers clean commits pushed on top of that SHA"], ["C", "or later;", "A release needs an approval naming the version, in the same request or a later one"], ["C", "the other,", "neither authorizes the other"], ["C", "push or PR;", "nothing is inferred from commit, push or PR"], ["C", "$", PROOF.singleUse]],
 	"31029c7ed676": [["C", "valid tests.", "Do not weaken valid tests"], ["C", "affected writes;", "block the affected writes"], ["C", "$", "a failed required gate blocks delivery"]],
 	"de624fc01704": [["C", "material missing decisions;", "Ask humans only for material missing decisions"], ["C", "reuse task authorization;", "reuse task authorization"], ["C", "no approval.", "is never approval"], ["C", "temporary pauses;", "Honor user stops and temporary pauses"], ["M", "$"]],
 	"3d6e6fd81fb2": [["C", "replay after tools/abort;", "never upgrade silently or replay after tools or abort"], ["M", "$"]],
@@ -263,7 +263,7 @@ test("each restored clause is proven independently: removing exactly one clause 
 		assert.deepEqual(proofs.filter((p) => !mutated.includes(p)), [proof], `proofs overlap or clause not independent: ${proof}`);
 	}
 	// Merge and release approvals stay separate from single-use grants; relocation exception keeps its safety prerequisites.
-	assert.match(COMPACT_LEAF_CONTRACT, /release needs a separate approval naming version and target SHA/);
+	assert.match(COMPACT_LEAF_CONTRACT, /A release needs an approval naming the version, in the same request or a later one/);
 	assert.match(COMPACT_LEAF_CONTRACT, /does not block an otherwise authorized relocation; leave services stopped/);
 });
 
@@ -315,7 +315,7 @@ test("assembled child prompts keep the existing shared guidance and gain the con
 		const body = toLf(fs.readFileSync(path.join(agentsDir, name), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "");
 		const prompt = assembleChildSystemPrompt({ name: name.replace(/\.md$/, ""), systemPrompt: body }, { codeIntegrationsEnabled: false, cwd: os.tmpdir(), packageRoot: null });
 		const effective = prompt + "\n" + COMPACT_LEAF_CONTRACT;
-		for (const phrase of ["## Shell syntax", "## Artifact placement", "Do not move live database files", "## Final handoff to main", "Never launch helpers or agents", "Readiness never grants commit", "an earlier approval", "references/git-attribution.md", "Keep active or dirty worktrees"]) {
+		for (const phrase of ["## Shell syntax", "## Artifact placement", "Do not move live database files", "## Final handoff to main", "Never launch helpers or agents", "Readiness never grants commit", "nothing is inferred from commit, push or PR", "references/git-attribution.md", "Keep active or dirty worktrees"]) {
 			assert.ok(effective.includes(phrase), `${name}: ${phrase}`);
 		}
 		assert.equal(effective.split("# Pi leaf contract").length - 1, 1);

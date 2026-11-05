@@ -555,7 +555,8 @@ test("merge approval (simulated TUI): the dialog shows PR, SHA, bound state and 
 		assert.equal(s.confirms.length, 1);
 		assert.equal(s.confirms[0][0], "Authorize PR merge?");
 		assert.match(dialog, /PR: #12 only \(feat\/x into main\)/);
-		assert.match(dialog, /Action: MERGE only \(squash, --match-head-commit [0-9a-f]{40}\)/);
+		assert.match(dialog, /Action: MERGE \(squash, --match-head-commit <live PR head>\)/);
+		assert.match(dialog, /Follows the PR: later commits on top of [0-9a-f]{7} \(fix rounds\) merge without a new approval/);
 		assert.match(dialog, /Bound candidate state: HEAD [0-9a-f]{40} on refs\/heads\/feat\/x; fingerprint [0-9a-f]{64}; excluded paths: none/);
 		assert.match(dialog, /not race-free/);
 		assert.match(dialog, /does not approve any release/);
@@ -577,12 +578,36 @@ test("merge approval (simulated TUI): the dialog shows PR, SHA, bound state and 
 	} finally { t.cleanup(); fs.rmSync(other.dir, { recursive: true, force: true }); }
 });
 
+// Field request: one approval per PR, as in Claude Code. One dialog covers merge and release; a fix round on top needs no new dialog.
+test("merge approval (simulated TUI): one dialog approves merge and release; a later head on top of it returns without a dialog", { timeout: 240_000 }, async () => {
+	const { dir, repoDir } = boundRepo();
+	const both = mergeReq(repoDir, "o1", { version: "v1.2.3", latest: true });
+	const s = await openMain([both, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	try {
+		const r = (await s.session.prompt("probe"), s.results());
+		assert.equal(r[0].isError, false, r[0].text);
+		assert.equal(s.confirms.length, 1);
+		assert.equal(s.confirms[0][0], "Authorize PR merge and release?");
+		assert.match(String(s.confirms[0][1]), /Also RELEASE: tag v1\.2\.3 as latest at the merge commit of PR #12, after the merge/);
+		assert.match(r[0].text, /merge and release v1\.2\.3 of PR #12/);
+	} finally { s.cleanup(); }
+	fs.writeFileSync(path.join(repoDir, "fix.txt"), "fix\n");
+	for (const args of [["add", "fix.txt"], ["-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "fix round"]]) assert.equal(spawnSync("git", args, { cwd: repoDir, windowsHide: true }).status, 0);
+	const later = await openMain([mergeReq(repoDir, "o2"), { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
+	try {
+		const r = (await later.session.prompt("probe"), later.results());
+		assert.equal(r[0].isError, false, r[0].text);
+		assert.match(r[0].text, /^Already authorized: the merge approval for PR #12 \(approved at [0-9a-f]{7}\) covers [0-9a-f]{7}, a later head on top of it/);
+		assert.equal(later.confirms.length, 0);
+	} finally { later.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("merge approval (simulated TUI): mismatched-SHA, detached or other-branch candidates, a bad expect and a moved PR head are refused with no dialog", { timeout: 240_000 }, async () => {
 	const { dir, repoDir } = boundRepo();
 	const good = mergeReq(repoDir, "g1");
 	const good_args = (good.args as any).delivery;
 	const bad = (id: string, d: Record<string, unknown>) => ({ tool: "request_authorization", args: { delivery: { ...good_args, ...d } }, id });
-	const steps = [bad("m2", { bind: { expect: "0".repeat(64) } }), bad("m3", { sha: "1".repeat(40) }), bad("m4", { pr: undefined }), bad("m5", { version: "v1.2.3" })];
+	const steps = [bad("m2", { bind: { expect: "0".repeat(64) } }), bad("m3", { sha: "1".repeat(40) }), bad("m4", { pr: undefined }), bad("m5", { latest: true })];
 	const s = await openMain([...steps, { text: "done" }], { ui: approve, origin: GITHUB_ORIGIN, dir });
 	try {
 		const r = (await s.session.prompt("probe"), s.results());

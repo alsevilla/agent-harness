@@ -129,7 +129,7 @@ test("bindDelivery refuses detached HEAD, another branch, UNSUPPORTED entries, b
 
 test("merge is allowed on the exact bound state and refused after every kind of change; a merge grant never covers push or release", { timeout: 120_000 }, () => {
 	const mutations: Array<[string, (r: string) => void]> = [
-		["new commit", (r) => { write(r, "g.txt", "g\n"); git(r, "add", "g.txt"); commit(r, "more"); }],
+		["rewritten history", (r) => { write(r, "f.txt", "rewritten\n"); git(r, "add", "f.txt"); git(r, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--amend", "-m", "amended"); }],
 		["unstaged edit", (r) => write(r, "f.txt", "zzzz\n")],
 		["staged-only edit", (r) => { write(r, "f.txt", "bbbb\n"); git(r, "add", "f.txt"); write(r, "f.txt", "aaaa\n"); }],
 		["untracked file", (r) => write(r, "new.txt", "x\n")],
@@ -171,6 +171,61 @@ test("legitimate metadata does not invalidate: ref updates, upstream, ignored fi
 	git(repo, "add", "-f", "out/a.txt");
 	assert.ok(blocked(run(store2, repo, mergeCmd(sha))), "staging into an excluded dir changes the unfiltered staged digest");
 });
+// Field request: one approval per PR, as in Claude Code. A fix round pushes commits on top of the approved head; the grant follows them.
+test("a merge grant follows the PR: a later clean head on top of the approved SHA merges without a new approval", () => {
+	const repo = makeRepo();
+	const store = newStore();
+	store.addDeliveryGrant(boundBinding(repo));
+	const approved = headOf(repo);
+	write(repo, "g.txt", "fix\n");
+	git(repo, "add", "g.txt");
+	commit(repo, "fix round");
+	const later = headOf(repo);
+	setView(approved);
+	assert.ok(blocked(run(store, repo, mergeCmd(later))), "the later head is not pushed yet: the PR head differs");
+	setView(later);
+	assert.ok(blocked(run(store, repo, mergeCmd(approved))), "--match-head-commit must name the live PR head");
+	assert.equal(run(store, repo, mergeCmd(later)), undefined, "pushed fix round: same grant, no new approval");
+	write(repo, "h.txt", "x\n");
+	assert.ok(blocked(run(store, repo, mergeCmd(later))), "an untracked file: the candidate is not what was pushed");
+	fs.rmSync(path.join(repo, "h.txt"));
+	write(repo, "g.txt", "edited\n");
+	assert.ok(blocked(run(store, repo, mergeCmd(later))), "an unstaged edit");
+	git(repo, "checkout", "--", "g.txt");
+	write(repo, "_evidence/r/out.md", "1\n");
+	assert.equal(run(store, repo, mergeCmd(later)), undefined, "ignored output does not count");
+	assert.ok(blocked(run(store, repo, mergeCmd(later), { follow: () => { throw new Error("git read failure"); } })), "a read failure refuses");
+	assert.ok(blocked(run(store, repo, mergeCmd(later), { follow: () => ({ head: later, ref: "refs/heads/feat/x", clean: true, descends: false }) })), "a head that does not descend from the approved SHA");
+});
+
+test("merge waits for checks: a failed, cancelled or running check refuses; passed, skipped or no checks allow", () => {
+	const repo = makeRepo();
+	const store = newStore();
+	store.addDeliveryGrant(boundBinding(repo));
+	const sha = headOf(repo);
+	const withChecks = (rollup: unknown) => { setView(sha); views[12].statusCheckRollup = rollup; return run(store, repo, mergeCmd(sha)); };
+	const check = (status: string, conclusion: string) => ({ __typename: "CheckRun", name: "test", status, conclusion });
+	assert.equal(withChecks(undefined), undefined, "no checks configured");
+	assert.equal(withChecks([]), undefined);
+	assert.equal(withChecks([check("COMPLETED", "SUCCESS"), check("COMPLETED", "SKIPPED"), { __typename: "StatusContext", context: "ci", state: "SUCCESS" }]), undefined);
+	for (const bad of [[check("COMPLETED", "FAILURE")], [check("COMPLETED", "CANCELLED")], [check("IN_PROGRESS", "")], [{ __typename: "StatusContext", context: "ci", state: "PENDING" }], "x"]) assert.ok(blocked(withChecks(bad)), JSON.stringify(bad));
+	assert.equal(C.checksPass({}), true);
+});
+
+test("a release approved with its merge targets the PR's live merge commit; the tag must not exist", () => {
+	const repo = makeRepo();
+	const store = newStore();
+	const merge = store.addDeliveryGrant(boundBinding(repo));
+	store.addDeliveryGrant(bindingOf(repo, { action: "release", pr: 12, sha: merge.sha, version: "v1.2.3", afterMerge: true }));
+	assert.equal(run(store, repo, RELEASE), undefined, "target = the merge commit the live PR reports");
+	assert.ok(blocked(run(store, repo, RELEASE.replace("fedcba98765", "0000000000a"))), "another target");
+	assert.ok(blocked(run(store, repo, RELEASE, { tagStatus: () => 0 })), "the tag exists");
+	assert.ok(blocked(run(store, repo, RELEASE.replace("v1.2.3", "v1.2.4"))), "another version");
+	assert.throws(() => store.addDeliveryGrant(boundBinding(repo, {}, { afterMerge: true })), RangeError, "a merge grant takes no afterMerge");
+	assert.throws(() => store.addDeliveryGrant(bindingOf(repo, { action: "release", pr: 12, sha: merge.sha, version: "v1.2.3", afterMerge: "yes" })), RangeError);
+	assert.match(C.authorizationStatus(store, T0), /version v1\.2\.3, latest no, target: the PR's merge commit/);
+});
+
 test("merge needs the exact PR, --match-head-commit equal to the approved bound HEAD and the live PR head", () => {
 	const repo = makeRepo();
 	const store = newStore();
@@ -295,11 +350,11 @@ test("status labels merge and release grants secret-free; README states the limi
 	const rec = store.addDeliveryGrant(boundBinding(repo));
 	store.addDeliveryGrant(releaseBinding(repo));
 	const text = C.authorizationStatus(store, T0);
-	assert.match(text, new RegExp(`- merge: repo acme/widgets, branch feat/x, base main, PR 12, SHA ${rec.sha.slice(0, 7)}, artifact dir none, valid, fp ${rec.bound.fingerprint.slice(0, 12)}, excl 0 \\(not rechecked in status\\)`));
+	assert.match(text, new RegExp(`- merge: repo acme/widgets, branch feat/x, base main, PR 12, SHA ${rec.sha.slice(0, 7)}, artifact dir none, valid, fp ${rec.bound.fingerprint.slice(0, 12)}, excl 0 \\(not rechecked in status\\), follows later commits on top when clean and checks pass`));
 	assert.match(text, /- release: repo acme\/widgets, branch feat\/x, base main, PR 12, SHA fedcba9, version v1\.2\.3, latest no/);
 	assert.doesNotMatch(text, new RegExp(rec.bound.fingerprint));
 	const readme = fs.readFileSync(path.resolve(import.meta.dirname, "..", "README.md"), "utf8");
-	for (const needle of [/not race-free/i, /deliveryActions/, /ignored files/i, /no pull, checkout or commit/i, /legacy/i]) assert.match(readme, needle);
+	for (const needle of [/not race-free/i, /deliveryActions/, /ignored files/i, /no pull or checkout/i, /legacy/i]) assert.match(readme, needle);
 });
 // ---- Repair: repository-local filters, linked ancestors, index flags that hide tracked edits. Each was reproduced against the first implementation (REPAIR REPORT).
 const asLinkAllowed = (target: string, link: string): boolean => { try { fs.symlinkSync(target, link, "junction"); return true; } catch { return false; } };

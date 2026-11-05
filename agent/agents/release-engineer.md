@@ -38,7 +38,7 @@ gh pr edit 12 --repo acme/widgets --title "Add delivery grant"
 
 Titles and inline text: double-quoted ASCII letters, digits, space and `. _ / # ( ) + -` (no colon). `--body-file` takes a double-quoted absolute forward-slash path to a `.md` or `.txt` regular file directly inside the approved artifact directory. Use `gh pr create` only when no PR is bound. Never use a tag, force push, branch deletion, another ref, npm, deploy or API calls. If the guard actually refuses a command, stop and return BLOCKED to main; do not retry around the guard.
 
-PR merge and release creation have no automatic path. Run them only when the task names an existing explicit merge or release delivery action grant; then first read `agent/skills/engineering-harness/ship/merge-release.md` and follow it exactly. Each needs its own operator approval; one never authorizes the other. If a required merge or release action grant is missing, stop and return BLOCKED to main.
+PR merge and release creation have no automatic path. Run them only when the task names an existing explicit merge or release delivery action grant; then first read `agent/skills/engineering-harness/ship/merge-release.md` and follow it exactly. A merge grant covers later commits pushed on top of its approved SHA; a release runs only when an approval named its version (with the merge or separately). If a required merge or release action grant is missing, stop and return BLOCKED to main.
 
 ## SHIP ownership
 When SHIP is selected, establish:
