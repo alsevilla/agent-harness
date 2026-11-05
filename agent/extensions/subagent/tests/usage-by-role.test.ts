@@ -122,18 +122,11 @@ test("cost per completed task counts failed and aborted cost against completed t
 	assert.match(text, /Foreground:[\s\S]*cost: \$0\.6000 SDK-estimated; \$0\.6000 per completed task/);
 });
 
-import { usageStatusLine } from "../background.ts";
-test("footer status line: context, tasks, cost per completed task and running jobs; nothing before anything is known", () => {
-	const scope = newUsageScope();
-	assert.equal(usageStatusLine(scope, null), undefined);
-	assert.equal(usageStatusLine(scope, 12000), "harness: ctx ~12,000 tok");
-	run(scope, "backend", false, 100, 10, 0.3);
-	run(scope, "backend", true, 100, 10, 0.1, "failed");
-	scope.running = 1;
-	assert.equal(usageStatusLine(scope, 45200), "harness: ctx ~45,200 tok · 2 tasks · $0.4000/completed task · 1 running");
-	assert.equal(usageStatusLine(scope, 99999), "harness: ctx ~99,999 tok · 2 tasks · $0.4000/completed task · 1 running", "below 100k: no hint");
-	assert.equal(usageStatusLine(scope, 100000), "harness: ctx ~100,000 tok · 2 tasks · $0.4000/completed task · 1 running · consider /new", "from 100k main is told to start fresh");
-	assert.equal(usageStatusLine(newUsageScope(), 140000), "harness: ctx ~140,000 tok · consider /new");
+// The footer was removed (the owner reads /subagent usage); its "consider /new" hint moved to the Main context line.
+test("usage: the Main context line suggests /new from 100k; below it, no hint", () => {
+	assert.match(formatUsageSummary(newUsageScope(), 99_999), /Main context: ~99,999 tokens \(SDK estimate\)$/);
+	assert.match(formatUsageSummary(newUsageScope(), 131_957), /Main context: ~131,957 tokens \(SDK estimate\); consider \/new once nothing is running \(\/reload keeps this history\)$/);
+	assert.match(formatUsageSummary(newUsageScope(), null), /Main context: unknown$/);
 });
 
 // Measuring worker masking: the providers' own per-request input (input + cacheRead + cacheWrite), peak and count over 100k, per role.

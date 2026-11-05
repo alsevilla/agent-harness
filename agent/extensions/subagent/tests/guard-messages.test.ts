@@ -240,3 +240,33 @@ test("user permission rules: allow only what an operator could approve; deny blo
 	const none = { scope: "main" as const, store: createGrantStore(), agentDir: slash(path.join(root, "no-perm")) };
 	assert.ok((guardToolCall(none, "powershell", { command: "Stop-Process -Id 1" }, cwd) as any)?.block, "no file: no allows");
 });
+
+// Field report (op c058ffddb7a0f93c): an approved isolated preview (backend 127.0.0.1:9091, frontend localhost:5173, scratch SQLite,
+// disposable admin password) could not start: Remove-Item Env:... was DESTRUCTIVE_FS, and the approval then refused the command as
+// credential-like although the password was generated at runtime. The first block message also pointed at that refused route.
+import { authorizableOp, blockReason, classifyShell, decideToolCall, literalCredential } from "../safety-core.ts";
+test("isolated preview: Env: cleanup is not a filesystem delete; runtime-generated credentials are approvable; literal ones are not, consistently", () => {
+	for (const env of ["Remove-Item Env:RFID_CAPTURE -ErrorAction SilentlyContinue", "Remove-Item -Path Env:\\SMS_WORKER", "ri env:PREVIEW_ADMIN_PASSWORD", "Remove-Item Variable:pw"]) {
+		assert.deepEqual(classifyShell(env).rules, [], env);
+	}
+	assert.deepEqual(classifyShell("Remove-Item -Recurse -Force D:/w/_scratch/run").rules, ["DESTRUCTIVE_FS"], "a real delete is still destructive");
+	assert.deepEqual(classifyShell("Remove-Item Env:X, D:/w/data.db").rules, ["DESTRUCTIVE_FS"], "a file target among provider targets is still a delete");
+
+	const runtime = '$env:PREVIEW_ADMIN_PASSWORD = [guid]::NewGuid().ToString(); Remove-Item -Recurse -Force D:/w/_scratch/run; Start-Process D:/w/_scratch/run/rfid-attendance.exe';
+	for (const value of ["[guid]::NewGuid().ToString()", "$(New-Guid)", "$pw", "-join ((48..57) | Get-Random -Count 16 | % {[char]$_})", "(Get-Random)"]) {
+		assert.equal(literalCredential(`$env:ADMIN_PASSWORD = ${value}`), false, value);
+	}
+	for (const literal of ['$env:ADMIN_PASSWORD = "hunter2"', "ADMIN_PASSWORD=hunter2 ./run", "curl -H 'Authorization: Bearer abc'", "npm publish --token=abc", "export KEY=sk-live123"]) {
+		assert.equal(literalCredential(literal), true, literal);
+	}
+	assert.doesNotThrow(() => authorizableOp("shell", runtime, "/tmp", agentDir), "a runtime-generated password is approvable");
+	const decision = decideToolCall("powershell", { command: runtime }, "/tmp", agentDir) as any;
+	assert.match(blockReason(decision, "main", false), /grantable: the operator can approve this exact operation with request_authorization/);
+
+	const literalCmd = runtime.replace("[guid]::NewGuid().ToString()", '"hunter2"');
+	assert.throws(() => authorizableOp("shell", literalCmd, "/tmp", agentDir), /credential-like literal text is not authorizable: generate the value when the command runs/);
+	const refused = blockReason(decideToolCall("powershell", { command: literalCmd }, "/tmp", agentDir) as any, "main", false);
+	assert.match(refused, /not approvable as written: the command text carries a credential-like literal, which an approval cannot show or store; generate the value when the command runs/, "the first refusal names the real route");
+	assert.doesNotMatch(refused, /hunter2/, "never echoed");
+	assert.doesNotMatch(refused, /approve this exact operation with request_authorization/);
+});
