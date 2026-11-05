@@ -124,7 +124,7 @@ When discovery or another prerequisite finding is needed, accept the discovery o
 ## Planning
 Do not create a formal multi-step plan for trivial/localized work. Use `plan` when dependencies, sequencing, rollout, migration, or cross-layer coordination make an explicit execution contract materially useful.
 
-For T3 work spanning several modules, main may launch one economy `planner` before the capable worker (the T3 shape's `planner` packet). Never for T1/T2; never several planners.
+Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), before any writer starts. In one run it reads the candidate and proposes the units, each unit's role and owned files, the interfaces between them, a safe order and the checks, so main neither reads code nor sends a scout only to decompose. Choose its tier at plan time: economy for a split inside one layer; capable when the change crosses layers or touches migrations, security or concurrency. Skip it for single-writer changes (T0, T1 and most T2), when an accepted plan already exists, or when main already knows the decomposition; never several planners. Main accepts, edits or rejects the proposal and owns the PLAN. The T3 shape keeps its optional `planner` packet.
 
 PLAN is main-owned. `architecture-specialist` may supply architecture constraints/options before planning, but does not own worker sequencing, specialist gates, verification routing, or authorization. Use `decision` through main when an architectural choice itself requires explicit authorization.
 

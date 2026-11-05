@@ -131,3 +131,15 @@ test("code workers get the change discipline once in their shared guidance", () 
 	assert.ok(flat(source).includes("Change only what the task needs: no unrequested features, refactors, renames, abstractions or dependency changes, and no comments that narrate the change"));
 	assert.ok(flat(source).includes('Report checks as they ran: quote the failing command and its output, never "should pass".'));
 });
+
+// Field report: main never launched the planner. AGENTS.md and every skill router gave planning to main alone, and routing.md allowed a
+// planner only as an optional T3 step. Main now launches one planner for multi-writer or cross-layer changes, and still owns the PLAN.
+test("main launches one planner for multi-writer or cross-layer changes and keeps the PLAN", () => {
+	assert.ok(flat(read("agent/skills/engineering-harness/SKILL.md")).includes("`planner` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN**"));
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers"));
+	assert.ok(routing.includes("Skip it for single-writer changes (T0, T1 and most T2)"));
+	assert.ok(!routing.includes("Never for T1/T2; never several planners."), "the old T3-only rule is gone");
+	assert.ok(flat(read("agent/skills/engineering-harness/plan/index.md")).includes("get the unit proposal from one read-only `planner` run"));
+	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("launch one read-only planner first"));
+});
