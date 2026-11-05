@@ -617,7 +617,7 @@ async function runNodeSuite() {
 
 	// Field report: the live view showed "graphify: no calls observed" while workers were told to query the graph through the skill's
 	// read_graph.py helper, which the old pattern (a graphify command or graphify_* tools) never matched.
-	test("integration counts: the graphify read_graph.py helper, qmd_ and serena_ tools are counted; plain grep is not", () => {
+	test("integration counts: the graphify read_graph.py helper, qmd_ tools and the code-symbols helper are counted; plain grep is not", () => {
 		const store = new monitor.WorkerStore();
 		const r = store.begin("scout", "map", "m", "low");
 		store.started(r.id);
@@ -625,17 +625,17 @@ async function runNodeSuite() {
 		run("bash", { command: "python3 /agent/skills/graphify/scripts/read_graph.py --graph D:/w/graphify-out/graph.json query --query SmsQueue" });
 		run("powershell", { command: "py C:\\agent\\skills\\graphify\\scripts\\read_graph.py path --from A --to B" });
 		run("qmd_search", { query: "sms provider decision" });
-		run("serena_find_symbol", { name_path: "SmsWorker" });
+		run("powershell", { command: "node \"C:/harness/agent/skills/code-symbols/scripts/symbols.mjs\" find SmsWorker backend" });
 		run("grep", { pattern: "sms", path: "backend" });
-		assert.deepEqual([r.integrations.graphify?.calls, r.integrations.qmd?.calls, r.integrations.serena?.calls], [2, 1, 1]);
+		assert.deepEqual([r.integrations.graphify?.calls, r.integrations.qmd?.calls, r.integrations.symbols?.calls], [2, 1, 1]);
 	});
 
 	// Ponytail injects mode text and has no tool calls to count, so the line shows it as loaded from the launch arguments.
-	test("integration line: ponytail shows as loaded when it was in the launch; serena, qmd and graphify count calls", () => {
+	test("integration line: ponytail shows as loaded when it was in the launch; symbols, qmd and graphify count calls", () => {
 		const record = (extra: Record<string, unknown> = {}) => ({ integrations: {}, graphReferences: 0, ...extra });
-		assert.equal(monitor.integrationLabel(record()), "serena: no calls observed | qmd: no calls observed | graphify: no calls observed");
-		assert.equal(monitor.integrationLabel(record({ ponytail: true })), "ponytail: loaded | serena: no calls observed | qmd: no calls observed | graphify: no calls observed");
-		assert.equal(monitor.integrationLabel(record({ ponytail: true, integrations: { serena: { calls: 3, returned: 3, errors: 0 } }, graphReferences: 2 })),
-			"ponytail: loaded | serena: 3 calls · 3 returned · 0 errors | qmd: no calls observed | graphify: no calls observed | graph references: 2 reads");
+		assert.equal(monitor.integrationLabel(record()), "symbols: no calls observed | qmd: no calls observed | graphify: no calls observed");
+		assert.equal(monitor.integrationLabel(record({ ponytail: true })), "ponytail: loaded | symbols: no calls observed | qmd: no calls observed | graphify: no calls observed");
+		assert.equal(monitor.integrationLabel(record({ ponytail: true, integrations: { symbols: { calls: 3, returned: 3, errors: 0 } }, graphReferences: 2 })),
+			"ponytail: loaded | symbols: 3 calls · 3 returned · 0 errors | qmd: no calls observed | graphify: no calls observed | graph references: 2 reads");
 	});
 }

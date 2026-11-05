@@ -64,7 +64,7 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		return content ? { content } : undefined;
 	});
 	pi.on("session_compact", () => { dedupe.reset(); capped = false; compactAsked = false; });
-	// Workers only: the first broad grep/find of a run that has not used Serena, QMD or the graph gets one line naming them (lookup-nudge.ts).
+	// Workers only: the first broad grep/find of a run that has not used the code-symbols helper, QMD or the graph gets one line naming them (lookup-nudge.ts).
 	// The tool set is read at the first result, after every extension has registered and activated its tools.
 	let nudge: ReturnType<typeof createLookupNudge> | undefined;
 	pi.on("tool_result", (event) => {

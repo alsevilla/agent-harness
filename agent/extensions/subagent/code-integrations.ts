@@ -33,12 +33,15 @@ Integrations never authorize nested agents, broader writes or new tasks; do not 
 const PONYTAIL_NAVIGATION = "When Ponytail's native extension is loaded in this launch, it injects the configured default/session mode without an extra skill read; apply its reuse and minimal-correct-change guidance within the assigned role. Ponytail never overrides user requirements, candidate boundaries, required checks or delegation policy. Do not reload its base skill merely to activate it or launch extra audit/review work.\n";
 // A named file or symbol is cheaper to read directly (+6% to +118% tokens with a language server), and grep is better for renames (a
 // location-only language server missed a call site in 3 of 4) (arXiv 2608.13568). For code the packet does not locate, the owner's field
-// report: workers defaulted to broad grep/find and never used the installed tools, so lookups go to Serena before grep/find.
-const SERENA_NAVIGATION = "When the packet names the file or symbol, read it directly. Use grep for renames and every textual occurrence: it also finds comments and strings, which symbol references miss. Otherwise locate code with Serena (symbol overview, find symbol, references) before grep or find; use read/grep for docs, config or targeted source follow-up.\n";
+// report: workers defaulted to broad grep/find and never used the installed tools. pi-serena added ~20 tool schemas to every launch and
+// its own "Serena-first" prompt, yet workers made no calls; the harness-owned code-symbols skill (one Node script, no schemas) replaces it.
+export const CODE_SYMBOLS_SKILL = fileURLToPath(new URL("../../skills/code-symbols/SKILL.md", import.meta.url));
+const symbolsScript = (skill: string) => path.join(path.dirname(skill), "scripts", "symbols.mjs").split(path.sep).join("/");
+const SYMBOLS_NAVIGATION = (script: string) => `Code symbols (Rust, TypeScript/JavaScript, Python): node "${script}" outline <file> lists a file's symbols with line ranges; find <Name or Owner/name> [path] --body shows where a symbol is defined and its body; refs <name> [path] lists code references with the enclosing symbol (strings and comments excluded). It is heuristic: when a result looks wrong, fall back to grep and read. When the packet names a small file or a symbol, read it directly. For a large source file (several hundred lines), run outline first, then read only the range you need (or find --body), instead of reading it whole. Use grep for renames and every textual occurrence: it also finds comments and strings, which refs skips. Otherwise locate code with the helper before grep or find; use read/grep for docs, config or targeted source follow-up.\n`;
 const GRAPHIFY_SKILL_NAVIGATION = "Orient with the graph before searching the repository: the graphify skill's standard-library read_graph.py helper is the read-only query and path tool, because native Graphify CLI queries can write stamps. Do not load build procedures or scan the repository without a task reason. Report a missing interpreter or backend rather than inventing results.\n";
 const FAILURE_NAVIGATION = "If an integration tool fails, report the concrete error once, do not retry it in a loop, continue with permitted read/grep/find, and report reduced capability in the handoff. File presence does not prove the backend is healthy or configured.\n";
 const QMD_NAVIGATION = "QMD uses the profile's shared named index, not a worktree-local one: scope queries to the relevant existing collection. Retrieved document paths can belong to the primary checkout. Treat retrieved notes as prior evidence; verify current files/requirements in the candidate. Do not create, update or clone indexes or rewrite QMD references under the worktree. For prior decisions, specs, notes or plans relevant to this assignment, run one focused qmd_search (maxResults 3, at most 5) in a useful collection scope before searching the repository for why or how something was decided; read only selected hits. Do not initialize/update indexes, request feedback writes, or treat retrieval as authoritative current code.\n";
-const SERENA_CANDIDATE = (project: string) => "For Serena calls pass project explicitly as " + project + "; resolve relative_path from that root, even from a backend/frontend shell cwd. Never activate the primary checkout just because it holds the graph; symbol lookups and references target the candidate. Do not automatically onboard or recreate Serena project configuration.\n";
+const SYMBOLS_CANDIDATE = (project: string) => "Run the code-symbols helper on the candidate: from " + project + " or with paths under it; its output paths are relative to the folder it runs in. Never point it at the primary checkout just because it holds the graph.\n";
 
 export function candidateProjectRoot(cwd: string): string {
     const candidate = path.resolve(cwd);
@@ -76,10 +79,10 @@ export function globalGraphGuidance(roots: string[], directory: string, hasProje
     "\nPrefer the verified project graph below when available. Global artifacts can include other projects and stale revisions; never treat their nodes as candidate source evidence. If no project graph exists, the matched global corpus can supply read-only orientation; verify source in the candidate. Do not use it as the candidate's graph or an automatic fallback. Do not load the entire global JSON into context, copy it into the worktree, or rebuild/merge/update it to repair a missing candidate folder.\n";
 }
 
-/** Candidate-scoped navigation for Serena (project path) and QMD (prior evidence). Emitted only for the tools present in the launch allowlist. */
-export function candidateNavigationGuidance(project: string, serena: boolean, qmd: boolean): string {
-  if (!serena && !qmd) return "";
-  return "\n## Candidate navigation and shared retrieval\n" + (serena ? SERENA_CANDIDATE(project) : "") + (qmd ? QMD_NAVIGATION : "");
+/** Candidate-scoped navigation for the code-symbols helper (candidate root) and QMD (prior evidence). Emitted only for what the launch loads. */
+export function candidateNavigationGuidance(project: string, symbols: boolean, qmd: boolean): string {
+  if (!symbols && !qmd) return "";
+  return "\n## Candidate navigation and shared retrieval\n" + (symbols ? SYMBOLS_CANDIDATE(project) : "") + (qmd ? QMD_NAVIGATION : "");
 }
 
 /** Graph reference blocks for graph artifacts that exist (project graphify-out or a global corpus). Empty when none exist. */
@@ -111,7 +114,7 @@ export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(
         "\nExisting artifacts (absolute paths):\n" + artifacts.map(file => "- " + file).join("\n") +
         "\nUse these absolute paths directly; they override relative graphify-out paths and existence-check examples in the Graphify skill. When listed, orient with the wiki index or report first. Do not ls/read the candidate's graphify-out to rediscover this reference when the graph source differs. Pass --graph only with a listed graph.json path; a missing wiki or report is no reason to try an unlisted one. If this directory or an artifact disappears, skip the graph rather than retrying the missing path. Never change the candidate cwd/project to make a relative graph path work." +
         (source !== root ? "\nThis graph belongs to another checkout of the same repository: orientation only. It may differ from the candidate branch or uncommitted edits; do not rewrite its paths into the candidate worktree or build, copy or update that checkout's graph in this assignment." : "\nGraph paths were checked at dispatch; if an artifact is removed, use focused permitted navigation instead of repeating the missing read.") +
-        "\nVerify symbols and changed behavior against the candidate checkout with Serena/read/grep.\n";
+        "\nVerify symbols and changed behavior against the candidate checkout with the code-symbols helper, read or grep.\n";
       break;
     }
     return globalGraphGuidance(roots, globalDirectory, location !== "") + location;
@@ -145,26 +148,26 @@ function ponytailIntegrations(): Integration[] {
 }
 
 // Optional for every configured role: a missing file skips that integration and its integration-only tools.
-function optionalIntegrations(qmdExtension: string): Integration[] {
+function optionalIntegrations(qmdExtension: string, symbolsSkill = CODE_SYMBOLS_SKILL): Integration[] {
   const packages = path.join(getAgentDir(), "npm", "node_modules");
   return [
     { label: "QMD extension", flag: "--extension", file: qmdExtension, toolPrefix: "qmd_" },
-    { label: "Serena extension", flag: "--extension", file: path.join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts"), toolPrefix: "serena_" },
     { label: "Graphify extension", flag: "--extension", file: path.join(packages, "graphify-pi", "extensions", "graphify.ts") },
     { label: "Graphify skill", flag: "--skill", file: path.join(getAgentDir(), "skills", "graphify", "SKILL.md") },
+    { label: "Code-symbols skill", flag: "--skill", file: symbolsSkill },
   ];
 }
 
 /** Launch note naming optional integrations this launch lacks; empty when all are present or the role has none configured. */
-export function unavailableIntegrationGuidance(agentName: string, qmdExtension = QMD_EXTENSION): string {
+export function unavailableIntegrationGuidance(agentName: string, qmdExtension = QMD_EXTENSION, symbolsSkill = CODE_SYMBOLS_SKILL): string {
   if (!readIntegrationConfig().roles.includes(agentName)) return "";
-  const items = [...(agentName === "reviewer" ? ponytailIntegrations() : []), ...optionalIntegrations(qmdExtension)];
+  const items = [...(agentName === "reviewer" ? ponytailIntegrations() : []), ...optionalIntegrations(qmdExtension, symbolsSkill)];
   const missing = items.filter(item => !fs.existsSync(item.file)).map(item => item.label);
   if (!missing.length) return "";
   return `\n## Integrations not loaded in this launch\nNot loaded: ${missing.join(", ")}. The launch continued without them; any tools they would provide are not granted. Use the permitted read, grep and find fallback for the affected navigation; do not call them.\n`;
 }
 
-export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = [], qmdExtension = QMD_EXTENSION): boolean {
+export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = [], qmdExtension = QMD_EXTENSION, symbolsSkill = CODE_SYMBOLS_SKILL): boolean {
   // Canonical package roles never launch without an explicit allowlist: omitting --tools would grant every host tool.
   if (agent.source === "package" && !agent.tools?.length) throw new Error(`Package role ${agent.name} has no tools in roles.json; refusing to grant host default tools.`);
   const config = readIntegrationConfig();
@@ -178,8 +181,9 @@ export function configureCodeIntegrations(args: string[], agent: AgentConfig, ex
   const [ponytailExtension, ponytailSkill] = ponytailIntegrations();
   if (!optionalPonytail && !fs.existsSync(ponytailExtension.file)) throw new Error(`Code integration missing for ${agent.name}: ${ponytailExtension.file}. Install @dietrichgebert/ponytail through Pi.`);
   if (!optionalPonytail) args.push(ponytailExtension.flag, ponytailExtension.file);
-  const optional = [...(optionalPonytail ? [ponytailExtension, ponytailSkill] : []), ...optionalIntegrations(qmdExtension)];
-  const omitted: string[] = [];
+  const optional = [...(optionalPonytail ? [ponytailExtension, ponytailSkill] : []), ...optionalIntegrations(qmdExtension, symbolsSkill)];
+  // pi-serena is no longer loaded into workers (code-symbols replaces it), so its tool names never reach a worker allowlist.
+  const omitted: string[] = ["serena_"];
   for (const item of optional) {
     if (fs.existsSync(item.file)) args.push(item.flag, item.file);
     else if (item.toolPrefix) omitted.push(item.toolPrefix);
@@ -194,7 +198,7 @@ export function configureCodeIntegrations(args: string[], agent: AgentConfig, ex
   return true;
 }
 
-export type ChildPromptOptions = { codeIntegrationsEnabled: boolean; cwd: string; packageRoot: string | null; launchArgs?: string[]; qmdExtension?: string; globalGraphDirectory?: string };
+export type ChildPromptOptions = { codeIntegrationsEnabled: boolean; cwd: string; packageRoot: string | null; launchArgs?: string[]; qmdExtension?: string; symbolsSkill?: string; globalGraphDirectory?: string };
 
 /** What this launch actually loads, read from its argv: --tools names and --extension/--skill paths that configureCodeIntegrations actually emitted. */
 function launchCapabilities(args: string[]) {
@@ -203,18 +207,18 @@ function launchCapabilities(args: string[]) {
   if (toolIndex >= 0 && args[toolIndex + 1]) for (const tool of args[toolIndex + 1].split(",")) tools.add(tool);
   const files = args.flatMap((arg, index) => (index > 0 && (args[index - 1] === "--extension" || args[index - 1] === "--skill") ? [arg] : []));
   const ponytail = files.some(file => /[\\/]@dietrichgebert[\\/]ponytail[\\/]/.test(file));
-  const serena = [...tools].some(tool => tool.startsWith("serena_"));
+  const symbolsSkill = files.find(file => /[\\/]code-symbols[\\/]SKILL\.md$/.test(file));
   const qmd = [...tools].some(tool => tool.startsWith("qmd_"));
   const graphifySkill = files.some(file => /[\\/]graphify[\\/]SKILL\.md$/.test(file));
-  return { ponytail, serena, qmd, graphifySkill };
+  return { ponytail, symbols: symbolsSkill !== undefined, symbolsSkill, qmd, graphifySkill };
 }
 
 /** Lookup order for code the packet does not locate, naming only the tools this launch has; empty when it has none of them. */
-export function navigationOrder(cap: { serena: boolean; qmd: boolean; graphifySkill: boolean }): string {
+export function navigationOrder(cap: { symbols: boolean; qmd: boolean; graphifySkill: boolean }): string {
   const steps = [
     cap.graphifySkill ? "the graph (the report or wiki listed below, then the graphify query helper) to orient" : "",
     cap.qmd ? "qmd_search once for prior decisions, specs and notes on that area" : "",
-    cap.serena ? "Serena to locate definitions and their callers" : "",
+    cap.symbols ? "the code-symbols helper (find, refs) to locate definitions and their callers" : "",
   ].filter(Boolean);
   if (!steps.length) return "";
   return `Lookup order for code the packet does not locate: ${steps.map((step, i) => `(${i + 1}) ${step}`).join(", ")}, then (${steps.length + 1}) grep or find for literal text, config, renames, or when those return nothing. Use these installed tools before broad grep or find; they are cheaper than reading search output.\n`;
@@ -226,12 +230,12 @@ export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: s
   const cap = launchCapabilities(options.launchArgs ?? []);
   let integrations = "";
   if (options.codeIntegrationsEnabled) {
-    const navigation = (cap.ponytail ? PONYTAIL_NAVIGATION : "") + navigationOrder(cap) + (cap.serena ? SERENA_NAVIGATION : "") + (cap.graphifySkill ? GRAPHIFY_SKILL_NAVIGATION : "");
-    const anyLoaded = cap.ponytail || cap.serena || cap.qmd || cap.graphifySkill;
+    const navigation = (cap.ponytail ? PONYTAIL_NAVIGATION : "") + navigationOrder(cap) + (cap.symbolsSkill ? SYMBOLS_NAVIGATION(symbolsScript(cap.symbolsSkill)) : "") + (cap.graphifySkill ? GRAPHIFY_SKILL_NAVIGATION : "");
+    const anyLoaded = cap.ponytail || cap.symbols || cap.qmd || cap.graphifySkill;
     integrations = (navigation || anyLoaded ? "\n## Code navigation integrations\n" + navigation + (anyLoaded ? FAILURE_NAVIGATION : "") : "") +
-      candidateNavigationGuidance(candidateProjectRoot(options.cwd), cap.serena, cap.qmd) +
+      candidateNavigationGuidance(candidateProjectRoot(options.cwd), cap.symbols, cap.qmd) +
       graphReferenceGuidance(options.cwd, options.globalGraphDirectory ?? path.join(os.homedir(), ".graphify")) +
-      unavailableIntegrationGuidance(agent.name, options.qmdExtension ?? QMD_EXTENSION);
+      unavailableIntegrationGuidance(agent.name, options.qmdExtension ?? QMD_EXTENSION, options.symbolsSkill ?? CODE_SYMBOLS_SKILL);
   }
   // Cache shape: provider prompt caches reuse only an exact prefix, so the text every role shares comes first, the role body next,
   // and the parts that depend on the working directory or launch last. Roles with the same model and tools then share one cached prefix.

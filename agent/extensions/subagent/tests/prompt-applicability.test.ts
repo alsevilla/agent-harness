@@ -1,5 +1,5 @@
 // Applicability matrix for assembled child prompts. Core guidance (shell, artifact bounds, shared build folder, relocation safety,
-// graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. Serena/QMD, graph and
+// graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. code-symbols/QMD, graph and
 // package detail appear only with actual launch evidence: --tools names, real --extension/--skill paths and graph artifacts.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
@@ -43,7 +43,7 @@ function role(name: string) {
   return { name, systemPrompt: ROLE_BODY, tools: toolsLine[1].split(",").map(tool => tool.trim()) };
 }
 
-type Spec = { ponytail?: boolean; serena?: boolean; qmd?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean; projectGraph?: boolean; globalGraph?: boolean; globalMatch?: boolean; cwdRel?: string; pkg?: boolean };
+type Spec = { ponytail?: boolean; symbols?: boolean; qmd?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean; projectGraph?: boolean; globalGraph?: boolean; globalMatch?: boolean; cwdRel?: string; pkg?: boolean };
 // Controlled world: every integration file, graph artifact and package root is a temp fixture; no real profile or home is read.
 function world(spec: Spec) {
   const root = fs.mkdtempSync(join(tmpdir(), "prompt-applicability-"));
@@ -55,7 +55,8 @@ function world(spec: Spec) {
   fs.mkdirSync(join(candidate, ".git"), { recursive: true });
   fs.mkdirSync(home, { recursive: true });
   if (spec.ponytail) put(join(packages, "@dietrichgebert", "ponytail", "pi-extension", "index.js"));
-  if (spec.serena) put(join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts"));
+  const symbolsSkill = join(root, "harness", "agent", "skills", "code-symbols", "SKILL.md");
+  if (spec.symbols) put(symbolsSkill);
   if (spec.graphifyExtension) put(join(packages, "graphify-pi", "extensions", "graphify.ts"));
   if (spec.graphifySkill) put(join(dir, "skills", "graphify", "SKILL.md"));
   const qmdExtension = join(root, "qmd", "extensions", "qmd", "index.ts");
@@ -66,7 +67,7 @@ function world(spec: Spec) {
   if (spec.pkg) { fs.mkdirSync(join(packageRoot, "skills", "engineering-harness"), { recursive: true }); fs.mkdirSync(join(packageRoot, "skills", "agent-creation"), { recursive: true }); }
   const cwd = join(candidate, spec.cwdRel ?? "");
   fs.mkdirSync(cwd, { recursive: true });
-  return { root, dir, home, candidate, cwd, qmdExtension, packageRoot, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  return { root, dir, home, candidate, cwd, qmdExtension, symbolsSkill, packageRoot, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 // One launch: configureCodeIntegrations decides the allowlist exactly as index.ts does, then the prompt is assembled from those launch args.
 function launch(agent: { name: string; systemPrompt: string; tools?: string[] }, spec: Spec, extraTools: string[] = []) {
@@ -75,8 +76,8 @@ function launch(agent: { name: string; systemPrompt: string; tools?: string[] },
   agentDir = w.dir;
   try {
     const args: string[] = [];
-    const enabled = configureCodeIntegrations(args, agent as never, extraTools, w.qmdExtension);
-    const prompt = assembleChildSystemPrompt(agent, { codeIntegrationsEnabled: enabled, cwd: w.cwd, packageRoot: spec.pkg ? w.packageRoot : null, launchArgs: args, qmdExtension: w.qmdExtension, globalGraphDirectory: join(w.home, ".graphify") } as never);
+    const enabled = configureCodeIntegrations(args, agent as never, extraTools, w.qmdExtension, w.symbolsSkill);
+    const prompt = assembleChildSystemPrompt(agent, { codeIntegrationsEnabled: enabled, cwd: w.cwd, packageRoot: spec.pkg ? w.packageRoot : null, launchArgs: args, qmdExtension: w.qmdExtension, symbolsSkill: w.symbolsSkill, globalGraphDirectory: join(w.home, ".graphify") } as never);
     return { prompt, args, enabled, candidate: w.candidate, cwd: w.cwd };
   } finally {
     agentDir = saved;
@@ -84,22 +85,23 @@ function launch(agent: { name: string; systemPrompt: string; tools?: string[] },
   }
 }
 
-test("plain general-worker without optional integrations gets core and the fallback only: no Serena, QMD or graph detail", () => {
+test("plain general-worker without optional integrations gets core and the fallback only: no code-symbols, QMD or graph detail", () => {
   const { prompt } = launch(role("general-worker"), { ponytail: true });
   for (const needle of Object.values(CORE)) assert.equal(count(prompt, needle), 1, needle);
-  for (const absent of ["qmd_search", "pass project explicitly as", "## Graph reference location", "## Global graph reference", "Orient with the graph before searching the repository", "do not ls/read an assumed"]) assert.equal(prompt.includes(absent), false, absent);
+  for (const absent of ["qmd_search", "Run the code-symbols helper on the candidate", "## Graph reference location", "## Global graph reference", "Orient with the graph before searching the repository", "do not ls/read an assumed"]) assert.equal(prompt.includes(absent), false, absent);
   assert.match(prompt, /## Integrations not loaded in this launch/);
   assert.match(prompt, /read, grep and find/);
 });
 
-test("QMD and Serena sentences appear only when their tools are in the launch allowlist", () => {
+test("QMD and code-symbols sentences appear only when their tools are in the launch allowlist", () => {
   const none = launch(role("general-worker"), { ponytail: true }).prompt;
   assert.equal(none.includes("qmd_search"), false);
-  assert.equal(none.includes("pass project explicitly as"), false);
-  const present = launch(role("general-worker"), { ponytail: true, serena: true, qmd: true });
-  assert.equal(count(present.prompt, "pass project explicitly as " + present.candidate), 1);
+  assert.equal(none.includes("Run the code-symbols helper on the candidate"), false);
+  const present = launch(role("general-worker"), { ponytail: true, symbols: true, qmd: true });
+  assert.equal(count(present.prompt, "Run the code-symbols helper on the candidate: from " + present.candidate), 1);
+  assert.equal(count(present.prompt, "/harness/agent/skills/code-symbols/scripts/symbols.mjs\" outline <file>"), 1, "the helper is named by its absolute path");
   assert.equal(count(present.prompt, "run one focused qmd_search"), 1);
-  assert.equal(count(present.prompt, "Lookup order for code the packet does not locate: (1) qmd_search once for prior decisions, specs and notes on that area, (2) Serena to locate definitions and their callers, then (3) grep or find"), 1, "the lookup order names only this launch's tools");
+  assert.equal(count(present.prompt, "Lookup order for code the packet does not locate: (1) qmd_search once for prior decisions, specs and notes on that area, (2) the code-symbols helper (find, refs) to locate definitions and their callers, then (3) grep or find"), 1, "the lookup order names only this launch's tools");
   assert.equal(none.includes("Lookup order"), false, "no lookup tools, no lookup order");
 });
 
@@ -111,7 +113,7 @@ test("graph reference is included only for actual artifacts; with no artifacts o
 });
 
 test("project graph with no Graphify tool or skill: listed absolute artifacts and write authority still appear", () => {
-  const run = launch(role("general-worker"), { ponytail: true, projectGraph: true, serena: false, qmd: false });
+  const run = launch(role("general-worker"), { ponytail: true, projectGraph: true, symbols: false, qmd: false });
   assert.equal(count(run.prompt, "## Graph reference location"), 1);
   assert.ok(run.prompt.includes(join(run.candidate, "graphify-out", "graph.json")), "listed artifact must be its absolute path");
   assert.equal(count(run.prompt, CORE.graphAuthority), 1);
@@ -135,7 +137,7 @@ test("unmatched global corpus is not injected: no global block and no unrelated 
 test("every prompt shape carries the core guidance and the handoff exactly once", () => {
   const shapes = [
     launch(role("general-worker"), { ponytail: true }).prompt,
-    launch(role("backend-worker"), { ponytail: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true }).prompt,
+    launch(role("backend-worker"), { ponytail: true, symbols: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true }).prompt,
     launch({ name: "custom-role", systemPrompt: ROLE_BODY, tools: ["read", "grep", "find", "ls"] }, { ponytail: true }).prompt,
     launch(role("general-worker"), { ponytail: true, pkg: true }).prompt,
   ];
@@ -150,29 +152,29 @@ test("package shape assembles core, the package note and the handoff once, with 
     assert.equal(count(prompt, "Package resources:"), 1);
     assert.match(prompt, /engineering-harness/);
     for (const [key, needle] of Object.entries(CORE)) assert.equal(count(prompt, needle), 1, key);
-    for (const absent of ["## Code navigation integrations", "qmd_search", "pass project explicitly as"]) assert.equal(prompt.includes(absent), false, absent);
+    for (const absent of ["## Code navigation integrations", "qmd_search", "Run the code-symbols helper on the candidate"]) assert.equal(prompt.includes(absent), false, absent);
   } finally {
     w.cleanup();
   }
 });
 
 test("overlapping instructions are not restated: install/reconfigure rule appears once", () => {
-  const fallback = launch(role("general-worker"), { ponytail: true, serena: false, qmd: false, graphifySkill: false, graphifyExtension: false }).prompt;
+  const fallback = launch(role("general-worker"), { ponytail: true, symbols: false, qmd: false, graphifySkill: false, graphifyExtension: false }).prompt;
   assert.equal(count(fallback, "reconfigure"), 1, "reconfigure stated once");
   assert.equal(count(fallback, CORE.installRule), 1);
-  const full = launch(role("backend-worker"), { ponytail: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true }).prompt;
+  const full = launch(role("backend-worker"), { ponytail: true, symbols: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true }).prompt;
   assert.equal(count(full, "Missing graphs never authorize"), 1);
 });
 
 test("unavailable integrations keep their fallback: named, read/grep/find fallback, and do-not-call instruction", () => {
-  const run = launch(role("general-worker"), { ponytail: true, serena: false });
-  assert.match(run.prompt, /Not loaded: .*Serena extension/);
+  const run = launch(role("general-worker"), { ponytail: true, symbols: false });
+  assert.match(run.prompt, /Not loaded: .*Code-symbols skill/);
   assert.match(run.prompt, /read, grep and find/);
   assert.match(run.prompt, /do not call them/);
 });
 
 test("reviewer launch without Ponytail gets no Ponytail navigation paragraph", () => {
-  const run = launch(role("reviewer"), { ponytail: false, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true });
+  const run = launch(role("reviewer"), { ponytail: false, symbols: true, qmd: true, graphifyExtension: true, graphifySkill: true });
   assert.equal(run.args.some(arg => /ponytail/i.test(arg)), false, run.args.join(" "));
   assert.equal(run.prompt.includes("When Ponytail's native extension is loaded in this launch"), false);
   for (const needle of Object.values(CORE)) assert.equal(count(run.prompt, needle), 1, needle);

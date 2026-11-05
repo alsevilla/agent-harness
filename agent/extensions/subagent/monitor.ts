@@ -6,7 +6,7 @@ import { AssistantMessageComponent, ToolExecutionComponent, createReadToolDefini
 export type WorkerState = "initializing" | "running" | "pausing" | "paused" | "completed" | "failed" | "aborted";
 export interface ToolActivity {
   id: string; name: string; command: string; startedAt: number; endedAt?: number;
-  state: "running" | "ok" | "error"; output: string; args: any; details?: any; revision: number; integration?: "serena" | "graphify" | "qmd";
+  state: "running" | "ok" | "error"; output: string; args: any; details?: any; revision: number; integration?: "symbols" | "graphify" | "qmd";
 }
 export type TranscriptEntry = {type: "tool"; id: string} | {type: "assistant"; id: string; text: string; partial: boolean};
 export interface WorkerRecord {
@@ -60,7 +60,7 @@ function resultText(result: any): string {
 }
 export function integrationLabel(r: WorkerRecord): string {
   const parts = r.ponytail ? ["ponytail: loaded"] : [];
-  parts.push(...["serena", "qmd", "graphify"].map(name => {
+  parts.push(...["symbols", "qmd", "graphify"].map(name => {
     const stats = r.integrations[name];
     return name + ": " + (stats?.calls ? stats.calls + " calls · " + stats.returned + " returned · " + stats.errors + " errors" : "no calls observed");
   }));
@@ -153,7 +153,7 @@ export class WorkerStore {
     } else if (event.type === "tool_execution_start") {
       const name = oneLine(event.toolName ?? "tool"), args = event.args ?? {};
       const command = toolCommand(name, args);
-      const integration = name.startsWith("serena_") ? "serena" : name.startsWith("qmd_") ? "qmd" : name.startsWith("graphify_") || /(?:^|[;&|\n])\s*(?:(?:uvx|npx)\s+|uv\s+run\s+|(?:python3?|py)\s+-m\s+)?(?:[^\s;&|]*[\/\\])?graphify(?:\.(?:exe|cmd|py))?(?=\s|$)/i.test(args.command ?? "") || /\bread_graph\.py\b/i.test(args.command ?? "") ? "graphify" : undefined;
+      const integration = /\bsymbols\.mjs\b/i.test(args.command ?? "") ? "symbols" : name.startsWith("qmd_") ? "qmd" : name.startsWith("graphify_") || /(?:^|[;&|\n])\s*(?:(?:uvx|npx)\s+|uv\s+run\s+|(?:python3?|py)\s+-m\s+)?(?:[^\s;&|]*[\/\\])?graphify(?:\.(?:exe|cmd|py))?(?=\s|$)/i.test(args.command ?? "") || /\bread_graph\.py\b/i.test(args.command ?? "") ? "graphify" : undefined;
       if (integration) (r.integrations[integration] ??= {calls: 0, returned: 0, errors: 0}).calls++;
       const target = args.path ?? args.relative_path ?? args.file_path ?? "";
       if (name === "read" && /graphify-out[\/\\]/i.test(target)) r.graphReferences++;

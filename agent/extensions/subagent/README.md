@@ -146,12 +146,12 @@ Automatic extension/MCP/skill/prompt discovery is disabled in children. `code-in
 
 | Integration | Actual worker behavior |
 | --- | --- |
-| Ponytail | Loads `@dietrichgebert/ponytail/pi-extension/index.js` once. Its `before_agent_start` hook injects configured guidance on each turn. It is not a tool call, so it will not appear as a Serena/QMD-style activity entry. No duplicate base-skill read is required. |
-| Serena | Loads the native extension with exact read-only navigation names. The shared workerTools list is empty: neither implementation worker receives Serena mutation tools. Both keep precise edit and omit write. Calls use the explicit candidate project root. |
+| Ponytail | Loads `@dietrichgebert/ponytail/pi-extension/index.js` once. Its `before_agent_start` hook injects configured guidance on each turn. It is not a tool call, so it will not appear as a symbols/QMD-style activity entry. No duplicate base-skill read is required. |
+| code-symbols | Loads the harness's own `agent/skills/code-symbols` skill (`--skill`) and names its script by absolute path in the worker prompt: `outline`, `find --body` and `refs` for Rust, TypeScript/JavaScript and Python, run through the shell from the candidate root. No tool schemas, no language server, read-only. It replaces pi-serena, which workers no longer load: its `serena_*` names are dropped from every worker allowlist. |
 | Graphify | Loads the native package extension and the profile-adapted skill. Main sessions and workers use the same skill; its helper queries write no cache files. Dispatch supplies verified absolute reference paths. |
 | QMD | Loads `../qmd/index.ts` with read-only `qmd_search`, `qmd_get`, `qmd_status`. BM25 search returns three references by default, at most five; selected reads are bounded. |
 
-Integration availability: Ponytail is required for every role except `reviewer`, where its extension and `ponytail-review` skill load when present. QMD, Serena and Graphify are optional for every configured role: an absent extension (or Graphify skill) file is skipped, its integration-only tools (`qmd_*`, `serena_*`) are omitted, and the launch note names what was not loaded. File presence does not prove a backend is healthy; a failing tool is reported once and not retried in a loop, and the worker falls back to permitted read/grep/find.
+Integration availability: Ponytail is required for every role except `reviewer`, where its extension and `ponytail-review` skill load when present. QMD, Graphify and code-symbols are optional for every configured role: an absent extension or skill file is skipped, its integration-only tools (`qmd_*`) are omitted, and the launch note names what was not loaded. File presence does not prove a backend is healthy; a failing tool is reported once and not retried in a loop, and the worker falls back to permitted read/grep/find.
 
 Ponytail defaults to `full` unless its package config/environment changes that default. New children do not inherit the main session's transient `/ponytail` mode. Advice cannot override requirements, assigned role authority, candidate boundaries or required checks, and does not require additional audit/review agents.
 
@@ -193,7 +193,7 @@ The parent policy is a short routing/authority contract. It does not preload ope
 
 ## Scoped worker edits
 
-Backend, frontend and general workers retain precise `edit`; `write` and all six Serena mutation tools are excluded. `integrations.json` controls the automatic grants, so this restriction needs no dispatcher code change. Removing those tools does not make implementation read-only: workers must inspect and edit only their assigned scope, preserving unrelated code/tests. Shell tools can still write; this is a tool-list restriction, not a filesystem sandbox, and custom project agent definitions must preserve it. The focused regression checks actual worker frontmatters against fixed mutation names and retains read-only integration tools.
+Backend, frontend and general workers retain precise `edit`; `write` is excluded (and no Serena tool is granted). `integrations.json` controls the automatic grants, so this restriction needs no dispatcher code change. Removing those tools does not make implementation read-only: workers must inspect and edit only their assigned scope, preserving unrelated code/tests. Shell tools can still write; this is a tool-list restriction, not a filesystem sandbox, and custom project agent definitions must preserve it. The focused regression checks actual worker frontmatters against fixed mutation names and retains read-only integration tools.
 
 Restart Pi and cancel/relaunch previously started workers to use the revised configuration. Pausing/resuming an existing worker retains its old tool list.
 

@@ -35,4 +35,4 @@ Service definitions, startup/shutdown handling, configuration and secrets wiring
 - Claiming unrun checks, source mutation, or that operational procedures were tested without evidence.
 
 
-Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify extensions. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.
+Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify integration and the code-symbols skill. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

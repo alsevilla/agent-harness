@@ -366,7 +366,7 @@ async function runAgentAttempt(
 	}
 	const integrationArgsStart = args.length;
 	codeIntegrationsEnabled = configureCodeIntegrations(args, agent, dispatchDefaults.jobId ? [DECISION_TOOL] : []);
-	// Compact leaf contract, main never loads it. Inserted before the integration extensions: Serena/Graphify return a forced systemPrompt rendered at their turn, so this must run first.
+	// Compact leaf contract, main never loads it. Inserted before the integration extensions: Graphify returns a forced systemPrompt rendered at their turn, so this must run first.
 	if (childContextEligible(agent, codeIntegrationsEnabled)) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "child-context-entry.ts"));
 
     } catch (error) {
@@ -900,7 +900,7 @@ export const MAIN_TOOL_GUIDELINES = [
 	"To read several files, call read for each one in the same turn (within main's limit of 3 named files), or delegate the reads with the subagent tool; do not wrap reads in a codemode script.",
 	"When the intended structure is known (function signatures, types, module layout), put it in the subagent task packet as a code skeleton beside the expected behavior and checks.",
 	"For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson.",
-	"For main's own lookups and for packets that ask a worker to find code, use the graph, qmd_search and Serena tools when they are declared, before grep or find; name the graph report or the known symbols in the packet.",
+	"For main's own lookups use the graph and qmd_search when declared, before grep or find. Workers locate code with the graph, qmd_search and the code-symbols skill (outline, find, refs); in a packet that asks a worker to find code, name the graph report or the known symbols.",
 ];
 
 export default function (pi: ExtensionAPI) {
