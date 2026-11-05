@@ -214,7 +214,7 @@ test("worker cap: normal batching first, re-measured; it stops at the first step
 	assert.equal(capOutputs(big)[0].length, 30_000, "input not mutated");
 });
 
-test("worker cap: still over budget after batching, every older output is masked, then outputs are bounded, then 'over'", () => {
+test("worker cap: still over budget after batching, every older output is masked, then outputs are bounded, then the last resort, then 'over'", () => {
 	const allOlder = capWorkerContext(run(9, 45_000), 80_000, 95_000); // ~101k, nine outputs: no whole batch beyond the newest five
 	assert.equal(allOlder.step, "all-older");
 	assert.equal(capOutputs(allOlder.messages!).filter((t) => t.startsWith("[older read output")).length, 4, "all four older outputs");
@@ -227,8 +227,16 @@ test("worker cap: still over budget after batching, every older output is masked
 	assert.match(texts[texts.length - 2], /^x{2000}\n\[… 76,000 characters shortened to stay in budget; read again with offset and limit, or rerun, if you need them …\]\nx{2000}$/);
 	assert.ok(bounded.after < 95_000);
 
-	const over = capWorkerContext(run(2, 400_000), 80_000, 95_000); // the latest result alone is over budget
-	assert.equal(over.step, "over", "the caller asks the host to compact");
+	const latestHuge = capWorkerContext(run(2, 400_000), 80_000, 95_000); // the latest result alone is over budget
+	assert.equal(latestHuge.step, "last-resort", "the latest result is bounded for this request, not left over budget");
+	const last = capOutputs(latestHuge.messages!);
+	assert.match(last[last.length - 1], /^x{8000}\n\[… 384,000 characters shortened to stay in budget; read again with offset and limit, or rerun, if you need them …\]\nx{8000}$/);
+	assert.match(last[0], /^\[older read output, shortened/, "every older output masked");
+	assert.ok(latestHuge.after < 95_000);
+
+	const talk = [{ role: "assistant", content: [{ type: "text", text: "y".repeat(400_000) }] }, ...run(1, 1_000)] as never[];
+	const over = capWorkerContext(talk, 80_000, 95_000); // assistant text, not tool output, fills the budget
+	assert.equal(over.step, "over", "only then is the host asked to compact");
 	assert.ok(over.after >= 95_000);
 });
 
