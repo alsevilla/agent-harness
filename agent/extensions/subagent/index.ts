@@ -37,7 +37,7 @@ import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProven
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { registerHandoffWindow, stateCard } from "./handoff-window.ts";
-import { STOPPED_JOBS_FILE } from "./stopped-jobs.ts";
+import { STOPPED_JOBS_DIR } from "./stopped-jobs.ts";
 import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
@@ -941,7 +941,7 @@ export default function (pi: ExtensionAPI) {
     const decisions = new DecisionRelay();
     decisionsRef = decisions;
     const runtime = new BackgroundWorkers(pi, monitor, decisions);
-    runtime.stoppedJobsFile = path.join(getAgentDir(), "run-state", STOPPED_JOBS_FILE);
+    runtime.stoppedJobsDir = path.join(getAgentDir(), "run-state", STOPPED_JOBS_DIR);
     runtimeRef = runtime;
     // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.
     const pendingText = () => { try { return formatCleanupPending(cleanupPending(safetyGrants, owners, (id) => runtime.jobs.get(id)?.state === "running")); } catch { return ""; } };

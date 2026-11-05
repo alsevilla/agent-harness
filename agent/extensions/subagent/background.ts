@@ -5,6 +5,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
 import { servedReported } from "./provenance.ts";
 import { saveStoppedJobs, stoppedJobDetail, stoppedJobsNotice, takeStoppedJobs, type StoppedJob } from "./stopped-jobs.ts";
+// The session a stopped-jobs record belongs to: its session file, or its id for an ephemeral session.
+const sessionKey = (ctx: any): string | undefined => {
+  try { const sm = ctx?.sessionManager; const key = sm?.getSessionFile?.() ?? sm?.getSessionId?.(); return typeof key === "string" && key ? key : undefined; } catch { return undefined; }
+};
 import { expandRetainedResult, formatCompletionNotice, validateNoticeLimit } from "./compact-handoff.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
@@ -65,9 +69,12 @@ export class RpcWorker {
 }
 
 // Session-scope usage ledger: numeric aggregates of settled logical jobs only (no task text or prompts; a named agent role is kept only as its agent name). A scope is captured at launch, so a job settling after reset charges only its own launch scope.
-export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number }
+export interface UsageTotals { attempts: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpricedTurns: number; zeroCostTurns: number}
+// A request's input = input + cacheRead + cacheWrite tokens. Claude Haiku 5.5 prices a request over this at 5x, so it is counted to measure worker masking.
+export const LONG_REQUEST_TOKENS = 100_000;
 export interface UsageSlice extends UsageTotals { completed: number; failed: number; aborted: number }
-export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; roles?: Record<string, UsageSlice> }
+export interface RequestSizes { peak: number; long: number }
+export interface UsageScope { running: number; foreground: UsageSlice; background: UsageSlice; roles?: Record<string, UsageSlice>; requests?: Record<string, RequestSizes> }
 const zeroTotals = (): UsageTotals => ({ attempts: 0, turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpricedTurns: 0, zeroCostTurns: 0 });
 const zeroSlice = (): UsageSlice => ({ ...zeroTotals(), completed: 0, failed: 0, aborted: 0 });
 export const newUsageScope = (): UsageScope => ({ running: 0, foreground: zeroSlice(), background: zeroSlice(), roles: {} });
@@ -80,6 +87,7 @@ function roleSlice(scope: UsageScope, role: string): UsageSlice {
 // One logical job (one runSingleAgent request). Finalized message_end usage only; finalizes once; physical attempts counted at spawn.
 export class LogicalUsage {
   private totals = zeroTotals(); private open = true;
+  private sizes: RequestSizes = { peak: 0, long: 0 };
   private scope: UsageScope; private slice: "foreground" | "background";
   private role?: string;
   constructor(scope: UsageScope, background: boolean, role?: string) { this.scope = scope; this.slice = background ? "background" : "foreground"; this.role = role || undefined; scope.running++; }
@@ -91,6 +99,9 @@ export class LogicalUsage {
     const n = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
     const input = n(usage.input), output = n(usage.output), cacheRead = n(usage.cacheRead), cacheWrite = n(usage.cacheWrite);
     t.input += input; t.output += output; t.cacheRead += cacheRead; t.cacheWrite += cacheWrite;
+    const request = input + cacheRead + cacheWrite;
+    this.sizes.peak = Math.max(this.sizes.peak, request);
+    if (request > LONG_REQUEST_TOKENS) this.sizes.long++;
     const cost = usage.cost?.total;
     if (!Number.isFinite(cost)) { t.unpricedTurns++; return; }
     t.cost += cost;
@@ -103,6 +114,11 @@ export class LogicalUsage {
     const add = (dst: UsageSlice) => { for (const key of Object.keys(t) as (keyof UsageTotals)[]) dst[key] += t[key]; dst[status]++; };
     add(this.scope[this.slice]);
     if (this.role) add(roleSlice(this.scope, this.role));
+    if (this.role && this.sizes.peak) {
+      const requests = (this.scope.requests ??= {});
+      if (!Object.hasOwn(requests, this.role)) Object.defineProperty(requests, this.role, { value: { peak: 0, long: 0 }, enumerable: true, writable: true, configurable: true });
+      const into = requests[this.role]; into.peak = Math.max(into.peak, this.sizes.peak); into.long += this.sizes.long;
+    }
   }
 }
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -131,9 +147,14 @@ function sliceLines(name: string, s: UsageSlice): string[] {
   ];
 }
 const tokenTotal = (s: UsageSlice) => s.input + s.output + s.cacheRead + s.cacheWrite;
-function roleLine(name: string, s: UsageSlice): string {
+function roleLine(name: string, s: UsageSlice, sizes?: RequestSizes): string {
   const n = (v: number) => v.toLocaleString("en-US");
-  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}${perCompleted(s)}`;
+  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}${perCompleted(s)}${requestNote(sizes)}`;
+}
+// Peak request and requests over the long-context line, to measure worker masking (see LONG_REQUEST_TOKENS).
+function requestNote(sizes?: RequestSizes): string {
+  if (!sizes?.peak) return "";
+  return `; peak request ${sizes.peak.toLocaleString("en-US")} tok${sizes.long ? `, ${plural(sizes.long, "request")} over ${LONG_REQUEST_TOKENS.toLocaleString("en-US")}` : ""}`;
 }
 // Footer status: main's context, settled tasks and cost per completed task. Undefined before anything is known.
 // Main's own context is what degrades an orchestrator (DACS 2604.07911; 'Reasoning Trap', 2606.01351); /reload keeps it, /new clears it.
@@ -169,7 +190,7 @@ function usageBody(scope: UsageScope): string {
   lines.push(...sliceLines("Foreground", scope.foreground), ...sliceLines("Background", scope.background));
   if (scope.running > 0) lines.push(`Pending: ${plural(scope.running, "agent task")} incl. queued, excluded until settled`);
   const roles = Object.entries(scope.roles ?? {}).filter(([, s]) => s.completed + s.failed + s.aborted > 0).sort(([a, x], [b, y]) => tokenTotal(y) - tokenTotal(x) || a.localeCompare(b));
-  if (roles.length) lines.push("By role (foreground + background, most tokens first):", ...roles.map(([name, s]) => roleLine(name, s)));
+  if (roles.length) lines.push("By role (foreground + background, most tokens first):", ...roles.map(([name, s]) => roleLine(name, s, scope.requests?.[name])));
   return lines.join("\n");
 }
 
@@ -186,7 +207,7 @@ export class BackgroundWorkers {
   private generation = 0;
   usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
   pendingNote?: () => string; // runtime-derived CLEANUP_PENDING text (never child text); empty when nothing is pending
-  stoppedJobsFile?: string; // set by index.ts: <agent dir>/run-state/stopped-jobs.json
+  stoppedJobsDir?: string; // set by index.ts: <agent dir>/run-state/stopped-jobs (one record per originating session)
   stoppedEarlier: StoppedJob[] = []; // jobs the previous runtime's reload or session change stopped; shown until main asks about each
   private sequence = 0;
   readonly epoch: string; // opaque per-runtime id: notices name bg-N@epoch, so an old notice can never select a new runtime's reused bg-N
@@ -199,22 +220,23 @@ export class BackgroundWorkers {
   constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay(), epoch = randomBytes(6).toString("hex")) {
     if (!/^[A-Za-z0-9]{1,16}$/.test(epoch)) throw new Error("epoch must be 1-16 letters or digits");
     this.pi = pi; this.monitor = monitor; this.decisions = decisions; this.epoch = epoch;
-    pi.on("session_start", (_event: unknown, ctx: any) => {
+    pi.on("session_start", (event: any, ctx: any) => {
       this.reset();
-      this.stoppedEarlier = this.stoppedJobsFile ? takeStoppedJobs(this.stoppedJobsFile) : [];
+      const current = sessionKey(ctx);
+      this.stoppedEarlier = this.stoppedJobsDir && current ? takeStoppedJobs(this.stoppedJobsDir, { current, previous: typeof event?.previousSessionFile === "string" ? event.previousSessionFile : undefined }) : [];
       if (this.stoppedEarlier.length) try { ctx?.ui?.notify?.(stoppedJobsNotice(this.stoppedEarlier), "warning"); } catch { /* notice is a courtesy */ }
     });
-    pi.on("session_shutdown", () => { this.recordStopped(); this.reset(); });
+    pi.on("session_shutdown", (event: any, ctx: any) => { this.recordStopped(sessionKey(ctx), event); this.reset(); });
   }
   /** Before shutdown aborts them: record the running jobs so the next runtime can say what was stopped. */
-  recordStopped(): void {
-    if (!this.stoppedJobsFile) return;
+  recordStopped(session: string | undefined, event?: { reason?: unknown; targetSessionFile?: unknown }): void {
+    if (!this.stoppedJobsDir || !session) return;
     const stoppedAt = new Date().toISOString();
     const jobs = [...this.jobs.values()].filter((j) => j.state === "running").map((j) => {
       const records = j.workerIds.map((id) => this.monitor.store.records.get(id));
       return { job: `${j.id}@${this.epoch}`, roles: [...new Set(records.map((r) => r?.name).filter((n): n is string => !!n))], task: records.find((r) => r?.task)?.task ?? "", stoppedAt };
     });
-    saveStoppedJobs(this.stoppedJobsFile, jobs);
+    saveStoppedJobs(this.stoppedJobsDir, { session, target: typeof event?.targetSessionFile === "string" ? event.targetSessionFile : undefined, reason: typeof event?.reason === "string" ? event.reason : undefined }, jobs);
   }
   reset() {
     this.settleDecisions(this.decisions.clear("session-reset"));
