@@ -12,7 +12,7 @@ import { foldCase } from "./path-case.ts";
 
 export type RiskRule =
 	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
-	| "LAUNCH_PI" | "CURL_SHELL" | "OPAQUE_UNPARSEABLE" | "SECRET" | "CONFIG_WRITE" | "PATH_AMBIGUOUS";
+	| "LAUNCH_PI" | "PI_PACKAGE" | "CURL_SHELL" | "OPAQUE_UNPARSEABLE" | "SECRET" | "CONFIG_WRITE" | "PATH_AMBIGUOUS";
 
 export type GuardOp = { kind: "shell"; command: string; cwd: string } | { kind: "write"; path: string } | { kind: "read"; path: string };
 export type Decision = { action: "allow" } | { action: "block"; rules: RiskRule[]; grantable: boolean; op: GuardOp; digest: string };
@@ -23,6 +23,15 @@ export const GRANT_TTL_DEFAULT_MS = 30 * 60_000;
 export const GRANT_TTL_MAX_MS = 60 * 60_000;
 const MAX_NESTING = 4;
 
+// Pi CLI forms (pi docs/cli.md, docs/packages.md). Anything else, including a bare `pi` or a prompt, launches an agent.
+const PI_READ_ONLY = new Set(["list", "--help", "-h", "--version"]);
+const PI_PACKAGE_CMDS = new Set(["install", "remove", "uninstall", "update", "config"]);
+/** Arguments after the Pi program for `pi ...`, `npx pi ...` or `node <pi-coding-agent cli> ...`; undefined when this is not Pi. */
+function piArgs(name: string, lower: string[]): string[] | undefined {
+	if (name === "pi") return lower;
+	const at = name === "npx" ? lower.findIndex((a) => a === "pi" || a.includes("pi-coding-agent")) : name === "node" ? lower.findIndex((a) => a.includes("pi-coding-agent")) : -1;
+	return at < 0 ? undefined : lower.slice(at + 1);
+}
 const NOT_GRANTABLE = new Set<RiskRule>(["OPAQUE_UNPARSEABLE", "SECRET", "PATH_AMBIGUOUS"]);
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ash", "ksh", "csh", "tcsh", "fish"]);
 const POWERSHELLS = new Set(["powershell", "pwsh"]);
@@ -378,7 +387,12 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 	if (PRIVILEGE_CMDS.has(name)) return add(out, "PRIVILEGE_PERSIST");
 	if (name === "net" && (lower[0] === "user" || lower[0] === "localgroup")) return add(out, "PRIVILEGE_PERSIST");
 	if (PROC_CMDS.has(name)) return add(out, "PROC_KILL");
-	if (name === "pi" || (name === "npx" && lower.some((a) => a === "pi" || a.includes("pi-coding-agent"))) || (name === "node" && lower.some((a) => a.includes("pi-coding-agent")))) return add(out, "LAUNCH_PI");
+	const pi = piArgs(name, lower);
+	if (pi !== undefined) {
+		// Only an agent launch is LAUNCH_PI. Help, version and the package list print and exit; package commands change the installed extensions.
+		if (pi.length === 1 && PI_READ_ONLY.has(pi[0])) return;
+		return add(out, PI_PACKAGE_CMDS.has(pi[0] ?? "") ? "PI_PACKAGE" : "LAUNCH_PI");
+	}
 	if ((name === "base64" && lower.some((a) => a === "-d" || a === "--decode" || a === "-D")) || (name === "certutil" && lower.includes("-decode"))) return add(out, "OPAQUE_UNPARSEABLE");
 }
 
@@ -543,6 +557,8 @@ export type GuardScope = "main" | "child";
 export interface GrantStore {
 	mint(request: MintRequest): GrantRecord[];
 	consume(scope: GuardScope, candidate: string, op: GuardOp): boolean;
+	/** Why a blocked shell op found no grant: one exists for other text here, for this text elsewhere, or this exact one was already used. */
+	grantMiss?(scope: GuardScope, candidate: string, op: GuardOp): GrantMiss | undefined;
 	claim(role: string, candidate: string): GrantRecord[];
 	importRecords(records: GrantRecord[]): void;
 	revokeAll(includeLeases?: boolean): void;
@@ -580,8 +596,11 @@ function validateRecord(value: unknown): GrantRecord {
 	return r;
 }
 
+export type GrantMiss = "other-text" | "other-folder" | "used";
 export function createGrantStore(now: () => number = () => Date.now()): GrantStore {
 	let records: GrantRecord[] = [];
+	// Keys of single-use grants already consumed, kept until the grant would have expired, only to explain a repeat block.
+	let spent: { main: boolean; key: string; expiresAt: number }[] = [];
 	let leases: PushLease[] = [];
 	let delivery: DeliveryGrant[] = [];
 	let cleanup: CleanupGrant[] = [];
@@ -589,6 +608,7 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
+		spent = spent.filter((s) => s.expiresAt > t);
 		cleanup = cleanup.filter((c) => t - c.issuedAt <= CLEANUP_TTL_MS);
 		artifacts = artifacts.filter((a) => t - a.issuedAt <= CLEANUP_TTL_MS);
 		return t;
@@ -663,8 +683,18 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			const t = live();
 			const index = records.findIndex((r) => (scope === "main" ? r.role === null : r.role !== null) && foldPath(r.candidate) === foldPath(candidate) && keyOf(r.op) === keyOf(op) && r.expiresAt > t);
 			if (index < 0) return false;
-			records.splice(index, 1);
+			const [used] = records.splice(index, 1);
+			spent.push({ main: used.role === null, key: keyOf(used.op), expiresAt: used.expiresAt });
 			return true;
+		},
+		grantMiss(scope, candidate, op) {
+			live();
+			if (op.kind !== "shell") return undefined;
+			const mine = records.filter((r) => (scope === "main" ? r.role === null : r.role !== null) && r.op.kind === "shell");
+			if (mine.some((r) => r.op.kind === "shell" && r.op.command === op.command)) return "other-folder";
+			if (mine.some((r) => foldPath(r.candidate) === foldPath(candidate))) return "other-text";
+			if (spent.some((s) => s.main === (scope === "main") && s.key === keyOf(op))) return "used";
+			return undefined;
 		},
 		claim(role, candidate) {
 			const t = live();
@@ -678,6 +708,7 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		},
 		revokeAll(includeLeases = false) {
 			records = [];
+			spent = [];
 			cleanup = [];
 			if (includeLeases) {
 				leases = [];
@@ -2066,6 +2097,7 @@ const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or gi
 const RULE_ADVICE: Partial<Record<RiskRule, string>> = {
 	SECRET: `agents never read or write secret files (.env*, keys, credentials, .ssh/.aws/.gnupg) or name them in a command; to check .env settings run node "${REDACTED_ENV_SCRIPT}" "<absolute .env path>" (secret-like values hidden); .env.example, .env.sample and .env.template are ordinary files when named alone`,
 	OPAQUE_UNPARSEABLE: "the guard cannot parse this command (inline scripts with nested quotes, eval, encoded or deeply nested commands); write the script to a file in the task's _scratch folder and run it by path or pipe it on stdin (for example betterwright run < \"<absolute file>\")",
+	PI_PACKAGE: "this changes your installed Pi packages or settings (install, update, remove, config), which loads new code into later sessions; the operator can also run it directly in a terminal outside Pi",
 	PATH_AMBIGUOUS: "use an exact absolute path without aliases, links or 8.3 short names; a delete never takes a variable, substitution, root, home, '.', '..' or bare glob target",
 };
 function programOf(op: GuardOp): string {
@@ -2138,8 +2170,14 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && artifactCleanupAllows(guard.store, decision, live)) return undefined;
 	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
 	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
-	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) };
+	const miss = decision.grantable ? guard.store.grantMiss?.(guard.scope, canonicalCwd(cwd), decision.op) : undefined;
+	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) + (miss ? ` ${GRANT_MISS_TEXT[miss]}` : "") };
 }
+const GRANT_MISS_TEXT: Record<GrantMiss, string> = {
+	"other-text": "An approval exists in this folder for a different command text: run the approved command exactly as approved, with nothing added (no redirection such as 2>&1, no cd, no chained command), or ask for a new approval.",
+	"other-folder": "An approval exists for this exact command in a different folder: run it from the approved folder, or ask for a new approval.",
+	"used": "This exact command was already approved and that approval was used; approvals are single use, so a retry needs a new approval.",
+};
 
 const MERGE_OR_RELEASE = /\bgh(?:\.exe)?\s+(?:(?:-R|--repo|--hostname)[\s=]\S+\s+)*(?:pr\s+merge|release\s+create)\b/i;
 
