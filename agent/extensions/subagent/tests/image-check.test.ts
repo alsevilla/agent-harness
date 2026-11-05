@@ -76,3 +76,15 @@ test("the live view marks ponytail from the worker's own launch arguments when i
 	assert.match(index, /worker\.ponytail = args\.some\(\(arg\) => \/\[\\\\\/\]@dietrichgebert\[\\\\\/\]ponytail\[\\\\\/\]\/\.test\(arg\)\)/);
 	assert.match(fs.readFileSync(new URL("../monitor.ts", import.meta.url), "utf8"), /r\.ponytail \? \["ponytail: loaded"\] : \[\]/);
 });
+
+// Claude Code working rules: batch independent calls, partial reads, dedicated file tools, no sleep polling, no interactive commands, no unneeded files.
+test("shared guidance: tool discipline", () => {
+	const core = CORE_GUIDANCE.replace(/\s+/g, " ");
+	assert.match(core, /## Tool discipline/);
+	assert.match(core, /Make independent tool calls \(reads, searches, status checks\) in the same turn/);
+	assert.match(core, /read only that part with offset and limit/);
+	assert.match(core, /Use the read, grep and find tools for files, not cat, head, tail or grep in the shell, so duplicate-read and read-before-edit checks see them/);
+	assert.match(core, /Never poll with sleep; use the command's own wait or timeout/);
+	assert.match(core, /Avoid interactive commands \(git rebase -i, git add -p, editors, pagers\): there is no terminal/);
+	assert.match(core, /Create no file the task does not need, such as new docs or helper scripts; prefer editing existing files/);
+});

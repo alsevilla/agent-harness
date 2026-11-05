@@ -37,6 +37,7 @@ import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProven
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { registerHandoffWindow, stateCard } from "./handoff-window.ts";
+import { STOPPED_JOBS_FILE } from "./stopped-jobs.ts";
 import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
@@ -898,7 +899,7 @@ export default function (pi: ExtensionAPI) {
 	registerProviderCooldown(pi);
 	// Request-only: older settled PASS results and main's old large tool outputs shortened (PI_SUBAGENT_HANDOFF_WINDOW=0 turns that off),
 	// plus a one-line runtime state card while jobs run or decisions wait.
-	registerHandoffWindow(pi, process.env, () => runtimeRef ? stateCard(runtimeRef.list(), runtimeRef.epoch, decisionsRef?.list().filter((d) => d.state === "announced" || d.state === "open").length ?? 0) : undefined);
+	registerHandoffWindow(pi, process.env, () => runtimeRef ? stateCard(runtimeRef.list(), runtimeRef.epoch, decisionsRef?.list().filter((d) => d.state === "announced" || d.state === "open").length ?? 0, runtimeRef.stoppedEarlier) : undefined);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
 	// Footer status after each main turn (interactive UI only): context, tasks, cost per completed task, running jobs.
@@ -940,6 +941,7 @@ export default function (pi: ExtensionAPI) {
     const decisions = new DecisionRelay();
     decisionsRef = decisions;
     const runtime = new BackgroundWorkers(pi, monitor, decisions);
+    runtime.stoppedJobsFile = path.join(getAgentDir(), "run-state", STOPPED_JOBS_FILE);
     runtimeRef = runtime;
     // Deterministic cleanup handoff: derived from runtime grants, the live merged PR and terminal worker records; never from child text. Empty when nothing is pending.
     const pendingText = () => { try { return formatCleanupPending(cleanupPending(safetyGrants, owners, (id) => runtime.jobs.get(id)?.state === "running")); } catch { return ""; } };
