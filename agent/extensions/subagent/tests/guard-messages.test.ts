@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
-import { createGrantStore, guardToolCall, REDACTED_ENV_SCRIPT, REDACTED_ENV_SCRIPT_SHA256, redactedEnvRead, validateArtifactDir } from "../safety-core.ts";
+import { createGrantStore, guardToolCall, REDACTED_ENV_SCRIPT, REDACTED_ENV_SCRIPT_SHA256, redactedEnvRead, validateArtifactDir, readOnlyViolation } from "../safety-core.ts";
 import { redactEnv } from "../read-env-redacted.mjs";
 
 const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "guard-msg-")));
@@ -118,9 +118,9 @@ test("read-only role: PowerShell and shell writes to the sibling worktrees _scra
 		`mkdir -p "${evidence}"`,
 	]) assert.equal(call(ok), undefined, ok);
 	for (const [bad, why] of [
-		[`Set-Content -Path src/app.tsx -Value "x"`, /set-content writes into the candidate checkout \(src\/app\.tsx\)/],
-		[`Set-Content src/app.tsx "x"`, /set-content writes into the candidate checkout \(src\/app\.tsx\)/],
-		[`New-Item -Name x.ts -ItemType File`, /new-item writes into the candidate checkout \(\.\/x\.ts\)/],
+		[`Set-Content -Path src/app.tsx -Value "x"`, /set-content writes into the candidate checkout \(src\/app\.tsx resolves to .*\/src\/app\.tsx, inside protected root /],
+		[`Set-Content src/app.tsx "x"`, /set-content writes into the candidate checkout \(src\/app\.tsx resolves to .*\/src\/app\.tsx, inside protected root /],
+		[`New-Item -Name x.ts -ItemType File`, /new-item writes into the candidate checkout \(\.\/x\.ts resolves to .*\/x\.ts, inside protected root /],
 		[`"x" | Out-File -FilePath "${candidate}/a.txt"`, /out-file writes into the candidate checkout/],
 		[`npm test > $env:TEMP\\x.log`, /redirects output to a target with a variable or substitution the guard cannot resolve \(\$env:TEMP\\x\.log\); use the literal absolute _scratch or _evidence path from the packet/],
 	] as const) {
@@ -129,6 +129,38 @@ test("read-only role: PowerShell and shell writes to the sibling worktrees _scra
 		assert.match(r!.reason, /\[READ_ONLY_ROLE\]/, bad);
 		assert.match(r!.reason, why, bad);
 	}
+});
+
+// Field report (refusals 2e15600798145446, 07c3231bac8764b9): a read-only test-engineer's
+//   cat > D:/work/RFID/worktrees/RFIDAttendance-Rust/_scratch/sim800c/run.js <<'EOF' … EOF
+// was refused as "redirects output into the candidate checkout ()": the heredoc body (JavaScript, "page.evaluate(() =>") was checked as
+// shell, and a line ending in "=>" looked like a redirect with no target. Windows paths are checked with Windows rules on every host.
+test("read-only role, Windows paths: heredoc scripts to the sibling _scratch pass; shell-read heredocs and candidate writes stay refused", () => {
+	const root = "D:/work/RFID/RFIDAttendance-Rust";
+	const scratch = "D:/work/RFID/worktrees/RFIDAttendance-Rust/_scratch/sim800c";
+	const js = "// Synthetic, mocked browser verification script\nconst ok = await page.evaluate(() =>\n  document.body.scrollHeight > window.innerHeight);\nif (count > 3) console.log(ok);";
+	const check = (command: string, tool = "bash") => readOnlyViolation(tool, { command }, root, root);
+	for (const ok of [
+		`cat > ${scratch}/heartbeat-scroll-reinit-run.js <<'EOF'\n${js}\nEOF`,
+		`cat > "${scratch}/a.js" <<EOF\n${js}\nEOF\nnpx betterwright run < "${scratch}/a.js"`,
+		`cat > ${scratch.replace(/\//g, "\\")}\\b.js <<-'EOF'\n\t${js}\n\tEOF`,
+		`cat > d:/work/rfid/worktrees/rfidattendance-rust/_scratch/sim800c/c.js <<'EOF'\nx > y\nEOF`,
+	]) assert.equal(check(ok), undefined, ok.split("\n")[0]);
+	assert.equal(check(`@'\n${js}\n'@ | Set-Content -Path "${scratch}/d.js"`, "powershell"), undefined, "a PowerShell here-string is a literal");
+	const refused: Array<[string, RegExp]> = [
+		[`bash <<'EOF'\necho x > src/app.ts\nEOF`, /\(src\/app\.ts resolves to D:\/work\/RFID\/RFIDAttendance-Rust\/src\/app\.ts, inside protected root D:\/work\/RFID\/RFIDAttendance-Rust\)/],
+		[`cat <<'EOF' | bash\necho x > src/app.ts\nEOF`, /inside protected root D:\/work\/RFID\/RFIDAttendance-Rust/],
+		[`cat > src/app.ts <<'EOF'\nx\nEOF`, /redirects output into the candidate checkout \(src\/app\.ts resolves to D:\/work\/RFID\/RFIDAttendance-Rust\/src\/app\.ts/],
+		[`cat > D:\\work\\RFID\\RFIDAttendance-Rust\\src\\a.ts <<'EOF'\nx\nEOF`, /resolves to D:\/work\/RFID\/RFIDAttendance-Rust\/src\/a\.ts, inside protected root/],
+		[`echo x >`, /redirects output with no target the guard can read; write to the literal absolute _scratch or _evidence path from the packet \(protected root D:\/work\/RFID\/RFIDAttendance-Rust\)/],
+	];
+	for (const [command, why] of refused) {
+		const reason = check(command);
+		assert.ok(reason, command.split("\n")[0]);
+		assert.match(reason!, why, command.split("\n")[0]);
+		assert.doesNotMatch(reason!, /\(\)/, "never an empty target");
+	}
+	assert.equal(readOnlyViolation("bash", { command: "echo x > ../worktrees/RFIDAttendance-Rust/_scratch/sim800c/r.txt" }, root, root), undefined, "a relative path that leaves the checkout");
 });
 
 // Claude Code practices: read before edit, and no approval for a delete it cannot resolve.
