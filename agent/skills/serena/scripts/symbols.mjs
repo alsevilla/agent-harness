@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// code-symbols: symbol outline, definition lookup and code references for Rust, TypeScript/JavaScript and Python, with no language
-// server, no package install and no tool schemas. It replaces pi-serena in worker launches: workers run it through the shell only when
-// they need it, so it costs nothing in a launch that does not. Read-only: it never writes, and it skips build output and dependencies.
+// Heuristic fallback of the serena skill (serena.mjs uses it when Serena cannot serve the checkout): symbol outline, definition lookup and
+// code references for Rust, TypeScript/JavaScript and Python, parsed from text with no language server. Read-only. It can also run alone:
 //
-//   node symbols.mjs outline <file>...                       symbols with kinds and line ranges
-//   node symbols.mjs find <name or A/b path> [path...] [--body] [--kind <kind>]   where a symbol is defined (and its body)
-//   node symbols.mjs refs <name> [path...]                   code references (strings and comments excluded) with the enclosing symbol
+//   node symbols.mjs outline <file>...
+//   node symbols.mjs find <name or A/b path> [path...] [--body] [--kind <kind>]
+//   node symbols.mjs refs <name> [path...]
 //
 // Heuristic parsing, not a compiler: macros, generated code and unusual formatting can hide a symbol. Use grep for literal text,
 // strings, comments, config and renames.

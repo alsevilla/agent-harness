@@ -82,4 +82,4 @@ This role does not own PLAN. Main owns planning, sequencing, delegation, and aut
 ## Cost and context discipline
 Use the smallest context and tool set that can establish the assigned result. Do not reread broad repository areas without a specific uncertainty.
 
-Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify/QMD/Ponytail integrations and the code-symbols skill. Do not use shell commands to launch Pi or other agents.
+Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify/QMD/Ponytail integrations and the serena skill. Do not use shell commands to launch Pi or other agents.

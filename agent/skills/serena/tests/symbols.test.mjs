@@ -1,4 +1,4 @@
-// code-symbols helper: symbol ranges for Rust, TSX and Python, masking of strings, comments, regex literals and JSX, and the three commands.
+// serena skill, heuristic fallback (symbols.mjs): symbol ranges for Rust, TSX and Python, masking of strings, comments, regex literals and JSX, and the three commands.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -122,7 +122,7 @@ test("Python: classes, methods and functions by indentation; nested functions st
 });
 
 test("commands: outline, find with body, refs without strings, comments or the definition", () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "code-symbols-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "serena-heuristic-"));
 	try {
 		fs.mkdirSync(path.join(dir, "src"));
 		fs.mkdirSync(path.join(dir, "node_modules", "dep"), { recursive: true });

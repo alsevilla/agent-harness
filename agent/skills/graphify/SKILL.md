@@ -5,7 +5,7 @@ description: Navigate existing Graphify project/global graphs with verified abso
 
 # Graphify for the modular Pi profile
 
-Use graph evidence for orientation, then verify candidate source with the code-symbols helper or targeted reads. User requirements, role authority and candidate boundaries govern every procedure here.
+Use graph evidence for orientation, then verify candidate source with Serena (the serena skill) or targeted reads. User requirements, role authority and candidate boundaries govern every procedure here.
 
 ## Choose one procedure
 
