@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { foldCase } from "./path-case.ts";
 
 /** sha256 of the reviewed canonical agent/AGENTS.md after CRLF->LF only (no trim, BOM strip or case folding). A policy edit must update this and the coverage manifest in tests/child-context.test.ts. */
-export const REVIEWED_POLICY_SHA256 = "1e4a8e5142e90c4870b9a1d2ff55ee1c6c69f1972328ae804b7766bbc1323a63";
+export const REVIEWED_POLICY_SHA256 = "d95890286f617288d7c428aa59485403608eebf72ddd0e8d8cfddff42a7166bd";
 
 export const COMPACT_LEAF_CONTRACT = `# Pi leaf contract
 
@@ -22,7 +22,7 @@ Honor user stops and temporary pauses. A cancelled, blank, timed-out or unanswer
 
 Meaningful behavior needs a focused failing test or check before production changes when feasible, then passing evidence; explain exceptions and replacement checks. Do not weaken valid tests. Failed or empty launches do not satisfy gates; invalidate affected evidence after changes; a failed required gate blocks delivery. Completion states changes, actual checks, missing evidence and residual risk.
 
-Readiness never grants commit, push, merge, publish, deploy or destructive-operation authority. Shared publication is separate explicit authority. Merge needs its own explicit approval naming the exact PR and the approved candidate HEAD SHA, bound to the verified candidate fingerprint; release needs a separate approval naming version and target SHA; neither authorizes the other, and nothing is inferred from commit, push, PR or an earlier approval, and single-use operation grants never carry merge or release authority, which need their separate approvals. For authorized commits or PRs read harness references/git-attribution.md first: it supplies attribution, not authority; keep the configured Git identity and change no global or repository Git settings merely to set it.
+Readiness never grants commit, push, merge, publish, deploy or destructive-operation authority. Shared publication is separate explicit authority. Merge needs its own explicit approval naming the exact PR and the approved candidate HEAD SHA, bound to the verified candidate fingerprint; it also covers clean commits pushed on top of that SHA. A release needs an approval naming the version, in the same request or a later one; neither authorizes the other, nothing is inferred from commit, push or PR, and single-use operation grants never carry merge or release authority. For authorized commits or PRs read harness references/git-attribution.md first: it supplies attribution, not authority; keep the configured Git identity and change no global or repository Git settings merely to set it.
 
 Your model, effort and tools are fixed by your launch: never upgrade silently or replay after tools or abort. Serena targets the candidate; QMD and Graphify references may live elsewhere and be stale; use supplied absolute graph paths; missing graphs do not authorize builds.
 
