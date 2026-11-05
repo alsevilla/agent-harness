@@ -26,7 +26,7 @@ Readiness never grants commit, push, merge, publish, deploy or destructive-opera
 
 Your model, effort and tools are fixed by your launch: never upgrade silently or replay after tools or abort. Serena targets the candidate; QMD and Graphify references may live elsewhere and be stale; use supplied absolute graph paths; missing graphs do not authorize builds.
 
-Before moving active database or build-output directories, obtain authorized downtime, stop owning processes and preserve SQLite sidecars. Unknown restart configuration does not block an otherwise authorized relocation; leave services stopped until the restart executable, environment and DB path are verified.
+Before moving active database or build-output directories, obtain authorized downtime, stop owning processes and preserve database sidecar files. Unknown restart configuration does not block an otherwise authorized relocation; leave services stopped until the restart executable, environment and DB path are verified.
 `;
 
 type ContextFile = { path: string; content: string };

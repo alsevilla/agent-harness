@@ -21,7 +21,7 @@ Match syntax to the selected tool, not the OS. The bash tool runs Bash on Window
 
 ## Artifact placement
 Main supplies absolute scratch/evidence paths in task packet when work may write outside the candidate. Put QA fixtures, temporary copies, external build targets and logs in the assigned _scratch/<task> path; captured backups and durable evidence go in _evidence/<task>. Both normally live under <primary-parent>/worktrees/<repo>. Do not create scratch directories beside the primary checkout. Return to main when a required artifact path is missing; do not guess a sibling folder. Report actual artifact paths at handoff. Source and test edits stay in the assigned candidate. Shell access is not a filesystem sandbox: verify targets before write-capable commands.
-Do not move live SQLite .db, -wal or -shm files or a running executable. Obtain authorized downtime and verify processes have stopped before relocating whole directories. Restart only with verified DB_PATH and runtime configuration; otherwise leave services stopped and return that scope to main.
+Do not move live database files (with their journal or WAL sidecars) or a running executable. Obtain authorized downtime and verify processes have stopped before relocating whole directories. Restart only with a verified database path and runtime configuration; otherwise leave services stopped and return that scope to main.
 
 ## Integration and graph authority
 Integrations never authorize nested agents, broader writes or new tasks; do not install, reconfigure, rebuild or repair an integration or index, and do not read auth files or secrets to diagnose one. Missing graphs never authorize a fresh graph build as a prerequisite. Graph references never widen write authority. Read-only roles must not build/update graphs, onboard projects or edit source; return stale-graph findings to the authorized worker.
@@ -204,7 +204,7 @@ function launchCapabilities(args: string[]) {
   return { ponytail, serena, qmd, graphifySkill };
 }
 
-/** The child system prompt. Core guidance is unconditional once; Rust, navigation, candidate-retrieval, graph and unavailable-integration sections are emitted only from actual launch evidence. */
+/** The child system prompt. Core guidance is unconditional once; navigation, candidate-retrieval, graph and unavailable-integration sections are emitted only from actual launch evidence. */
 const SHARED_CHILD_PREFIX = CORE_GUIDANCE.replace(/^\n+/, "") + COMPACT_HANDOFF_INSTRUCTIONS;
 export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: string }, options: ChildPromptOptions): string {
   const cap = launchCapabilities(options.launchArgs ?? []);

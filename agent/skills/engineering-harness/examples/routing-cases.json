@@ -5,15 +5,15 @@
     {
       "id": "R01",
       "kind": "positive",
-      "question": "Add a required device_id check to the existing POST /v1/readers/heartbeat handler; the request contract is already accepted.",
-      "context": "Backend service written in Go, not Rust/Axum. Single handler plus its test. Cause not applicable.",
+      "question": "Add a required device_id check to the existing POST /v1/devices/heartbeat handler; the request contract is already accepted.",
+      "context": "Backend service written in Go. Single handler plus its test. Cause not applicable.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
         "roles_required": ["backend-worker"],
         "roles_allowed": ["backend-worker"],
         "skills_required": ["backend"],
-        "skills_forbidden": ["backend/rust-axum-engineering"],
+        "skills_forbidden": ["backend/load-resilience-testing"],
         "model_tiers": {"backend-worker": ["economy", "omitted"]},
         "required_reads": ["agent/skills/backend/SKILL.md"]
       }
@@ -28,7 +28,7 @@
         "routes": ["T3_SPECIALIST_FIRST"],
         "roles_required": ["database-specialist"],
         "roles_allowed": ["database-specialist", "database-worker"],
-        "skills_required": ["backend/sqlite-sqlx-engineering"],
+        "skills_required": [],
         "skills_forbidden": [],
         "model_tiers": {"database-specialist": ["capable"]}
       }
@@ -195,7 +195,7 @@
     {
       "id": "R14",
       "kind": "near_miss",
-      "question": "The user cited the exact file src/handlers/readers.go and function parseHeartbeat; add a missing length check.",
+      "question": "The user cited the exact file src/handlers/devices.go and function parseHeartbeat; add a missing length check.",
       "context": "Exact location is supplied, so Scout is not needed. Implementation only.",
       "critical": false,
       "expect": {
@@ -525,14 +525,14 @@
       "id": "R37",
       "kind": "positive",
       "question": "Add a required tenant_id check to the existing POST /v1/orders handler and its test; the request contract is already accepted.",
-      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. Backend service written in Go, not Rust/Axum. Single bounded handler plus its test; no UI, browser or code-graph work is involved.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. Backend service written in Go. Single bounded handler plus its test; no UI, browser or code-graph work is involved.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
         "roles_required": ["backend-worker"],
         "roles_allowed": ["backend-worker"],
         "skills_required": ["backend"],
-        "skills_forbidden": ["frontend", "browser", "graphify", "backend/rust-axum-engineering"],
+        "skills_forbidden": ["frontend", "browser", "graphify", "backend/load-resilience-testing"],
         "required_reads": ["agent/skills/backend/SKILL.md"]
       }
     },

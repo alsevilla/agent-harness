@@ -361,8 +361,6 @@ test("database-worker uses implementation-worker metadata and database ownership
 });
 
 test("implementation workers are backend, frontend, general and platform with registry-defined defaults", () => {
-  assert.equal(roles.find((r: { name: string }) => r.name === "rust-worker"), undefined, "rust-worker retired from registry");
-  assert.equal(fs.existsSync(new URL("../../../agents/rust-worker.md", import.meta.url)), false, "rust-worker definition retired");
   for (const name of ["backend-worker", "frontend-worker", "general-worker", "platform-worker", "database-worker"]) {
     const role = roles.find((r: { name: string }) => r.name === name);
     assert.ok(role, name);
@@ -395,7 +393,7 @@ test("routing keeps generic domain adjacency and leaves project-local domain spe
   assert.match(route, /project-local domain specialists/i);
   assert.match(route, /database-worker/i);
   assert.match(route, /database-specialist/i);
-  assert.match(route, /Tokio.*concurrency-specialist/i);
+  assert.match(route, /async tasks.*concurrency-specialist/i);
   assert.match(route, /deployment.*devops-specialist/i);
   assert.match(route, /self-contained packet.*exact unresolved question/is);
 });

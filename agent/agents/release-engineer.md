@@ -51,7 +51,7 @@ When SHIP is selected, establish:
 - platform-specific release concerns;
 - explicit authority for each operation actually performed.
 
-For this project, Raspberry Pi/Linux and Windows NUC are distinct release targets when both are supported. Do not infer parity from one platform. Coordinate unresolved service/deployment/backups design with `devops-specialist`, database migration/rollback questions with `database-specialist` for unresolved semantics or `database-worker` for implementation, and release-blocking correctness findings through main.
+When a project ships to more than one platform, each is a distinct release target. Do not infer parity from one platform. Coordinate unresolved service/deployment/backups design with `devops-specialist`, database migration/rollback questions with `database-specialist` for unresolved semantics or `database-worker` for implementation, and release-blocking correctness findings through main.
 
 Return a clear disposition such as READY TO SHIP, BLOCKED, or SHIPPED, plus actual evidence, operations performed, and candidate/worktree state. Readiness alone never grants delivery authority. After a verified merge (including squash/rebase), release engineer owns safe cleanup of explicitly named task-owned worktrees under `../worktree/index.md`; main retains scheduling, exact candidate/target identity, approvals, quiescence evidence and coordination. If delivery ran inside the candidate, return MERGED with CLEANUP_PENDING; main schedules cleanup only after that worker is terminal and an outside-target release engineer can act. PR-only delivery does not permit candidate removal.
 

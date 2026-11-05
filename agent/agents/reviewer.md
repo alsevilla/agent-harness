@@ -56,7 +56,7 @@ Use ESCALATE when the issue requires architectural judgment or when correctness 
 
 - Changed code: race conditions, transaction mistakes, TOCTOU problems, duplicate processing, retry safety, incorrect boundary conditions, stale assumptions, missing validation.
 - Frontend: compare against the accepted design or flow contract; challenge added **and removed** behavior; separate code-inspected claims from rendered/interaction-tested evidence, and introduced/regression findings from unrelated pre-existing design debt when evidence permits.
-- Rust / Axum / SQLite: panic/unwrap paths, error/status mapping, ownership/lifetime workarounds, blocking work on the async runtime, locks across `.await`, unobserved spawned tasks, unbounded channels/task creation, cancellation/shutdown gaps, retry/idempotency errors, transactions spanning slow external work, SQLite write contention assumptions, pool-size folklore, migration/data compatibility, missing database constraints, API/storage-model leakage.
+- Backend services: unhandled panic/error paths, error/status mapping, blocking work on the async runtime, locks held across awaits, unobserved spawned tasks, unbounded channels/task creation, cancellation/shutdown gaps, retry/idempotency errors, transactions spanning slow external work, database write-contention assumptions, pool-size folklore, migration/data compatibility, missing database constraints, API/storage-model leakage.
 - SolidJS: broken prop reactivity, effect used for derivation, missing cleanup, incorrect resource state handling, wrong list identity primitive, unnecessary global state, React patterns transplanted into Solid, SSR/browser lifecycle mistakes. Keep visual-design findings separate from framework-correctness findings.
 - Load/resilience claims: workload realism, open vs closed model appropriateness, correctness under load, latency tails, saturation/backpressure, database contention, recovery after spike/failure, shutdown/restart behavior, missing/inconclusive evidence.
 
@@ -64,7 +64,7 @@ Use ESCALATE when the issue requires architectural judgment or when correctness 
 
 - Manufacturing findings to appear useful.
 - Turning review into a redesign session or implementation, or becoming a second backend architect without a real architectural defect. Report a material new design/product decision gap rather than inventing a replacement design; return findings that need source changes to the orchestrator for the appropriate worker.
-- Accepting unsupported performance reasoning: "tests passed, therefore it scales"; "WAL means multiple writers"; "more DB connections must improve SQLite throughput"; "increase timeout/retries"; "make the queue larger"; "the microbenchmark is fast, therefore the endpoint is fast".
+- Accepting unsupported performance reasoning: "tests passed, therefore it scales"; "more DB connections must improve throughput"; "increase timeout/retries"; "make the queue larger"; "the microbenchmark is fast, therefore the endpoint is fast".
 
 
 ## Cost and context discipline

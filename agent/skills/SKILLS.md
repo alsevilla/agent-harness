@@ -27,14 +27,10 @@ Choose frontend-design OR ui-ux-pro-max for broad direction unless distinct need
 justify both. Modules grant guidance, not design/implementation authority.
 
 ## Backend modules
-rust-axum-engineering, sqlite-sqlx-engineering, load-resilience-testing live under
-backend/<name>/index.md. Use only the capabilities justified by the task.
+load-resilience-testing lives under backend/<name>/index.md. Use it only when the task justifies it.
+Database roles use the project's own database guidance.
 
-Default role links include:
-- backend-worker -> rust-axum-engineering (Rust/Axum stacks only)
-- database-specialist -> sqlite-sqlx-engineering (only when the actual stack is SQLite/SQLx); database-worker -> project database guidance
-
-`load-resilience-testing` remains conditional for performance, concurrency, SQLite, reviewer, and verification work when burst/overload/resilience evidence is actually material. Do not preload it for ordinary hot-path profiling or localized performance questions.
+`load-resilience-testing` remains conditional for performance, concurrency, database, reviewer, and verification work when burst/overload/resilience evidence is actually material. Do not preload it for ordinary hot-path profiling or localized performance questions.
 
 ## Compatibility
 Pi's manual shortcuts live under ~/.pi/agent/prompts/. They expand instructions;

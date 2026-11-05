@@ -111,7 +111,7 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual([c.R39.expect.routes, c.R39.expect.roles_required, c.R39.expect.skills_required], [["T1_WORKER"], ["frontend-worker"], ["frontend"]]);
 		assert.deepEqual([c.R40.expect.routes, c.R40.expect.roles_required], [["DISCOVER_SCOUT_FIRST"], ["scout"]]);
 		assert.ok(!c.R40.expect.skills_forbidden.includes("graphify"), "graph query stays allowed");
-		assert.deepEqual(c.R37.expect.skills_forbidden, ["frontend", "browser", "graphify", "backend/rust-axum-engineering"]);
+		assert.deepEqual(c.R37.expect.skills_forbidden, ["frontend", "browser", "graphify", "backend/load-resilience-testing"]);
 		assert.deepEqual(c.R39.expect.skills_forbidden, ["frontend/design-dashboards", "frontend/ui-ux-pro-max", "browser"]);
 	});
 
@@ -128,7 +128,7 @@ describe("FixtureSpecimenTests", () => {
 		const c = byId(loadFixture());
 		const x = (id) => c[id].expect;
 		assert.deepEqual(x("R01").roles_allowed, ["backend-worker"]);
-		assert.ok(x("R01").skills_forbidden.includes("backend/rust-axum-engineering"));
+		assert.ok(x("R01").skills_forbidden.includes("backend/load-resilience-testing"));
 		assert.deepEqual(x("R03").roles_allowed, ["frontend-worker"]);
 		assert.deepEqual(x("R04").roles_required, ["ui-ux-specialist"]);
 		assert.deepEqual(x("R04").roles_allowed, ["ui-ux-specialist", "frontend-worker"]);
@@ -254,7 +254,7 @@ describe("EvaluatorTests", () => {
 	it("forbidden_skill_is_critical_even_on_noncritical_case", () => {
 		const fx = loadFixture();
 		assert.equal(byId(fx).R01.critical, false);
-		const rep = evaluateRows(setRow(perfectPredictions(fx), "R01", { skills: ["backend", "backend/rust-axum-engineering"] }), fx);
+		const rep = evaluateRows(setRow(perfectPredictions(fx), "R01", { skills: ["backend", "backend/load-resilience-testing"] }), fx);
 		assert.equal(rep.violations.skill_forbidden, 1);
 		assert.equal(rep.critical_failures, 1);
 		assert.equal(rep.ok, false);

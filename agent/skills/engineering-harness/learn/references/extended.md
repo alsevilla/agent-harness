@@ -86,13 +86,13 @@ Preserve knowledge, not history.
 
 Bad project memory:
 
-> We ran cargo test, then the debugger found a problem, then the
+> We ran the tests, then the debugger found a problem, then the
 > reviewer looked at three files.
 
 Useful project memory:
 
-> Alternate Rust worktrees used for isolated baseline/RED verification
-> require unique `CARGO_TARGET_DIR` values when shared build artifacts
+> Alternate worktrees used for isolated baseline/RED verification
+> require unique build output folders when shared build artifacts
 > could contaminate the evidence boundary.
 
 The first is chronology.
@@ -184,7 +184,7 @@ Bad:
 
 Bad:
 
-> Remove the 1.7 GB temporary Cargo target.
+> Remove the 1.7 GB temporary build output folder.
 
 These are task state.
 
@@ -292,13 +292,13 @@ Example:
 
 Debug:
 
-> Shared Cargo target artifacts contaminated the alternate-worktree
+> Shared build output artifacts contaminated the alternate-worktree
 > baseline.
 
 Learn:
 
-> Rust worktree isolation requires a unique `CARGO_TARGET_DIR`; do not
-> use the primary target directory or broad `cargo clean` as a
+> Worktree isolation requires a unique build output folder; do not
+> use the primary build output folder or a broad clean as a
 > substitute.
 
 ------------------------------------------------------------------------
@@ -480,12 +480,12 @@ the durable lesson depends on details the summary does not prove.
 
 Example:
 
-> "A shared Cargo-target contamination incident happened."
+> "A shared build-output contamination incident happened."
 
 A later summary saying that contamination once occurred may justify searching
 for the original Verify/Debug evidence. It does not establish that the event
 occurred during baseline/RED reconstruction, that shared artifacts were the
-cause, or that a unique `CARGO_TARGET_DIR` was the demonstrated correction
+cause, or that a unique build output folder was the demonstrated correction
 unless those details are independently supported.
 
 If only circular or secondhand evidence is recovered:
@@ -541,10 +541,10 @@ to be discarded as false.
 
 Example compound statement:
 
-> During an earlier isolated baseline/RED reconstruction, shared Cargo build
+> During an earlier isolated baseline/RED reconstruction, shared build
 > artifacts contaminated the evidence, therefore isolated evidence worktrees
-> require a unique `CARGO_TARGET_DIR`, and all worktrees should always use
-> unique Cargo targets.
+> require a unique build output folder, and all worktrees should always use
+> unique build output folders.
 
 Evaluate separately:
 
@@ -674,7 +674,7 @@ A known failure mode or misleading approach.
 Examples:
 
 -   wall-clock exact-minute tests can become suite-flaky;
--   shared Cargo targets can contaminate baseline reconstruction.
+-   shared build output folders can contaminate baseline reconstruction.
 
 ## ENVIRONMENT
 
@@ -682,8 +682,8 @@ A durable fact about build/runtime/deployment environment.
 
 Examples:
 
--   production uses Raspberry Pi/Linux and Windows NUC targets;
--   Field devices are local USB devices rather than network devices.
+-   production uses Linux and Windows targets;
+-   hardware devices attach locally rather than over the network.
 
 ## PROCESS
 
@@ -738,7 +738,7 @@ how the engineering workflow governs decisions and evidence.
 
 Example:
 
-PATTERN: Use a unique Cargo target directory for isolated worktrees.
+PATTERN: Use a unique build output folder for isolated worktrees.
 
 PROCESS: A worker's TDD evidence does not replace independent Test
 Engineer verification.
@@ -752,13 +752,13 @@ recurrence.
 
 Weak:
 
-> Cargo caching caused problems.
+> Build caching caused problems.
 
 Strong:
 
-> Reusing the same Cargo target directory across current and baseline
+> Reusing the same build output folder across current and baseline
 > worktrees can execute contaminated/stale build artifacts and
-> invalidate RED reconstruction. Use a unique `CARGO_TARGET_DIR` per
+> invalidate RED reconstruction. Use a unique build output folder per
 > isolated worktree.
 
 ------------------------------------------------------------------------
@@ -882,7 +882,7 @@ Specific to the current repository/system.
 
 Example:
 
-> Field devices are local USB devices attached directly to the host.
+> Hardware devices are attached directly to the host.
 
 ## GLOBAL PROCESS
 
@@ -898,7 +898,7 @@ Applies broadly to a recurring technical domain.
 
 Example:
 
-> SQLite lifecycle guards that depend on read-then-write state require
+> Database lifecycle guards that depend on read-then-write state require
 > atomicity analysis.
 
 Default to PROJECT unless clearly broader.
@@ -1013,7 +1013,7 @@ correctness.
 Examples:
 
 -   deterministic clock seam required for exact boundary tests;
--   isolated Rust worktrees require unique `CARGO_TARGET_DIR`;
+-   isolated worktrees require unique build output folders;
 -   hardware-dependent verification requires a particular supported
     seam.
 
@@ -1298,7 +1298,7 @@ Use for stable architectural structure and boundaries.
 Examples:
 
 -   backend/frontend separation;
--   local USB reader architecture;
+-   local device architecture;
 -   queue/worker boundaries;
 -   persistence ownership;
 -   deployment topology.
@@ -1511,11 +1511,11 @@ If existing knowledge says:
 
 and new evidence establishes:
 
-> Shared Cargo targets can still contaminate isolated worktrees.
+> Shared build output folders can still contaminate isolated worktrees.
 
 Prefer refining it to:
 
-> Use isolated worktrees with unique `CARGO_TARGET_DIR` values for
+> Use isolated worktrees with unique build output folders for
 > baseline testing.
 
 Do not create two overlapping entries.
@@ -1596,8 +1596,8 @@ Avoid:
 
 Prefer:
 
-> Alternate Rust worktrees used for evidence isolation require unique
-> Cargo target directories.
+> Alternate worktrees used for evidence isolation require unique
+> build output folders.
 
 ------------------------------------------------------------------------
 
@@ -1733,7 +1733,7 @@ Bad:
 
 Good:
 
-> Broad `cargo clean` is not an appropriate isolation strategy for
+> A broad clean of build output is not an appropriate isolation strategy for
 > alternate worktree verification because it affects the primary build
 > environment; use unique target directories instead.
 
@@ -1918,8 +1918,8 @@ Before writing, internally or visibly construct:
   Candidate        Category             Scope     Evidence        Evidence      Durable?      Active      Existing?   Action
                                                                   State                       Work?
   ---------------- -------------------- --------- --------------- ------------- ------------- ----------- ----------- -------------
-  unique Cargo     PITFALL              GLOBAL    prior runtime   ESTABLISHED   yes if        no          maybe       MERGE/WRITE
-  target for                            PROCESS   contamination   if recovered; established                           or NEEDS
+  unique build     PITFALL              GLOBAL    prior runtime   ESTABLISHED   yes if        no          maybe       MERGE/WRITE
+  output for                            PROCESS   contamination   if recovered; established                           or NEEDS
   isolated                                                        otherwise                                           EVIDENCE
   baseline/RED                                                    EVIDENCE NOT
   worktrees                                                       RETRIEVED
@@ -2048,7 +2048,7 @@ requires domain expertise.
 
 Example:
 
-a SQLite behavior may be version-specific rather than a durable
+a database behavior may be version-specific rather than a durable
 architectural fact.
 
 Do not summon agents merely to approve memory wording.

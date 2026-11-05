@@ -2,7 +2,7 @@
 
 Reference guidance only; the current role, candidate authority and AGENTS policy govern. Search headings and read the task-relevant section; do not load the whole catalog.
 
-## Raspberry Pi / Linux
+## Linux
 
 Understand and consider:
 
@@ -14,8 +14,6 @@ Understand and consider:
 - journald
 - Unix permissions
 - users and groups
-- udev rules
-- USB device permissions
 - filesystem ownership
 - environment files
 - shell scripts
@@ -23,14 +21,14 @@ Understand and consider:
 - SIGTERM/SIGINT handling
 - graceful shutdown
 - package installation
-- architecture differences such as ARM64 vs x86_64
+- CPU architecture differences such as ARM64 vs x86_64
 - Linux filesystem conventions
 - log rotation
 - scheduled jobs
 - networking
 - firewall configuration
 
-## Windows NUC
+## Windows
 
 Understand and consider:
 
@@ -40,10 +38,6 @@ Understand and consider:
 - service recovery/restart policies
 - Windows service accounts
 - Windows permissions and ACLs
-- USB device behavior
-- COM ports where applicable
-- HID devices
-- Windows device enumeration
 - environment variables
 - Windows filesystem paths
 - PowerShell
@@ -53,7 +47,6 @@ Understand and consider:
 - graceful service shutdown
 - process supervision
 - Windows Defender / firewall implications
-- x86_64 architecture
 - installer/deployment packaging
 - service upgrades
 - rollback
@@ -61,7 +54,7 @@ Understand and consider:
 
 Do not recommend systemd instructions for Windows deployments.
 
-Do not recommend Windows-specific mechanisms for Raspberry Pi/Linux deployments.
+Do not recommend Windows-specific mechanisms for Linux deployments.
 
 ---
 
@@ -74,7 +67,7 @@ Keep platform-specific behavior isolated.
 Prefer:
 
 application/domain logic
-→ cross-platform Rust
+→ cross-platform code
 
 platform integration
 → small Linux/Windows-specific boundary
@@ -96,12 +89,11 @@ Focus on:
 - configuration
 - secrets
 - filesystem permissions
-- USB permissions
 - networking
 - ports
 - logging
 - disk usage
-- SQLite storage
+- database storage
 - backups
 - restore procedures
 - WAL checkpointing
@@ -142,8 +134,7 @@ Consider:
 - database transaction completion;
 - worker shutdown;
 - channel shutdown;
-- USB reader shutdown;
-- SQLite connection closure;
+- database connection closure;
 - queued work persistence.
 
 Linux implementations should correctly handle relevant Unix termination signals.
@@ -158,11 +149,11 @@ Design persistent state so unexpected termination does not corrupt application b
 
 # Power Loss
 
-For Raspberry Pi and Windows NUC deployments consider sudden power loss.
+For on-premises and edge deployments consider sudden power loss.
 
 Analyze:
 
-- SQLite durability;
+- database durability;
 - WAL state;
 - partially completed operations;
 - queue recovery;
@@ -171,68 +162,6 @@ Analyze:
 - hardware reinitialization.
 
 Do not rely exclusively on graceful shutdown for correctness.
-
----
-
-# USB Field Devices
-
-The application may depend on locally connected USB reader devices.
-
-Consider platform differences in:
-
-- device discovery;
-- permissions;
-- identifiers;
-- enumeration;
-- reconnect behavior;
-- driver requirements;
-- serial/COM naming;
-- HID access.
-
-Linux may require:
-
-- user/group configuration;
-- udev rules;
-- device permissions.
-
-Windows may require:
-
-- drivers;
-- COM configuration;
-- device interface discovery;
-- service-account access to hardware.
-
-Coordinate hardware behavior with `concurrency-specialist`.
-
-Do not embed fragile platform-specific device paths directly into domain logic.
-
----
-
-# SQLite Operations
-
-SQLite may be used as the local production database.
-
-Consider:
-
-- database file location;
-- WAL files;
-- SHM files;
-- filesystem permissions;
-- locking;
-- backups;
-- restore;
-- checkpoints;
-- disk capacity;
-- application shutdown;
-- application restart;
-- antivirus interactions where relevant;
-- network filesystem hazards.
-
-Prefer storing SQLite on a local filesystem.
-
-Do not place the active SQLite database on a network share unless the architecture has explicitly been validated for that environment.
-
-Coordinate unresolved material database semantics with `database-specialist`; database-worker owns implementation.
 
 ---
 
@@ -254,7 +183,7 @@ For important deployments, backups should not exist solely on the same physical 
 
 Possible destinations may include:
 
-- external USB storage;
+- external storage;
 - another machine;
 - controlled network storage;
 - approved remote storage.
@@ -288,7 +217,7 @@ Consider what happens when disk space becomes low or completely exhausted.
 
 Potential consequences include:
 
-- SQLite write failures;
+- database write failures;
 - WAL growth;
 - failed backups;
 - failed logs;
@@ -346,7 +275,6 @@ Grant only required:
 - database directory access;
 - configuration access;
 - log access;
-- USB/device access.
 
 Avoid running as root unless genuinely required.
 
@@ -360,7 +288,6 @@ Grant only required:
 - database directory access;
 - configuration access;
 - logs;
-- USB/device access;
 - network resources when necessary.
 
 Avoid running as Administrator unless genuinely required.
@@ -381,14 +308,9 @@ Deployment plans should specify:
 - verification;
 - rollback.
 
-For Rust applications, prefer reproducible release builds.
+Prefer reproducible release builds.
 
 Ensure binaries are compiled for the correct platform and CPU architecture.
-
-Examples include:
-
-- Linux ARM64 for appropriate Raspberry Pi deployments;
-- Windows x86_64 for typical Intel/AMD NUC deployments.
 
 Never assume binaries are portable across operating systems or CPU architectures.
 
@@ -455,9 +377,7 @@ Consider health signals for:
 
 - application process;
 - database;
-- USB reader devices;
 - background workers;
-- notification processing;
 - storage capacity;
 - backups;
 - external dependencies.
@@ -468,11 +388,10 @@ A running process is not necessarily a healthy application.
 
 # Platform Parity
 
-When the application supports both Raspberry Pi/Linux and Windows NUC, explicitly identify differences in:
+When the application supports both Linux and Windows, explicitly identify differences in:
 
 - startup;
 - shutdown;
-- device access;
 - filesystem paths;
 - permissions;
 - logging;
@@ -496,12 +415,11 @@ For operational changes ask:
 4. What happens if storage fills?
 5. What happens if configuration is invalid?
 6. What happens if the database cannot open?
-7. What happens if a device reader disconnects?
-8. What happens if networking disappears?
-9. What happens if an external service is unavailable?
-10. How does the operator know something failed?
-11. How is service recovered?
-12. How is the previous version restored?
+7. What happens if networking disappears?
+8. What happens if an external service is unavailable?
+9. How does the operator know something failed?
+10. How is service recovered?
+11. How is the previous version restored?
 
 ---
 
@@ -511,9 +429,6 @@ Coordinate with:
 
 `database-specialist`
 for materially unresolved database semantics; use engine-specific guidance for operational safety.
-
-`concurrency-specialist`
-for USB device lifecycle, drivers, discovery, and reconnect behavior.
 
 `concurrency-specialist`
 for shutdown, worker lifecycle, channels, async behavior, and background processing.

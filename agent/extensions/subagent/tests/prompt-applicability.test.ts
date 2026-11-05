@@ -1,6 +1,6 @@
 // Applicability matrix for assembled child prompts. Core guidance (shell, artifact bounds, shared build folder, relocation safety,
-// graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. Rust, Serena/QMD, graph and
-// package detail appear only with actual launch evidence: structural Cargo manifests, --tools names, real --extension/--skill paths and graph artifacts.
+// graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. Serena/QMD, graph and
+// package detail appear only with actual launch evidence: --tools names, real --extension/--skill paths and graph artifacts.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { after, test } from "node:test";
@@ -27,7 +27,7 @@ after(() => fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }));
 const CORE = {
   shell: "## Shell syntax",
   artifact: "## Artifact placement",
-  relocation: "Do not move live SQLite .db, -wal or -shm files or a running executable.",
+  relocation: "Do not move live database files (with their journal or WAL sidecars) or a running executable.",
   noGraphBuild: "Missing graphs never authorize a fresh graph build as a prerequisite.",
   graphAuthority: "Graph references never widen write authority.",
   nested: "Integrations never authorize nested agents, broader writes or new tasks",
@@ -44,7 +44,7 @@ function role(name: string) {
 }
 
 type Spec = { ponytail?: boolean; serena?: boolean; qmd?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean; projectGraph?: boolean; globalGraph?: boolean; globalMatch?: boolean; cwdRel?: string; pkg?: boolean };
-// Controlled world: every integration file, Cargo manifest, graph artifact and package root is a temp fixture; no real profile or home is read.
+// Controlled world: every integration file, graph artifact and package root is a temp fixture; no real profile or home is read.
 function world(spec: Spec) {
   const root = fs.mkdtempSync(join(tmpdir(), "prompt-applicability-"));
   const dir = join(root, "agent");

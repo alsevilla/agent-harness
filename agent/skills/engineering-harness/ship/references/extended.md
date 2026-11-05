@@ -263,8 +263,8 @@ Examples:
 - publish package;
 - prepare release notes;
 - create installer;
-- produce Raspberry Pi bundle;
-- produce Windows NUC bundle.
+- produce the Linux bundle;
+- produce the Windows bundle.
 
 Do not assume deployment when the user only asked for packaging.
 
@@ -639,9 +639,6 @@ run the appropriate release build when practical.
 
 Examples:
 
-Rust:
-`cargo build --release`
-
 Frontend:
 production build command
 
@@ -761,8 +758,8 @@ Identify supported shipping targets relevant to the release.
 
 Examples:
 
-- Windows NUC;
-- Raspberry Pi/Linux;
+- Windows;
+- Linux;
 - browser/frontend;
 - development workstation.
 
@@ -783,7 +780,7 @@ Possible evidence may include:
 - prior target build;
 - static inspection.
 
-Do not pretend Windows build success proves Raspberry Pi runtime behavior.
+Do not pretend Windows build success proves Linux runtime behavior.
 
 ---
 
@@ -868,7 +865,7 @@ For releases with meaningful persistent-data risk, inspect recovery readiness.
 
 Examples:
 
-- SQLite backup;
+- database backup;
 - migration backup;
 - rollback package;
 - known-good binary;
@@ -904,23 +901,6 @@ UNKNOWN may block high-risk production delivery.
 
 ---
 
-# SQLite Release Considerations
-
-For SQLite deployments consider as relevant:
-
-- migration sequencing;
-- WAL files;
-- backup consistency;
-- application shutdown requirements;
-- checkpoint behavior;
-- file permissions;
-- DB path;
-- version compatibility.
-
-Do not copy a live SQLite database casually as a "backup" without considering consistency.
-
----
-
 # Service Deployment Readiness
 
 For supervised services inspect as relevant:
@@ -939,17 +919,16 @@ Do not change service configuration during Ship unless it is already approved re
 
 ---
 
-# Raspberry Pi Readiness
+# Linux Readiness
 
-For Raspberry Pi deployment consider:
+For Linux deployment consider:
 
 - architecture;
 - executable compatibility;
 - filesystem paths;
-- USB permissions;
 - service account;
 - device access;
-- SQLite path/permissions;
+- database path/permissions;
 - restart policy;
 - backup destination.
 
@@ -957,7 +936,7 @@ Do not claim hardware readiness without target evidence when hardware behavior i
 
 ---
 
-# Windows NUC Readiness
+# Windows Readiness
 
 For Windows deployment consider:
 
@@ -965,8 +944,7 @@ For Windows deployment consider:
 - service/task startup;
 - paths;
 - permissions;
-- USB reader access;
-- SQLite location;
+- database location;
 - backup;
 - log location.
 

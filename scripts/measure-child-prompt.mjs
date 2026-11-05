@@ -40,7 +40,7 @@ const countOf = (text, needle) => text.split(needle).length - 1;
 const MARKERS = {
 	shellSyntaxHeading: "## Shell syntax",
 	artifactPlacementHeading: "## Artifact placement",
-	relocationSafety: "Do not move live SQLite",
+	relocationSafety: "Do not move live database files",
 	noAutomaticGraphBuild: "Missing graphs never authorize a fresh graph build",
 	codeNavigationHeading: "## Code navigation integrations",
 	candidateNavigationHeading: "## Candidate navigation and shared retrieval",

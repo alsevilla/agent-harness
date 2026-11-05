@@ -74,11 +74,11 @@ test("shared code-leaf guidance specifies artifact placement and missing-path ha
   assert.match(CORE_GUIDANCE, /return.*main.*missing/i);
   assert.match(CORE_GUIDANCE, /report.*artifact paths.*handoff/i);
 });
-test("shared guidance treats live SQLite and running executables as relocation blockers", () => {
-  assert.match(CORE_GUIDANCE, /SQLite.*-wal.*-shm/i);
+test("shared guidance treats live database files and running executables as relocation blockers", () => {
+  assert.match(CORE_GUIDANCE, /live database files \(with their journal or WAL sidecars\)/i);
   assert.match(CORE_GUIDANCE, /running executable/i);
   assert.match(CORE_GUIDANCE, /verify processes have stopped before relocating/i);
-  assert.match(CORE_GUIDANCE, /Restart only with verified DB_PATH[\s\S]*otherwise leave services stopped/i);
+  assert.match(CORE_GUIDANCE, /Restart only with a verified database path[\s\S]*otherwise leave services stopped/i);
 });
 test("worktree policy permits safe relocation without a known restart configuration", () => {
   const paths = ["../../../skills/engineering-harness/references/policy-detail.md", "../README.md", "../../../skills/engineering-harness/worktree/index.md"];

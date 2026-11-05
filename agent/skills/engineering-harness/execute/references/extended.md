@@ -191,7 +191,7 @@ Examples:
 
 "Use option A for Decision 1."
 
-"Keep physical secondary taps as SECONDARY_OUT."
+"Keep the existing status names unchanged."
 
 "Go with the recommendations for Decisions 1 through 3."
 
@@ -1339,10 +1339,10 @@ Reconsult a specialist when implementation reveals a domain question the Plan di
 
 Examples:
 
-- unexpected SQLite locking behavior;
+- unexpected database locking behavior;
 - newly discovered race;
 - security boundary ambiguity;
-- USB lifecycle behavior contradicts assumptions.
+- device or platform behavior contradicts assumptions.
 
 Ask a specific question.
 
@@ -1579,7 +1579,7 @@ Report what was actually verified.
 
 Examples:
 
-"rustfmt is available, but repository-wide `cargo fmt --check` fails because of pre-existing formatting drift."
+"The formatter is available, but the repository-wide format check fails because of pre-existing formatting drift."
 
 or:
 

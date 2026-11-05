@@ -20,12 +20,12 @@ Specialists are conditional. Do not summon a specialist merely because code touc
 
 Typical ownership:
 - Database implementation (SQL/schema/migrations/transactions/queries/indexes/ORM/repositories/data access and DB tests) -> `database-worker`; unresolved material database invariants/semantics -> `database-specialist`
-- Tokio/races/backpressure/shutdown -> `concurrency-specialist`
+- async tasks/races/backpressure/shutdown -> `concurrency-specialist`
 - auth/secrets/trust/privilege -> `security-specialist`
 - public/typed API contract -> `api-specialist`
 - subsystem boundaries/major tradeoffs -> `architecture-specialist`
 - measured performance/overload -> `performance-specialist`
-- device protocol/physical I/O, domain state machines, event ordering, provider delivery semantics or personal-data policy -> a project-local domain specialist when the project defines one (not part of this generic profile); otherwise return the decision to main
+- domain state machines, event ordering or personal-data policy -> a project-local domain specialist when the project defines one (not part of this generic profile); otherwise return the decision to main
 - deployment/service/backups -> `devops-specialist`
 - logs/metrics/health/audit -> `observability-specialist`
 - UX/design judgment -> `ui-ux-specialist`
@@ -34,7 +34,7 @@ One specialist is preferred. Multiple specialists require distinct unresolved qu
 
 Use project-local domain specialists, when the project defines them, only when a material business/event/provider/privacy decision is unresolved; skip them when the task is implementation against a confirmed contract or the uncertainty belongs to another discipline. Specialists are read-only advisors, not an automatic phase or implementation gate. Their self-contained packet should name the exact unresolved question, candidate/evidence paths, known constraints, relevant scope, forbidden assumptions and requested decision/evidence. The handoff should separate confirmed facts, options/tradeoffs, boundary examples, acceptance evidence and explicit open questions; return unresolved business, legal, privacy, consent, provider or retention policy to main rather than inventing it.
 
-Keep adjacent ownership distinct: device protocol and physical I/O -> the project's device owner, when defined; database implementation -> `database-worker`, with unresolved material invariants/semantics analyzed by `database-specialist`; Tokio task/queue/race/shutdown behavior -> `concurrency-specialist`; auth, secrets and access control -> `security-specialist`; API/provider contract -> `api-specialist`; deployment, service and backup operations -> `devops-specialist`. A domain specialist may describe implications but does not decide those implementation/operational contracts. Main assigns file seams and one writer for mixed tasks; no automatic specialist/worker chain.
+Keep adjacent ownership distinct: database implementation -> `database-worker`, with unresolved material invariants/semantics analyzed by `database-specialist`; async task/queue/race/shutdown behavior -> `concurrency-specialist`; auth, secrets and access control -> `security-specialist`; API/provider contract -> `api-specialist`; deployment, service and backup operations -> `devops-specialist`. A domain specialist may describe implications but does not decide those implementation/operational contracts. Main assigns file seams and one writer for mixed tasks; no automatic specialist/worker chain.
 
 ## Frontend
 If the task requires a real design/UX decision, use `ui-ux-specialist` before `frontend-worker`.

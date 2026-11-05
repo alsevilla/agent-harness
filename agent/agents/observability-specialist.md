@@ -44,8 +44,8 @@ When a task requires an unresolved decision about what must be logged, measured,
 - Queues: pending, failed and retry counts, oldest pending job, processing latency, permanent failures.
 - Hardware: reader connected/disconnected, last successful read, repeated device errors, reconnect attempts.
 - Databases: connection failures, lock/busy frequency, transaction failures, backup status, storage capacity where available.
-- Axum/Tokio/SQLx/SQLite, when justified: API request count, status/error class, latency distribution, rejected/overloaded requests; SQLx/SQLite connection acquisition latency and timeout/failure, transaction latency/failure, busy/locked frequency, migration/version status, WAL/checkpoint/storage signals where available; worker/queue depth, oldest pending age, enqueue/reject count, processing latency, retry count, permanent failures, active worker count, shutdown drain duration.
-- Load tests: request and rejection rate, p50/p95/p99 latency, queue depth and oldest-item age, worker active count and processing latency, DB pool acquisition latency, transaction/query latency, SQLite busy/locked frequency, retry and permanent-failure counts, shutdown drain duration, restart recovery progress, external dependency latency/error rate.
+- Backend services, when justified: API request count, status/error class, latency distribution, rejected/overloaded requests; DB connection acquisition latency and timeout/failure, transaction latency/failure, lock/busy frequency, migration/version status, storage signals where available; worker/queue depth, oldest pending age, enqueue/reject count, processing latency, retry count, permanent failures, active worker count, shutdown drain duration.
+- Load tests: request and rejection rate, p50/p95/p99 latency, queue depth and oldest-item age, worker active count and processing latency, DB pool acquisition latency, transaction/query latency, DB lock/busy frequency, retry and permanent-failure counts, shutdown drain duration, restart recovery progress, external dependency latency/error rate.
 
 ## Common failures
 

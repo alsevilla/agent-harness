@@ -169,7 +169,7 @@ const PROOF = {
 	exactPr: "naming the exact PR and the approved candidate HEAD SHA",
 	fingerprint: "bound to the verified candidate fingerprint",
 	singleUse: "single-use operation grants never carry merge or release authority",
-	downtime: "obtain authorized downtime, stop owning processes and preserve SQLite sidecars",
+	downtime: "obtain authorized downtime, stop owning processes and preserve database sidecar files",
 	unknownRestart: "Unknown restart configuration does not block an otherwise authorized relocation",
 	stayStopped: "leave services stopped until the restart executable, environment and DB path are verified",
 	freshCount: "a new distinct failure starts a fresh count",
@@ -315,7 +315,7 @@ test("assembled child prompts keep the existing shared guidance and gain the con
 		const body = toLf(fs.readFileSync(path.join(agentsDir, name), "utf8")).replace(/^---\n[\s\S]*?\n---\n/, "");
 		const prompt = assembleChildSystemPrompt({ name: name.replace(/\.md$/, ""), systemPrompt: body }, { codeIntegrationsEnabled: false, cwd: os.tmpdir(), packageRoot: null });
 		const effective = prompt + "\n" + COMPACT_LEAF_CONTRACT;
-		for (const phrase of ["## Shell syntax", "## Artifact placement", "Do not move live SQLite", "## Final handoff to main", "Never launch helpers or agents", "Readiness never grants commit", "an earlier approval", "references/git-attribution.md", "Keep active or dirty worktrees"]) {
+		for (const phrase of ["## Shell syntax", "## Artifact placement", "Do not move live database files", "## Final handoff to main", "Never launch helpers or agents", "Readiness never grants commit", "an earlier approval", "references/git-attribution.md", "Keep active or dirty worktrees"]) {
 			assert.ok(effective.includes(phrase), `${name}: ${phrase}`);
 		}
 		assert.equal(effective.split("# Pi leaf contract").length - 1, 1);

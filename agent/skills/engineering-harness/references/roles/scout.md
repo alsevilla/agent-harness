@@ -185,7 +185,7 @@ Recommend `database-specialist` only for material unresolved database semantics;
 Recommend `concurrency-specialist` for:
 
 - shared state;
-- Tokio tasks;
+- async tasks;
 - channels;
 - simultaneous processing;
 - ordering assumptions;
@@ -227,15 +227,14 @@ domain contract is already settled, recommend the worker directly.
 
 Recommend `concurrency-specialist` for:
 
-- USB;
 - field-device readers;
 - serial/HID;
 - device lifecycle.
 
 Recommend `devops-specialist` for:
 
-- Raspberry Pi/Linux deployment;
-- Windows NUC deployment;
+- Linux deployment;
+- Windows deployment;
 - services;
 - production configuration;
 - backup/recovery.
@@ -443,25 +442,22 @@ If SolidJS semantics are material, recommend `frontend-worker` +
 ### Backend
 
 Look for:
-- Rust edition/toolchain and Axum/Tokio/SQLx versions;
+- language toolchain and framework/runtime versions;
 - app/router state pattern;
 - middleware layers;
 - error/response types;
 - service/domain boundaries;
 - background tasks/channels;
 - shutdown/cancellation handling;
-- SQLx pool/connect options;
-- SQLite pragmas/WAL setup;
+- database pool/connect options and engine settings;
 - schema/migrations/indexes;
 - load/benchmark utilities;
 - tracing/metrics;
 - load/resilience tooling such as k6/oha/benchmarks/fault-injection fixtures;
 - existing capacity/SLO/load-test documentation.
 
-If backend server implementation is material, recommend `backend-worker`;
-add `rust-axum-engineering` only for a Rust/Axum stack.
+If backend server implementation is material, recommend `backend-worker`.
 
-If SQLite/SQLx-specific semantics are materially unresolved, recommend `database-specialist` +
-`sqlite-sqlx-engineering`.
+If database semantics are materially unresolved, recommend `database-specialist`.
 
 Inventory before invention.

@@ -1212,10 +1212,10 @@ verify platform-specific behavior proportionally to risk.
 
 For example:
 
-- Raspberry Pi/Linux;
-- Windows NUC/Windows.
+- Linux;
+- Windows.
 
-Shared Rust logic passing on Windows does not prove platform-specific Linux behavior.
+Shared logic passing on Windows does not prove platform-specific Linux behavior.
 
 If the changed behavior is platform-independent pure logic, say so explicitly rather than claiming both platforms were tested.
 
@@ -1256,11 +1256,6 @@ HIGH/CRITICAL changes normally warrant broad regression unless impractical.
 Run relevant non-writing checks.
 
 Examples:
-
-Rust:
-
-cargo check
-cargo test
 
 Frontend:
 
@@ -1342,29 +1337,9 @@ Do not assume worktree separation implies build-cache separation.
 
 ---
 
-# Rust CARGO_TARGET_DIR Isolation
-
-For alternate-state Rust testing:
-
-use a unique temporary target directory.
-
-Conceptually:
-
-CARGO_TARGET_DIR=<unique-temp-target> cargo test ...
-
-The baseline/alternate build must not share compiled artifacts with the active implementation when stale artifacts could affect evidence.
-
-Clean up disposable target directories when appropriate.
-
----
-
 # Primary Build Cache Safety
 
-Do not casually use:
-
-cargo clean
-
-against the user's primary build environment during Verify.
+Do not casually run a broad clean of build output against the user's primary build environment during Verify.
 
 Especially avoid broad cleanup merely to diagnose uncertainty.
 

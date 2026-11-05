@@ -17,7 +17,7 @@ explicit runtime/external-effect authority.
 Prefer:
 - disposable/local environments;
 - isolated test databases;
-- fake/local notification gateways;
+- fake/local external service gateways;
 - bounded scenarios;
 - explicit cleanup.
 
@@ -62,7 +62,7 @@ Track relevant correctness signals such as:
 - oldest queue age;
 - retries;
 - permanent failures;
-- SQLite busy/locked events;
+- database lock/busy events;
 - DB pool acquisition latency;
 - transaction latency;
 - shutdown drain completion;
@@ -75,9 +75,9 @@ For event systems, accepted work must not silently disappear.
 
 Choose a model that matches the real producer.
 
-For device-reader bursts, an **open arrival-rate model** is usually the more
-useful system-capacity test because taps continue arriving even when the server
-slows.
+For producers that keep sending regardless of response time, an **open
+arrival-rate model** is usually the more useful system-capacity test because
+requests continue arriving even when the server slows.
 
 Avoid accidental coordinated omission where the load generator reduces traffic
 simply because responses became slower.
@@ -89,7 +89,7 @@ Document:
 - concurrency/VU limits;
 - dataset/cardinality;
 - request mix;
-- reader/source distribution;
+- client/source distribution;
 - think time, if any;
 - expected vs overload scenario.
 
@@ -154,7 +154,7 @@ Observe:
 
 ### 7. Dependency failure
 
-For network dependencies such as a notification gateway, inject controlled:
+For network dependencies such as an external gateway, inject controlled:
 - latency;
 - timeout;
 - disconnect;
@@ -232,17 +232,14 @@ Prefer it for quick smoke/stress checks, not complex multi-step business flows.
 
 ### Criterion / microbenchmarks
 
-Use for pure Rust hot-path microbenchmarks.
+Use for pure hot-path microbenchmarks.
 
-Do not use a microbenchmark as proof of end-to-end Axum/SQLx/SQLite capacity.
+Do not use a microbenchmark as proof of end-to-end service and database capacity.
 
-### Loom / Shuttle
+### Schedule-exploration tools
 
 Use only for concurrency invariants that justify controlled schedule
 exploration.
-
-- Loom: small critical concurrency primitives/invariants.
-- Shuttle: larger randomized concurrency scenarios.
 
 Do not force all async code into these tools.
 
@@ -250,7 +247,7 @@ Do not force all async code into these tools.
 
 Use for external network dependency fault injection when explicitly authorized.
 
-Do not use it for local SQLite file locking.
+Do not use it for local database file locking.
 
 ### Internal failpoints
 
@@ -258,9 +255,9 @@ Test-only failpoints may be useful for hard-to-trigger internal failures.
 
 Adding failpoints is source mutation and must be separately authorized.
 
-## Tower / Backpressure
+## Middleware / Backpressure
 
-When Tower middleware controls concurrency or buffering, verify the **actual
+When middleware controls concurrency or buffering, verify the **actual
 layer order**.
 
 Buffering and concurrency limits are not interchangeable:
@@ -271,29 +268,29 @@ Buffering and concurrency limits are not interchangeable:
 If load shedding is used, verify:
 - overload rejection behavior;
 - returned status/error mapping;
-- reader/client retry expectations;
+- client retry expectations;
 - recovery after capacity returns.
 
 Do not solve overload by creating an arbitrarily large queue.
 
-## SQLite / SQLx Under Load
+## Database Under Load
 
 Remember:
-- WAL improves read/write concurrency but SQLite still serializes writers;
-- busy timeout is waiting policy, not a correctness guarantee;
+- check how the actual engine serializes writers;
+- a lock or busy timeout is waiting policy, not a correctness guarantee;
 - retries must be bounded and safe;
 - pool size is not a throughput knob by itself.
 
 Measure:
 - pool acquire latency;
 - transaction latency;
-- busy/locked frequency;
+- lock/busy frequency;
 - queue delay before DB work;
 - write duration;
 - retry count;
 - important query latency.
 
-Use a disposable real SQLite file for contention evidence rather than mocks.
+Use a disposable real database for contention evidence rather than mocks.
 
 ## Pass / Fail Contract
 
@@ -326,7 +323,7 @@ This skill may be used by:
 - `test-engineer` — independent scenario execution/verdict;
 - `performance-specialist` — workload modeling and bottleneck measurement;
 - `concurrency-specialist` — backpressure/task/channel/cancellation analysis;
-- `database-specialist` — material unresolved SQLite contention/WAL/pool/transaction semantics (SQLite/SQLx only); `database-worker` — authorized database implementation;
+- `database-specialist` — material unresolved contention/pool/transaction semantics; `database-worker` — authorized database implementation;
 - `observability-specialist` — required runtime signals;
 - `reviewer` — challenge unsupported capacity/resilience claims.
 

@@ -709,7 +709,7 @@ Source-worktree isolation and build-output isolation are separate
 decisions.
 
 Do not establish a universal rule that every worktree requires a unique
-build directory or `CARGO_TARGET_DIR`.
+build output folder.
 
 Use separate build-output isolation only when justified by:
 
@@ -725,9 +725,8 @@ evidence.
 
 Examples include:
 
--   build outputs locked by a concurrently running executable (for example,
-    a Windows Rust binary using a shared Cargo target directory);
--   SQLite databases;
+-   build outputs locked by a concurrently running executable;
+-   local database files;
 -   queues;
 -   uploaded files;
 -   generated mutable fixtures;
@@ -1389,7 +1388,7 @@ If a critical answer is unknown, stop rather than guessing.
 17. Clean checkout does not by itself prove evidence relevance.
 18. Build-output isolation and source-worktree isolation are separate
     decisions.
-19. No universal unique-`CARGO_TARGET_DIR` rule is established.
+19. No universal unique-build-folder rule is established.
 20. Isolation transitions never bypass lifecycle gates.
 21. Strict read-only boundaries propagate into isolation decisions.
 22. Automatic cleanup is mutation and remains subject to the current
@@ -1433,8 +1432,8 @@ Observed multi-agent runtime evidence demonstrated that:
 - delegated activity could mutate/switch the orchestrator checkout;
 - worktree infrastructure placed under the project could appear as untracked
   project content;
-- concurrent Rust builds on Windows could require separate build output when a
-  running executable locks the shared target;
+- concurrent builds on Windows could require separate build output when a
+  running executable locks the shared output folder;
 - recovery helpers such as temporary patch files are mutations, not free
   read-only safety measures.
 

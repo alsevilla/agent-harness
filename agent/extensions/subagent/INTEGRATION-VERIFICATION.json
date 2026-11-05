@@ -5,7 +5,6 @@
   "source": "Local subprocess-argument and extension-handler fixture",
   "testedRoles": [
     "debugger",
-    "rust-worker",
     "reviewer",
     "oracle",
     "statusline-setup"

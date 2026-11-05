@@ -8,7 +8,7 @@ tools: read, search, execute, edit
 Precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` or Serena mutation tools does not disable editing; do not report that it does. Shell access is not a write sandbox.
 
 ## Assigned module
-No domain module is mandatory. Use the explicit assignment packet and repository conventions. Read a skill module only when the packet names it. Do not apply Rust/Axum, SQLite or SolidJS guidance unless the packet names it and the target stack matches.
+No domain module is mandatory. Use the explicit assignment packet and repository conventions. Read a skill module only when the packet names it. Do not apply stack-specific guidance (for example SolidJS) unless the packet names it and the target stack matches.
 
 ## Leaf boundary
 Perform only this assigned role. Never launch/delegate/supervise helpers through subagent, Agent/Task aliases or shell commands. If another role is needed, hand the affected scope back to main, which owns launches, controls, sequencing and delivery. Preserve explicit candidate, authority and project requirements.

@@ -39,7 +39,7 @@
       "name": "backend-worker",
       "headLfSha256": "302848b0fb88377940a683f4a20198d699a1fa91cceee54085821954222c69b2",
       "nativeToolsLine": "tools: read, search, execute, edit",
-      "descriptionLine": "description: Implements authorized backend services, APIs, business logic and non-database backend tests in any language; Rust/Axum guidance applies only when that stack applies. Database implementation belongs to database-worker. Not frontend UI or tooling/CLI/extension work.",
+      "descriptionLine": "description: Implements authorized backend services, APIs, business logic and non-database backend tests in any language. Database implementation belongs to database-worker. Not frontend UI or tooling/CLI/extension work.",
       "removed": [
         "model: claude-sonnet-5.5",
         "metadata:",
@@ -55,7 +55,7 @@
       "name": "concurrency-specialist",
       "headLfSha256": "c0257bb5d0a3c4c554c2c0515cc47b36cc3234b7546f5e0097b1519f040dfcfc",
       "nativeToolsLine": "tools: read, search, execute",
-      "descriptionLine": "description: Read-only Rust/Tokio concurrency specialist for task ownership, channels, shared state, locking, races, backpressure, cancellation, graceful shutdown, retries, duplicate processing, and overload correctness.",
+      "descriptionLine": "description: Read-only concurrency specialist for task ownership, channels, shared state, locking, races, backpressure, cancellation, graceful shutdown, retries, duplicate processing, and overload correctness.",
       "removed": [
         "model: gpt-6.1-sol",
         "metadata:",
@@ -119,7 +119,7 @@
       "name": "devops-specialist",
       "headLfSha256": "d298ebdf6261996cac69754b4e186875b177bc509281789a03e4d7b45691ff35",
       "nativeToolsLine": "tools: read, search, execute",
-      "descriptionLine": "description: Read-only cross-platform deployment and operations specialist for Raspberry Pi/Linux and Windows NUC systems, including systemd, Windows Services, process supervision, configuration, backups, upgrades, rollback, permissions, storage, and production reliability.",
+      "descriptionLine": "description: Read-only cross-platform deployment and operations specialist for Linux and Windows systems, including systemd, Windows Services, process supervision, configuration, backups, upgrades, rollback, permissions, storage, and production reliability.",
       "removed": [
         "model: claude-sonnet-5.5",
         "metadata:",
