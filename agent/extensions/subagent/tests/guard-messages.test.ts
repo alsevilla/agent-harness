@@ -21,7 +21,10 @@ test("block messages name the rule, digest, program and grantability, never the 
 	assert.match(r, /^Blocked by harness safety guard \[DESTRUCTIVE_FS\] op [0-9a-f]{16}: rm; grantable: /);
 	assert.match(r, /request_authorization; the approval must name this folder and the exact command text/);
 	assert.ok(!r.includes("build-secret-abc123"), "no argument echo");
-	assert.match(reason(child, "git push origin feat/x"), /git push; grantable: a worker receives only grants requested for its role and this folder before it was launched/);
+	const pushReason = reason(child, "git push origin feat/x");
+	assert.match(pushReason, /git push; grantable: a worker receives only grants requested for its role and its launch folder before it was launched/);
+	// Field report: main re-requested a grant for the session folder while the worker ran elsewhere; the message names the folder to request it for.
+	assert.ok(pushReason.includes(`ask main to request one with role and cwd ${cwd} and relaunch the worker in that folder`), pushReason);
 });
 
 test("non-grantable rules say so and give the next step", () => {

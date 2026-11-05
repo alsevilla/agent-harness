@@ -2,18 +2,15 @@
 
 | Claude setting | Pi equivalent in this profile |
 |---|---|
-| PreToolUse: Serena remind | Installed @bacnh85/pi-serena injects Serena-first guidance before agent work. Its optional strict checks run on tool_call. Strict mode was not enabled. |
-| PreToolUse: Serena auto-approve | No Claude permission classifier to approve in Pi. The Claude hook is not called. Other installed Pi permission extensions, if any, keep their own behavior. |
-| SessionStart: Serena activate | config.json sets SERENA_EAGER_STARTUP=1. The installed Serena extension warms its bridge with the current project on session_start. |
-| SessionEnd: Serena cleanup | Installed Serena extension closes its worker on session_shutdown. |
+| Serena hooks (remind, auto-approve, activate, cleanup) | Not mapped. Workers reach Serena through the harness's `serena` skill (`agent/skills/serena`): its server starts on the first query and exits after 30 idle minutes, so no session hook is needed. pi-serena is no longer part of this profile; `SERENA_EAGER_STARTUP` in an older config.json is accepted and ignored. |
 | Four GIT_AUTHOR/GIT_COMMITTER variables | Local index.ts sets them before tools run. Child processes inherit them. No global Git config changes. |
 | CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 | This Claude-specific variable is not copied. The custom subprocess subagent runner disables extension discovery in children and only loads the Claude subscription guard for Anthropic children; it does not load its own subagent extension. Other agent extensions have their own nesting rules. |
 | attribution.commit | Global AGENTS.md instructs authorized commits to include the two requested coauthor trailers once. This is guidance, not automatic commit-message enforcement. |
 | attribution.pr | Global AGENTS.md adds the requested coauthor links and identifies Pi as the generating client. This is guidance, not a PR publication hook. |
 
-Use ordinary pi with normal extension discovery. After changing these files, restart Pi or use /reload. The Serena extension manages activation/cleanup; Claude serena-hooks commands are not duplicated.
+Use ordinary pi with normal extension discovery. After changing these files, restart Pi or use /reload.
 
-Serena tools are available where its extension is loaded (main and any compatible in-process agents). Code subprocess leaves explicitly load Serena and Graphify through subagent/code-integrations.ts and receive role-specific tool allowlists; the environment variables alone do not add tools. Serena bridge health and project activation still depend on its installed Python/backend requirements and were not verified by configuration checks.
+Code subprocess leaves load the serena and Graphify skills through subagent/code-integrations.ts and receive role-specific tool allowlists; the environment variables alone do not add tools. Serena's health depends on its installed Python and language servers (`node agent/skills/serena/scripts/serena.mjs status` reports them).
 
 No credentials or Claude subscription tokens are in these files. Existing model settings, installed packages, MCP choices and Claude settings are preserved.
 

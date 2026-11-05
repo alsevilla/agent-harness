@@ -617,7 +617,7 @@ async function runNodeSuite() {
 
 	// Field report: the live view showed "graphify: no calls observed" while workers were told to query the graph through the skill's
 	// read_graph.py helper, which the old pattern (a graphify command or graphify_* tools) never matched.
-	test("integration counts: the graphify read_graph.py helper, qmd_ and serena_ tools are counted; plain grep is not", () => {
+	test("integration counts: the graphify read_graph.py helper, qmd_ tools and the Serena helper are counted; plain grep is not", () => {
 		const store = new monitor.WorkerStore();
 		const r = store.begin("scout", "map", "m", "low");
 		store.started(r.id);
@@ -625,7 +625,7 @@ async function runNodeSuite() {
 		run("bash", { command: "python3 /agent/skills/graphify/scripts/read_graph.py --graph D:/w/graphify-out/graph.json query --query SmsQueue" });
 		run("powershell", { command: "py C:\\agent\\skills\\graphify\\scripts\\read_graph.py path --from A --to B" });
 		run("qmd_search", { query: "sms provider decision" });
-		run("serena_find_symbol", { name_path: "SmsWorker" });
+		run("powershell", { command: "node \"C:/harness/agent/skills/serena/scripts/serena.mjs\" find SmsWorker backend" });
 		run("grep", { pattern: "sms", path: "backend" });
 		assert.deepEqual([r.integrations.graphify?.calls, r.integrations.qmd?.calls, r.integrations.serena?.calls], [2, 1, 1]);
 	});

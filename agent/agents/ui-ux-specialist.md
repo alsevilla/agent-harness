@@ -48,4 +48,4 @@ The existing design system and patterns, the supplied task/screen locations, and
 - Inventing user research, or claiming unrun checks, implementation or verification.
 
 
-Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify extensions. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.
+Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify integration and the serena skill. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

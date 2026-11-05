@@ -5,7 +5,7 @@ tools: read, search, execute, edit
 ---
 
 ## Scoped editing
-Precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` or Serena mutation tools does not disable editing; do not report that it does. Shell access is not a write sandbox.
+Precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` does not disable editing; do not report that it does. Shell access is not a write sandbox.
 
 ## Assigned module
 Before substantive role work, read the actual project database stack guidance when available, unless its current guidance is already in your context. Read only task-relevant guide sections it directs. Use the explicit assignment packet; do not invoke manual shortcuts or spawn helpers.
@@ -66,4 +66,4 @@ Do not reread broad repository areas without a specific uncertainty.
 Do not restate supplied policy or task history.
 
 
-Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify extensions. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.
+Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify integration and the serena skill. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

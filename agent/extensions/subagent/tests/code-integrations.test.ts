@@ -15,7 +15,7 @@ registerHooks({
     return nextResolve(specifier, context);
   },
 } as never);
-const { assembleChildSystemPrompt, candidateNavigationGuidance, configureCodeIntegrations, CORE_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
+const { assembleChildSystemPrompt, candidateNavigationGuidance, SERENA_SKILL, configureCodeIntegrations, CORE_GUIDANCE, graphReferenceGuidance, packageResourceGuidance, unavailableIntegrationGuidance } = await import("../code-integrations.ts");
 // Controlled fixtures: a nonexistent global graph directory (no host ~/.graphify read), and git checkouts under a temp root removed at the end.
 const EMPTY_GLOBAL = join(tmpdir(), "code-integrations-no-global-graph");
 const fixtureRoot = fs.mkdtempSync(join(tmpdir(), "code-integrations-cwd-"));
@@ -25,8 +25,8 @@ function repoAt(name: string): string {
   fs.mkdirSync(join(dir, ".git"), { recursive: true });
   return dir;
 }
-// Every optional integration launched: Ponytail extension, Serena and QMD tools, Graphify skill (as configureCodeIntegrations emits them).
-const FULL_LAUNCH = ["--extension", "/fx/npm/node_modules/@dietrichgebert/ponytail/pi-extension/index.js", "--extension", "/fx/npm/node_modules/@bacnh85/pi-serena/extensions/index.ts", "--extension", "/fx/qmd/index.ts", "--skill", "/fx/skills/graphify/SKILL.md", "--tools", "read,grep,find,ls,serena_find_symbol,qmd_search"];
+// Every optional integration launched: Ponytail extension, QMD tools, Graphify and serena skills (as configureCodeIntegrations emits them).
+const FULL_LAUNCH = ["--extension", "/fx/npm/node_modules/@dietrichgebert/ponytail/pi-extension/index.js", "--extension", "/fx/qmd/index.ts", "--skill", "/fx/skills/graphify/SKILL.md", "--skill", "/fx/harness/agent/skills/serena/SKILL.md", "--tools", "read,grep,find,ls,qmd_search"];
 function assembled(cwd: string, options: { launchArgs?: string[]; packageRoot?: string | null; enabled?: boolean; name?: string } = {}): string {
   return assembleChildSystemPrompt({ name: options.name ?? "general-worker", systemPrompt: "ROLE BODY" }, { codeIntegrationsEnabled: options.enabled ?? true, cwd, packageRoot: options.packageRoot ?? null, launchArgs: options.launchArgs ?? [], globalGraphDirectory: EMPTY_GLOBAL });
 }
@@ -113,29 +113,29 @@ test("actual read-only scout grants remain unchanged", () => {
 type Present = { ponytailExtension?: boolean; ponytailSkill?: boolean; qmd?: boolean; serena?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean };
 const ponytailExtensionPath = (dir: string) => join(dir, "npm", "node_modules", "@dietrichgebert", "ponytail", "pi-extension", "index.js");
 const ponytailSkillPath = (dir: string) => join(dir, "npm", "node_modules", "@dietrichgebert", "ponytail", "skills", "ponytail-review", "SKILL.md");
-function withAgentDir<T>(present: Present, run: (dir: string, qmdExtension?: string) => T): T {
+function withAgentDir<T>(present: Present, run: (dir: string, qmdExtension?: string, serenaSkill?: string) => T): T {
   const { ponytailExtension = false, ponytailSkill = false, qmd = true, serena = true, graphifyExtension = true, graphifySkill = true } = present;
   const dir = fs.mkdtempSync(join(tmpdir(), "code-integrations-fixture-"));
   const packages = join(dir, "npm", "node_modules");
   const files = [
     ...(ponytailExtension ? [ponytailExtensionPath(dir)] : []),
     ...(ponytailSkill ? [ponytailSkillPath(dir)] : []),
-    ...(serena ? [join(packages, "@bacnh85", "pi-serena", "extensions", "index.ts")] : []),
     ...(graphifyExtension ? [join(packages, "graphify-pi", "extensions", "graphify.ts")] : []),
     ...(graphifySkill ? [join(dir, "skills", "graphify", "SKILL.md")] : []),
   ];
   for (const file of files) { fs.mkdirSync(join(file, ".."), { recursive: true }); fs.writeFileSync(file, ""); }
   const saved = agentDir;
   agentDir = dir;
-  try { return run(dir, qmd ? undefined : join(dir, "qmd-absent", "index.ts")); } finally { agentDir = saved; fs.rmSync(dir, { recursive: true, force: true }); }
+  try { return run(dir, qmd ? undefined : join(dir, "qmd-absent", "index.ts"), serena ? SERENA_SKILL : join(dir, "serena-absent", "SKILL.md")); } finally { agentDir = saved; fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test("reviewer launches with Ponytail absent: normal reviewer integrations and no Ponytail grant", () => {
   withAgentDir({}, () => {
     const args: string[] = [];
     assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
     assert.ok(!args.some(arg => /ponytail/i.test(arg)), args.join(" "));
-    assert.equal(args.filter(arg => arg === "--extension").length, 3, "qmd, serena and graphify extensions");
-    assert.ok(args.includes("--skill"), "graphify skill still loaded");
+    assert.equal(args.filter(arg => arg === "--extension").length, 2, "qmd and graphify extensions; pi-serena is never loaded");
+    assert.ok(args.includes(SERENA_SKILL), "serena skill loaded");
+    assert.ok(!args.some(arg => /pi-serena/i.test(arg)), args.join(" "));
   });
 });
 test("reviewer with Ponytail extension and review skill loads both for supplemental guidance", () => {
@@ -163,7 +163,7 @@ for (const name of ["general-worker", "scout"]) {
     });
   });
 }
-test("reviewer with Serena absent launches with QMD and Graphify, without Serena tools", () => {
+test("reviewer with the serena skill absent launches with QMD and Graphify", () => {
   const run = launch("reviewer", { ponytailExtension: true, ponytailSkill: true, serena: false });
   assert.equal(run.enabled, true);
   assert.equal(loaded.serena(run), false);
@@ -202,9 +202,9 @@ function flagValues(args: string[], flag: string) { return args.flatMap((arg, i)
 function toolsOf(args: string[]) { const index = args.indexOf("--tools"); assert.ok(index >= 0 && args[index + 1], "effective allowlist missing"); return args[index + 1].split(","); }
 // Non-reviewer roles require Ponytail, so the default fixture carries it; a case can still override it.
 function launch(name: string, present: Present = {}, extraTools: string[] = []) {
-  return withAgentDir({ ponytailExtension: true, ...present }, (dir, qmdExtension) => {
+  return withAgentDir({ ponytailExtension: true, ...present }, (dir, qmdExtension, serenaSkill) => {
     const args: string[] = [];
-    const enabled = configureCodeIntegrations(args, role(name), extraTools, qmdExtension);
+    const enabled = configureCodeIntegrations(args, role(name), extraTools, qmdExtension, serenaSkill);
     return { dir, enabled, extensions: flagValues(args, "--extension"), skills: flagValues(args, "--skill"), tools: toolsOf(args) };
   });
 }
@@ -212,12 +212,12 @@ type Run = ReturnType<typeof launch>;
 const loaded = {
   ponytail: (run: Run) => run.extensions.includes(ponytailExtensionPath(run.dir)),
   qmd: (run: Run) => run.extensions.some(file => file.endsWith(join("extensions", "qmd", "index.ts"))),
-  serena: (run: Run) => run.extensions.some(file => file.includes("pi-serena")),
+  serena: (run: Run) => run.skills.includes(SERENA_SKILL),
   graphifyExtension: (run: Run) => run.extensions.some(file => file.endsWith(join("graphify-pi", "extensions", "graphify.ts"))),
-  graphifySkill: (run: Run) => run.skills.length > 0,
+  graphifySkill: (run: Run) => run.skills.some(file => file.endsWith(join("graphify", "SKILL.md"))),
 };
 const integrationFamilies = (tools: string[]) => ["serena_", "qmd_"].filter(prefix => tools.some(tool => tool.startsWith(prefix)));
-test("general-worker with QMD, Serena and Graphify all absent: Ponytail still loaded, ordinary tools only", () => {
+test("general-worker with QMD, serena and Graphify all absent: Ponytail still loaded, ordinary tools only", () => {
   const agent = role("general-worker");
   const run = launch("general-worker", { qmd: false, serena: false, graphifyExtension: false, graphifySkill: false });
   assert.equal(run.enabled, true);
@@ -234,12 +234,12 @@ test("reviewer with Ponytail absent and all three optional integrations absent: 
   assert.deepEqual(sorted(run.tools), sorted(agent.tools));
 });
 const partialCases: [string, Present, Record<keyof typeof loaded, boolean>, string[]][] = [
-  ["Serena absent", { serena: false }, { ponytail: true, qmd: true, serena: false, graphifyExtension: true, graphifySkill: true }, ["qmd_"]],
-  ["QMD absent", { qmd: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: true, graphifySkill: true }, ["serena_"]],
-  ["Graphify extension absent", { graphifyExtension: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: false, graphifySkill: true }, ["serena_", "qmd_"]],
-  ["Graphify skill absent", { graphifySkill: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: false }, ["serena_", "qmd_"]],
-  ["QMD and Serena absent", { qmd: false, serena: false }, { ponytail: true, qmd: false, serena: false, graphifyExtension: true, graphifySkill: true }, []],
-  ["QMD and Graphify skill absent", { qmd: false, graphifySkill: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: true, graphifySkill: false }, ["serena_"]],
+  ["serena absent", { serena: false }, { ponytail: true, qmd: true, serena: false, graphifyExtension: true, graphifySkill: true }, ["qmd_"]],
+  ["QMD absent", { qmd: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: true, graphifySkill: true }, []],
+  ["Graphify extension absent", { graphifyExtension: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: false, graphifySkill: true }, ["qmd_"]],
+  ["Graphify skill absent", { graphifySkill: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: false }, ["qmd_"]],
+  ["QMD and serena absent", { qmd: false, serena: false }, { ponytail: true, qmd: false, serena: false, graphifyExtension: true, graphifySkill: true }, []],
+  ["QMD and Graphify skill absent", { qmd: false, graphifySkill: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: true, graphifySkill: false }, []],
 ];
 for (const [label, present, expected, families] of partialCases) {
   test(`general-worker with ${label}: the other integrations and ordinary tools stay`, () => {
@@ -257,9 +257,9 @@ test("general-worker still fails closed when Ponytail is absent, even with every
   });
 });
 test("unavailable integrations are named with fallback guidance; present ones are not", () => {
-  withAgentDir({ serena: false, graphifySkill: false }, () => {
-    const note = unavailableIntegrationGuidance("general-worker");
-    assert.match(note, /Serena/);
+  withAgentDir({ serena: false, graphifySkill: false }, (_dir, qmdExtension, serenaSkill) => {
+    const note = unavailableIntegrationGuidance("general-worker", qmdExtension, serenaSkill);
+    assert.match(note, /Serena skill/);
     assert.match(note, /Graphify skill/);
     assert.doesNotMatch(note, /QMD/);
     assert.match(note, /read, grep and find/);
@@ -278,13 +278,11 @@ test("shared guidance: a failing integration is reported once, not retried, and 
   assert.match(text, /does not prove the backend is healthy/i);
 });
 // Explicit role allowlists may name integration tools; an omitted integration drops them, while ordinary tools and per-launch grants stay.
-test("explicit integration tool names are omitted with their integration; ordinary tools and grants stay", () => {
+test("explicit integration tool names are omitted with their integration; Serena tools are never granted; ordinary tools and grants stay", () => {
   const explicit = { ...role("general-worker"), tools: ["read", "serena_find_symbol", "qmd_search", "edit"] };
   const cases: [Present, string[], string[]][] = [
-    [{ serena: false, qmd: false }, ["serena_find_symbol", "qmd_search"], []],
-    [{ serena: false }, ["serena_find_symbol"], ["qmd_search"]],
-    [{ qmd: false }, ["qmd_search"], ["serena_find_symbol"]],
-    [{}, [], ["serena_find_symbol", "qmd_search"]],
+    [{ qmd: false }, ["serena_find_symbol", "qmd_search"], []],
+    [{}, ["serena_find_symbol"], ["qmd_search"]],
   ];
   for (const [present, dropped, kept] of cases) {
     withAgentDir({ ponytailExtension: true, ...present }, (_dir, qmdExtension) => {
@@ -348,10 +346,10 @@ test("graph reference keeps candidate scope, no automatic fallback and read-only
     fs.mkdirSync(join(candidate, ".git"), { recursive: true });
     fs.mkdirSync(globalDir, { recursive: true });
     fs.writeFileSync(join(globalDir, "global-graph.json"), "{}");
-    // Candidate scope (Serena project path) is candidate navigation, emitted only when Serena or QMD is launched.
+    // Candidate scope (the Serena helper's root) is candidate navigation, emitted only when that skill or QMD is launched.
     const scope = candidateNavigationGuidance(candidate, true, false);
-    assert.ok(scope.includes("pass project explicitly as " + candidate), "candidate root must be named for Serena calls");
-    assert.match(scope, /Never activate the primary checkout just because it holds the graph/);
+    assert.ok(scope.includes("Run the Serena helper on the candidate: from " + candidate), "candidate root must be named for the helper");
+    assert.match(scope, /Never point it at the primary checkout just because it holds the graph/);
     // Unmatched global corpus (no manifest source_path for this candidate) is not injected at all.
     const none = graphReferenceGuidance(candidate, globalDir);
     assert.equal(none, "", "unmatched global corpus must not be injected");

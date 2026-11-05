@@ -55,8 +55,8 @@ test("only workers load it: the child guard entry wires tool_result and compacti
 });
 
 // "Does a Language Server Save Tokens for Coding Agents?" (2608.13568): named targets are cheaper to read or grep directly.
-test("Serena guidance: read a named file or symbol directly; grep for renames and every occurrence; otherwise Serena before grep or find", () => {
+test("serena guidance: read a small named file or symbol directly; a large source file through the outline; grep for renames; otherwise the helper before grep or find", () => {
 	const source = fs.readFileSync(new URL("../code-integrations.ts", import.meta.url), "utf8");
-	assert.match(source, /When the packet names the file or symbol, read it directly\. Use grep for renames and every textual occurrence: it also finds comments and strings, which symbol references miss\. Otherwise locate code with Serena \(symbol overview, find symbol, references\) before grep or find/);
-	assert.doesNotMatch(source, /Use Serena[^"]*to find every reference or caller/, "language-server references bought precision, not savings, and missed rename sites");
+	assert.match(source, /When the packet names a small file or a symbol, read it directly\. For a large source file \(several hundred lines\), run outline first, then read only the range you need \(or find --body\), instead of reading it whole\. Use grep for renames and every textual occurrence: it also finds comments and strings, which refs skips\. Otherwise locate code with Serena before grep or find/);
+	assert.doesNotMatch(source, /to find every reference or caller/, "language-server references bought precision, not savings, and missed rename sites");
 });

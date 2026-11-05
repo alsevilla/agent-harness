@@ -46,4 +46,4 @@ Before editing: the target, its modules and variables, and its callers.
 - Never print, expose or echo secrets, tokens, kubeconfig contents, state files or connection strings. Reference them by name only, and prefer OIDC federation over stored secrets for workflows and cloud access.
 - Weakening validation to pass a check.
 
-Runtime boundary: this leaf has no subagent tool; the runner explicitly loads role-scoped Serena/Graphify extensions. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.
+Runtime boundary: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify integration and the serena skill. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

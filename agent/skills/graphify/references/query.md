@@ -14,4 +14,4 @@ Matching uses existing IDs/labels with case-insensitive tokens; it does not crea
 
 For a global graph, scope with `--repo <exact-stored-repo-label>` when the assigned question concerns one covered repository. Global coverage must already be established; a label filter does not prove candidate identity. For cross-project questions, explicitly retain each returned repository label. Never dump the full graph, create a vocabulary sidecar, call `save-result`, write a query stamp or update a graph during retrieval.
 
-Check returned paths/claims against the actual candidate source. If the graph lacks the relevant node/path or is stale, say so and use targeted Serena/read/grep within the role's authority.
+Check returned paths/claims against the actual candidate source. If the graph lacks the relevant node/path or is stale, say so and use Serena (the serena skill) or targeted read/grep within the role's authority.
