@@ -71,3 +71,15 @@ test("a launch that receives no approval says why: another folder, another role,
 
 	assert.match(launch(createGrantStore(), "general-worker", folder).run()?.reason ?? "", /This worker was launched with no approved operations\./);
 });
+
+// Field report: a release-engineer's multi-line `git commit -m` was refused with the commit-form rule (correct: use -F) plus "This worker
+// was launched with no approved operations", which suggested an approval the commit never needs. The note now follows only refusals
+// that an approval can unblock.
+test("a commit-form refusal carries no launch note about approvals; a grantable refusal still does", () => {
+	const store = createGrantStore();
+	const commit = 'git commit -m "feat(sms): pace shared sender submissions\n\nAvoid queued SMS bursts.\n\nCo-Authored-By: Claude <noreply@anthropic.com>"';
+	const refused = guardToolCall({ scope: "child", store, agentDir, gateCommits: true }, "bash", { command: commit }, folder) as { reason: string };
+	assert.match(refused.reason, /\[GIT_COMMIT\][^:]*: not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute \.md\/\.txt file>"/);
+	assert.doesNotMatch(refused.reason, /approved operations|At launch/);
+	assert.match(launch(store, "general-worker", folder).run()?.reason ?? "", /This worker was launched with no approved operations\./, "grantable refusals keep it");
+});
