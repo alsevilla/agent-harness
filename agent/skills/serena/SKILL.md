@@ -25,6 +25,8 @@ Project setup: Serena serves a checkout that has `.serena/project.yml`. On first
 
 Fallback: when Serena is not installed, cannot serve the checkout (a worktree without `.serena`, for example) or does not answer, a built-in heuristic parser (`scripts/symbols.mjs`: Rust, TypeScript/JavaScript, Python) answers instead, and the output starts with `[heuristic parser, not Serena: <reason>]`. Treat that answer as a hint and confirm with read or grep.
 
+Any host: it is a plain Node script, not a Pi extension, so it runs the same in Pi workers, in a GitHub Copilot CLI session (which lists this skill through the harness plugin) or by hand. It never fails for lack of Serena: without it, the heuristic parser answers, and the exit code is 0. It does not need or conflict with a Serena MCP server configured in another client.
+
 When not to use it: small files and exact ranges the packet names (read them), literal text, strings, comments, config, docs and renames (grep finds every textual occurrence).
 
 Settings (environment): `HARNESS_SERENA_PYTHON` (the Serena Python, when not found under `uv tool dir`), `HARNESS_SERENA_PORT` (default 24227), `HARNESS_SERENA_TIMEOUT_SECONDS` (per query, default 300), `HARNESS_SERENA_IDLE_SECONDS` (server idle exit, default 1800), `SERENA_HOME` (default `~/.serena`).
