@@ -452,7 +452,7 @@ async function runAgentAttempt(
 			});
 			const client = new RpcWorker(proc, controlPath);
             proc.on("spawn", () => {
-                if (worker) dispatchDefaults.monitor?.store.started(worker.id);
+                if (worker) { worker.ponytail = args.some((arg) => /[\\/]@dietrichgebert[\\/]ponytail[\\/]/.test(arg)); dispatchDefaults.monitor?.store.started(worker.id); }
                 if (client) {
                     void client.send("prompt", "Task: " + task).catch(error => {
                         if (client.closed && currentResult.messages.length) return;
@@ -888,6 +888,8 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 export const MAIN_TOOL_GUIDELINES = [
 	"Call only tools declared in this session: \"Additional tools may be available\" does not make an undeclared tool callable, and codemode is not available unless it is declared.",
 	"To read several files, call read for each one in the same turn (within main's limit of 3 named files), or delegate the reads with the subagent tool; do not wrap reads in a codemode script.",
+	"When the intended structure is known (function signatures, types, module layout), put it in the subagent task packet as a code skeleton beside the expected behavior and checks.",
+	"For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson.",
 ];
 
 export default function (pi: ExtensionAPI) {

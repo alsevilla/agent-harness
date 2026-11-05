@@ -62,3 +62,17 @@ test("main's subagent tool registers the declared-tools rules as prompt guidelin
 	assert.match(index, /codemode is not available unless it is declared/);
 	assert.doesNotMatch(fs.readFileSync(new URL("../safety-guard-entry.ts", import.meta.url), "utf8"), /MAIN_TOOL_GUIDELINES/);
 });
+
+// Skeleton Coding (2610.38214): structure beside tests cut implementation cost 15-26x. Failure memory (2610.41433): the failed transcript
+// helped a retry more than a model-written lesson.
+test("main's packet rules: a code skeleton when the structure is known, and a retry carries the failed REPORT and output as they are", () => {
+	const index = fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+	assert.match(index, /When the intended structure is known \(function signatures, types, module layout\), put it in the subagent task packet as a code skeleton beside the expected behavior and checks/);
+	assert.match(index, /For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson/);
+});
+
+test("the live view marks ponytail from the worker's own launch arguments when it spawns", () => {
+	const index = fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+	assert.match(index, /worker\.ponytail = args\.some\(\(arg\) => \/\[\\\\\/\]@dietrichgebert\[\\\\\/\]ponytail\[\\\\\/\]\/\.test\(arg\)\)/);
+	assert.match(fs.readFileSync(new URL("../monitor.ts", import.meta.url), "utf8"), /r\.ponytail \? \["ponytail: loaded"\] : \[\]/);
+});

@@ -135,6 +135,8 @@ function roleLine(name: string, s: UsageSlice): string {
   return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}${perCompleted(s)}`;
 }
 // Footer status: main's context, settled tasks and cost per completed task. Undefined before anything is known.
+// Main's own context is what degrades an orchestrator (DACS 2604.07911; 'Reasoning Trap', 2606.01351); /reload keeps it, /new clears it.
+export const MAIN_CONTEXT_HINT_TOKENS = 100_000;
 export function usageStatusLine(scope: UsageScope, mainTokens: number | null): string | undefined {
   const all = { ...zeroSlice() };
   for (const slice of [scope.foreground, scope.background]) for (const key of Object.keys(all) as (keyof UsageSlice)[]) all[key] += slice[key];
@@ -144,6 +146,7 @@ export function usageStatusLine(scope: UsageScope, mainTokens: number | null): s
   if (tasks) parts.push(`${tasks} task${tasks === 1 ? "" : "s"}`);
   if (all.completed && all.turns && all.unpricedTurns < all.turns) parts.push(`$${(all.cost / all.completed).toFixed(4)}/completed task`);
   if (scope.running) parts.push(`${scope.running} running`);
+  if (mainTokens !== null && mainTokens >= MAIN_CONTEXT_HINT_TOKENS) parts.push("consider /new");
   return parts.length ? `harness: ${parts.join(" · ")}` : undefined;
 }
 // Main session's current context from the SDK estimate (ctx.getContextUsage().tokens); null when unavailable, never 0.

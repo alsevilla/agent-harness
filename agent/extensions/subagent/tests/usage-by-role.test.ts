@@ -131,4 +131,7 @@ test("footer status line: context, tasks, cost per completed task and running jo
 	run(scope, "backend", true, 100, 10, 0.1, "failed");
 	scope.running = 1;
 	assert.equal(usageStatusLine(scope, 45200), "harness: ctx ~45,200 tok · 2 tasks · $0.4000/completed task · 1 running");
+	assert.equal(usageStatusLine(scope, 99999), "harness: ctx ~99,999 tok · 2 tasks · $0.4000/completed task · 1 running", "below 100k: no hint");
+	assert.equal(usageStatusLine(scope, 100000), "harness: ctx ~100,000 tok · 2 tasks · $0.4000/completed task · 1 running · consider /new", "from 100k main is told to start fresh");
+	assert.equal(usageStatusLine(newUsageScope(), 140000), "harness: ctx ~140,000 tok · consider /new");
 });
