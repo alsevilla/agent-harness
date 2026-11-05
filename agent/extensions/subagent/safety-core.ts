@@ -37,6 +37,7 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ash", "ksh", "csh", "tcsh"
 const POWERSHELLS = new Set(["powershell", "pwsh"]);
 const WRAPPERS = new Set(["env", "command", "nohup", "time", "timeout", "exec", "call", "start", "nice", "xargs"]);
 const DELETE_CMDS = new Set(["rm", "rmdir", "rd", "unlink", "shred", "del", "erase", "rimraf", "remove-item", "ri"]);
+const PS_DELETE_NAMES = new Set(["remove-item", "ri", "rm", "del", "erase", "rd", "rmdir"]);
 const PRIVILEGE_CMDS = new Set(["sudo", "runas", "schtasks", "reg", "setx", "crontab", "icacls", "takeown", "chmod", "chown", "register-scheduledtask", "new-scheduledtask"]);
 const PROC_CMDS = new Set(["kill", "killall", "pkill", "taskkill", "stop-process"]);
 const WRITE_CMDS = new Set(["cp", "copy", "mv", "move", "tee", "set-content", "out-file", "add-content", "copy-item", "move-item", "sed", "new-item"]);
@@ -45,6 +46,22 @@ const SECRET_BASENAME = /^(auth\.json|\.npmrc|\.netrc|\.pypirc|\.git-credentials
 const SECRET_SAFE_NAMES = new Set([".env.example", ".env.sample", ".env.template"]);
 const SECRET_DIRS = new Set([".ssh", ".aws", ".gnupg"]);
 const CREDENTIAL_TEXT = /(token|password|secret|api[_-]?key|authorization)\s*[=:]|_authtoken|\bBearer\s+\S+|\b(sk-|ghp_|github_pat_|xox[bp]-|AKIA[0-9A-Z]{16})|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
+// Field report (op c058ffddb7a0f93c): an approved isolated preview set a disposable admin password generated at runtime
+// ($env:ADMIN_PASSWORD = [guid]::NewGuid()), and every command naming a password was refused as credential-like. A credential
+// assignment whose value is computed when the command runs carries no secret in its text, so it can be shown and approved; a literal
+// value, a Bearer token, a known key prefix or a private key cannot.
+const CREDENTIAL_ASSIGN = /(token|password|secret|api[_-]?key|authorization)\s*[=:]\s*/gi;
+const ALWAYS_CREDENTIAL = /_authtoken|\bBearer\s+\S+|\b(sk-|ghp_|github_pat_|xox[bp]-|AKIA[0-9A-Z]{16})|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
+const RUNTIME_VALUE = /^(\[[A-Za-z_][\w.]*\]::|\$\(|\$[A-Za-z_{]|\(|-join\b|(Get-Random|New-Guid|ConvertTo-SecureString|openssl\s+rand|uuidgen|node\s+-e)\b)/i;
+/** True when the text embeds a credential literal (not one computed at runtime), so it must not be shown in an approval or stored in a grant. */
+export function literalCredential(text: string): boolean {
+	if (ALWAYS_CREDENTIAL.test(text)) return true;
+	for (const m of text.matchAll(CREDENTIAL_ASSIGN)) {
+		const rest = text.slice((m.index ?? 0) + m[0].length);
+		if (!RUNTIME_VALUE.test(rest)) return true;
+	}
+	return false;
+}
 
 type Token = { text: string; op: boolean };
 
@@ -374,6 +391,11 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 		if (sub === "config" && lower.some((a) => a.includes("_authtoken") || a.startsWith("//"))) add(out, "PKG_PUBLISH_AUTH");
 		return;
 	}
+	// PowerShell providers that are not the filesystem: Remove-Item Env:NAME clears a process variable, not a file.
+	if (DELETE_CMDS.has(name) && PS_DELETE_NAMES.has(name)) {
+		const targets = args.filter((a, i) => !a.startsWith("-") && !/^-(?:ErrorAction|ea|WarningAction|wa)$/i.test(args[i - 1] ?? ""));
+		if (targets.length && targets.every((a) => /^(env|variable|function|alias):/i.test(a))) return;
+	}
 	if (DELETE_CMDS.has(name)) {
 		// A delete whose target is a variable, substitution, glob at a root, or a root, home or current/parent folder can remove far more
 		// than intended (rm -rf $DIR/ with an empty DIR is rm -rf /). No approval makes that safe, so it is PATH_AMBIGUOUS, never grantable.
@@ -536,7 +558,7 @@ const UNSAFE_DISPLAY = /[\p{Cf}\p{Zl}\p{Zp}\u0000-\u0008\u000b-\u001f\u007f-\u00
 function assertDisplayable(text: string): void {
 	if (text.length > MAX_OP_CHARS) throw new RangeError(`operation text exceeds ${MAX_OP_CHARS} characters`);
 	if (UNSAFE_DISPLAY.test(text)) throw new RangeError("invisible, bidi, line-separator or control characters are not authorizable");
-	if (CREDENTIAL_TEXT.test(text)) throw new RangeError("credential-like text is not authorizable; use the operator out-of-band");
+	if (literalCredential(text)) throw new RangeError("credential-like literal text is not authorizable: generate the value when the command runs (for example $env:NAME = [guid]::NewGuid().ToString()) or have the operator run it out-of-band");
 }
 
 function validateOp(op: GuardOp): void {
@@ -2223,7 +2245,10 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
 	}
 	const advice = decision.rules.map((r) => RULE_ADVICE[r]).filter(Boolean);
-	const how = !decision.grantable
+	const credential = decision.grantable && decision.op.kind === "shell" && literalCredential(decision.op.command);
+	const how = credential
+		? "not approvable as written: the command text carries a credential-like literal, which an approval cannot show or store; generate the value when the command runs (for example $env:NAME = [guid]::NewGuid().ToString()) and request approval for that text, or have the operator run it directly"
+		: !decision.grantable
 		? "not grantable: no approval unblocks this for an agent; the operator can run it directly"
 		: scope === "main"
 			? "grantable: the operator can approve this exact operation with request_authorization; the approval must name this folder and the exact command text, and is used once"
