@@ -12,7 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { BackgroundWorkers, formatUsageSummary, LogicalUsage, mainContextTokens, usageStatusLine, RpcWorker, type UsageScope } from "./background.ts";
+import { BackgroundWorkers, formatUsageSummary, LogicalUsage, mainContextTokens, RpcWorker, type UsageScope } from "./background.ts";
 import { WorkerMonitor } from "./monitor.ts";
 import { acquireWorkspace, releaseWorkspace, WorkspaceAdmissionError, type WorkspaceAccess, type WorkspaceLease } from "./workspace-admission.ts";
 import { spawn } from "node:child_process";
@@ -903,10 +903,6 @@ export default function (pi: ExtensionAPI) {
 	registerHandoffWindow(pi, process.env, () => runtimeRef ? stateCard(runtimeRef.list(), runtimeRef.epoch, decisionsRef?.list().filter((d) => d.state === "announced" || d.state === "open").length ?? 0, runtimeRef.stoppedEarlier) : undefined);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
-	// Footer status after each main turn (interactive UI only): context, tasks, cost per completed task, running jobs.
-	pi.on("agent_settled", (_event, ctx: any) => {
-		try { if (ctx?.hasUI && runtimeRef) ctx.ui?.setStatus?.("harness-usage", usageStatusLine(runtimeRef.usage, mainContextTokens(ctx))); } catch { /* status is cosmetic */ }
-	});
 	pi.on("agent_settled", (event) => {
 		if (!event.aborted) return;
 		safetyGrants.revokeAll();

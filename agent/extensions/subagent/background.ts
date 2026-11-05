@@ -156,28 +156,16 @@ function requestNote(sizes?: RequestSizes): string {
   if (!sizes?.peak) return "";
   return `; peak request ${sizes.peak.toLocaleString("en-US")} tok${sizes.long ? `, ${plural(sizes.long, "request")} over ${LONG_REQUEST_TOKENS.toLocaleString("en-US")}` : ""}`;
 }
-// Footer status: main's context, settled tasks and cost per completed task. Undefined before anything is known.
 // Main's own context is what degrades an orchestrator (DACS 2604.07911; 'Reasoning Trap', 2606.01351); /reload keeps it, /new clears it.
+// The footer that used to carry this hint was removed: /subagent usage shows it on its Main context line.
 export const MAIN_CONTEXT_HINT_TOKENS = 100_000;
-export function usageStatusLine(scope: UsageScope, mainTokens: number | null): string | undefined {
-  const all = { ...zeroSlice() };
-  for (const slice of [scope.foreground, scope.background]) for (const key of Object.keys(all) as (keyof UsageSlice)[]) all[key] += slice[key];
-  const tasks = all.completed + all.failed + all.aborted;
-  const parts: string[] = [];
-  if (mainTokens !== null) parts.push(`ctx ~${mainTokens.toLocaleString("en-US")} tok`);
-  if (tasks) parts.push(`${tasks} task${tasks === 1 ? "" : "s"}`);
-  if (all.completed && all.turns && all.unpricedTurns < all.turns) parts.push(`$${(all.cost / all.completed).toFixed(4)}/completed task`);
-  if (scope.running) parts.push(`${scope.running} running`);
-  if (mainTokens !== null && mainTokens >= MAIN_CONTEXT_HINT_TOKENS) parts.push("consider /new");
-  return parts.length ? `harness: ${parts.join(" · ")}` : undefined;
-}
 // Main session's current context from the SDK estimate (ctx.getContextUsage().tokens); null when unavailable, never 0.
 export function mainContextTokens(ctx: { getContextUsage?: () => { tokens?: unknown } | undefined }): number | null {
   let tokens: unknown;
   try { tokens = ctx.getContextUsage?.()?.tokens; } catch { tokens = undefined; }
   return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? Math.round(tokens) : null;
 }
-const mainContextLine = (tokens: number | null) => `Main context: ${tokens === null ? "unknown" : `~${tokens.toLocaleString("en-US")} tokens (SDK estimate)`}`;
+const mainContextLine = (tokens: number | null) => `Main context: ${tokens === null ? "unknown" : `~${tokens.toLocaleString("en-US")} tokens (SDK estimate)${tokens >= MAIN_CONTEXT_HINT_TOKENS ? "; consider /new once nothing is running (/reload keeps this history)" : ""}`}`;
 // Plain text for /subagent usage: fixed labels, numeric aggregates only. The main-context line is added only when the caller passes a reading.
 export function formatUsageSummary(scope: UsageScope, mainContext?: number | null): string {
   const text = usageBody(scope);
