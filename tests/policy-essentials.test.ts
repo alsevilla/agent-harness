@@ -55,3 +55,16 @@ test("release-engineer cleanup never forces a worktree removal in routine mode",
 	assert.match(text, /git worktree remove/);
 	assert.match(text, /(?:without|no)\s+`?--force`?/);
 });
+
+// Field report: a project that keeps local notes in a repo-root /local-knowledge/ (outside docs/, which QMD indexes) got LEARN BLOCKED
+// on docs/knowledge/local/, and the post-merge cleanup then kept _scratch and _evidence.
+test("LEARN saves to the local store the project documents, and the merge approval names the artifact directory", () => {
+	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md"]) {
+		const text = flat(read(file));
+		assert.ok(text.includes("the git-ignored local-notes folder the project documents"), file);
+		assert.ok(text.includes("only when the project names none, `docs/knowledge/local/`"), file);
+		assert.ok(text.includes("`git check-ignore` confirms the existing ignore rule covers it, create exactly that folder"), file);
+		assert.ok(text.includes("never edit `.gitignore`"), file);
+	}
+	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("a merge approved without one cleans nothing"));
+});
