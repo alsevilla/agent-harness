@@ -137,7 +137,7 @@ export function maskedLine(tool: string, label: string, length: number): string 
 }
 
 /** Returns a new message list with older large read/bash/grep/find/ls outputs masked, or undefined when nothing changes. Never mutates its input. */
-export function maskToolOutputs<T extends Message>(messages: readonly T[], window: number, batched = true): T[] | undefined {
+export function maskToolOutputs<T extends Message>(messages: readonly T[], window: number, batched = true, minChars = MASK_MIN): T[] | undefined {
 	if (!(window > 0)) return undefined;
 	const calls = new Map<string, any>();
 	for (const m of messages) if (m?.role === "assistant" && Array.isArray(m.content)) for (const part of m.content as any[]) if (part?.type === "toolCall" && typeof part.id === "string") calls.set(part.id, part.arguments);
@@ -145,7 +145,7 @@ export function maskToolOutputs<T extends Message>(messages: readonly T[], windo
 	messages.forEach((m, index) => {
 		if (m?.role !== "toolResult" || m.isError || !MASK_TOOLS.has(String(m.toolName))) return;
 		const text = textOf(m.content);
-		if (text === undefined || text.length < MASK_MIN) return;
+		if (text === undefined || text.length < minChars || text.startsWith("[older ")) return;
 		outputs.push({ index, tool: String(m.toolName), length: text.length, id: m.toolCallId });
 	});
 	// Batched (default): whole batches only, so the cached prefix changes once per batch. Unbatched: every output older than the window.
@@ -165,8 +165,11 @@ export function maskToolOutputs<T extends Message>(messages: readonly T[], windo
 // (default 80k) the request is shortened in steps, re-measuring after each, and stops at the first that fits WORKER_BUDGET_ENV (95k):
 //   batch      main's stable batching (older large outputs, newest five kept, whole batches only)
 //   all-older  every older large output, not just whole batches
+//   small-older  every older output of 500 characters or more (long test runs leave many mid-size outputs)
 //   bounded    remaining large outputs except the latest cut to head and tail
 //   over       still over budget: the caller asks the host to compact once per run
+// Sizes are calibrated against the provider: characters / 4 undercounts code and tool output (measured peaks of 128k and 140k
+// against a 95k budget), so the estimate is scaled by the provider-reported input of the latest request (requestScale).
 export const WORKER_MASK_ENV = "PI_SUBAGENT_WORKER_MASK_TOKENS";
 export const WORKER_BUDGET_ENV = "PI_SUBAGENT_WORKER_TOKEN_BUDGET";
 export const DEFAULT_WORKER_MASK_TOKENS = 80_000;
@@ -217,27 +220,46 @@ export function boundToolOutputs<T extends Message>(messages: readonly T[]): T[]
 	});
 	return changed ? out : undefined;
 }
-export type CapStep = "batch" | "all-older" | "bounded" | "over";
-export interface CapResult<T> { messages?: T[]; step?: CapStep; before: number; after: number }
+export type CapStep = "batch" | "all-older" | "small-older" | "bounded" | "over";
+export interface CapResult<T> { messages?: T[]; step?: CapStep; before: number; after: number; scale: number }
+const SMALL_MASK_MIN = 500;
+/**
+ * Provider tokens per estimated token, from the latest assistant message that reports usage: its request carried every message before
+ * it plus `base` (system prompt and tools), and the provider counted input + cacheRead + cacheWrite. Never below 1 (an estimate is
+ * only ever scaled up) and at most 4; 1 when no usage is known yet.
+ */
+export function requestScale(messages: readonly Message[], base = 0): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i] as any;
+		if (m?.role !== "assistant" || !m.usage) continue;
+		const real = [m.usage.input, m.usage.cacheRead, m.usage.cacheWrite].reduce((sum: number, v: unknown) => sum + (Number.isFinite(v) ? (v as number) : 0), 0);
+		const estimated = base + estimateTokens(messages.slice(0, i));
+		if (!(real > 0) || !(estimated > 0)) return 1;
+		return Math.min(4, Math.max(1, real / estimated));
+	}
+	return 1;
+}
 /**
  * Worker request shortening. `base` is the estimated size of everything outside `messages` (the system prompt and tools). Nothing
  * changes below `from`; above it each step runs only while the re-measured request is still at or over `budget`.
  */
-export function capWorkerContext<T extends Message>(messages: readonly T[], from: number, budget = Math.max(from, DEFAULT_WORKER_TOKEN_BUDGET), base = 0): CapResult<T> {
-	const before = base + estimateTokens(messages);
-	if (!(from > 0) || before < from) return { before, after: before };
+export function capWorkerContext<T extends Message>(messages: readonly T[], from: number, budget = Math.max(from, DEFAULT_WORKER_TOKEN_BUDGET), base = 0, scale = requestScale(messages, base)): CapResult<T> {
+	const measure = (list: readonly T[]) => Math.ceil((base + estimateTokens(list)) * scale);
+	const before = measure(messages);
+	if (!(from > 0) || before < from) return { before, after: before, scale };
 	let current = messages as T[];
 	let step: CapStep | undefined;
 	let size = before;
 	const attempt = (next: T[] | undefined, name: CapStep) => {
 		if (!next) return;
-		current = next; step = name; size = base + estimateTokens(next);
+		current = next; step = name; size = measure(next);
 	};
 	attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW), "batch");
 	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false), "all-older");
+	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false, SMALL_MASK_MIN), "small-older");
 	if (size >= budget) attempt(boundToolOutputs(current), "bounded");
 	if (size >= budget) step = "over";
-	return { messages: current === messages ? undefined : current, step, before, after: size };
+	return { messages: current === messages ? undefined : current, step, before, after: size, scale };
 }
 
 /** Both request-only shortenings in order: subagent results first, then main's own large tool outputs. */

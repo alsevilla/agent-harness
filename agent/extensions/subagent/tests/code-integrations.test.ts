@@ -334,7 +334,7 @@ test("shared code-leaf guidance keeps Ponytail, QMD and missing-graph authority 
   assert.match(text, /never overrides user requirements, candidate boundaries, required checks or delegation policy/);
   assert.match(text, /Do not reload its base skill/);
   assert.equal(text.split("Missing graphs never authorize a fresh graph build").length - 1, 1);
-  assert.match(text, /run one focused qmd_search \(maxResults 3, at most 5\)[\s\S]*only when that context is needed/);
+  assert.match(text, /run one focused qmd_search \(maxResults 3, at most 5\)[\s\S]*before searching the repository for why or how something was decided/);
   assert.match(text, /Do not initialize\/update/);
   assert.match(text, /read-only roles must not build\/update graphs/i);
   assert.match(text, /Integrations never authorize nested agents, broader writes or new tasks/);

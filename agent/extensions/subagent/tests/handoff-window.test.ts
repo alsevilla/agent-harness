@@ -237,3 +237,33 @@ test("worker cap: the system prompt counts toward the trigger and the budget", (
 	assert.equal(capWorkerContext(mid, 80_000, 95_000).step, undefined);
 	assert.equal(capWorkerContext(mid, 80_000, 95_000, 25_000).step, "batch", "with a 25k system prompt it is over the trigger");
 });
+
+// Field report on v1.14.0: test-engineer peaked at 128,481 and debugger at 140,152 provider tokens against a 95k budget, because
+// characters / 4 undercounts code and tool output. The estimate is now scaled by the provider-reported input of the latest request.
+import { requestScale } from "../handoff-window.ts";
+const withUsage = (messages: any[], real: number) => [...messages, { role: "assistant", content: [{ type: "text", text: "ok" }], usage: { input: 10, cacheRead: real - 10, cacheWrite: 0 } }];
+test("calibration: provider tokens per estimated token from the latest reported request, between 1 and 4; 1 without usage", () => {
+	const msgs = run(4, 40_000); // ~40k estimated
+	const est = estimateTokens(msgs);
+	assert.equal(requestScale(msgs), 1, "no usage yet");
+	assert.ok(Math.abs(requestScale(withUsage(msgs, Math.round(est * 1.4))) - 1.4) < 0.01);
+	assert.equal(requestScale(withUsage(msgs, Math.round(est * 0.5))), 1, "never scaled down");
+	assert.equal(requestScale(withUsage(msgs, est * 10)), 4, "capped");
+	assert.ok(Math.abs(requestScale(withUsage(msgs, Math.round((est + 5_000) * 1.3)), 5_000) - 1.3) < 0.01, "the system prompt counts in the base");
+});
+test("calibration: an undercounted request that looked fine by characters is now shortened to the budget", () => {
+	const msgs = run(12, 24_000); // ~72k estimated: under the 80k trigger by characters alone
+	const est = estimateTokens(msgs);
+	const real = withUsage(msgs, Math.round(est * 1.4)); // the provider counted ~101k for it
+	assert.equal(capWorkerContext(msgs, 80_000, 95_000, 0, 1).step, undefined, "uncalibrated: no action");
+	const r = capWorkerContext(real, 80_000, 95_000);
+	assert.ok(r.scale > 1.39 && r.before > 100_000, "measured in provider tokens");
+	assert.ok(r.step && r.after < 95_000, `shortened to fit (${r.step}, ${r.after})`);
+});
+test("small-older: many mid-size outputs (long test runs) are masked when large-output steps are not enough", () => {
+	const mid = run(60, 1_800); // sixty 1,800-character outputs: none reach the 2,000 large-output cutoff
+	const r = capWorkerContext(withUsage(mid, Math.round(estimateTokens(mid) * 4)), 80_000, 95_000);
+	assert.equal(r.step, "small-older");
+	assert.equal(capOutputs(r.messages!).filter((t) => t.startsWith("[older read output")).length, 55, "all but the newest five");
+	assert.ok(r.after < 95_000);
+});

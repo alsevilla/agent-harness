@@ -87,7 +87,7 @@ function launch(agent: { name: string; systemPrompt: string; tools?: string[] },
 test("plain general-worker without optional integrations gets core and the fallback only: no Serena, QMD or graph detail", () => {
   const { prompt } = launch(role("general-worker"), { ponytail: true });
   for (const needle of Object.values(CORE)) assert.equal(count(prompt, needle), 1, needle);
-  for (const absent of ["qmd_search", "pass project explicitly as", "## Graph reference location", "## Global graph reference", "The graphify skill is on demand", "do not ls/read an assumed"]) assert.equal(prompt.includes(absent), false, absent);
+  for (const absent of ["qmd_search", "pass project explicitly as", "## Graph reference location", "## Global graph reference", "Orient with the graph before searching the repository", "do not ls/read an assumed"]) assert.equal(prompt.includes(absent), false, absent);
   assert.match(prompt, /## Integrations not loaded in this launch/);
   assert.match(prompt, /read, grep and find/);
 });
@@ -98,7 +98,9 @@ test("QMD and Serena sentences appear only when their tools are in the launch al
   assert.equal(none.includes("pass project explicitly as"), false);
   const present = launch(role("general-worker"), { ponytail: true, serena: true, qmd: true });
   assert.equal(count(present.prompt, "pass project explicitly as " + present.candidate), 1);
-  assert.equal(count(present.prompt, "qmd_search"), 1);
+  assert.equal(count(present.prompt, "run one focused qmd_search"), 1);
+  assert.equal(count(present.prompt, "Lookup order for code the packet does not locate: (1) qmd_search once for prior decisions, specs and notes on that area, (2) Serena to locate definitions and their callers, then (3) grep or find"), 1, "the lookup order names only this launch's tools");
+  assert.equal(none.includes("Lookup order"), false, "no lookup tools, no lookup order");
 });
 
 test("graph reference is included only for actual artifacts; with no artifacts only the core authority line remains", () => {
@@ -113,7 +115,7 @@ test("project graph with no Graphify tool or skill: listed absolute artifacts an
   assert.equal(count(run.prompt, "## Graph reference location"), 1);
   assert.ok(run.prompt.includes(join(run.candidate, "graphify-out", "graph.json")), "listed artifact must be its absolute path");
   assert.equal(count(run.prompt, CORE.graphAuthority), 1);
-  assert.equal(run.prompt.includes("The graphify skill is on demand"), false, "no Graphify skill text without the skill");
+  assert.equal(run.prompt.includes("Orient with the graph before searching the repository"), false, "no Graphify skill text without the skill");
 });
 
 test("global graph with manifest coverage: read-only orientation block with no-automatic-fallback limits, no project location", () => {
@@ -184,7 +186,7 @@ test("Ponytail and Graphify-skill navigation are detected from Windows backslash
 	const agent = { name: "general-worker", systemPrompt: ROLE_BODY };
 	const options = { codeIntegrationsEnabled: true, cwd: join(tmpdir(), "applicability-no-such-candidate"), packageRoot: null, globalGraphDirectory: EMPTY_GLOBAL };
 	assert.match(assembleChildSystemPrompt(agent, { ...options, launchArgs: ponytailArgv }), /When Ponytail's native extension is loaded/);
-	assert.match(assembleChildSystemPrompt(agent, { ...options, launchArgs: skillArgv }), /The graphify skill is on demand/);
+	assert.match(assembleChildSystemPrompt(agent, { ...options, launchArgs: skillArgv }), /Orient with the graph before searching the repository/);
 });
 
 // Caller regression: the production launch must forward its argv (args holds --tools and integration --extension/--skill) into the prompt assembler.

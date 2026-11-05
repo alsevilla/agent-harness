@@ -616,11 +616,11 @@ async function runNodeSuite() {
 	});
 
 	// Ponytail injects mode text and has no tool calls to count, so the line shows it as loaded from the launch arguments.
-	test("integration line: ponytail shows as loaded when it was in the launch; serena and graphify count calls", () => {
+	test("integration line: ponytail shows as loaded when it was in the launch; serena, qmd and graphify count calls", () => {
 		const record = (extra: Record<string, unknown> = {}) => ({ integrations: {}, graphReferences: 0, ...extra });
-		assert.equal(monitor.integrationLabel(record()), "serena: no calls observed | graphify: no calls observed");
-		assert.equal(monitor.integrationLabel(record({ ponytail: true })), "ponytail: loaded | serena: no calls observed | graphify: no calls observed");
+		assert.equal(monitor.integrationLabel(record()), "serena: no calls observed | qmd: no calls observed | graphify: no calls observed");
+		assert.equal(monitor.integrationLabel(record({ ponytail: true })), "ponytail: loaded | serena: no calls observed | qmd: no calls observed | graphify: no calls observed");
 		assert.equal(monitor.integrationLabel(record({ ponytail: true, integrations: { serena: { calls: 3, returned: 3, errors: 0 } }, graphReferences: 2 })),
-			"ponytail: loaded | serena: 3 calls · 3 returned · 0 errors | graphify: no calls observed | graph references: 2 reads");
+			"ponytail: loaded | serena: 3 calls · 3 returned · 0 errors | qmd: no calls observed | graphify: no calls observed | graph references: 2 reads");
 	});
 }

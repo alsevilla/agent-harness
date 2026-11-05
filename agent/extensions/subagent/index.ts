@@ -891,6 +891,7 @@ export const MAIN_TOOL_GUIDELINES = [
 	"To read several files, call read for each one in the same turn (within main's limit of 3 named files), or delegate the reads with the subagent tool; do not wrap reads in a codemode script.",
 	"When the intended structure is known (function signatures, types, module layout), put it in the subagent task packet as a code skeleton beside the expected behavior and checks.",
 	"For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson.",
+	"For main's own lookups and for packets that ask a worker to find code, use the graph, qmd_search and Serena tools when they are declared, before grep or find; name the graph report or the known symbols in the packet.",
 ];
 
 export default function (pi: ExtensionAPI) {

@@ -31,12 +31,13 @@ Integrations never authorize nested agents, broader writes or new tasks; do not 
 
 // Evidence-gated sections: each is emitted only from actual launch evidence (see assembleChildSystemPrompt).
 const PONYTAIL_NAVIGATION = "When Ponytail's native extension is loaded in this launch, it injects the configured default/session mode without an extra skill read; apply its reuse and minimal-correct-change guidance within the assigned role. Ponytail never overrides user requirements, candidate boundaries, required checks or delegation policy. Do not reload its base skill merely to activate it or launch extra audit/review work.\n";
-// A named file or symbol is cheaper to read or grep directly (+6% to +118% tokens with a language server), and grep is better for renames
-// (a location-only language server missed a call site in 3 of 4); language-server references buy precision, not savings (arXiv 2608.13568).
-const SERENA_NAVIGATION = "When the packet names the file or symbol, read or grep it directly. Use grep for renames and every occurrence: it also finds comments and strings, which symbol references miss. Use Serena symbol overview, lookup and references when grep matches are noisy (definitions vs calls) or to explore unfamiliar code; use read/grep for docs, config or targeted source follow-up.\n";
-const GRAPHIFY_SKILL_NAVIGATION = "The graphify skill is on demand for graph queries and paths: its standard-library read_graph.py helper is the read-only query path, because native Graphify CLI queries can write stamps. Do not load build procedures or scan the repository without a task reason. Report a missing interpreter or backend rather than inventing results.\n";
+// A named file or symbol is cheaper to read directly (+6% to +118% tokens with a language server), and grep is better for renames (a
+// location-only language server missed a call site in 3 of 4) (arXiv 2608.13568). For code the packet does not locate, the owner's field
+// report: workers defaulted to broad grep/find and never used the installed tools, so lookups go to Serena before grep/find.
+const SERENA_NAVIGATION = "When the packet names the file or symbol, read it directly. Use grep for renames and every textual occurrence: it also finds comments and strings, which symbol references miss. Otherwise locate code with Serena (symbol overview, find symbol, references) before grep or find; use read/grep for docs, config or targeted source follow-up.\n";
+const GRAPHIFY_SKILL_NAVIGATION = "Orient with the graph before searching the repository: the graphify skill's standard-library read_graph.py helper is the read-only query and path tool, because native Graphify CLI queries can write stamps. Do not load build procedures or scan the repository without a task reason. Report a missing interpreter or backend rather than inventing results.\n";
 const FAILURE_NAVIGATION = "If an integration tool fails, report the concrete error once, do not retry it in a loop, continue with permitted read/grep/find, and report reduced capability in the handoff. File presence does not prove the backend is healthy or configured.\n";
-const QMD_NAVIGATION = "QMD uses the profile's shared named index, not a worktree-local one: scope queries to the relevant existing collection. Retrieved document paths can belong to the primary checkout. Treat retrieved notes as prior evidence; verify current files/requirements in the candidate. Do not create, update or clone indexes or rewrite QMD references under the worktree. For prior decisions, specs, notes or plans relevant to this assignment, run one focused qmd_search (maxResults 3, at most 5) in a useful collection scope, only when that context is needed; read only selected hits. Do not initialize/update indexes, request feedback writes, or treat retrieval as authoritative current code.\n";
+const QMD_NAVIGATION = "QMD uses the profile's shared named index, not a worktree-local one: scope queries to the relevant existing collection. Retrieved document paths can belong to the primary checkout. Treat retrieved notes as prior evidence; verify current files/requirements in the candidate. Do not create, update or clone indexes or rewrite QMD references under the worktree. For prior decisions, specs, notes or plans relevant to this assignment, run one focused qmd_search (maxResults 3, at most 5) in a useful collection scope before searching the repository for why or how something was decided; read only selected hits. Do not initialize/update indexes, request feedback writes, or treat retrieval as authoritative current code.\n";
 const SERENA_CANDIDATE = (project: string) => "For Serena calls pass project explicitly as " + project + "; resolve relative_path from that root, even from a backend/frontend shell cwd. Never activate the primary checkout just because it holds the graph; symbol lookups and references target the candidate. Do not automatically onboard or recreate Serena project configuration.\n";
 
 export function candidateProjectRoot(cwd: string): string {
@@ -208,13 +209,24 @@ function launchCapabilities(args: string[]) {
   return { ponytail, serena, qmd, graphifySkill };
 }
 
+/** Lookup order for code the packet does not locate, naming only the tools this launch has; empty when it has none of them. */
+export function navigationOrder(cap: { serena: boolean; qmd: boolean; graphifySkill: boolean }): string {
+  const steps = [
+    cap.graphifySkill ? "the graph (the report or wiki listed below, then the graphify query helper) to orient" : "",
+    cap.qmd ? "qmd_search once for prior decisions, specs and notes on that area" : "",
+    cap.serena ? "Serena to locate definitions and their callers" : "",
+  ].filter(Boolean);
+  if (!steps.length) return "";
+  return `Lookup order for code the packet does not locate: ${steps.map((step, i) => `(${i + 1}) ${step}`).join(", ")}, then (${steps.length + 1}) grep or find for literal text, config, renames, or when those return nothing. Use these installed tools before broad grep or find; they are cheaper than reading search output.\n`;
+}
+
 /** The child system prompt. Core guidance is unconditional once; navigation, candidate-retrieval, graph and unavailable-integration sections are emitted only from actual launch evidence. */
 const SHARED_CHILD_PREFIX = CORE_GUIDANCE.replace(/^\n+/, "") + COMPACT_HANDOFF_INSTRUCTIONS;
 export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: string }, options: ChildPromptOptions): string {
   const cap = launchCapabilities(options.launchArgs ?? []);
   let integrations = "";
   if (options.codeIntegrationsEnabled) {
-    const navigation = (cap.ponytail ? PONYTAIL_NAVIGATION : "") + (cap.serena ? SERENA_NAVIGATION : "") + (cap.graphifySkill ? GRAPHIFY_SKILL_NAVIGATION : "");
+    const navigation = (cap.ponytail ? PONYTAIL_NAVIGATION : "") + navigationOrder(cap) + (cap.serena ? SERENA_NAVIGATION : "") + (cap.graphifySkill ? GRAPHIFY_SKILL_NAVIGATION : "");
     const anyLoaded = cap.ponytail || cap.serena || cap.qmd || cap.graphifySkill;
     integrations = (navigation || anyLoaded ? "\n## Code navigation integrations\n" + navigation + (anyLoaded ? FAILURE_NAVIGATION : "") : "") +
       candidateNavigationGuidance(candidateProjectRoot(options.cwd), cap.serena, cap.qmd) +
