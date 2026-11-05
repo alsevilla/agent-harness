@@ -884,6 +884,12 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 	}
 }
 
+/** Rules Pi appends to main's system prompt through the subagent tool: call only declared tools, and batch reads without codemode. */
+export const MAIN_TOOL_GUIDELINES = [
+	"Call only tools declared in this session: \"Additional tools may be available\" does not make an undeclared tool callable, and codemode is not available unless it is declared.",
+	"To read several files, call read for each one in the same turn (within main's limit of 3 named files), or delegate the reads with the subagent tool; do not wrap reads in a codemode script.",
+];
+
 export default function (pi: ExtensionAPI) {
 	let runtimeRef: BackgroundWorkers | undefined;
 	let decisionsRef: DecisionRelay | undefined;
@@ -946,6 +952,9 @@ export default function (pi: ExtensionAPI) {
 			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
 			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 		].join(" "),
+		// Main only (workers never load this tool). Pi's base prompt says "Additional tools may be available" and points at codemode docs,
+		// so models guess a codemode tool that is not enabled ("Tool codemode not found"). These rules name the real ways to batch reads.
+		promptGuidelines: MAIN_TOOL_GUIDELINES,
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx, preparedDispatch?: { discovery: ReturnType<typeof discoverAgents>; selected: Map<number, SelectedAgent>; cleanupId?: string }) {

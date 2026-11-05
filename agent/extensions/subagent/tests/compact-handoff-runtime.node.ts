@@ -119,6 +119,14 @@ test("tool description keeps every user role name discoverable without the 22-ro
 	assert.doesNotMatch(description, /test role chain-one/);
 });
 
+// Pi's base prompt says "Additional tools may be available" and points at codemode docs; main guessed an undeclared codemode tool twice.
+test("the registered subagent tool carries main's declared-tools rules: no undeclared codemode, batch reads with read or subagent", () => {
+	const rules = ((tool as { promptGuidelines?: string[] } | undefined)?.promptGuidelines ?? []).join("\n");
+	assert.match(rules, /Call only tools declared in this session/);
+	assert.match(rules, /codemode is not available unless it is declared/);
+	assert.match(rules, /call read for each one in the same turn \(within main's limit of 3 named files\), or delegate the reads with the subagent tool/);
+});
+
 test("child system prompt carries the compact handoff guidance in the shared prefix, before the role prompt", async () => {
 	const root = setupRoles({ "guided": "You are guided." });
 	spawnPlan = () => ({ events: [reply(["STATUS: PASS"])], exitCode: 0 });
