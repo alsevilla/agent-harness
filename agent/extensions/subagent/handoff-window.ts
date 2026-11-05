@@ -167,7 +167,8 @@ export function maskToolOutputs<T extends Message>(messages: readonly T[], windo
 //   all-older  every older large output, not just whole batches
 //   small-older  every older output of 500 characters or more (long test runs leave many mid-size outputs)
 //   bounded    remaining large outputs except the latest cut to head and tail
-//   over       still over budget: the caller asks the host to compact once per run
+//   last-resort  every older output of 500+ characters masked, and the latest bounded to its first and last 8,000 characters
+//   over       still over budget (assistant text dominates): the caller asks the host to compact once per run
 // Sizes are calibrated against the provider: characters / 4 undercounts code and tool output (measured peaks of 128k and 140k
 // against a 95k budget), so the estimate is scaled by the provider-reported input of the latest request (requestScale).
 export const WORKER_MASK_ENV = "PI_SUBAGENT_WORKER_MASK_TOKENS";
@@ -206,21 +207,30 @@ export function estimateTokens(messages: readonly Message[]): number {
 	return Math.ceil(chars / 4);
 }
 /** Cut every text tool output over BOUND_CHARS, except the latest tool result, to its head and tail. Undefined when nothing changes. */
-export function boundToolOutputs<T extends Message>(messages: readonly T[]): T[] | undefined {
+export function boundToolOutputs<T extends Message>(messages: readonly T[], includeLatest = false, max = BOUND_CHARS, keep = BOUND_KEEP): T[] | undefined {
 	let latest = -1;
 	messages.forEach((m, i) => { if (m?.role === "toolResult") latest = i; });
 	let changed = false;
 	const out = messages.map((m, i) => {
-		if (i === latest || m?.role !== "toolResult") return m;
+		if ((i === latest && !includeLatest) || m?.role !== "toolResult") return m;
 		const text = textOf(m.content);
-		if (text === undefined || text.length <= BOUND_CHARS) return m;
+		if (text === undefined || text.length <= max) return m;
 		changed = true;
-		const cut = text.length - 2 * BOUND_KEEP;
-		return { ...m, content: [{ type: "text", text: `${text.slice(0, BOUND_KEEP)}\n[… ${cut.toLocaleString("en-US")} characters shortened to stay in budget; read again with offset and limit, or rerun, if you need them …]\n${text.slice(-BOUND_KEEP)}` }] } as T;
+		const cut = text.length - 2 * keep;
+		return { ...m, content: [{ type: "text", text: `${text.slice(0, keep)}\n[… ${cut.toLocaleString("en-US")} characters shortened to stay in budget; read again with offset and limit, or rerun, if you need them …]\n${text.slice(-keep)}` }] } as T;
 	});
 	return changed ? out : undefined;
 }
-export type CapStep = "batch" | "all-older" | "small-older" | "bounded" | "over";
+// Last resort for the current request (field report on v1.14.0 + #53: a debugger still sent 4 requests over 100k, peak 119,337, because
+// the newest outputs were never touched and compaction only helps the next request): every older output of 500+ characters is masked
+// and the latest is bounded to its first and last 8,000 characters.
+const LAST_RESORT_KEEP = 8_000;
+function lastResort<T extends Message>(messages: readonly T[]): T[] | undefined {
+	const masked = maskToolOutputs(messages, 1, false, SMALL_MASK_MIN);
+	const bounded = boundToolOutputs(masked ?? messages, true, 2 * LAST_RESORT_KEEP, LAST_RESORT_KEEP);
+	return bounded ?? masked;
+}
+export type CapStep = "batch" | "all-older" | "small-older" | "bounded" | "last-resort" | "over";
 export interface CapResult<T> { messages?: T[]; step?: CapStep; before: number; after: number; scale: number }
 const SMALL_MASK_MIN = 500;
 /**
@@ -258,6 +268,7 @@ export function capWorkerContext<T extends Message>(messages: readonly T[], from
 	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false), "all-older");
 	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false, SMALL_MASK_MIN), "small-older");
 	if (size >= budget) attempt(boundToolOutputs(current), "bounded");
+	if (size >= budget) attempt(lastResort(current), "last-resort");
 	if (size >= budget) step = "over";
 	return { messages: current === messages ? undefined : current, step, before, after: size, scale };
 }
