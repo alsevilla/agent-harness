@@ -173,3 +173,32 @@ test("state card wiring: appended last as a hidden custom message, with or witho
 	card = undefined;
 	assert.equal(await handlers.get("context")!({ messages }), undefined, "idle: no change");
 });
+
+// Claude Haiku 5.5 prices a request over 100k input tokens at 5x; workers kept every tool output, so a long debugger run crossed it.
+import { capWorkerContext, DEFAULT_WORKER_MASK_TOKENS, estimateTokens, workerMaskFromEnv, WORKER_MASK_ENV } from "../handoff-window.ts";
+test("worker cap: threshold from the environment, 0 turns it off, nonsense keeps the default", () => {
+	assert.equal(DEFAULT_WORKER_MASK_TOKENS, 80_000);
+	assert.equal(workerMaskFromEnv({}), 80_000);
+	assert.equal(workerMaskFromEnv({ [WORKER_MASK_ENV]: "0" }), 0);
+	assert.equal(workerMaskFromEnv({ [WORKER_MASK_ENV]: "60000" }), 60_000);
+	assert.equal(workerMaskFromEnv({ [WORKER_MASK_ENV]: "500" }), 80_000, "below 20k is refused");
+	assert.equal(workerMaskFromEnv({ [WORKER_MASK_ENV]: "lots" }), 80_000);
+});
+test("worker cap: nothing changes below the threshold; above it older large outputs are masked like main's, newest five kept", () => {
+	const call = (i: number) => ({ role: "assistant", content: [{ type: "toolCall", id: `c${i}`, name: "read", arguments: { path: `/w/src/f${i}.ts` } }] });
+	const out = (i: number, size: number) => ({ role: "toolResult", toolCallId: `c${i}`, toolName: "read", isError: false, content: [{ type: "text", text: "x".repeat(size) }] });
+	const run = (n: number, size: number) => Array.from({ length: n }, (_, i) => [call(i), out(i, size)]).flat() as never[];
+	const small = run(12, 4000); // ~12k tokens
+	assert.ok(estimateTokens(small) < 80_000);
+	assert.equal(capWorkerContext(small, 80_000), undefined, "a short worker run is untouched");
+	const big = run(12, 30_000); // ~90k tokens
+	assert.ok(estimateTokens(big) >= 80_000);
+	const capped = capWorkerContext(big, 80_000)!;
+	assert.ok(capped, "masked from the threshold");
+	const texts = capped.filter((m: any) => m.role === "toolResult").map((m: any) => m.content[0].text);
+	assert.equal(texts.filter((t: string) => t.startsWith("[older read output, shortened: /w/src/f")).length, 5, "oldest whole batch of five");
+	assert.equal(texts.filter((t: string) => t.length === 30_000).length, 7, "the rest, including the newest five, word for word");
+	assert.ok(estimateTokens(capped) < estimateTokens(big) * 0.65);
+	assert.equal(capWorkerContext(big, 0), undefined, "0 is off");
+	assert.equal(big.filter((m: any) => m.role === "toolResult")[0].content[0].text.length, 30_000, "input not mutated");
+});

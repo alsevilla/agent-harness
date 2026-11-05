@@ -158,6 +158,41 @@ export function maskToolOutputs<T extends Message>(messages: readonly T[], windo
 	return out;
 }
 
+// Workers keep every tool output word for word, so a long worker run can pass Claude Haiku 5.5's long-context line: a request with more
+// than 100k input tokens is priced 5x (input, output, cache read and write). A debugger run that averaged ~107k per request cost $0.20
+// instead of ~$0.06. From WORKER_MASK_ENV estimated tokens (default 80k, leaving room for the system prompt and tools) a worker's older
+// large tool outputs are masked like main's, in stable batches; below it nothing changes. 0 turns it off.
+export const WORKER_MASK_ENV = "PI_SUBAGENT_WORKER_MASK_TOKENS";
+export const DEFAULT_WORKER_MASK_TOKENS = 80_000;
+const MIN_WORKER_MASK_TOKENS = 20_000;
+export function workerMaskFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env[WORKER_MASK_ENV];
+	if (raw === undefined || raw.trim() === "") return DEFAULT_WORKER_MASK_TOKENS;
+	const n = Number(raw.trim());
+	if (n === 0) return 0;
+	return Number.isFinite(n) && n >= MIN_WORKER_MASK_TOKENS ? Math.floor(n) : DEFAULT_WORKER_MASK_TOKENS;
+}
+/** Rough request size: characters of text and tool-call arguments divided by 4 (images not counted). */
+export function estimateTokens(messages: readonly Message[]): number {
+	let chars = 0;
+	for (const m of messages) {
+		const content = (m as any)?.content;
+		if (typeof content === "string") { chars += content.length; continue; }
+		if (!Array.isArray(content)) continue;
+		for (const part of content as any[]) {
+			if (typeof part?.text === "string") chars += part.text.length;
+			else if (typeof part?.thinking === "string") chars += part.thinking.length;
+			else if (part?.type === "toolCall") { try { chars += JSON.stringify(part.arguments ?? {}).length; } catch { /* skip */ } }
+		}
+	}
+	return Math.ceil(chars / 4);
+}
+/** A worker's request with older large tool outputs masked once it reaches `from` estimated tokens; undefined below it or when nothing changes. */
+export function capWorkerContext<T extends Message>(messages: readonly T[], from: number): T[] | undefined {
+	if (!(from > 0) || estimateTokens(messages) < from) return undefined;
+	return maskToolOutputs(messages, DEFAULT_HANDOFF_WINDOW);
+}
+
 /** Both request-only shortenings in order: subagent results first, then main's own large tool outputs. */
 export function shortenContext<T extends Message>(messages: readonly T[], window: number): T[] | undefined {
 	const handoffs = collapseHandoffs(messages, window);
