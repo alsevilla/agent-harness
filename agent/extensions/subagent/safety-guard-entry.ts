@@ -3,6 +3,7 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_GRANT_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
+import { createLookupNudge, launchLookupTools } from "./lookup-nudge.ts";
 import { capWorkerContext, workerBudgetFromEnv, workerMaskFromEnv } from "./handoff-window.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
@@ -60,4 +61,12 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		return content ? { content } : undefined;
 	});
 	pi.on("session_compact", () => { dedupe.reset(); capped = false; compactAsked = false; });
+	// Workers only: the first broad grep/find of a run that has not used Serena, QMD or the graph gets one line naming them (lookup-nudge.ts).
+	// The tool set is read at the first result, after every extension has registered and activated its tools.
+	let nudge: ReturnType<typeof createLookupNudge> | undefined;
+	pi.on("tool_result", (event) => {
+		try { nudge ??= createLookupNudge(launchLookupTools(pi.getActiveTools())); } catch { return undefined; }
+		const content = nudge.onResult(event.toolName, event.input, event.content, event.isError === true);
+		return content ? { content } : undefined;
+	});
 }
