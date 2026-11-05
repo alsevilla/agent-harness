@@ -125,7 +125,7 @@ A `tool_call` guard runs on main and every worker. It blocks risky shell operati
 | Your own rules | `harness-permissions.json` in your Pi agent directory: `{ "allow": ["Stop-Process -Id *"], "deny": ["git push --force*"] }`. Exact commands, or prefixes ending in `*`. Allow covers only what you could approve anyway (never secrets, unresolvable deletes, merge or release); deny blocks main and every worker. Agents cannot write the file. |
 | Secrets | `.env*`, keys and credentials are never read or written. `node "<extension folder>/read-env-redacted.mjs" "<absolute .env path>"` shows settings with secret-like values hidden. |
 
-**Optional OS sandbox (Linux).** Set `PI_SUBAGENT_SANDBOX=on` (or `require`, which refuses to launch without it) to run each worker under bubblewrap (`bwrap`): the filesystem is read-only except the worker's checkout (writing roles only), the task's `_evidence`/`_scratch` folders, the temp folder and a few state folders; add more with `PI_SUBAGENT_SANDBOX_WRITABLE`. Network stays on, because the worker must reach the model. It is off by default and Linux-only (on Windows, use WSL2).
+**Optional OS sandbox (Linux and macOS).** Set `PI_SUBAGENT_SANDBOX=on` (or `require`, which refuses to launch without it) to run each worker under bubblewrap (`bwrap`) on Linux or Seatbelt (`sandbox-exec`) on macOS: the filesystem is read-only except the worker's checkout (writing roles only), the task's `_evidence`/`_scratch` folders, the temp folder and a few state folders; add more with `PI_SUBAGENT_SANDBOX_WRITABLE`. Network stays on, because the worker must reach the model. It is off by default; Windows has no equivalent here (use WSL2 for it).
 
 Details, limits and every check: [subagent README](agent/extensions/subagent/README.md#safety-guard).
 
@@ -162,7 +162,8 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 
 ## Limits
 
-- Without the opt-in Linux sandbox, workers are not OS-isolated: the guard's read-only and secret rules are lexical and best-effort. The sandbox enforces writes only, not network.
+- Paths are compared case-insensitively on Windows and macOS, as their file systems are, and case-sensitively on Linux.
+- Without the opt-in OS sandbox (Linux, macOS), workers are not OS-isolated: the guard's read-only and secret rules are lexical and best-effort. The sandbox enforces writes only, not network.
 - Background admission, job ids and the DAG run per Pi process and in memory; after a reload or new session, old job ids are gone.
 - Only the latest Pi release is supported. The package is not published to npm.
 - Costs in `/subagent usage` are provider or catalog estimates, not a bill.
