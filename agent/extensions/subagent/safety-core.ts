@@ -2018,8 +2018,50 @@ export const CHILD_READONLY_ENV = "PI_SAFETY_READONLY";
 const RO_GIT = new Set(["add", "commit", "checkout", "switch", "restore", "reset", "apply", "am", "cherry-pick", "merge", "rebase", "revert", "rm", "mv", "clean", "push", "pull", "init", "clone", "worktree", "submodule", "notes", "update-index", "update-ref", "gc", "prune"]);
 const RO_PKG = new Set(["install", "i", "add", "remove", "rm", "uninstall", "un", "update", "up", "upgrade", "ci", "link", "unlink", "dedupe", "prune", "init", "version", "pkg"]);
 const RO_DEST_LAST = new Set(["cp", "copy", "copy-item", "mv", "move", "move-item", "install", "rsync"]);
-const RO_DEST_ALL = new Set(["tee", "touch", "truncate", "set-content", "out-file", "add-content", "new-item", "mkdir", "md", "ni"]);
+const RO_DEST_ALL = new Set(["tee", "touch", "truncate", "mkdir", "md"]);
+// PowerShell writers take named parameters: only the path parameters (or the first positional) name the file. Field report: treating
+// every argument as a target made -Value script text, -ItemType Directory and -Encoding utf8 look like paths inside the candidate, so
+// a read-only worker could not write its Betterwright script to the packet's sibling _scratch folder.
+const PS_WRITERS = new Set(["set-content", "add-content", "out-file", "new-item", "ni", "sc", "ac"]);
+const PS_PATH_PARAMS = ["path", "filepath", "literalpath", "pspath"];
+const PS_VALUE_PARAMS = ["value", "inputobject", "encoding", "itemtype", "type", "stream", "width", "delimiter", "credential", "filter", "include", "exclude", "name"];
+const PS_SWITCHES = ["force", "append", "noclobber", "nonewline", "passthru", "whatif", "confirm", "asbytestream", "raw"];
+function psParam(arg: string, names: string[]): string | undefined {
+	const bare = arg.replace(/^-+/, "").split(":")[0].toLowerCase();
+	if (bare.length < 2) return undefined;
+	const hits = names.filter((n) => n === bare || n.startsWith(bare));
+	return hits.length === 1 || hits.includes(bare) ? (hits.includes(bare) ? bare : hits[0]) : undefined;
+}
+/** The files a PowerShell writer targets. Unknown parameters are treated as switches, so their values stay possible targets (fail closed). */
+export function psWriteTargets(args: string[]): string[] {
+	const paths: string[] = [], positionals: string[] = [];
+	let name: string | undefined;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (!/^-[A-Za-z]/.test(arg)) { positionals.push(arg); continue; }
+		const inline = arg.includes(":") ? arg.slice(arg.indexOf(":") + 1) : undefined;
+		const pathParam = psParam(arg, PS_PATH_PARAMS);
+		const valueParam = pathParam ? undefined : psParam(arg, PS_VALUE_PARAMS);
+		if (pathParam || valueParam) {
+			const value = inline !== undefined && inline !== "" ? inline : args[++i];
+			if (value === undefined) continue;
+			if (pathParam) paths.push(value); else if (valueParam === "name") name = value;
+			continue;
+		}
+		if (psParam(arg, PS_SWITCHES) && inline === undefined) continue;
+		// unknown parameter: no value consumed
+	}
+	const targets = paths.length ? paths : positionals.slice(0, 1); // positional 0 is Path / FilePath; later positionals are values
+	if (name !== undefined) return (targets.length ? targets : ["."]).map((t) => `${t.replace(/[\\/]+$/, "")}/${name}`);
+	return targets;
+}
 const RO_SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+const shownTarget = (target: string) => (target.length > 120 ? `${target.slice(0, 119)}…` : target);
+/** Why a write target is refused: inside the candidate, or not resolvable here (a variable or substitution); undefined when allowed. */
+function roTarget(what: string, target: string, cwd: string, root: string): string | undefined {
+	if (/[$`%]/.test(target) && !/^(\$null)$/i.test(target)) return `${what} to a target with a variable or substitution the guard cannot resolve (${shownTarget(target)}); use the literal absolute _scratch or _evidence path from the packet`;
+	return insideRoot(target, cwd, root) ? `${what} into the candidate checkout (${shownTarget(target)})` : undefined;
+}
 function insideRoot(target: string, cwd: string, root: string): boolean {
 	if (/[$`%]/.test(target) || target === "") return true; // unexpandable here: assume the candidate (fail closed)
 	if (/^(\/dev\/null|nul|\$null)$/i.test(target) || /^&\d$/.test(target)) return false;
@@ -2031,7 +2073,7 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 	if (depth > 3) return "command nesting is too deep to check";
 	for (const raw of splitSegments(text)) {
 		const tokens = tokenize(raw);
-		for (let i = 0; i < tokens.length; i++) if (tokens[i].op && tokens[i].text.includes(">") && !/>&$/.test(tokens[i].text) && insideRoot(tokens[i + 1]?.text ?? "", cwd, root)) return "redirects output into the candidate checkout"; // >& targets a descriptor
+		for (let i = 0; i < tokens.length; i++) if (tokens[i].op && tokens[i].text.includes(">") && !/>&$/.test(tokens[i].text)) { const why = roTarget("redirects output", tokens[i + 1]?.text ?? "", cwd, root); if (why) return why; } // >& targets a descriptor
 		const words = argvOf(tokens);
 		if (!words.length) continue;
 		const name = commandName(words[0]);
@@ -2049,8 +2091,9 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 		}
 		if (["npm", "pnpm", "yarn", "bun", "pip", "pip3", "cargo", "dotnet", "go"].includes(name) && RO_PKG.has(positionals[0]?.toLowerCase() ?? "")) return `${name} ${positionals[0]} changes dependencies`;
 		if ((name === "sed" || name === "perl") && lower.some((a) => /^-[a-z]*i/.test(a) || a === "--in-place")) return `${name} -i edits files in place`;
-		if (RO_DEST_LAST.has(name) && positionals.length && insideRoot(positionals[positionals.length - 1], cwd, root)) return `${name} writes into the candidate checkout`;
-		if (RO_DEST_ALL.has(name) && positionals.some((p) => insideRoot(p, cwd, root))) return `${name} writes into the candidate checkout`;
+		if (RO_DEST_LAST.has(name) && positionals.length) { const why = roTarget(`${name} writes`, positionals[positionals.length - 1], cwd, root); if (why) return why; }
+		if (RO_DEST_ALL.has(name)) for (const p of positionals) { const why = roTarget(`${name} writes`, p, cwd, root); if (why) return why; }
+		if (PS_WRITERS.has(name)) for (const p of psWriteTargets(args)) { const why = roTarget(`${name} writes`, p, cwd, root); if (why) return why; }
 	}
 	return undefined;
 }
