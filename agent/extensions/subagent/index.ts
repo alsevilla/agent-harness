@@ -37,6 +37,7 @@ import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProven
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { registerHandoffWindow, stateCard } from "./handoff-window.ts";
+import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
 import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge } from "./compact-handoff.ts";
@@ -437,7 +438,11 @@ async function runAgentAttempt(
 
 		let removeAbort = () => {};
         const exitCode = await new Promise<number>((resolve) => {
-			const invocation = getPiInvocation(args);
+			// Opt-in OS sandbox (Linux, bubblewrap): read-only filesystem except the folders this worker may write. Refused or noted per mode.
+			const boxed = sandboxInvocation(getPiInvocation(args), { cwd: cwd ?? defaultCwd, readOnly: readOnlyRoot !== undefined, agentDir: getAgentDir(), env: { ...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd) } });
+			if (!boxed.ok) { currentResult.stopReason = "error"; currentResult.errorMessage = boxed.reason; resolve(1); return; }
+			if (boxed.note) currentResult.stderr += `${boxed.note}\n`;
+			const invocation = { command: boxed.command, args: boxed.args };
 			logical?.attempt();
 			dispatchDefaults.onSpawn?.();
 			const proc = spawn(invocation.command, invocation.args, {
