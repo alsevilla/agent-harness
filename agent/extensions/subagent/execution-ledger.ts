@@ -56,6 +56,18 @@ export function commandCategory(norm: string): Category {
 	return "other";
 }
 
+/** Check commands a task packet names: backticked spans and code-block lines that classify as checks (tests, builds, linters). */
+export function packetChecks(task: string): string[] {
+	const found = new Set<string>();
+	const spans = [...task.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].flatMap((m) => m[1].split("\n"));
+	spans.push(...[...task.replace(/```[\s\S]*?```/g, "").matchAll(/`([^`\n]+)`/g)].map((m) => m[1]));
+	for (const raw of spans) {
+		const norm = normalizeCommand(raw.replace(/^\s*(?:\$|PS>|>)\s*/, ""));
+		if (norm && norm.length <= 200 && commandCategory(norm) === "check") found.add(norm);
+	}
+	return [...found].slice(0, 12);
+}
+
 /** Lines a successful read actually returned (1-based, end inclusive; end undefined = the whole file). Undefined = no coverage. */
 export function readCoverage(input: { offset?: unknown; limit?: unknown }, text: string): { start: number; end?: number } | undefined {
 	if (/^\[Line \d+ is .* exceeds /m.test(text)) return undefined;
@@ -79,7 +91,8 @@ export function createExecutionLedger() {
 	const files = new Map<string, FileState>();
 	const commands: CommandRecord[] = [];
 	const noted = new Set<string>(); // commands that already received a note
-	let viewOff = false; // older outputs were masked or compacted: earlier copies may be gone, so no "still current" claims or reuse
+	let viewOff = false;
+	let expected: string[] = []; // check commands the task packet names // older outputs were masked or compacted: earlier copies may be gone, so no "still current" claims or reuse
 
 	const fileFor = (cwd: string, p: string): FileState => {
 		const key = foldCase(path.resolve(cwd, p.replace(/^@/, "")));
@@ -161,12 +174,17 @@ export function createExecutionLedger() {
 				if (current.length) lines.push(`Read and still current (the earlier output is the file now): ${current.slice(0, VIEW_FILES).join("; ")}`);
 				if (stale.length) lines.push(`Read, but may have changed since: ${stale.slice(0, VIEW_FILES).join("; ")}`);
 			}
+			const ran = (want: string) => commands.some((c) => c.category === "check" && (c.norm === want || c.norm.includes(want)));
+			const missing = expected.filter((want) => !ran(want));
+			if (expected.length) lines.push(missing.length ? `Checks the packet names, not run yet: ${missing.map((c) => `\`${short(c, 90)}\``).join("; ")}` : "Every check the packet names has run at least once.");
 			const checks = new Map<string, CommandRecord>();
 			for (const c of commands) if (c.category === "check") checks.set(c.norm, c);
 			const lastChecks = [...checks.values()].sort((a, b) => b.step - a.step).slice(0, VIEW_COMMANDS);
 			if (lastChecks.length) lines.push(`Checks (latest run of each): ${lastChecks.map((c) => `\`${c.display}\` ${c.failed ? "failed" : "passed"} at step ${c.step}${c.global === global ? ", no change since" : ", files changed since"}`).join("; ")}`);
 			return lines.length > 1 ? lines.join("\n") : undefined;
 		},
+		/** The task packet, once: the check commands it names are tracked as run or not run in the view. */
+		noteTask(task: string): void { if (!expected.length && typeof task === "string") expected = packetChecks(task); },
 		/** Older outputs were masked or the run was compacted: earlier copies may be gone, so stop claiming them current or reusing them. */
 		earlierCopiesGone(): void { viewOff = true; },
 		/** After a compaction everything before it is a summary; start the observation index again. */

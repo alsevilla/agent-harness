@@ -1,0 +1,43 @@
+// Workers only: a long shell output keeps its start and end in context; the full text stays on disk. Pi keeps up to the last 2,000 lines
+// or 50 KB (about 12k tokens) of a command's output, and that copy then rides along in every later request of the run. Claude Code cuts
+// far sooner. Build and test logs are the usual offenders, and what matters in them is the start (the command, the first error) and the
+// end (the summary). Over the cap (default 16,000 characters; PI_SUBAGENT_OUTPUT_CAP, 0 off) the output keeps its first 2,000 and last
+// 8,000 characters, with a line naming the file that holds all of it: Pi's own full-output file when Pi already truncated, otherwise a
+// file this writes under the system temp folder.
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+type Part = { type: string; text?: string };
+export const OUTPUT_CAP_DEFAULT = 16_000;
+const HEAD = 2_000;
+const TAIL = 8_000;
+
+export function outputCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env.PI_SUBAGENT_OUTPUT_CAP;
+	if (raw === undefined || raw.trim() === "") return OUTPUT_CAP_DEFAULT;
+	const n = Number(raw);
+	if (!Number.isFinite(n) || n < 0) return OUTPUT_CAP_DEFAULT;
+	return n === 0 ? 0 : Math.max(HEAD + TAIL + 1_000, Math.floor(n));
+}
+
+/** Replacement content for a long shell output, or undefined to keep it. */
+export function capShellOutput(toolName: string, content: unknown, details: unknown, cap: number, saveDir = path.join(os.tmpdir(), "pi-worker-output")): Part[] | undefined {
+	if (!(cap > 0) || (toolName !== "bash" && toolName !== "powershell") || !Array.isArray(content)) return undefined;
+	const parts = content as Part[];
+	if (!parts.every((p) => p?.type === "text" && typeof p.text === "string")) return undefined;
+	const text = parts.map((p) => p.text).join("\n");
+	if (text.length <= cap) return undefined;
+	let full = typeof (details as { fullOutputPath?: unknown })?.fullOutputPath === "string" ? (details as { fullOutputPath: string }).fullOutputPath : undefined;
+	if (!full) {
+		try {
+			fs.mkdirSync(saveDir, { recursive: true });
+			full = path.join(saveDir, `${createHash("sha256").update(text).digest("hex").slice(0, 16)}.log`);
+			fs.writeFileSync(full, text);
+		} catch { full = undefined; }
+	}
+	const cut = text.length - HEAD - TAIL;
+	const where = full ? `the full output is in ${full.split(path.sep).join("/")}; read it with offset and limit, or grep it` : "rerun with the output sent to a file in your _scratch folder if you need it";
+	return [{ type: "text", text: `${text.slice(0, HEAD)}\n[… ${cut.toLocaleString("en-US")} characters cut to keep your context small: ${where} …]\n${text.slice(-TAIL)}` }];
+}

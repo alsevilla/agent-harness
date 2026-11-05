@@ -350,6 +350,7 @@ async function runAgentAttempt(
         }
     }
     const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier, agent.modelSlot);
+    if (worker) worker.cwd = path.resolve(cwd ?? defaultCwd); // for /subagent changes
     if (worker && dispatchDefaults.jobId) dispatchDefaults.runtime?.note(dispatchDefaults.jobId, worker.id, dispatchDefaults.waitKey);
     let codeIntegrationsEnabled = false;
     try {
