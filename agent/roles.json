@@ -154,12 +154,12 @@
       "economy": {
         "model": "openai-codex/gpt-6-luna",
         "fallbackModel": "anthropic/claude-haiku-5-5",
-        "thinking": "high"
+        "thinking": "medium"
       },
       "capable": {
         "model": "openai-codex/gpt-6.1-sol",
         "fallbackModel": "anthropic/claude-sonnet-5-5",
-        "thinking": "high"
+        "thinking": "medium"
       }
     },
     "tools": "read, grep, find, ls, bash, powershell"
@@ -188,12 +188,12 @@
       "economy": {
         "model": "anthropic/claude-haiku-5-5",
         "fallbackModel": "openai-codex/gpt-6-luna",
-        "thinking": "high"
+        "thinking": "medium"
       },
       "capable": {
         "model": "anthropic/claude-sonnet-5-5",
         "fallbackModel": "openai-codex/gpt-6.1-sol",
-        "thinking": "high"
+        "thinking": "medium"
       }
     },
     "tools": "read, grep, find, ls, bash, powershell"

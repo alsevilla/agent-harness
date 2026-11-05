@@ -275,13 +275,14 @@ test("the retired role budget key is an unknown key for the manual scanner, not 
 
 // Golden: the declared default of every shipped role equals the independent approved-preset oracle (user-approved snapshot; tier-only-baseline.json stays immutable
 // and its delta to the oracle is pinned by role-registry.test.ts). Tool permissions are the baseline's plus the separately approved release-engineer write grant.
-test("candidate declared defaults equal the independent approved-preset oracle for all 20 baseline roles; the additive planner mirrors architecture-specialist", () => {
+test("candidate declared defaults equal the independent approved-preset oracle for all 20 baseline roles; the additive planner mirrors architecture-specialist (medium thinking)", () => {
 	const golden = JSON.parse(fs.readFileSync(new URL("./fixtures/approved-user-presets.json", import.meta.url), "utf8")) as { roles: Array<{ name: string; defaultModelTier: string; tiers: Record<string, { model: string; fallbackModel: string[]; thinking: string }>; tools: string[] }> };
 	const registry = JSON.parse(fs.readFileSync(path.join(repo, "agent", "roles.json"), "utf8"));
 	const declared = (scanner as any).declaredDefaults(registry) as Map<string, { model: string; fallbackModel: string[]; thinking: string; tools: string }>;
 	assert.equal(golden.roles.length, 20);
 	assert.equal(declared.size, 21);
-	assert.deepEqual(declared.get("planner"), declared.get("architecture-specialist"), "additive planner declares exactly the architecture-specialist settings");
+	// User-approved 2026-11-05: planner runs at medium thinking; every other setting mirrors architecture-specialist.
+	assert.deepEqual(declared.get("planner"), { ...declared.get("architecture-specialist")!, thinking: "medium" }, "additive planner declares the architecture-specialist settings, at medium thinking");
 	for (const role of golden.roles) {
 		const d = declared.get(role.name);
 		assert.ok(d, role.name);

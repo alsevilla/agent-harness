@@ -43,3 +43,13 @@ test("handoff check: one nudge only for a normal final reply without a STATUS li
 	assert.equal(needsHandoffNudge([]), false);
 	assert.match(HANDOFF_NUDGE, /STATUS, NEXT, RISKS, EVIDENCE/);
 });
+
+// Token-efficiency research (Prompt-Induced Waste, 2608.01347; Can your AI agent be cheaper?, 2608.25399): bounded packets cut reasoning and search.
+test("shared guidance: start at named locations, stop at the stop condition, long output goes to a _scratch log", () => {
+	const core = CORE_GUIDANCE.replace(/\s+/g, " ");
+	assert.match(core, /Start from the locations the packet names \(files, symbols, failing tests\) before searching wider/);
+	assert.match(core, /Stop when the packet's stop condition is met, or, when it names none, once its acceptance checks pass: report then, without further refining, refactoring or re-verifying/);
+	assert.match(core, /send its output to a log file in the assigned _scratch\/<task> folder, read only the failing part or the tail, and report the log path/);
+	const policy = fs.readFileSync(new URL("../../../AGENTS.md", import.meta.url), "utf8");
+	assert.match(policy, /known locations \(files, symbols, failing tests\), evidence paths, allowed\/forbidden scope, checks, a stop condition and requested output/);
+});
