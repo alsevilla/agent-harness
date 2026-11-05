@@ -12,6 +12,7 @@
 // Main's own large tool outputs (read, bash, grep, find, ls) get the same treatment: the newest `window` stay word for word,
 // older ones are masked in whole batches by a one-line stub naming the tool and its file or command. Errors and short
 // outputs are never masked. Plain masking, not summarization: it saves tokens without a model call or a guessed digest.
+import { stoppedJobsCardPart, type StoppedJob } from "./stopped-jobs.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const HANDOFF_WINDOW_ENV = "PI_SUBAGENT_HANDOFF_WINDOW";
@@ -168,12 +169,13 @@ export function shortenContext<T extends Message>(messages: readonly T[], window
 // conversation still knows what is in flight and never re-launches it. Appended at the very end, so the cached prefix is untouched.
 export const STATE_CARD_TYPE = "subagent-state";
 export interface StateJob { jobId: string; state: string; paused?: boolean; workers?: { name?: string }[] }
-export function stateCard(jobs: readonly StateJob[], epoch: string, openDecisions: number): string | undefined {
+export function stateCard(jobs: readonly StateJob[], epoch: string, openDecisions: number, stopped: readonly StoppedJob[] = []): string | undefined {
 	const running = jobs.filter((j) => j.state === "running");
-	if (!running.length && !openDecisions) return undefined;
+	if (!running.length && !openDecisions && !stopped.length) return undefined;
 	const list = running.slice(0, 8).map((j) => `${j.jobId}@${epoch} (${[...new Set((j.workers ?? []).map((w) => w.name).filter(Boolean))].join(", ") || "starting"}${j.paused ? ", paused" : ""})`);
 	const parts = [running.length ? `running: ${list.join("; ")}${running.length > 8 ? `; +${running.length - 8} more` : ""}` : "no running jobs"];
 	if (openDecisions) parts.push(`${openDecisions} worker decision${openDecisions === 1 ? "" : "s"} waiting (subagent_control decisions)`);
+	if (stopped.length) parts.push(stoppedJobsCardPart([...stopped]));
 	return `[runtime state, not user text] ${parts.join("; ")}. Completions arrive automatically; do not re-launch running work.`;
 }
 

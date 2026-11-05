@@ -4,6 +4,7 @@ import type { ChildProcess } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { WorkerMonitor } from "./monitor.ts";
 import { servedReported } from "./provenance.ts";
+import { saveStoppedJobs, stoppedJobDetail, stoppedJobsNotice, takeStoppedJobs, type StoppedJob } from "./stopped-jobs.ts";
 import { expandRetainedResult, formatCompletionNotice, validateNoticeLimit } from "./compact-handoff.ts";
 import { DecisionRelay, decisionPayload, formatDecisionNotice, type DecisionAction, type DecisionNotice, type DecisionRecord, type DecisionSettlement } from "./decision-relay-state.ts";
 
@@ -185,6 +186,8 @@ export class BackgroundWorkers {
   private generation = 0;
   usage: UsageScope = newUsageScope(); // replaced on reset; launches capture the scope they start under
   pendingNote?: () => string; // runtime-derived CLEANUP_PENDING text (never child text); empty when nothing is pending
+  stoppedJobsFile?: string; // set by index.ts: <agent dir>/run-state/stopped-jobs.json
+  stoppedEarlier: StoppedJob[] = []; // jobs the previous runtime's reload or session change stopped; shown until main asks about each
   private sequence = 0;
   readonly epoch: string; // opaque per-runtime id: notices name bg-N@epoch, so an old notice can never select a new runtime's reused bg-N
   private slots = 0;
@@ -196,8 +199,22 @@ export class BackgroundWorkers {
   constructor(pi: ExtensionAPI, monitor: WorkerMonitor, decisions = new DecisionRelay(), epoch = randomBytes(6).toString("hex")) {
     if (!/^[A-Za-z0-9]{1,16}$/.test(epoch)) throw new Error("epoch must be 1-16 letters or digits");
     this.pi = pi; this.monitor = monitor; this.decisions = decisions; this.epoch = epoch;
-    pi.on("session_start", () => this.reset());
-    pi.on("session_shutdown", () => this.reset());
+    pi.on("session_start", (_event: unknown, ctx: any) => {
+      this.reset();
+      this.stoppedEarlier = this.stoppedJobsFile ? takeStoppedJobs(this.stoppedJobsFile) : [];
+      if (this.stoppedEarlier.length) try { ctx?.ui?.notify?.(stoppedJobsNotice(this.stoppedEarlier), "warning"); } catch { /* notice is a courtesy */ }
+    });
+    pi.on("session_shutdown", () => { this.recordStopped(); this.reset(); });
+  }
+  /** Before shutdown aborts them: record the running jobs so the next runtime can say what was stopped. */
+  recordStopped(): void {
+    if (!this.stoppedJobsFile) return;
+    const stoppedAt = new Date().toISOString();
+    const jobs = [...this.jobs.values()].filter((j) => j.state === "running").map((j) => {
+      const records = j.workerIds.map((id) => this.monitor.store.records.get(id));
+      return { job: `${j.id}@${this.epoch}`, roles: [...new Set(records.map((r) => r?.name).filter((n): n is string => !!n))], task: records.find((r) => r?.task)?.task ?? "", stoppedAt };
+    });
+    saveStoppedJobs(this.stoppedJobsFile, jobs);
   }
   reset() {
     this.settleDecisions(this.decisions.clear("session-reset"));
@@ -398,9 +415,14 @@ export class BackgroundWorkers {
     const shown = JSON.stringify(String(target).slice(0, 80));
     const noOutcome = " No outcome is implied: do not infer PASS or FAIL and do not rerun the task automatically; report to the user.";
     const qualified = /^(bg-\d+)@(.+)$/.exec(target);
-    if (qualified && qualified[2] !== this.epoch) throw new Error(`Result unavailable for ${shown}: it names another Pi runtime (epoch mismatch); this runtime's bg-N, if any, is a different job and is not returned.${noOutcome}`);
+    // A job the last reload or session change stopped: explain it once and drop its state-card line (same epoch after /new, another after /reload).
+    const stopped = this.stoppedEarlier.find((j) => j.job === target || (!qualified && j.job === `${target}@${this.epoch}`));
+    if (stopped) this.stoppedEarlier = this.stoppedEarlier.filter((j) => j !== stopped);
+    const detail = stopped ? stoppedJobDetail(stopped) : "";
+    if (qualified && qualified[2] !== this.epoch) throw new Error(`Result unavailable for ${shown}: it names another Pi runtime (epoch mismatch); this runtime's bg-N, if any, is a different job and is not returned.${detail}${noOutcome}`);
     const id = qualified ? qualified[1] : target;
     const job = this.jobs.get(id);
+    if (!job && detail) throw new Error(`Result unavailable for ${shown}.${detail}${noOutcome}`);
     if (!job) throw new Error(`Result unavailable for ${shown}: not retained by this Pi runtime (never started here, evicted beyond the latest 64 finished jobs, cleared by new/resume/fork/reload, or from another runtime epoch).${noOutcome}`);
     target = id;
     if (!job.result) return {content: [{type: "text", text: `Job ${target} is still running. Continue other work; completion will arrive automatically.`}]};
