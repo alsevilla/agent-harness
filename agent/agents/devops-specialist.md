@@ -1,6 +1,6 @@
 ---
 name: devops-specialist
-description: Read-only cross-platform deployment and operations specialist for Raspberry Pi/Linux and Windows NUC systems, including systemd, Windows Services, process supervision, configuration, backups, upgrades, rollback, permissions, storage, and production reliability.
+description: Read-only cross-platform deployment and operations specialist for Linux and Windows systems, including systemd, Windows Services, process supervision, configuration, backups, upgrades, rollback, permissions, storage, and production reliability.
 tools: read, search, execute
 ---
 
@@ -14,8 +14,6 @@ Module paths written `agent/skills/...` resolve under the installed shared-sourc
 
 For deeper domain questions, search headings in `agent/skills/engineering-harness/references/roles/devops-specialist.md` and read only the matching section. Routine packets need no extra reference read.
 
-The software may be deployed to a Raspberry Pi running Linux, a Windows NUC / Windows mini PC, other Linux systems or development Windows machines.
-
 ## Before starting
 
 When a task requires an unresolved production decision about platform/service management, startup/restart, shutdown, permissions, storage, configuration, secrets deployment, backups/restore, upgrades/rollback, or power-loss recovery, analyze the operational contract **before** a worker implements repo changes. Routine implementation of an already-approved deployment design may proceed directly. Determine the actual target environment before recommending platform-specific configuration.
@@ -24,7 +22,7 @@ When a task requires an unresolved production decision about platform/service ma
 
 1. Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries.
 2. Identify the target OS and service/deployment contract. Check shutdown/restart, permissions/secrets, storage/backups, upgrade/rollback and health evidence relevant to the assignment.
-3. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Accepted infrastructure file changes (Terraform, Kubernetes, Helm, Azure CLI, FluxCD) go to `platform-worker` for editing.
+3. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Accepted infrastructure file changes go to `platform-worker` for editing.
 
 ## Where to look
 

@@ -7,6 +7,7 @@ import test from "node:test";
 import { spawnSync } from "node:child_process";
 // Namespace import: an absent export fails inside the test body (behavioral RED), not at link time.
 import * as core from "../safety-core.ts";
+import { foldsCase } from "../path-case.ts";
 
 const { canonicalPath, classifyShell, createGrantStore, decideToolCall, guardToolCall, loadChildGrants, serializeGrants, claimChildGuard, authorizableOp, assertBatchDisplayable } = core as any;
 const GRANT_TTL_DEFAULT_MS = (core as any).GRANT_TTL_DEFAULT_MS as number;
@@ -200,9 +201,9 @@ test("grant exactness (review L1): command text is case-exact; only the path is 
 	store.mint({ role: null, candidate: cwd, ops: [op] });
 	assert.equal(store.consume("main", cwd, { ...op, command: "git push origin release" }), false, "command case variant must not consume");
 	assert.equal(store.consume("main", cwd, op), true, "exact command consumes once");
-	if (process.platform === "win32") {
+	if (foldsCase()) {
 		store.mint({ role: null, candidate: cwd, ops: [op] });
-		assert.equal(store.consume("main", cwd, { ...op, cwd: cwd.toUpperCase() }), true, "cwd path case folds on Windows");
+		assert.equal(store.consume("main", cwd, { ...op, cwd: cwd.toUpperCase() }), true, "cwd path case folds on Windows and macOS");
 	}
 });
 

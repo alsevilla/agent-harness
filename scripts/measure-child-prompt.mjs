@@ -40,11 +40,8 @@ const countOf = (text, needle) => text.split(needle).length - 1;
 const MARKERS = {
 	shellSyntaxHeading: "## Shell syntax",
 	artifactPlacementHeading: "## Artifact placement",
-	sharedBuildFolderRule: cic.SHARED_BUILD_FOLDER_RULE,
-	relocationSafety: "Do not move live SQLite",
+	relocationSafety: "Do not move live database files",
 	noAutomaticGraphBuild: "Missing graphs never authorize a fresh graph build",
-	rustBuildHeading: "## Rust build output",
-	rustCargoCommandRule: "Use it for every cargo command",
 	codeNavigationHeading: "## Code navigation integrations",
 	candidateNavigationHeading: "## Candidate navigation and shared retrieval",
 	serenaProjectPath: "pass project explicitly as",
@@ -66,7 +63,7 @@ const repeatedLines = (text) => {
 };
 const toolNames = (args) => { const i = args.indexOf("--tools"); return i >= 0 ? args[i + 1].split(",") : []; };
 
-// Controlled world: integration files, Cargo manifest, graph artifacts and package root are temp fixtures only.
+// Controlled world: integration files, graph artifacts and package root are temp fixtures only.
 const fixtureRoot = path.join(outdir, "fixtures");
 const writeFile = (file, text = "") => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
 function makeWorld(name, spec = {}) {
@@ -83,7 +80,6 @@ function makeWorld(name, spec = {}) {
 	if (spec.graphifySkill) writeFile(path.join(agentDir, "skills", "graphify", "SKILL.md"));
 	const qmdExtension = path.join(base, "qmd", "extensions", "qmd", "index.ts");
 	if (spec.qmd) writeFile(qmdExtension);
-	if (spec.cargo) writeFile(path.join(candidate, "Cargo.toml"), "[package]\nname = \"fixture\"\n");
 	if (spec.projectGraph) { writeFile(path.join(candidate, "graphify-out", "graph.json"), "{}"); writeFile(path.join(candidate, "graphify-out", "GRAPH_REPORT.md"), "# report\n"); writeFile(path.join(candidate, "graphify-out", "wiki", "index.md"), "# wiki\n"); }
 	if (spec.globalGraph) { writeFile(path.join(home, ".graphify", "global-graph.json"), "{}"); writeFile(path.join(home, ".graphify", "global-manifest.json"), JSON.stringify({ repos: {} })); writeFile(path.join(home, ".graphify", "wiki", "index.md"), "# global\n"); }
 	let packageRoot = null;
@@ -126,14 +122,12 @@ for (const role of ROLES) {
 	}
 }
 
-// Fixture shapes: identical specs for BEFORE and AFTER; plain candidate unless the spec adds Cargo, graphs or a package root.
+// Fixture shapes: identical specs for BEFORE and AFTER; plain candidate unless the spec adds graphs or a package root.
 const minimal = { ponytail: true };
 const customRole = { name: "custom-role", systemPrompt: "CUSTOM ROLE BODY: read and report only.", tools: ["read", "grep", "find", "ls"] };
 const SHAPES = [
-	{ name: "minimal-general-worker", role: "general-worker", spec: minimal, description: "general-worker; Ponytail only; no Cargo, no graph, no global graph, no QMD/Serena/Graphify, no package" },
-	{ name: "rust-general-worker", role: "general-worker", spec: { ...minimal, cargo: true }, description: "minimal-general-worker plus Cargo.toml at the candidate root" },
-	{ name: "rust-backend-worker", role: "backend-worker", spec: { ...minimal, cargo: true }, description: "backend-worker plus Cargo.toml at the candidate root" },
-	{ name: "full-graph-qmd-package-general-worker", role: "general-worker", spec: { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true, pkg: true }, description: "general-worker with Ponytail, QMD, Serena, Graphify extension and skill, project graph, global graph and package root; no Cargo" },
+	{ name: "minimal-general-worker", role: "general-worker", spec: minimal, description: "general-worker; Ponytail only; no graph, no global graph, no QMD/Serena/Graphify, no package" },
+	{ name: "full-graph-qmd-package-general-worker", role: "general-worker", spec: { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true, pkg: true }, description: "general-worker with Ponytail, QMD, Serena, Graphify extension and skill, project graph, global graph and package root" },
 	{ name: "package-custom-role", role: "custom-role", spec: { pkg: true }, description: "non-configured role (read/grep/find/ls allowlist) with a package root" },
 ];
 const fixtureRows = [];

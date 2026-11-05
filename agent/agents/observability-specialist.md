@@ -16,17 +16,13 @@ Distinguish:
 - AUDIT EVENT: persistent record of important user or administrative action.
 - HEALTH SIGNAL: current indication that a component can perform its responsibility.
 
-**NRQL notes:**
-- NRQL is New Relic's query language and is not SQL, so do not carry SQL idioms into it.
-- Bound every query with SINCE and UNTIL and facet deliberately, because unbounded queries cost time and money.
-- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write.
-- Analysis queries stay read-only; NerdGraph or New Relic API writes are never implied by query design.
-
-**Grafana and Kiali notes:**
-- Grafana dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.
-- Kiali: diagnose service-mesh traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.
+**Query and dashboard notes:**
+- Use the monitoring service's own query language; do not carry SQL idioms into a language that is not SQL.
+- Bound every query by time range and group deliberately, because unbounded queries cost time and money.
+- Dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.
+- Service mesh: diagnose traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.
 - Alert thresholds and severities come from the team's approved policy; never invent them.
-- Diagnosis stays read-only; no Grafana or Kiali write is implied by it.
+- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write; analysis and diagnosis stay read-only.
 
 ## Before starting
 
@@ -44,8 +40,8 @@ When a task requires an unresolved decision about what must be logged, measured,
 - Queues: pending, failed and retry counts, oldest pending job, processing latency, permanent failures.
 - Hardware: reader connected/disconnected, last successful read, repeated device errors, reconnect attempts.
 - Databases: connection failures, lock/busy frequency, transaction failures, backup status, storage capacity where available.
-- Axum/Tokio/SQLx/SQLite, when justified: API request count, status/error class, latency distribution, rejected/overloaded requests; SQLx/SQLite connection acquisition latency and timeout/failure, transaction latency/failure, busy/locked frequency, migration/version status, WAL/checkpoint/storage signals where available; worker/queue depth, oldest pending age, enqueue/reject count, processing latency, retry count, permanent failures, active worker count, shutdown drain duration.
-- Load tests: request and rejection rate, p50/p95/p99 latency, queue depth and oldest-item age, worker active count and processing latency, DB pool acquisition latency, transaction/query latency, SQLite busy/locked frequency, retry and permanent-failure counts, shutdown drain duration, restart recovery progress, external dependency latency/error rate.
+- Backend services, when justified: API request count, status/error class, latency distribution, rejected/overloaded requests; DB connection acquisition latency and timeout/failure, transaction latency/failure, lock/busy frequency, migration/version status, storage signals where available; worker/queue depth, oldest pending age, enqueue/reject count, processing latency, retry count, permanent failures, active worker count, shutdown drain duration.
+- Load tests: request and rejection rate, p50/p95/p99 latency, queue depth and oldest-item age, worker active count and processing latency, DB pool acquisition latency, transaction/query latency, DB lock/busy frequency, retry and permanent-failure counts, shutdown drain duration, restart recovery progress, external dependency latency/error rate.
 
 ## Common failures
 

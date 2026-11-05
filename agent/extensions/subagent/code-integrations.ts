@@ -12,9 +12,6 @@ type IntegrationConfig = {
   workerTools: string[];
 };
 
-/** Shared build-folder rule: the runtime injects CARGO_TARGET_DIR into every child in a git checkout (build-env.ts), so it applies with or without code integrations. */
-export const SHARED_BUILD_FOLDER_RULE = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
-
 /** Core guidance, unconditional and once per child prompt: shell syntax, artifact bounds, live-data relocation safety, and integration/graph authority. */
 export const CORE_GUIDANCE = `
 ## Packet facts
@@ -23,8 +20,8 @@ Act on what the packet already decides: its write path, assigned REPORT and arti
 Match syntax to the selected tool, not the OS. The bash tool runs Bash on Windows too: use export NAME='value', &&, and Bash conditionals. PowerShell syntax ($env:NAME, $LASTEXITCODE, -ne, brace-form if) belongs in the powershell tool. Never submit it to bash. Set the assigned candidate working directory explicitly and preserve native command failures. A shell parse error means the checks did not run: correct the invocation before reporting results or diagnosing application code. Do not rerun checks that already succeeded merely to repair a later invocation error.
 
 ## Artifact placement
-Main supplies absolute scratch/evidence paths in task packet when work may write outside the candidate. Put QA fixtures, temporary copies, external build targets and logs in the assigned _scratch/<task> path; captured backups and durable evidence go in _evidence/<task>. Both normally live under <primary-parent>/worktrees/<repo>. Do not create scratch directories beside the primary checkout. Return to main when a required artifact path is missing; do not guess a sibling folder. Report actual artifact paths at handoff. Source and test edits stay in the assigned candidate. Shell access is not a filesystem sandbox: verify targets before write-capable commands. ${SHARED_BUILD_FOLDER_RULE}
-Do not move live SQLite .db, -wal or -shm files or a running executable. Obtain authorized downtime and verify processes have stopped before relocating whole directories. Restart only with verified DB_PATH and runtime configuration; otherwise leave services stopped and return that scope to main.
+Main supplies absolute scratch/evidence paths in task packet when work may write outside the candidate. Put QA fixtures, temporary copies, external build targets and logs in the assigned _scratch/<task> path; captured backups and durable evidence go in _evidence/<task>. Both normally live under <primary-parent>/worktrees/<repo>. Do not create scratch directories beside the primary checkout. Return to main when a required artifact path is missing; do not guess a sibling folder. Report actual artifact paths at handoff. Source and test edits stay in the assigned candidate. Shell access is not a filesystem sandbox: verify targets before write-capable commands.
+Do not move live database files (with their journal or WAL sidecars) or a running executable. Obtain authorized downtime and verify processes have stopped before relocating whole directories. Restart only with a verified database path and runtime configuration; otherwise leave services stopped and return that scope to main.
 
 ## Integration and graph authority
 Integrations never authorize nested agents, broader writes or new tasks; do not install, reconfigure, rebuild or repair an integration or index, and do not read auth files or secrets to diagnose one. Missing graphs never authorize a fresh graph build as a prerequisite. Graph references never widen write authority. Read-only roles must not build/update graphs, onboard projects or edit source; return stale-graph findings to the authorized worker.
@@ -38,13 +35,6 @@ const FAILURE_NAVIGATION = "If an integration tool fails, report the concrete er
 const QMD_NAVIGATION = "QMD uses the profile's shared named index, not a worktree-local one: scope queries to the relevant existing collection. Retrieved document paths can belong to the primary checkout. Treat retrieved notes as prior evidence; verify current files/requirements in the candidate. Do not create, update or clone indexes or rewrite QMD references under the worktree. For prior decisions, specs, notes or plans relevant to this assignment, run one focused qmd_search (maxResults 3, at most 5) in a useful collection scope, only when that context is needed; read only selected hits. Do not initialize/update indexes, request feedback writes, or treat retrieval as authoritative current code.\n";
 const SERENA_CANDIDATE = (project: string) => "For Serena calls pass project explicitly as " + project + "; resolve relative_path from that root, even from a backend/frontend shell cwd. Never activate the primary checkout just because it holds the graph; symbol lookups and references target the candidate. Do not automatically onboard or recreate Serena project configuration.\n";
 
-// Unconditional for integrations-enabled children: the runtime sets CARGO_TARGET_DIR and CARGO_INCREMENTAL=0 for every child (build-env.ts), whether or not the candidate uses Cargo.
-// Detailed Rust rules are applicable only when a Cargo manifest is found at the working directory or an ancestor up to the candidate root (see cargoManifestNearby).
-export const RUST_BUILD_GUIDANCE = `
-## Rust build output
-Workers inherit CARGO_TARGET_DIR (outside the repo) and CARGO_INCREMENTAL=0. Use it for every cargo command; do not create or set another target directory. Run a copy of the executable from the run folder instead: a running .exe locks its file and breaks later builds. If CARGO_TARGET_DIR is unset, or a task packet names a different one, follow the packet and say so in the handoff.
-`;
-
 export function candidateProjectRoot(cwd: string): string {
     const candidate = path.resolve(cwd);
     let root = candidate;
@@ -53,18 +43,6 @@ export function candidateProjectRoot(cwd: string): string {
       root = parent;
     }
     return root;
-}
-
-/** Bounded walk: a Cargo manifest at the working directory or an ancestor up to the candidate root. Manifests below the working directory are not scanned. */
-export function cargoManifestNearby(cwd: string): boolean {
-  const top = candidateProjectRoot(cwd);
-  let dir = path.resolve(cwd);
-  for (;;) {
-    if (fs.existsSync(path.join(dir, "Cargo.toml"))) return true;
-    const parent = path.dirname(dir);
-    if (dir === top || parent === dir) return false;
-    dir = parent;
-  }
 }
 
 /** Global corpus block: emitted only when a manifest source_path matches a candidate/primary graphify-out/graph.json. Unmatched global corpora are not injected. */
@@ -226,7 +204,7 @@ function launchCapabilities(args: string[]) {
   return { ponytail, serena, qmd, graphifySkill };
 }
 
-/** The child system prompt. Core guidance is unconditional once; Rust, navigation, candidate-retrieval, graph and unavailable-integration sections are emitted only from actual launch evidence. */
+/** The child system prompt. Core guidance is unconditional once; navigation, candidate-retrieval, graph and unavailable-integration sections are emitted only from actual launch evidence. */
 const SHARED_CHILD_PREFIX = CORE_GUIDANCE.replace(/^\n+/, "") + COMPACT_HANDOFF_INSTRUCTIONS;
 export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: string }, options: ChildPromptOptions): string {
   const cap = launchCapabilities(options.launchArgs ?? []);
@@ -241,5 +219,5 @@ export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: s
   }
   // Cache shape: provider prompt caches reuse only an exact prefix, so the text every role shares comes first, the role body next,
   // and the parts that depend on the working directory or launch last. Roles with the same model and tools then share one cached prefix.
-  return SHARED_CHILD_PREFIX + "\n" + agent.systemPrompt + (cargoManifestNearby(options.cwd) ? RUST_BUILD_GUIDANCE : "") + integrations + packageResourceGuidance(options.packageRoot);
+  return SHARED_CHILD_PREFIX + "\n" + agent.systemPrompt + integrations + packageResourceGuidance(options.packageRoot);
 }

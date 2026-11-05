@@ -17,7 +17,7 @@ const doublesUrl = new URL("./fixtures/runtime-doubles.mjs", import.meta.url).hr
 const stubMonitorUrl = "data:text/javascript," + encodeURIComponent("export class WorkerMonitor { constructor() { this.store = { begin() { return undefined; }, started() {}, event() {}, finish() {}, records: new Map(), changed() {} }; } }");
 // Launch-state stub for the provider cooldown entry: its pi-ai/compat import is not resolvable from this node test, and cooldown behavior is not under test here.
 const entryStubUrl = "data:text/javascript," + encodeURIComponent("export default function providerCooldownEntry() {}\nexport function registerProviderCooldown() {}\nexport async function runProviderCooldownCommand() { return { message: '', type: 'info' }; }\nexport async function providerLaunchState() { return { state: 'launch' }; }\nexport async function guardRefusalReplayable() { return false; }");
-const indexDependencies = new Set(["node:child_process", "@earendil-works/pi-ai", "./code-integrations.ts", "./build-env.ts"]);
+const indexDependencies = new Set(["node:child_process", "@earendil-works/pi-ai", "./code-integrations.ts"]);
 // Real installed TypeBox builds the real tool schema; pi-ai's public validateToolArguments (pure argument validation: no session, provider or model) checks it.
 const INSTALL_MODULES = hostModules(["@earendil-works/pi-ai", "typebox"]);
 const typeboxUrl = pathToFileURL(`${INSTALL_MODULES}/typebox/build/index.mjs`).href;

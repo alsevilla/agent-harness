@@ -107,11 +107,11 @@ describe("FixtureSpecimenTests", () => {
 			assert.match(c[id].context, /^Frontend, backend, browser and graphify skill catalogs are all discoverable\./, id);
 		}
 		assert.deepEqual([c.R37.expect.routes, c.R37.expect.roles_required, c.R37.expect.skills_required], [["T1_WORKER"], ["backend-worker"], ["backend"]]);
-		assert.deepEqual(c.R38.expect.skills_required, ["frontend", "frontend/solidjs-engineering"]);
+		assert.deepEqual(c.R38.expect.skills_required, ["frontend", "frontend/typescript-advanced-types"]);
 		assert.deepEqual([c.R39.expect.routes, c.R39.expect.roles_required, c.R39.expect.skills_required], [["T1_WORKER"], ["frontend-worker"], ["frontend"]]);
 		assert.deepEqual([c.R40.expect.routes, c.R40.expect.roles_required], [["DISCOVER_SCOUT_FIRST"], ["scout"]]);
 		assert.ok(!c.R40.expect.skills_forbidden.includes("graphify"), "graph query stays allowed");
-		assert.deepEqual(c.R37.expect.skills_forbidden, ["frontend", "browser", "graphify", "backend/rust-axum-engineering"]);
+		assert.deepEqual(c.R37.expect.skills_forbidden, ["frontend", "browser", "graphify", "backend/load-resilience-testing"]);
 		assert.deepEqual(c.R39.expect.skills_forbidden, ["frontend/design-dashboards", "frontend/ui-ux-pro-max", "browser"]);
 	});
 
@@ -128,7 +128,7 @@ describe("FixtureSpecimenTests", () => {
 		const c = byId(loadFixture());
 		const x = (id) => c[id].expect;
 		assert.deepEqual(x("R01").roles_allowed, ["backend-worker"]);
-		assert.ok(x("R01").skills_forbidden.includes("backend/rust-axum-engineering"));
+		assert.ok(x("R01").skills_forbidden.includes("backend/load-resilience-testing"));
 		assert.deepEqual(x("R03").roles_allowed, ["frontend-worker"]);
 		assert.deepEqual(x("R04").roles_required, ["ui-ux-specialist"]);
 		assert.deepEqual(x("R04").roles_allowed, ["ui-ux-specialist", "frontend-worker"]);
@@ -254,7 +254,7 @@ describe("EvaluatorTests", () => {
 	it("forbidden_skill_is_critical_even_on_noncritical_case", () => {
 		const fx = loadFixture();
 		assert.equal(byId(fx).R01.critical, false);
-		const rep = evaluateRows(setRow(perfectPredictions(fx), "R01", { skills: ["backend", "backend/rust-axum-engineering"] }), fx);
+		const rep = evaluateRows(setRow(perfectPredictions(fx), "R01", { skills: ["backend", "backend/load-resilience-testing"] }), fx);
 		assert.equal(rep.violations.skill_forbidden, 1);
 		assert.equal(rep.critical_failures, 1);
 		assert.equal(rep.ok, false);
@@ -321,7 +321,7 @@ describe("EvaluatorTests", () => {
 
 	it("forbidden_router_rejects_child_skill", () => {
 		const fx = loadFixture();
-		const rep = evaluateRows(setRow(perfectPredictions(fx), "R19", { skills: ["backend", "frontend/solidjs-engineering"] }), fx);
+		const rep = evaluateRows(setRow(perfectPredictions(fx), "R19", { skills: ["backend", "frontend/typescript-advanced-types"] }), fx);
 		assert.equal(rep.violations.skill_forbidden, 1);
 		assert.equal(rep.critical_failures, 1);
 		assert.equal(rep.ok, false);
@@ -408,7 +408,7 @@ describe("FixtureValidationTests", () => {
 	it("skill_name_with_trailing_newline_is_malformed", () => { const d = rawFixture(); d.cases[0].expect.skills_required = ["backend\n"]; assertBadFixture(d); });
 	it("required_skill_under_forbidden_router_rejected", () => {
 		const d = rawFixture();
-		d.cases.find((c) => c.id === "R19").expect.skills_required = ["frontend/solidjs-engineering"];
+		d.cases.find((c) => c.id === "R19").expect.skills_required = ["frontend/typescript-advanced-types"];
 		assertBadFixture(d);
 	});
 	it("deeply_nested_fixture_is_routing_eval_error", () => rejects(() => ev.parseFixture("[".repeat(100000) + "]".repeat(100000))));
@@ -1138,9 +1138,9 @@ describe("ReadDiagnosticsTests", () => {
 	const R01 = "agent/skills/backend/SKILL.md";
 	const R21 = "agent/skills/engineering-harness/ship/index.md";
 	const R38_FRONTEND = "agent/skills/frontend/SKILL.md";
-	const R38_SOLID = "agent/skills/frontend/solidjs-engineering/index.md";
+	const R38_TYPES = "agent/skills/frontend/typescript-advanced-types/index.md";
 	const R40_DISCOVER = "agent/skills/engineering-harness/discover/index.md";
-	const NEW_READS = { R37: [R01], R38: [R38_FRONTEND, R38_SOLID], R39: [R38_FRONTEND], R40: [R40_DISCOVER] };
+	const NEW_READS = { R37: [R01], R38: [R38_FRONTEND, R38_TYPES], R39: [R38_FRONTEND], R40: [R40_DISCOVER] };
 	const ALL_MAPPED = ["R01", "R21", "R37", "R38", "R39", "R40"];
 	const fx = loadFixture();
 	const obs = (events, complete = true) => ({ provenance: "unit-test synthetic trace", complete, events: events.map(([p, s]) => ({ path: p, status: s })) });
@@ -1156,7 +1156,7 @@ describe("ReadDiagnosticsTests", () => {
 		assert.deepEqual(c.R01.expect.required_reads, [R01]);
 		assert.deepEqual(c.R21.expect.required_reads, [R21]);
 		for (const [id, ps] of Object.entries(NEW_READS)) assert.deepEqual(c[id].expect.required_reads, ps, id);
-		for (const p of [R01, R21, R38_FRONTEND, R38_SOLID, R40_DISCOVER]) assert.ok(fs.statSync(path.join(REPO_ROOT, p)).isFile(), p);
+		for (const p of [R01, R21, R38_FRONTEND, R38_TYPES, R40_DISCOVER]) assert.ok(fs.statSync(path.join(REPO_ROOT, p)).isFile(), p);
 		assert.deepEqual(fx.cases.filter((x) => x.expect.required_reads).map((x) => x.id), ALL_MAPPED);
 	});
 
@@ -1192,9 +1192,9 @@ describe("ReadDiagnosticsTests", () => {
 	});
 
 	it("multi_path_case_needs_every_required_path_fully_read", () => {
-		const partial = runReads({ R38: obs([[R38_FRONTEND, "full"], [R38_SOLID, "partial"]]) }).read_diagnostics;
+		const partial = runReads({ R38: obs([[R38_FRONTEND, "full"], [R38_TYPES, "partial"]]) }).read_diagnostics;
 		assert.deepEqual([partial.measured_cases, partial.required_full, partial.required_total, partial.zero_observed_cases], [1, 1, 2, 0]);
-		const none = runReads({ R38: obs([[R38_SOLID, "truncated"]]) }).read_diagnostics;
+		const none = runReads({ R38: obs([[R38_TYPES, "truncated"]]) }).read_diagnostics;
 		assert.deepEqual([none.required_full, none.zero_observed_cases], [0, 1]);
 	});
 
@@ -1294,7 +1294,7 @@ describe("CliTests", () => {
 	it("requires_one_input_source", () => { assert.equal(runCli("--cases", CASES).status, 2); });
 
 	it("forbidden_child_skill_exit_one_critical", () => {
-		const rows = setRow(perfectPredictions(fx), "R19", { skills: ["backend", "frontend/solidjs-engineering"] });
+		const rows = setRow(perfectPredictions(fx), "R19", { skills: ["backend", "frontend/typescript-advanced-types"] });
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("child.jsonl", toJsonl(rows)));
 		assert.equal(r.status, 1, r.stderr);
 		assert.ok(r.stdout.includes("MISMATCH R19 [CRITICAL]"));

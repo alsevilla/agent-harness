@@ -74,11 +74,11 @@ test("shared code-leaf guidance specifies artifact placement and missing-path ha
   assert.match(CORE_GUIDANCE, /return.*main.*missing/i);
   assert.match(CORE_GUIDANCE, /report.*artifact paths.*handoff/i);
 });
-test("shared guidance treats live SQLite and running executables as relocation blockers", () => {
-  assert.match(CORE_GUIDANCE, /SQLite.*-wal.*-shm/i);
+test("shared guidance treats live database files and running executables as relocation blockers", () => {
+  assert.match(CORE_GUIDANCE, /live database files \(with their journal or WAL sidecars\)/i);
   assert.match(CORE_GUIDANCE, /running executable/i);
   assert.match(CORE_GUIDANCE, /verify processes have stopped before relocating/i);
-  assert.match(CORE_GUIDANCE, /Restart only with verified DB_PATH[\s\S]*otherwise leave services stopped/i);
+  assert.match(CORE_GUIDANCE, /Restart only with a verified database path[\s\S]*otherwise leave services stopped/i);
 });
 test("worktree policy permits safe relocation without a known restart configuration", () => {
   const paths = ["../../../skills/engineering-harness/references/policy-detail.md", "../README.md", "../../../skills/engineering-harness/worktree/index.md"];
@@ -311,30 +311,7 @@ test("shared guidance keeps shell and artifact rules unconditional for every rol
   assert.match(CORE_GUIDANCE, /Never submit it to bash/);
   assert.match(CORE_GUIDANCE, /_scratch\/<task>/);
 });
-// The runtime injects CARGO_TARGET_DIR into every child in a git checkout (build-env.ts), so the no-delete and no-server protection stays unconditional in the shared guidance.
-test("shared build folder protection is unconditional for integrations-enabled children, not gated on Cargo", () => {
-  assert.match(CORE_GUIDANCE, /When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it\./);
-});
-// Detailed Rust rules are applicable only with a Cargo manifest at the working directory or an ancestor up to the candidate root.
-// Below-cwd manifests are not scanned (documented limit). The shared build-folder rule stays in core for every shape.
-test("Rust build output rules apply only with a Cargo manifest at the working directory or an ancestor; the build-folder rule is always present", () => {
-  const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
-  const plain = repoAt("rust-plain");
-  const deep = repoAt("rust-deep");
-  fs.mkdirSync(join(deep, "a", "b", "c", "d"), { recursive: true });
-  fs.writeFileSync(join(deep, "a", "b", "c", "d", "Cargo.toml"), "[package]\n");
-  const manifestAtCwd = join(deep, "a", "b", "c", "d");
-  for (const cwd of [plain, deep, join(deep, "a")]) {
-    const text = assembled(cwd);
-    assert.equal(text.includes("## Rust build output"), false, `no manifest at or above ${cwd}`);
-    assert.equal(text.split(rule).length - 1, 1, cwd);
-  }
-  const text = assembled(manifestAtCwd);
-  assert.equal(text.split("## Rust build output").length - 1, 1, manifestAtCwd);
-  for (const rust of [/CARGO_TARGET_DIR/, /CARGO_INCREMENTAL=0/, /Use it for every cargo command; do not create or set another target directory/, /locks its file and breaks later builds/, /If CARGO_TARGET_DIR is unset/]) assert.match(text, rust, manifestAtCwd);
-});
 test("assembled child prompt: core headings once in every shape; navigation and retrieval only with their launch evidence", () => {
-  const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
   const plain = repoAt("assembled-plain");
   const live = assembled(plain, { launchArgs: FULL_LAUNCH });
   // Cache shape: shared guidance and the handoff format first, then the role body, then cwd/launch-dependent parts.
@@ -343,27 +320,14 @@ test("assembled child prompt: core headings once in every shape; navigation and 
   assert.ok(live.indexOf("ROLE BODY") < live.indexOf("## Code navigation integrations"), "launch-dependent parts follow the role body");
   assert.equal(assembled(repoAt("assembled-other"), { launchArgs: FULL_LAUNCH }).slice(0, live.indexOf("ROLE BODY")), live.slice(0, live.indexOf("ROLE BODY")), "the shared prefix does not depend on the working directory");
   for (const heading of ["## Shell syntax", "## Artifact placement", "## Integration and graph authority", "## Code navigation integrations", "## Candidate navigation and shared retrieval", "## Final handoff to main"]) assert.equal(live.split(heading).length - 1, 1, heading);
-  assert.equal(live.split(rule).length - 1, 1);
-  assert.equal(live.includes("## Rust build output"), false, "no Cargo manifest, so no Rust detail");
   const bare = assembled(plain);
   assert.equal(bare.includes("## Code navigation integrations"), false, "no integration in the launch, so no navigation section");
   assert.equal(bare.includes("## Candidate navigation and shared retrieval"), false);
   assert.equal(bare.split("## Final handoff to main").length - 1, 1);
   const pkg = assembled(plain, { enabled: false, packageRoot: "C:\\pkg" });
   assert.equal(pkg.split("## Shell syntax").length - 1, 1, "core is unconditional, so the package shape carries it too");
-  assert.equal(pkg.split(rule).length - 1, 1);
-  assert.doesNotMatch(pkg, /## Rust build output/);
   assert.match(pkg, /Package resources:/);
   assert.ok(pkg.includes("## Final handoff to main"));
-});
-// F2: package-shape children get no code guidance, so the build-folder rule is appended exactly once; integrations-enabled prompts keep it once too.
-test("package-shape children carry the shared build-folder rule exactly once, and so does an integrations-enabled prompt", () => {
-  const agent = { name: "general-worker", systemPrompt: "ROLE BODY" };
-  const rule = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
-  const pkg = assembleChildSystemPrompt(agent, { codeIntegrationsEnabled: false, cwd: tmpdir(), packageRoot: "C:\\pkg", globalGraphDirectory: EMPTY_GLOBAL });
-  assert.equal(pkg.split(rule).length - 1, 1);
-  const live = assembleChildSystemPrompt(agent, { codeIntegrationsEnabled: true, cwd: tmpdir(), packageRoot: null, globalGraphDirectory: EMPTY_GLOBAL });
-  assert.equal(live.split(rule).length - 1, 1);
 });
 test("shared code-leaf guidance keeps Ponytail, QMD and missing-graph authority limits", () => {
   const text = assembled(repoAt("authority-limits"), { launchArgs: FULL_LAUNCH });

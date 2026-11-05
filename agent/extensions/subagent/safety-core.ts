@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertExcludeUntracked, candidateFingerprint, git as hardenedGit, preflight as checkoutPreflight, assertNoRepoFsmonitor, validateExclude } from "./candidate-fingerprint.ts";
 import { overlaps, type OwnerTracker } from "./cleanup-state.ts";
+import { foldCase } from "./path-case.ts";
 
 export type RiskRule =
 	| "GIT_PUBLISH" | "GIT_COMMIT" | "GIT_DESTRUCTIVE" | "PKG_PUBLISH_AUTH" | "DESTRUCTIVE_FS" | "LINKS" | "PRIVILEGE_PERSIST" | "PROC_KILL"
@@ -250,7 +251,7 @@ export function isSecretBasename(name: string): boolean {
 
 function isConfigToken(token: string): boolean {
 	const norm = token.toLowerCase().replace(/\\/g, "/");
-	return basenameOf(norm) === "settings.json" || /(^|\/)\.git\/(hooks\/|config$)/.test(norm);
+	return basenameOf(norm) === "settings.json" || basenameOf(norm) === PERMISSIONS_FILE || /(^|\/)\.git\/(hooks\/|config$)/.test(norm);
 }
 
 function add(out: Set<RiskRule>, ...rules: RiskRule[]): void {
@@ -461,7 +462,7 @@ function isConfigWritePath(canonical: string, agentDir: string): boolean {
 	const norm = canonical.toLowerCase().replace(/\\/g, "/");
 	const base = basenameOf(norm);
 	const agent = path.resolve(agentDir).toLowerCase().replace(/\\/g, "/");
-	return base === "settings.json" || /(^|\/)\.git\/(hooks\/|config$)/.test(norm) || (norm.startsWith(agent) && base.includes("trust"));
+	return base === "settings.json" || base === PERMISSIONS_FILE || /(^|\/)\.git\/(hooks\/|config$)/.test(norm) || (norm.startsWith(agent) && base.includes("trust"));
 }
 
 export function canonicalCwd(cwd: string): string {
@@ -472,9 +473,9 @@ export function canonicalCwd(cwd: string): string {
 	}
 }
 
-// Command text is case-exact; only the Windows path (cwd or target) is case-folded.
+// Command text is case-exact; paths (cwd or target) are case-folded where the OS ignores case (Windows, macOS; see path-case.ts).
 function foldPath(p: string): string {
-	return process.platform === "win32" ? p.toLowerCase() : p;
+	return foldCase(p);
 }
 
 function keyOf(op: GuardOp): string {
@@ -2032,6 +2033,33 @@ export function readOnlyViolation(toolName: string, input: Record<string, unknow
 	return readOnlyShell(String(input?.command ?? ""), cwd, root);
 }
 
+// ---- User permission rules: <agent dir>/harness-permissions.json, written by the user only (agents cannot: it is a CONFIG_WRITE path).
+//   { "allow": ["Stop-Process -Id *", "rm -rf build"], "deny": ["git push --force*"] }
+// Each entry is an exact shell command, or a prefix when it ends with "*" (whitespace collapsed, case kept). An allow entry lets a command
+// through that an operator could approve anyway (grantable rules only; never merge or release, which keep their own approvals). A deny
+// entry blocks a matching command for main and every worker as USER_DENY, never grantable. Missing file: no rules. Malformed: no allows.
+export const PERMISSIONS_FILE = "harness-permissions.json";
+let permissionsCache: { file: string; mtime: number; allow: string[]; deny: string[] } | undefined;
+const squash = (text: string) => text.trim().replace(/\s+/g, " ");
+export function loadPermissions(agentDir: string): { allow: string[]; deny: string[] } {
+	const file = path.join(agentDir, PERMISSIONS_FILE);
+	try {
+		const stat = fs.statSync(file);
+		if (permissionsCache && permissionsCache.file === file && permissionsCache.mtime === stat.mtimeMs) return permissionsCache;
+		const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { allow?: unknown; deny?: unknown };
+		const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && squash(x).length > 0 && squash(x) !== "*").map(squash) : []);
+		permissionsCache = { file, mtime: stat.mtimeMs, allow: list(raw.allow), deny: list(raw.deny) };
+		return permissionsCache;
+	} catch (error) {
+		// No file: no rules. A file that exists but cannot be parsed keeps its deny-nothing, allow-nothing default (fail closed for allows).
+		return { allow: [], deny: [] };
+	}
+}
+export function permissionMatches(pattern: string, command: string): boolean {
+	const c = squash(command);
+	return pattern.endsWith("*") ? c.startsWith(pattern.slice(0, -1)) : c === pattern;
+}
+
 // ---- Block messages: rule ids, the op digest, the program (never its arguments: a command may carry a credential), whether a grant can
 // ever help, and the exact next step.
 const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root); the -m text is one line of plain ASCII with no \\n escapes, the -F file lives in the task\'s _evidence or _scratch folder, and these forms need no grant';
@@ -2073,6 +2101,13 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 			return { block: true, reason: `Blocked by harness safety guard [READ_ONLY_ROLE] op ${digest}: ${why}; not grantable: this role is read-only for its candidate, so write REPORT and evidence files to the packet's _evidence or _scratch paths and return code or config changes to main for the owning worker.` };
 		}
 	}
+	if ((toolName === "bash" || toolName === "powershell") && typeof input?.command === "string") {
+		const denied = loadPermissions(guard.agentDir).deny.find((p) => permissionMatches(p, String(input.command)));
+		if (denied) {
+			const digest = createHash("sha256").update(`${toolName}\0${input.command}`).digest("hex").slice(0, 16);
+			return { block: true, reason: `Blocked by harness safety guard [USER_DENY] op ${digest}: ${String(input.command).trim().split(/\s+/)[0]}; not grantable: it matches a deny rule in your ${PERMISSIONS_FILE}.` };
+		}
+	}
 	if (redactedEnvRead(toolName, input)) return undefined;
 	const decision = decideToolCall(toolName, input, cwd, guard.agentDir, guard.scope === "child" && guard.gateCommits === true);
 	if (decision.action === "allow") {
@@ -2101,6 +2136,8 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, live)) return undefined;
 	if (guard.scope === "child" && cleanupAllows(guard.store, decision, live)) return undefined;
 	if (guard.scope === "child" && artifactCleanupAllows(guard.store, decision, live)) return undefined;
+	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
+	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
 	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) };
 }
 

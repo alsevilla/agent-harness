@@ -901,7 +901,7 @@ Look for:
 - lock behavior;
 - idempotency keys.
 
-Use concurrency/sqlite specialists if necessary.
+Use concurrency/database specialists if necessary.
 
 ---
 
@@ -975,23 +975,6 @@ Use `concurrency-specialist` when needed.
 
 ---
 
-# SQLite Review
-
-When SQLite persistence is material inspect:
-
-- transaction boundaries;
-- WAL assumptions;
-- busy handling;
-- connection PRAGMAs;
-- upsert behavior;
-- conditional updates;
-- concurrent writers;
-- uniqueness.
-
-Use `database-specialist` only for materially unresolved database semantics; `database-worker` owns implementation.
-
----
-
 # Performance Review
 
 Review performance when:
@@ -1016,8 +999,7 @@ When relevant inspect:
 - OS assumptions;
 - device behavior;
 - Windows vs Linux differences;
-- Raspberry Pi constraints;
-- USB lifecycle;
+- target hardware constraints;
 - service restart behavior.
 
 Do not claim platform safety merely because shared logic tests pass.

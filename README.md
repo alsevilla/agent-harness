@@ -122,7 +122,10 @@ A `tool_call` guard runs on main and every worker. It blocks risky shell operati
 | Merge | One approval names the exact PR and head SHA; the runtime computes and shows the candidate fingerprint itself. That one approval covers the merge, the knowledge checkpoint and the post-merge cleanup. |
 | Release | Its own approval, naming version and target SHA; refused if the tag exists. |
 | Cleanup after merge | The task's worktree (if any), then its `_scratch/<task>` and `_evidence/<task>` folders, each removed once after live checks that the PR merged as approved and nothing still uses them. |
+| Your own rules | `harness-permissions.json` in your Pi agent directory: `{ "allow": ["Stop-Process -Id *"], "deny": ["git push --force*"] }`. Exact commands, or prefixes ending in `*`. Allow covers only what you could approve anyway (never secrets, unresolvable deletes, merge or release); deny blocks main and every worker. Agents cannot write the file. |
 | Secrets | `.env*`, keys and credentials are never read or written. `node "<extension folder>/read-env-redacted.mjs" "<absolute .env path>"` shows settings with secret-like values hidden. |
+
+**Optional OS sandbox (Linux and macOS).** Set `PI_SUBAGENT_SANDBOX=on` (or `require`, which refuses to launch without it) to run each worker under bubblewrap (`bwrap`) on Linux or Seatbelt (`sandbox-exec`) on macOS: the filesystem is read-only except the worker's checkout (writing roles only), the task's `_evidence`/`_scratch` folders, the temp folder and a few state folders; add more with `PI_SUBAGENT_SANDBOX_WRITABLE`. Network stays on, because the worker must reach the model. It is off by default; Windows has no equivalent here (use WSL2 for it).
 
 Details, limits and every check: [subagent README](agent/extensions/subagent/README.md#safety-guard).
 
@@ -131,6 +134,8 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 - **Old results collapse.** In main's requests, the newest five subagent results stay word for word and older settled PASS results become one line each, in batches, so the cached prefix rarely changes. Main's own old large file and command outputs are masked the same way. `PI_SUBAGENT_HANDOFF_WINDOW=0` turns both off.
 - **Runtime state card.** While jobs run or worker decisions wait, each main request ends with one hidden line naming them, so a compacted conversation still knows what is in flight.
 - **Shared text first.** Every worker prompt starts with the same shared guidance, so roles with the same model and tools can reuse one cached prefix.
+- **Handoff check.** A worker that finishes without its STATUS line is asked once for the four-line handoff before it closes, so main doesn't have to re-ask.
+- **Footer status.** After each turn Pi's footer shows main's context, settled tasks, cost per completed task and running jobs.
 - **Measure by cost per completed task.** `/subagent usage` shows it per role. Cache reads and writes dominate the bill, so fewer tokens alone is not a saving.
 
 ## Optional components
@@ -157,7 +162,8 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 
 ## Limits
 
-- Workers are not an OS sandbox. The guard's read-only and secret rules are lexical and best-effort, not isolation.
+- Paths are compared case-insensitively on Windows and macOS, as their file systems are, and case-sensitively on Linux.
+- Without the opt-in OS sandbox (Linux, macOS), workers are not OS-isolated: the guard's read-only and secret rules are lexical and best-effort. The sandbox enforces writes only, not network.
 - Background admission, job ids and the DAG run per Pi process and in memory; after a reload or new session, old job ids are gone.
 - Only the latest Pi release is supported. The package is not published to npm.
 - Costs in `/subagent usage` are provider or catalog estimates, not a bill.

@@ -32,8 +32,7 @@ harness. It is not a second lifecycle.
 
 When backend concerns are material, invoke `Skill(backend)` before selecting a
 backend capability or routing `backend-worker` / backend specialists. Do not jump
-directly from the main session to `rust-axum-engineering`,
-`sqlite-sqlx-engineering`, `load-resilience-testing`, or a backend specialist.
+directly from the main session to `load-resilience-testing` or a backend specialist.
 
 
 ## Router Means Dispatch, Not Orchestrator Substitution
@@ -72,9 +71,9 @@ The main implementation writer for backend service/API source (any language) is 
 
 Read-only/domain specialists may participate when justified:
 
-- `database-specialist` — read-only analysis of material unresolved database semantics (including SQLite/SQLx when applicable); `database-worker` owns all DB implementation including migrations, constraints,
-  locking, WAL, indexes, query plans;
-- `concurrency-specialist` — Tokio tasks, channels, locks, cancellation,
+- `database-specialist` — read-only analysis of material unresolved database semantics; `database-worker` owns all DB implementation including migrations, constraints,
+  locking, indexes, query plans;
+- `concurrency-specialist` — async tasks, channels, locks, cancellation,
   backpressure, shutdown;
 - `api-specialist` — consumer/provider contract, validation, compatibility;
 - `performance-specialist` — measured throughput/latency/contention;
@@ -88,30 +87,16 @@ Do not create a second writer merely because several concerns are present.
 
 | Skill | Primary use | Primary owner | Use when | Location |
 |---|---|---|---|---|
-| `rust-axum-engineering` | Rust + Axum + Tokio + Tower implementation | `backend-worker` | Handlers, services, errors, typed state/extractors, middleware, async tasks, cancellation, shutdown, bounded concurrency, backend tests | `agent/skills/backend/rust-axum-engineering/index.md` |
-| `sqlite-sqlx-engineering` | SQLite + SQLx persistence engineering, only for that actual stack | `database-specialist` for material unresolved semantics, `database-worker` for authorized implementation | Schema, migrations, SQLx pool/options, transactions, WAL, busy handling, constraints, indexes, query plans, idempotency, burst writes | `agent/skills/backend/sqlite-sqlx-engineering/index.md` |
 | `load-resilience-testing` | Burst/load/resilience evidence | `test-engineer` / `performance-specialist` with domain specialists as needed | Arrival-rate workloads, overload/backpressure, DB contention, dependency failure, shutdown-under-load, restart/recovery, soak when justified | `agent/skills/backend/load-resilience-testing/index.md` |
 
 ## Routing Priority
 
-### Rust / Axum / Tokio implementation
+### Database behavior
 
-Use:
-
-`rust-axum-engineering`
-
-Add `sqlite-sqlx-engineering` only when persistence semantics are material.
+`database-specialist` owns read-only analysis of material unresolved invariants. `database-worker` owns all database source implementation; `backend-worker` owns non-database backend services and API/business logic.
 
 Add `concurrency-specialist` when correctness depends on task/channel/lock/
 cancellation behavior that is not routine.
-
-### SQLite / SQLx behavior
-
-Use:
-
-`sqlite-sqlx-engineering`
-
-`database-specialist` owns read-only analysis of material unresolved invariants. `database-worker` owns all database source implementation; `backend-worker` owns non-database backend services and API/business logic.
 
 ### API contract changes
 
@@ -129,7 +114,7 @@ Use `performance-specialist` for evidence and measurement.
 
 Do not treat:
 - more DB connections;
-- more Tokio tasks;
+- more async tasks;
 - larger queues;
 - more retries;
 - more indexes
@@ -147,11 +132,11 @@ but "does the exact candidate remain correct and bounded under pressure or
 failure?"
 
 Typical triggers:
-- reader/event burst windows;
+- event burst windows;
 - queue saturation;
 - overload/rejection behavior;
-- SQLite contention;
-- external notification failure;
+- database contention;
+- external dependency failure;
 - graceful shutdown while work is in flight;
 - restart/recovery;
 - capacity claims.
@@ -165,7 +150,7 @@ Use `observability-specialist` when the task needs runtime evidence such as:
 - API latency/error rate;
 - queue depth/age;
 - worker throughput/retries;
-- SQLite busy/lock frequency;
+- database lock/busy frequency;
 - DB acquisition latency;
 - graceful-shutdown completion;
 - external-service failure rate.
@@ -216,7 +201,7 @@ authority to invent unresolved domain policy.
 Before backend mutation, route unresolved material decisions to the matching
 read-only specialist:
 - all database implementation -> `database-worker`; material unresolved database semantics -> `database-specialist`
-- Tokio concurrency/backpressure/shutdown -> `concurrency-specialist`
+- async concurrency/backpressure/shutdown -> `concurrency-specialist`
 - API contract -> `api-specialist`
 - security boundary -> `security-specialist`
 - architecture -> `architecture-specialist`

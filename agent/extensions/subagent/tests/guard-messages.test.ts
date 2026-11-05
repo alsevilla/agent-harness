@@ -128,3 +128,24 @@ test("read before edit never hides a secret or config refusal", () => {
 	const g = { scope: "child" as const, store: createGrantStore(), agentDir, reads: new Set<string>() };
 	assert.match((guardToolCall(g, "write", { path: `${dir}/.env` }, dir) as any).reason, /\[SECRET\]/);
 });
+
+// User permission rules: <agent dir>/harness-permissions.json (user-written only).
+test("user permission rules: allow only what an operator could approve; deny blocks for everyone; agents cannot write the file", () => {
+	const dir = slash(path.join(root, "perm-agent"));
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, "harness-permissions.json"), JSON.stringify({ allow: ["Stop-Process -Id *", "rm -rf build", "cat .env", "gh pr merge *"], deny: ["git push --force*"] }));
+	const g = { scope: "main" as const, store: createGrantStore(), agentDir: dir };
+	const run = (command: string, tool = "bash") => guardToolCall(g, tool, { command }, cwd) as { block: boolean; reason: string } | undefined;
+	assert.equal(run("Stop-Process -Id 14236 -ErrorAction Stop", "powershell"), undefined, "prefix allow for a grantable rule");
+	assert.equal(run("rm -rf  build"), undefined, "exact allow, whitespace collapsed");
+	assert.ok(run("rm -rf dist")?.block, "not listed");
+	assert.match(run("cat .env")!.reason, /\[SECRET\]/, "an allow never covers a non-grantable rule");
+	assert.match(run("rm -rf $DIR")!.reason, /PATH_AMBIGUOUS/, "nor an unresolvable delete");
+	assert.ok(run("gh pr merge 12 --squash")?.block, "merge keeps its own approval");
+	assert.match(run("git push --force origin main")!.reason, /^Blocked by harness safety guard \[USER_DENY\] op [0-9a-f]{16}: git; not grantable: it matches a deny rule/);
+	assert.equal(run("git status"), undefined);
+	assert.match((guardToolCall(g, "write", { path: path.join(dir, "harness-permissions.json") }, cwd) as any).reason, /CONFIG_WRITE/, "agents cannot write the rules");
+	assert.match(run(`echo '{}' > "${dir}/harness-permissions.json"`)!.reason, /CONFIG_WRITE/);
+	const none = { scope: "main" as const, store: createGrantStore(), agentDir: slash(path.join(root, "no-perm")) };
+	assert.ok((guardToolCall(none, "powershell", { command: "Stop-Process -Id 1" }, cwd) as any)?.block, "no file: no allows");
+});

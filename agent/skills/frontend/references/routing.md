@@ -13,13 +13,12 @@ Use the narrowest applicable skill and pass findings to the assigned role.
 | New visual direction | frontend-design OR ui-ux-pro-max | ui-ux-specialist |
 | Purposeful motion and transitions | design-motion-principles | ui-ux-specialist; frontend-worker implements accepted behavior |
 | Existing UI implementation audit | web-design-guidelines | ui-ux-specialist or explicitly selected reviewer |
-| Solid reactivity, resources, cleanup, lifecycle | solidjs-engineering | frontend-worker; already preloaded |
 | Complex generics/type utilities | typescript-advanced-types | frontend-worker |
 
 Resolve material flow decisions before visual direction and affected implementation.
 Do not load both broad visual skills by default, or advanced types for ordinary TS.
-For SolidJS, keep Solid framework semantics; general design advice does not authorize
-React/Next.js implementation patterns. A design audit is not independent VERIFY.
+Keep the project's own framework semantics; general design advice does not authorize
+another framework's implementation patterns. A design audit is not independent VERIFY.
 
 The specialist remains read-only; frontend-worker owns non-trivial frontend writes.
 Pass the approved design or specialist handoff, applicable capabilities, relevant

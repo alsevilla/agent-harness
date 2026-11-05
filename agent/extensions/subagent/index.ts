@@ -12,7 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { BackgroundWorkers, formatUsageSummary, LogicalUsage, mainContextTokens, RpcWorker, type UsageScope } from "./background.ts";
+import { BackgroundWorkers, formatUsageSummary, LogicalUsage, mainContextTokens, usageStatusLine, RpcWorker, type UsageScope } from "./background.ts";
 import { WorkerMonitor } from "./monitor.ts";
 import { acquireWorkspace, releaseWorkspace, WorkspaceAdmissionError, type WorkspaceAccess, type WorkspaceLease } from "./workspace-admission.ts";
 import { spawn } from "node:child_process";
@@ -37,11 +37,11 @@ import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProven
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { registerHandoffWindow, stateCard } from "./handoff-window.ts";
+import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
-import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages } from "./compact-handoff.ts";
+import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
-import { cargoEnvDefaults } from "./build-env.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
@@ -437,12 +437,16 @@ async function runAgentAttempt(
 
 		let removeAbort = () => {};
         const exitCode = await new Promise<number>((resolve) => {
-			const invocation = getPiInvocation(args);
+			// Opt-in OS sandbox (Linux, bubblewrap): read-only filesystem except the folders this worker may write. Refused or noted per mode.
+			const boxed = sandboxInvocation(getPiInvocation(args), { cwd: cwd ?? defaultCwd, readOnly: readOnlyRoot !== undefined, agentDir: getAgentDir(), env: process.env });
+			if (!boxed.ok) { currentResult.stopReason = "error"; currentResult.errorMessage = boxed.reason; resolve(1); return; }
+			if (boxed.note) currentResult.stderr += `${boxed.note}\n`;
+			const invocation = { command: boxed.command, args: boxed.args };
 			logical?.attempt();
 			dispatchDefaults.onSpawn?.();
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
-                env: guard.childEnv({...process.env, ...cargoEnvDefaults(cwd ?? defaultCwd), PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : "", [CHILD_READONLY_ENV]: readOnlyRoot ?? ""}),
+                env: guard.childEnv({...process.env, PI_SUBAGENT_CONTROL_FILE: controlPath ?? "", [DECISION_RELAY_ENV]: dispatchDefaults.jobId ? "1" : "", [CHILD_READONLY_ENV]: readOnlyRoot ?? ""}),
 				shell: false,
 				stdio: ["pipe", "pipe", "pipe"],
 			});
@@ -459,6 +463,7 @@ async function runAgentAttempt(
                 }
             });
             let buffer = "";
+            let nudged = false; // at most one handoff nudge per worker process
             // One decoder per stream per spawn: a pipe chunk may end inside a multi-byte codepoint.
             const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
 
@@ -482,7 +487,11 @@ async function runAgentAttempt(
                     currentResult.stderr += `Worker dialog canceled: ${event.method} ${event.title ?? ""}\n`;
                 }
                 if (event.type === "tool_execution_start") currentResult.toolActivity = true;
-                if (event.type === "agent_settled" && client) { client.close(); proc.stdin?.end(); if (worker) dispatchDefaults.runtime?.detach(worker.id); }
+                // One handoff nudge: a worker that settled without its STATUS line is asked once for the four-line handoff before it closes.
+                if (event.type === "agent_settled" && client && !nudged && !event.aborted && !signal?.aborted && needsHandoffNudge(currentResult.messages)) {
+                    nudged = true;
+                    void client.send("prompt", HANDOFF_NUDGE).catch(() => { client.close(); proc.stdin?.end(); if (worker) dispatchDefaults.runtime?.detach(worker.id); });
+                } else if (event.type === "agent_settled" && client) { client.close(); proc.stdin?.end(); if (worker) dispatchDefaults.runtime?.detach(worker.id); }
                 if (worker) dispatchDefaults.monitor?.store.event(worker.id, event);
                 if (event.type === "message_end" && event.message) {
 					const msg = event.message as Message;
@@ -884,6 +893,10 @@ export default function (pi: ExtensionAPI) {
 	registerHandoffWindow(pi, process.env, () => runtimeRef ? stateCard(runtimeRef.list(), runtimeRef.epoch, decisionsRef?.list().filter((d) => d.state === "announced" || d.state === "open").length ?? 0) : undefined);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
+	// Footer status after each main turn (interactive UI only): context, tasks, cost per completed task, running jobs.
+	pi.on("agent_settled", (_event, ctx: any) => {
+		try { if (ctx?.hasUI && runtimeRef) ctx.ui?.setStatus?.("harness-usage", usageStatusLine(runtimeRef.usage, mainContextTokens(ctx))); } catch { /* status is cosmetic */ }
+	});
 	pi.on("agent_settled", (event) => {
 		if (!event.aborted) return;
 		safetyGrants.revokeAll();

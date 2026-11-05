@@ -39,7 +39,7 @@ export function spawn(_command, args, options) {
 }`);
 // Launch-state stub for the provider cooldown entry: every declared model launches; this suite does not test cooldown.
 const entryStubUrl = dataUrl("export default function providerCooldownEntry() {}\nexport function registerProviderCooldown() {}\nexport async function runProviderCooldownCommand() { return { message: '', type: 'info' }; }\nexport async function providerLaunchState() { return { state: 'launch' }; }\nexport async function guardRefusalReplayable() { return false; }");
-const indexDependencies = new Set(["@earendil-works/pi-ai", "./code-integrations.ts", "./build-env.ts"]);
+const indexDependencies = new Set(["@earendil-works/pi-ai", "./code-integrations.ts"]);
 // Real installed SDK pieces for the tool-boundary check: index.ts builds its real TypeBox schema; validateToolArguments comes from the installed pi-ai.
 const INSTALL_MODULES = hostModules(["@earendil-works/pi-ai", "typebox"]);
 const typeboxUrl = pathToFileURL(`${INSTALL_MODULES}/typebox/build/index.mjs`).href;

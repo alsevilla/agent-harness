@@ -3,9 +3,10 @@
 // every other context entry, and every unrecognised shape, stays byte-identical (full context = master behavior).
 import { createHash } from "node:crypto";
 import * as path from "node:path";
+import { foldCase } from "./path-case.ts";
 
 /** sha256 of the reviewed canonical agent/AGENTS.md after CRLF->LF only (no trim, BOM strip or case folding). A policy edit must update this and the coverage manifest in tests/child-context.test.ts. */
-export const REVIEWED_POLICY_SHA256 = "8bc3ddb78f05a70b2f4d2f47125445fea99ac6496ee49d3844f87602c164d4ac";
+export const REVIEWED_POLICY_SHA256 = "3860d3269e8500c96d02751289a4cf8d2085dc7b5f3b7366c0009937db767f16";
 
 export const COMPACT_LEAF_CONTRACT = `# Pi leaf contract
 
@@ -23,16 +24,16 @@ Meaningful behavior needs a focused failing test or check before production chan
 
 Readiness never grants commit, push, merge, publish, deploy or destructive-operation authority. Shared publication is separate explicit authority. Merge needs its own explicit approval naming the exact PR and the approved candidate HEAD SHA, bound to the verified candidate fingerprint; release needs a separate approval naming version and target SHA; neither authorizes the other, and nothing is inferred from commit, push, PR or an earlier approval, and single-use operation grants never carry merge or release authority, which need their separate approvals. For authorized commits or PRs read harness references/git-attribution.md first: it supplies attribution, not authority; keep the configured Git identity and change no global or repository Git settings merely to set it.
 
-Your model, effort and tools are fixed by your launch: never upgrade silently or replay after tools or abort. Serena targets the candidate; QMD and Graphify references may live elsewhere and be stale; use supplied absolute graph paths; missing graphs do not authorize builds. Rust builds use the harness-provided per-checkout CARGO_TARGET_DIR; never run servers from it; remove scratch build output you create.
+Your model, effort and tools are fixed by your launch: never upgrade silently or replay after tools or abort. Serena targets the candidate; QMD and Graphify references may live elsewhere and be stale; use supplied absolute graph paths; missing graphs do not authorize builds.
 
-Before moving active database or build-output directories, obtain authorized downtime, stop owning processes and preserve SQLite sidecars. Unknown restart configuration does not block an otherwise authorized relocation; leave services stopped until the restart executable, environment and DB path are verified.
+Before moving active database or build-output directories, obtain authorized downtime, stop owning processes and preserve database sidecar files. Unknown restart configuration does not block an otherwise authorized relocation; leave services stopped until the restart executable, environment and DB path are verified.
 `;
 
 type ContextFile = { path: string; content: string };
 
 const normalizeLf = (text: string) => text.replace(/\r\n/g, "\n");
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
-const samePath = (a: string, b: string) => (process.platform === "win32" ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b));
+const samePath = (a: string, b: string) => foldCase(path.resolve(a)) === foldCase(path.resolve(b));
 
 /** Roles that get the compact contract: integration-enabled, non-project sources, never the highest-privilege release-engineer (first slice). */
 export const childContextEligible = (agent: { name: string; source?: string }, codeIntegrationsEnabled: boolean): boolean =>

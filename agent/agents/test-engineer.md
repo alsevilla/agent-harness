@@ -21,7 +21,6 @@ You are an adversarial software test engineer. Do not assume the implementation 
 ## Knows/loads
 
 - For backend candidates, read the backend router in leaf mode to select backend verification capabilities.
-- When SolidJS semantics are material, consult `agent/skills/frontend/solidjs-engineering/index.md`.
 - When the completion contract includes burst, overload, contention, failure or recovery evidence, consult `agent/skills/backend/load-resilience-testing/index.md`.
 - Use Betterwright/browser evidence when available and authorized by the governing verification procedure.
 
@@ -44,15 +43,13 @@ Independently verify the exact implemented candidate, not the worker's descripti
 - Database: uniqueness, transaction boundaries, retries, duplicate writes, rollback behavior, concurrent access.
 - APIs: malformed input, missing fields, unauthorized actions when relevant, conflicting operations, expected status codes.
 - Frontend: happy path and branch/recovery paths; loading/empty/error/success/busy/disabled states; validation and retry; keyboard navigation and focus placement/restoration; responsive behavior at required viewports; long text/text expansion where material; permission/unauthorized behavior; destructive-action confirmation/recovery; UX copy that materially changes user decisions/recovery.
-- Rust / SQLite backend: handler/API behavior and serialization, error/status mapping, domain boundary cases, async task completion/cancellation, queue full/backpressure, duplicate/idempotency, graceful shutdown, database constraints, transaction rollback, migration of representative old data, SQLite busy/lock behavior, concurrent readers/writers, important query plans/performance evidence. For burst-sensitive workflows, verify realistic bursts rather than only single-request correctness.
-- SolidJS: reactive prop updates, effect/memo behavior, cleanup/disposal, async loading/refresh/error, list identity/reordering, relevant user interactions with Solid Testing Library/browser evidence.
+- Backend: handler/API behavior and serialization, error/status mapping, domain boundary cases, async task completion/cancellation, queue full/backpressure, duplicate/idempotency, graceful shutdown, database constraints, transaction rollback, migration of representative old data, database lock behavior, concurrent readers/writers, important query plans/performance evidence. For burst-sensitive workflows, verify realistic bursts rather than only single-request correctness.
 
 ## Common failures
 
 - Changing production behavior, or increasing timeouts/concurrency, merely to make a test pass.
 - Redesigning the interface or changing production behavior to make verification easier.
 - Assuming desktop/mobile/state equivalence: if required coverage is missing, report INCONCLUSIVE.
-- Inferring React-style rerender behavior in SolidJS.
 - Calling a run PASS when throughput is high but accepted work is lost, duplicated or left unrecoverable.
 
 

@@ -1,6 +1,6 @@
 // Applicability matrix for assembled child prompts. Core guidance (shell, artifact bounds, shared build folder, relocation safety,
-// graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. Rust, Serena/QMD, graph and
-// package detail appear only with actual launch evidence: structural Cargo manifests, --tools names, real --extension/--skill paths and graph artifacts.
+// graph/integration authority, compact handoff) is unconditional and appears exactly once per prompt shape. Serena/QMD, graph and
+// package detail appear only with actual launch evidence: --tools names, real --extension/--skill paths and graph artifacts.
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { after, test } from "node:test";
@@ -24,12 +24,10 @@ const ROLE_BODY = "ROLE BODY";
 // Controlled global home: an empty directory, so no host ~/.graphify corpus can leak into any assertion.
 const EMPTY_GLOBAL = fs.mkdtempSync(join(tmpdir(), "applicability-empty-global-"));
 after(() => fs.rmSync(EMPTY_GLOBAL, { recursive: true, force: true }));
-const SHARED = "When CARGO_TARGET_DIR is set, it is a shared per-checkout build folder: do not delete it and never run a server from it.";
 const CORE = {
   shell: "## Shell syntax",
   artifact: "## Artifact placement",
-  shared: SHARED,
-  relocation: "Do not move live SQLite .db, -wal or -shm files or a running executable.",
+  relocation: "Do not move live database files (with their journal or WAL sidecars) or a running executable.",
   noGraphBuild: "Missing graphs never authorize a fresh graph build as a prerequisite.",
   graphAuthority: "Graph references never widen write authority.",
   nested: "Integrations never authorize nested agents, broader writes or new tasks",
@@ -45,8 +43,8 @@ function role(name: string) {
   return { name, systemPrompt: ROLE_BODY, tools: toolsLine[1].split(",").map(tool => tool.trim()) };
 }
 
-type Spec = { ponytail?: boolean; serena?: boolean; qmd?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean; projectGraph?: boolean; globalGraph?: boolean; globalMatch?: boolean; cargoAt?: string[]; cwdRel?: string; pkg?: boolean };
-// Controlled world: every integration file, Cargo manifest, graph artifact and package root is a temp fixture; no real profile or home is read.
+type Spec = { ponytail?: boolean; serena?: boolean; qmd?: boolean; graphifyExtension?: boolean; graphifySkill?: boolean; projectGraph?: boolean; globalGraph?: boolean; globalMatch?: boolean; cwdRel?: string; pkg?: boolean };
+// Controlled world: every integration file, graph artifact and package root is a temp fixture; no real profile or home is read.
 function world(spec: Spec) {
   const root = fs.mkdtempSync(join(tmpdir(), "prompt-applicability-"));
   const dir = join(root, "agent");
@@ -62,7 +60,6 @@ function world(spec: Spec) {
   if (spec.graphifySkill) put(join(dir, "skills", "graphify", "SKILL.md"));
   const qmdExtension = join(root, "qmd", "extensions", "qmd", "index.ts");
   if (spec.qmd) put(qmdExtension);
-  for (const rel of spec.cargoAt ?? []) put(join(candidate, rel, "Cargo.toml"), "[package]\nname = \"fixture\"\n");
   if (spec.projectGraph) { put(join(candidate, "graphify-out", "graph.json"), "{}"); put(join(candidate, "graphify-out", "GRAPH_REPORT.md"), "# report\n"); }
   if (spec.globalGraph) { put(join(home, ".graphify", "global-graph.json"), "{}"); put(join(home, ".graphify", "global-manifest.json"), JSON.stringify({ repos: { [spec.globalMatch ? "candidate-repo" : "unrelated-repo"]: { source_path: spec.globalMatch ? join(candidate, "graphify-out", "graph.json") : join(root, "elsewhere", "graphify-out", "graph.json") } } })); }
   const packageRoot = join(root, "package");
@@ -87,28 +84,12 @@ function launch(agent: { name: string; systemPrompt: string; tools?: string[] },
   }
 }
 
-test("plain general-worker without optional integrations gets core and the fallback only: no Rust, Serena, QMD or graph detail", () => {
+test("plain general-worker without optional integrations gets core and the fallback only: no Serena, QMD or graph detail", () => {
   const { prompt } = launch(role("general-worker"), { ponytail: true });
   for (const needle of Object.values(CORE)) assert.equal(count(prompt, needle), 1, needle);
-  for (const absent of ["## Rust build output", "CARGO_INCREMENTAL", "qmd_search", "pass project explicitly as", "## Graph reference location", "## Global graph reference", "The graphify skill is on demand", "do not ls/read an assumed"]) assert.equal(prompt.includes(absent), false, absent);
+  for (const absent of ["qmd_search", "pass project explicitly as", "## Graph reference location", "## Global graph reference", "The graphify skill is on demand", "do not ls/read an assumed"]) assert.equal(prompt.includes(absent), false, absent);
   assert.match(prompt, /## Integrations not loaded in this launch/);
   assert.match(prompt, /read, grep and find/);
-});
-
-test("Cargo at the candidate root gives a Rust-capable worker the full Rust detail; a plain general-worker gets none", () => {
-  const rust = launch(role("backend-worker"), { ponytail: true, cargoAt: [""] }).prompt;
-  for (const needle of ["## Rust build output", "Workers inherit CARGO_TARGET_DIR", "CARGO_INCREMENTAL=0", "Use it for every cargo command; do not create or set another target directory", "locks its file and breaks later builds", "If CARGO_TARGET_DIR is unset"]) assert.equal(count(rust, needle), 1, needle);
-  assert.equal(count(launch(role("general-worker"), { ponytail: true }).prompt, "## Rust build output"), 0);
-  // Structural, not role-keyed: a general-worker running in a Cargo checkout gets the same Rust detail.
-  assert.equal(count(launch(role("general-worker"), { ponytail: true, cargoAt: [""] }).prompt, "## Rust build output"), 1);
-});
-
-test("Cargo above the working directory (workspace root) is detected; Cargo only below it is a documented limit and the shared build-folder rule stays", () => {
-  const workspace = launch(role("backend-worker"), { ponytail: true, cargoAt: [""], cwdRel: "crates/app" }).prompt;
-  assert.equal(count(workspace, "## Rust build output"), 1);
-  const below = launch(role("backend-worker"), { ponytail: true, cargoAt: ["crates/app"] }).prompt;
-  assert.equal(count(below, "## Rust build output"), 0, "nested manifest below cwd is not scanned (no recursive scan)");
-  assert.equal(count(below, SHARED), 1);
 });
 
 test("QMD and Serena sentences appear only when their tools are in the launch allowlist", () => {
@@ -152,14 +133,14 @@ test("unmatched global corpus is not injected: no global block and no unrelated 
 test("every prompt shape carries the core guidance and the handoff exactly once", () => {
   const shapes = [
     launch(role("general-worker"), { ponytail: true }).prompt,
-    launch(role("backend-worker"), { ponytail: true, cargoAt: [""], serena: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true }).prompt,
+    launch(role("backend-worker"), { ponytail: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true }).prompt,
     launch({ name: "custom-role", systemPrompt: ROLE_BODY, tools: ["read", "grep", "find", "ls"] }, { ponytail: true }).prompt,
     launch(role("general-worker"), { ponytail: true, pkg: true }).prompt,
   ];
   for (const [index, prompt] of shapes.entries()) for (const [key, needle] of Object.entries(CORE)) assert.equal(count(prompt, needle), 1, `shape ${index}: ${key}`);
 });
 
-test("package shape assembles core, the package note and the handoff once, with no integration or Rust detail", () => {
+test("package shape assembles core, the package note and the handoff once, with no integration detail", () => {
   const w = world({ pkg: true });
   try {
     const agent = { name: "general-worker", systemPrompt: ROLE_BODY };
@@ -167,20 +148,18 @@ test("package shape assembles core, the package note and the handoff once, with 
     assert.equal(count(prompt, "Package resources:"), 1);
     assert.match(prompt, /engineering-harness/);
     for (const [key, needle] of Object.entries(CORE)) assert.equal(count(prompt, needle), 1, key);
-    for (const absent of ["## Code navigation integrations", "## Rust build output", "qmd_search", "pass project explicitly as"]) assert.equal(prompt.includes(absent), false, absent);
+    for (const absent of ["## Code navigation integrations", "qmd_search", "pass project explicitly as"]) assert.equal(prompt.includes(absent), false, absent);
   } finally {
     w.cleanup();
   }
 });
 
-test("overlapping instructions are not restated: install/reconfigure rule and shared build-folder rule appear once", () => {
+test("overlapping instructions are not restated: install/reconfigure rule appears once", () => {
   const fallback = launch(role("general-worker"), { ponytail: true, serena: false, qmd: false, graphifySkill: false, graphifyExtension: false }).prompt;
   assert.equal(count(fallback, "reconfigure"), 1, "reconfigure stated once");
   assert.equal(count(fallback, CORE.installRule), 1);
-  const full = launch(role("backend-worker"), { ponytail: true, cargoAt: [""], serena: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true }).prompt;
-  assert.equal(count(full, SHARED), 1);
+  const full = launch(role("backend-worker"), { ponytail: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true, projectGraph: true }).prompt;
   assert.equal(count(full, "Missing graphs never authorize"), 1);
-  assert.equal(count(full, "Use it for every cargo command"), 1);
 });
 
 test("unavailable integrations keep their fallback: named, read/grep/find fallback, and do-not-call instruction", () => {

@@ -5,15 +5,15 @@
     {
       "id": "R01",
       "kind": "positive",
-      "question": "Add a required device_id check to the existing POST /v1/readers/heartbeat handler; the request contract is already accepted.",
-      "context": "Backend service written in Go, not Rust/Axum. Single handler plus its test. Cause not applicable.",
+      "question": "Add a required device_id check to the existing POST /v1/devices/heartbeat handler; the request contract is already accepted.",
+      "context": "Existing backend service. Single handler plus its test. Cause not applicable.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
         "roles_required": ["backend-worker"],
         "roles_allowed": ["backend-worker"],
         "skills_required": ["backend"],
-        "skills_forbidden": ["backend/rust-axum-engineering"],
+        "skills_forbidden": ["backend/load-resilience-testing"],
         "model_tiers": {"backend-worker": ["economy", "omitted"]},
         "required_reads": ["agent/skills/backend/SKILL.md"]
       }
@@ -28,7 +28,7 @@
         "routes": ["T3_SPECIALIST_FIRST"],
         "roles_required": ["database-specialist"],
         "roles_allowed": ["database-specialist", "database-worker"],
-        "skills_required": ["backend/sqlite-sqlx-engineering"],
+        "skills_required": [],
         "skills_forbidden": [],
         "model_tiers": {"database-specialist": ["capable"]}
       }
@@ -37,13 +37,13 @@
       "id": "R03",
       "kind": "positive",
       "question": "Apply the approved spacing and column order from the accepted dashboard design to the summary table.",
-      "context": "Design already approved in the record. No open design, flow or accessibility judgment; localized SolidJS presentation fix.",
+      "context": "Design already approved in the record. No open design, flow or accessibility judgment; localized presentation fix.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
         "roles_required": ["frontend-worker"],
         "roles_allowed": ["frontend-worker"],
-        "skills_required": ["frontend/solidjs-engineering"],
+        "skills_required": [],
         "skills_forbidden": [],
         "model_tiers": {"frontend-worker": ["economy", "omitted"]}
       }
@@ -195,7 +195,7 @@
     {
       "id": "R14",
       "kind": "near_miss",
-      "question": "The user cited the exact file src/handlers/readers.go and function parseHeartbeat; add a missing length check.",
+      "question": "The user cited the exact file src/handlers/devices.ts and function parseHeartbeat; add a missing length check.",
       "context": "Exact location is supplied, so Scout is not needed. Implementation only.",
       "critical": false,
       "expect": {
@@ -525,37 +525,37 @@
       "id": "R37",
       "kind": "positive",
       "question": "Add a required tenant_id check to the existing POST /v1/orders handler and its test; the request contract is already accepted.",
-      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. Backend service written in Go, not Rust/Axum. Single bounded handler plus its test; no UI, browser or code-graph work is involved.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. Existing backend service. Single bounded handler plus its test; no UI, browser or code-graph work is involved.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
         "roles_required": ["backend-worker"],
         "roles_allowed": ["backend-worker"],
         "skills_required": ["backend"],
-        "skills_forbidden": ["frontend", "browser", "graphify", "backend/rust-axum-engineering"],
+        "skills_forbidden": ["frontend", "browser", "graphify", "backend/load-resilience-testing"],
         "required_reads": ["agent/skills/backend/SKILL.md"]
       }
     },
     {
       "id": "R38",
       "kind": "positive",
-      "question": "Move the approved filter selection state of the SolidJS orders table into a shared store, following the accepted design.",
-      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. The design is approved and there is no open UX judgment. Localized SolidJS state change; no backend, browser or code-graph work is involved.",
+      "question": "Type the approved filter state of the orders table so each column's filter value type is derived from the column definition, following the accepted design.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. The design is approved and there is no open UX judgment. Localized change that needs mapped and conditional TypeScript types; no backend, browser or code-graph work is involved.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],
         "roles_required": ["frontend-worker"],
         "roles_allowed": ["frontend-worker"],
-        "skills_required": ["frontend", "frontend/solidjs-engineering"],
+        "skills_required": ["frontend", "frontend/typescript-advanced-types"],
         "skills_forbidden": ["backend", "browser", "graphify", "frontend/ui-ux-pro-max"],
-        "required_reads": ["agent/skills/frontend/SKILL.md", "agent/skills/frontend/solidjs-engineering/index.md"]
+        "required_reads": ["agent/skills/frontend/SKILL.md", "agent/skills/frontend/typescript-advanced-types/index.md"]
       }
     },
     {
       "id": "R39",
       "kind": "near_miss",
       "question": "Change the heading and button wording on the existing dashboard settings page to the approved copy.",
-      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. The page is not SolidJS. Copy-only change: no layout, flow, visual or accessibility judgment, so no dashboard design, UX or browser module is needed.",
+      "context": "Frontend, backend, browser and graphify skill catalogs are all discoverable. Copy-only change: no layout, flow, visual or accessibility judgment, so no dashboard design, UX or browser module is needed.",
       "critical": false,
       "expect": {
         "routes": ["T1_WORKER"],

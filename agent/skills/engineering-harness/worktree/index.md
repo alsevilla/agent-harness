@@ -25,16 +25,16 @@ Do not move an existing checkout while a running/paused worker or server uses it
 For existing database or build-output directories, identify owning processes,
 ports and probable data paths. If owners are active, obtain explicit downtime
 authority, quiesce and stop them, and verify they exited. Never move a running
-executable or live SQLite database. Back up a live SQLite database through its backup API when
+executable or live database. Back up a live database through its own backup tool when
 needed, and verify the backup.
 Unknown restart configuration does not block authorized relocation; leave
 services stopped if restart requirements cannot be established. Move each
-database directory separately with its `.db`, `-wal` and `-shm` files intact;
+database directory separately with its journal or WAL sidecar files intact;
 do not merge databases, delete sidecars or overwrite a destination. Verify
 file counts/hashes after moving whole directories. Path-bound tools such as
 virtualenv launchers may need recreation; check them before claiming they work.
-Restart only with a verified executable, environment and DB path (for example
-`DB_PATH`); otherwise leave services stopped and report the required handoff.
+Restart only with a verified executable, environment and database path;
+otherwise leave services stopped and report the required handoff.
 
 ### Completion and cleanup
 Two distinct modes exist: routine post-merge cleanup (this section, unchanged) and the explicit, narrow Authorized retirement mode below. A merge, readiness or a general cleanup request never selects retirement.

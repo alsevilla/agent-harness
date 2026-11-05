@@ -44,7 +44,7 @@ Report SYMPTOM, ROOT CAUSE, FIX and VERIFICATION separately, and return them to 
 ## Where to look
 
 - Async ordering, stale state, incorrect assumptions, database transaction boundaries, race conditions, time/date handling, serialization, API contract mismatches, hidden shared state.
-- Rust / Axum / SQLite: classify evidence first as compiler/type/trait/lifetime; `Send`/`Sync` or async task bound; Axum extractor/state/middleware; panic/error mapping; blocking-on-runtime; deadlock/lock contention; cancellation/shutdown; queue/backpressure; SQLx pool/acquire; SQLite busy/lock; migration/schema mismatch; transaction/idempotency; query/index performance; environment/build/linker.
+- Backend services: classify evidence first as compiler/type; async task bounds; framework routing/state/middleware; panic/error mapping; blocking-on-runtime; deadlock/lock contention; cancellation/shutdown; queue/backpressure; DB pool/acquire; DB lock contention; migration/schema mismatch; transaction/idempotency; query/index performance; environment/build/linker.
 
 ## Common failures
 

@@ -540,22 +540,6 @@ Do not contaminate current-state evidence.
 
 ---
 
-# Cargo Isolation
-
-For Rust alternate-state debugging:
-
-use a unique `CARGO_TARGET_DIR`.
-
-Conceptually:
-
-CARGO_TARGET_DIR=<unique-temp-target> cargo test ...
-
-Do not share build artifacts between baseline and current-state worktrees when stale artifacts could distort results.
-
-Do not casually run broad `cargo clean` against the user's primary build environment.
-
----
-
 # Build Cache Safety
 
 Prefer:
@@ -657,7 +641,7 @@ Bad:
 
 Better:
 
-> If stale Cargo artifacts cause the failure, an isolated target directory should eliminate it without source changes.
+> If stale build artifacts cause the failure, an isolated target directory should eliminate it without source changes.
 
 A hypothesis that explains everything after the fact but predicts nothing is weak.
 
@@ -780,24 +764,6 @@ For persistence failures inspect, as relevant:
 Prefer temporary DB copies or test DBs.
 
 Do not experiment destructively against production data.
-
----
-
-# SQLite Debugging
-
-When SQLite is involved, consider:
-
-- WAL behavior;
-- busy timeout;
-- transaction mode;
-- connection-specific PRAGMAs;
-- foreign_keys state;
-- lock contention;
-- checkpoint behavior;
-- uniqueness;
-- concurrent writers.
-
-Use `database-specialist` only for materially unresolved SQLite semantics (when SQLite is the actual engine); route database implementation to `database-worker`.
 
 ---
 
@@ -1301,7 +1267,7 @@ Separate root cause from contributing factors.
 Example:
 
 Root cause:
-shared Cargo target reused incompatible baseline artifacts.
+a shared build output folder reused incompatible baseline artifacts.
 
 Contributing factor:
 temporary worktree assumed build isolation.

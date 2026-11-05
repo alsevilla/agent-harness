@@ -21,6 +21,7 @@ The main orchestrator owns delegations, approvals, and phase routing.
 `;
 
 import { attemptsNote, modelProvenance } from "./provenance.ts";
+import { foldCase } from "./path-case.ts";
 
 export const BACKGROUND_COMPLETION_LIMIT = 4000; // default notice limit (total serialized UTF-16 length); the `noticeLimit` argument overrides it per job
 
@@ -232,7 +233,7 @@ export function expandRetainedResult(jobResult: any): string | null {
 // Image check: absolute image paths named in the task, compared with the paths the worker actually opened with read.
 // Runtime evidence, not child text: main cannot view images itself, so a visual claim about an unopened image is unverified.
 const IMAGE_PATH = /(?<![\w:/.\\])(?:[A-Za-z]:)?[\\/][^\s"'`<>|*?]*\.(?:png|jpe?g|webp|gif|bmp)\b/gi;
-const foldImage = (p: string) => { const s = p.replace(/\\/g, "/"); return process.platform === "win32" ? s.toLowerCase() : s; };
+const foldImage = (p: string) => foldCase(p.replace(/\\/g, "/"));
 export function unopenedImages(task: string, messages: readonly unknown[]): string[] {
 	const named = [...new Set((String(task ?? "").match(IMAGE_PATH) ?? []).map((p) => p.replace(/\\/g, "/")))];
 	if (!named.length) return [];
@@ -242,4 +243,14 @@ export function unopenedImages(task: string, messages: readonly unknown[]): stri
 		for (const part of (m as any).content) if (part?.type === "toolCall" && part.name === "read" && typeof part.arguments?.path === "string") opened.add(foldImage(part.arguments.path));
 	}
 	return named.filter((p) => !opened.has(foldImage(p)));
+}
+
+// Handoff check: a worker that settles normally without a STATUS line gets one follow-up prompt asking for the four-line handoff,
+// so main does not have to re-ask or re-fetch. Runtime decision from the worker's own final message; at most one nudge per worker.
+export const HANDOFF_NUDGE = "Your reply ended without the final handoff to main. If your details are not in a REPORT file yet, write them to the REPORT path your packet names (or its _evidence folder) first. Then reply with only the four lines: STATUS, NEXT, RISKS, EVIDENCE. Do not start new work.";
+export function needsHandoffNudge(messages: readonly unknown[]): boolean {
+	const last = [...(messages ?? [])].reverse().find((m: any) => m?.role === "assistant") as any;
+	if (!last || last.stopReason !== "stop") return false; // errors, aborts, length cut-offs and tool turns are handled elsewhere
+	const text = Array.isArray(last.content) ? last.content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n") : String(last.content ?? "");
+	return !/^\s*STATUS\s*:/im.test(text);
 }

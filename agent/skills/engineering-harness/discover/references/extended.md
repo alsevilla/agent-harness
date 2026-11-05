@@ -393,7 +393,6 @@ Typical routing:
 - security boundary → `security-specialist`
 - API contract → `api-specialist`
 - substantial UI workflow → `ui-ux-specialist`
-- USB/field-reader/device lifecycle → `concurrency-specialist`
 - deployment/platform behavior → `devops-specialist`
 - hot path/throughput → `performance-specialist`
 - cross-system structure → `architecture-specialist`

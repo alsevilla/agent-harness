@@ -438,13 +438,13 @@ Typical routing:
 
 ### Database
 
-Use `database-worker` for implementation across database engines. Use the read-only `database-specialist` only for material unresolved invariants or semantics; SQLite/SQLx rules apply only when that is the actual stack.
+Use `database-worker` for implementation across database engines. Use the read-only `database-specialist` only for material unresolved invariants or semantics.
 
 ### Concurrency
 
 Use `concurrency-specialist` for:
 
-- Tokio tasks;
+- async tasks;
 - shared state;
 - races;
 - channels;
@@ -530,7 +530,6 @@ Use `architecture-specialist` for:
 
 Use `concurrency-specialist` for device lifecycle and reader work:
 
-- USB;
 - field-device readers;
 - serial/HID;
 - device lifecycle;
@@ -543,8 +542,8 @@ Use `concurrency-specialist` for device lifecycle and reader work:
 
 Use `devops-specialist` for:
 
-- Raspberry Pi/Linux deployment;
-- Windows NUC/Windows deployment;
+- Linux deployment;
+- Windows deployment;
 - systemd;
 - Windows Services;
 - service accounts;
@@ -593,9 +592,9 @@ Give each specialist a specific technical question.
 
 Examples:
 
-"Determine the safest SQLite transaction and uniqueness strategy that guarantees one promotion batch per source/target period across process restarts."
+"Determine the safest transaction and uniqueness strategy that guarantees one batch per source/target period across process restarts."
 
-"Determine whether the proposed device reconnect loop can race with shutdown or create duplicate reader tasks."
+"Determine whether the proposed reconnect loop can race with shutdown or create duplicate worker tasks."
 
 "Determine whether this endpoint preserves the existing authorization boundary."
 
