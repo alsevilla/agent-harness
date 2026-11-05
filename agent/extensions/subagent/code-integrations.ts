@@ -148,12 +148,12 @@ function ponytailIntegrations(): Integration[] {
   ];
 }
 
-// Optional for every configured role: a missing file skips that integration and its integration-only tools.
+// Optional for every configured role: a missing file skips that integration and its integration-only tools. The graphify-pi extension is
+// not loaded into workers: it appended a "## graphify" prompt on every turn telling the worker to run graphify query (which writes stamps)
+// and graphify update (graph builds are not a worker's job); the harness's Graphify skill and its read-only read_graph.py cover queries.
 function optionalIntegrations(qmdExtension: string, serenaSkill = SERENA_SKILL): Integration[] {
-  const packages = path.join(getAgentDir(), "npm", "node_modules");
   return [
     { label: "QMD extension", flag: "--extension", file: qmdExtension, toolPrefix: "qmd_" },
-    { label: "Graphify extension", flag: "--extension", file: path.join(packages, "graphify-pi", "extensions", "graphify.ts") },
     { label: "Graphify skill", flag: "--skill", file: path.join(getAgentDir(), "skills", "graphify", "SKILL.md") },
     { label: "Serena skill", flag: "--skill", file: serenaSkill },
   ];

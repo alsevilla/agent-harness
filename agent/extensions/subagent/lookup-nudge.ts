@@ -72,6 +72,6 @@ export function launchLookupTools(activeTools: readonly string[], argv: readonly
 	return {
 		serena: argv.some((a) => /[\\/]serena[\\/]SKILL\.md$/i.test(a)),
 		qmd: activeTools.some((t) => t.startsWith("qmd_")),
-		graph: argv.some((a) => /[\\/]graphify[\\/]SKILL\.md$/i.test(a) || /[\\/]graphify-pi[\\/]/i.test(a)) || activeTools.some((t) => t.startsWith("graphify_")),
+		graph: argv.some((a) => /[\\/]graphify[\\/]SKILL\.md$/i.test(a)) || activeTools.some((t) => t.startsWith("graphify_")),
 	};
 }

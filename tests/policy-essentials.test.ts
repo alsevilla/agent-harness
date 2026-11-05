@@ -68,3 +68,16 @@ test("LEARN saves to the local store the project documents, and the merge approv
 	}
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("a merge approved without one cleans nothing"));
 });
+
+// Planner-as-Router (arXiv 2609.32917) and CodeRescue (arXiv 2607.19338): tiers are chosen at plan time, small general-worker edits run on
+// economy, and a fix round stays on its tier until a second failure. Field data: untiered general-worker edits cost ~$0.07 each on capable.
+test("main chooses tiers at plan time and keeps a task's tier for its first fix round", () => {
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("decide each task's `modelTier` in the plan, before launching any"));
+	assert.ok(routing.includes("- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> explicit economy"));
+	assert.ok(routing.includes("the fix round keeps the task's tier and passes the failed REPORT and the failing command output as they are"));
+	assert.ok(routing.includes("never an automatic upgrade"));
+	const main = flat(read("agent/extensions/subagent/index.ts"));
+	assert.ok(main.includes("Choose each task's modelTier when you plan, before launching any"));
+	assert.ok(main.includes("Keep the task's modelTier for the first fix round; choose capable explicitly only after a second failure on the same check."));
+});

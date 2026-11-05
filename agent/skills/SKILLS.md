@@ -43,8 +43,9 @@ Former agent skill preloads become explicit assigned-module reads; do not assume
 automatic injection or reinvoke the manual shortcut. Missing context stays BLOCKED.
 
 Browser (Betterwright) and the profile-adapted Graphify skill remain independent.
-There is one browser entry; graphify-pi supplies its native extension while its
-package skill is disabled to keep main and worker guidance consistent. A folder move
+There is one browser entry. Graphify needs only its CLI (`uv tool install graphifyy`):
+the profile skill and its read-only read_graph.py helper cover queries, and the
+graphify-pi extension is not used, so main and workers get one consistent guidance. A folder move
 alone saves no tokens: savings come from fewer catalog entries, smaller module indexes,
 selective detail loading and avoiding blanket preload of long capability guides.
 

@@ -75,7 +75,6 @@ function makeWorld(name, spec = {}) {
 	fs.mkdirSync(home, { recursive: true });
 	fs.mkdirSync(path.join(candidate, ".git"), { recursive: true });
 	if (spec.ponytail) { writeFile(path.join(modules, "@dietrichgebert", "ponytail", "pi-extension", "index.js")); writeFile(path.join(modules, "@dietrichgebert", "ponytail", "skills", "ponytail-review", "SKILL.md")); }
-	if (spec.graphifyExtension) writeFile(path.join(modules, "graphify-pi", "extensions", "graphify.ts"));
 	if (spec.graphifySkill) writeFile(path.join(agentDir, "skills", "graphify", "SKILL.md"));
 	const qmdExtension = path.join(base, "qmd", "extensions", "qmd", "index.ts");
 	if (spec.qmd) writeFile(qmdExtension);
