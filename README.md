@@ -136,6 +136,9 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 - **Shared text first.** Every worker prompt starts with the same shared guidance, so roles with the same model and tools can reuse one cached prefix.
 - **Handoff check.** A worker that finishes without its STATUS line is asked once for the four-line handoff before it closes, so main doesn't have to re-ask.
 - **Footer status.** After each turn Pi's footer shows main's context, settled tasks, cost per completed task and running jobs.
+- **Bounded packets.** Main names known locations (files, symbols, failing tests) and a stop condition; workers start there, stop there, and send long test, build or install output to a log in their `_scratch` folder.
+- **No duplicate reads.** When a worker reads the same file and range again and gets exactly the same text, the result is a one-line note pointing at its earlier copy. Changed files, other ranges, images and errors pass through.
+- **Keep project `AGENTS.md` short.** Studies of context files found that repository overviews raise cost without improving results, while instructions are followed. Put rules and guardrails in a project's `AGENTS.md`, and move detail (architecture, routes, build notes) into project skills under `.agents/skills/` that agents read only when a task needs them.
 - **Measure by cost per completed task.** `/subagent usage` shows it per role. Cache reads and writes dominate the bill, so fewer tokens alone is not a saving.
 
 ## Optional components
