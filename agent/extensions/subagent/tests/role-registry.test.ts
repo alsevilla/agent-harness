@@ -37,6 +37,8 @@ const GENERIC_ROLES = [
 
 // Additive roles after the frozen 20-role baseline: name -> existing role whose validated tiers/tools it must mirror exactly. Baseline fixtures stay unchanged.
 const ADDED_ROLES: Record<string, string> = { planner: "architecture-specialist" };
+// User-approved 2026-11-05: planner runs at medium thinking on every tier; everything else still mirrors its source role.
+const ADDED_THINKING: Record<string, string> = { planner: "medium" };
 const BASELINE_ROLES = GENERIC_ROLES.filter((name) => !(name in ADDED_ROLES));
 
 // Canonical definitions carry no Pi settings: model, fallback, thinking and Pi tools come from roles.json; text is the definition file.
@@ -732,13 +734,16 @@ test("raw roles.json equals the approved preset oracle for every role: default t
   }
 });
 
-test("additive planner mirrors architecture-specialist tiers, models, thinking and tools exactly, read-only, and no baseline role changed", () => {
+test("additive planner mirrors architecture-specialist tiers, models and tools exactly (thinking per the approved exception), read-only, and no baseline role changed", () => {
   const raw = RAW_ROLES();
   for (const [added, source] of Object.entries(ADDED_ROLES)) {
     const a = raw.find((item) => item.name === added)!;
     const b = raw.find((item) => item.name === source)!;
     assert.ok(a && b);
-    assert.deepEqual({ ...a, name: source }, b, `${added} copies ${source} registry settings`);
+    const thinking = ADDED_THINKING[added];
+    for (const tier of Object.values(a.modelTiers)) if (thinking) assert.equal(tier!.thinking, thinking, `${added}: approved thinking`);
+    const mirrored = thinking ? Object.fromEntries(Object.entries(a.modelTiers).map(([k, v]) => [k, { ...v!, thinking: b.modelTiers[k as "economy" | "capable"]!.thinking }])) : a.modelTiers;
+    assert.deepEqual({ ...a, name: source, modelTiers: mirrored }, b, `${added} copies ${source} registry settings (thinking aside)`);
     assert.deepEqual(a.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool === "edit" || tool === "write"), [], `${added}: read-only tools`);
     const text = fs.readFileSync(new URL(`../../../agents/${added}.md`, import.meta.url), "utf8");
     assert.ok(text.split(String.fromCharCode(10)).map((line) => line.trim()).includes("tools: read, search, execute"), `${added}: native read-only tools line`);
