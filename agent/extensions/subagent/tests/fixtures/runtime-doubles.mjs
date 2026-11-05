@@ -95,9 +95,10 @@ export const CODE_NAVIGATION_GUIDANCE = "";
 export function graphReferenceGuidance() {
 	return "";
 }
-// Integrations are disabled in this double; the compact handoff is still appended as in the production assembler.
+// Integrations are disabled in this double. It keeps the production order: the shared prefix (core guidance, which opens with
+// "## Packet facts", then the compact handoff) comes first so providers can cache it, then the role body.
 export function assembleChildSystemPrompt(agent) {
-	return agent.systemPrompt + COMPACT_HANDOFF_INSTRUCTIONS;
+	return "## Packet facts\n(test double: shared core guidance)\n" + COMPACT_HANDOFF_INSTRUCTIONS + "\n" + agent.systemPrompt;
 }
 export function packageResourceGuidance() {
 	return "";

@@ -316,7 +316,7 @@ test("retired lifecycle/disposal: unknown fields are rejected (not ignored) with
 	const base = children().length;
 	const retired = await s.launch({ cleanup: { ...s.request, lifecycle: { action: "merge", learn: { state: "NO LESSON", reason: "x" } } } });
 	assert.equal(retired.isError, true);
-	assert.match(text(retired), /cleanup needs exactly checkout, branch, base, pr, headSha, mergeCommit and quiescent/, "lifecycle is an unknown field, not a missing approval");
+	assert.match(text(retired), /cleanup needs exactly checkout \(worktree task\) or task \(plain-branch task\), plus branch, base, pr, headSha, mergeCommit and quiescent/, "lifecycle is an unknown field, not a missing approval");
 	assert.equal(children().length, base, "nothing launched");
 	const host = fakeHost();
 	subagentExtension(host);
