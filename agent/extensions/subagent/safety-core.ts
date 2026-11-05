@@ -582,6 +582,8 @@ export interface GrantStore {
 	/** Why a blocked shell op found no grant: one exists for other text here, for this text elsewhere, or this exact one was already used. */
 	grantMiss?(scope: GuardScope, candidate: string, op: GuardOp): GrantMiss | undefined;
 	claim(role: string, candidate: string): GrantRecord[];
+	/** Why a launch of this role in this folder receives no grant although live ones exist: another folder, or another role here. */
+	claimHint?(role: string, candidate: string): string | undefined;
 	importRecords(records: GrantRecord[]): void;
 	revokeAll(includeLeases?: boolean): void;
 	size(): number;
@@ -720,9 +722,19 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		},
 		claim(role, candidate) {
 			const t = live();
-			const taken = records.filter((r) => r.role === role && r.candidate === candidate && r.expiresAt > t);
+			// Folded like every other path check: on Windows a grant for C:\\Work\\App and a launch in c:\\work\\app are one folder.
+			const taken = records.filter((r) => r.role === role && foldPath(r.candidate) === foldPath(candidate) && r.expiresAt > t);
 			records = records.filter((r) => !taken.includes(r));
 			return taken;
+		},
+		claimHint(role, candidate) {
+			const t = live();
+			const liveRecords = records.filter((r) => r.expiresAt > t);
+			const elsewhere = liveRecords.find((r) => r.role === role && foldPath(r.candidate) !== foldPath(candidate));
+			if (elsewhere) return `main holds an approval for ${role} in folder ${elsewhere.candidate}, but this worker was launched in ${candidate}; launch it in that folder or ask for an approval with cwd set to this one`;
+			const other = liveRecords.find((r) => r.role !== role && foldPath(r.candidate) === foldPath(candidate));
+			if (other) return `main holds an approval for this folder bound to ${other.role === null ? "main" : `role ${other.role}`}, not ${role}`;
+			return undefined;
 		},
 		importRecords(incoming) {
 			const valid = incoming.map(validateRecord);
@@ -839,6 +851,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 }
 
 export const CHILD_GRANT_ENV = "PI_SAFETY_GRANTS";
+/** One line from main's launch: why this worker received no single-use approval although one was requested. Advisory text only. */
+export const CHILD_GRANT_NOTE_ENV = "PI_SAFETY_GRANT_NOTE";
 
 // Push target of the trusted release-engineer launch. `base` is the optional parent-supplied PR base: when present, PR create/edit must match it exactly; when absent the legacy syntactic-only base check applies.
 export interface PushTarget { candidate: string; pushUrl: string; branch: string; base?: string }
@@ -1878,7 +1892,7 @@ export interface ChildGuardLaunch {
 }
 
 // One logical child job's claim window. Its first actual spawn closes the window, even when no grant exists or the spawn fails; fallback spawns of that job never claim.
-export interface ClaimWindow { open: boolean }
+export interface ClaimWindow { open: boolean; claimed?: number }
 
 // Claims this role's grants for one child spawn (single use) and returns the guard entry plus the child's environment.
 export function claimChildGuard(store: GrantStore, role: string, candidate: string, guardFile: string, window: ClaimWindow = { open: true }, withLeases = false, prBase?: string, cleanupId?: string): ChildGuardLaunch {
@@ -1912,6 +1926,11 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	const mayClaim = window.open;
 	window.open = false;
 	const claimed = mayClaim ? store.claim(role, canonicalCwd(candidate)) : [];
+	if (mayClaim) window.claimed = claimed.length;
+	// Field report: a worker refused for an approved command could not tell why; the launch now carries the reason it received none.
+	const grantNote = claimed.length ? undefined : !mayClaim && (window.claimed ?? 0) > 0
+		? "this is a retry or fallback attempt of the job, and its single-use approvals went to the first attempt; ask main to request the approval again and relaunch"
+		: mayClaim ? store.claimHint?.(role, canonicalCwd(candidate)) : undefined;
 	const cleanup = mayClaim && cleanupId !== undefined ? [store.claimCleanup(cleanupId)].filter((c): c is CleanupGrant => c !== undefined) : [];
 	const value = claimed.length || leases.length || delivery.length || cleanup.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget, cleanup) : undefined;
 	return {
@@ -1924,7 +1943,9 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 		childEnv(base) {
 			const env: NodeJS.ProcessEnv = { ...base };
 			delete env[CHILD_GRANT_ENV];
+			delete env[CHILD_GRANT_NOTE_ENV];
 			if (value !== undefined) env[CHILD_GRANT_ENV] = value;
+			if (grantNote !== undefined) env[CHILD_GRANT_NOTE_ENV] = grantNote.replace(/[\x00-\x1f\x7f]+/g, " ").slice(0, 400);
 			return env;
 		},
 	};
@@ -2304,12 +2325,12 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		? "not grantable: no approval unblocks this for an agent; the operator can run it directly"
 		: scope === "main"
 			? "grantable: the operator can approve this exact operation with request_authorization; the approval must name this folder and the exact command text, and is used once"
-			: "grantable: a worker receives only grants requested for its role and this folder before it was launched, with the exact command text; ask main to request one and relaunch the worker, or have the operator run it";
+			: `grantable: a worker receives only grants requested for its role and its launch folder before it was launched, with the exact command text; ask main to request one with role and cwd ${decision.op.kind === "shell" ? decision.op.cwd : "set to this folder"} and relaunch the worker in that folder, or have the operator run it`;
 	return `${head}${programOf(decision.op)}; ${how}${advice.length ? `; ${advice.join("; ")}` : ""}.`;
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
-export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget; readOnlyRoot?: string; reads?: Set<string> }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
+export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; agentDir: string; live?: DeliveryLive; gateCommits?: boolean; pushTarget?: PushTarget; readOnlyRoot?: string; reads?: Set<string>; grantNote?: string }, toolName: string, input: Record<string, unknown>, cwd: string, liveUrl: (candidate: string, branch: string) => string | undefined = livePushUrl): GuardBlock | undefined {
 	// Commit gating is a trusted-child policy only; the main guard never gates commits.
 	if (guard.scope === "child" && guard.readOnlyRoot !== undefined) {
 		const why = readOnlyViolation(toolName, input, cwd, guard.readOnlyRoot);
@@ -2356,7 +2377,8 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
 	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
 	const miss = decision.grantable ? guard.store.grantMiss?.(guard.scope, canonicalCwd(cwd), decision.op) : undefined;
-	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) + (miss ? ` ${GRANT_MISS_TEXT[miss]}` : "") };
+	const note = !miss && decision.grantable && guard.scope === "child" ? (guard.grantNote ? ` At launch: ${guard.grantNote}.` : guard.store.size() === 0 ? " This worker was launched with no approved operations." : "") : "";
+	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) + (miss ? ` ${GRANT_MISS_TEXT[miss]}` : "") + note };
 }
 const GRANT_MISS_TEXT: Record<GrantMiss, string> = {
 	"other-text": "An approval exists in this folder for a different command text: run the approved command exactly as approved, with nothing added (no redirection such as 2>&1, no cd, no chained command), or ask for a new approval.",

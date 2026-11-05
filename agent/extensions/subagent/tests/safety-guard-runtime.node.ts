@@ -319,6 +319,24 @@ test("main I (simulated TUI): role-bound grant (role=general-worker) is not cons
 	} finally { s.cleanup(); }
 });
 
+// Field report: a PROC_KILL grant minted for the session folder never reached a worker launched in another folder.
+test("main I2 (simulated TUI): a role grant names the worker's launch folder; cwd needs a role and an existing folder", { timeout: 120_000 }, async () => {
+	const dir = fs.mkdtempSync(path.join(scratchBase, "s1-cwd-"));
+	const other = path.join(dir, "project", "run");
+	fs.mkdirSync(other, { recursive: true });
+	const ask = (id: string, extra: Record<string, unknown>) => ({ tool: "request_authorization", args: { operations: [{ kind: "shell", value: MAIN_RM }], ...extra }, id });
+	const s = await openMain([ask("k0", { role: "general-worker", cwd: "run" }), ask("k1", { cwd: "run" }), ask("k2", { role: "general-worker", cwd: "missing" }), { text: "done" }], { ui: approve, dir });
+	try {
+		const r = await s.run();
+		assert.equal(r[0].isError, false, r[0].text);
+		assert.match(String(s.confirms[0][1]), new RegExp(`Folder \\(the worker's launch cwd\\): ${fs.realpathSync(other).replace(/[\\/.]/g, ".")}`));
+		assert.match(r[0].text, /Launch the general-worker worker with cwd .*run: a worker in any other folder does not receive them/);
+		assert.match(r[1].text, /cwd needs role/);
+		assert.match(r[2].text, /cwd does not exist/);
+		assert.equal(s.confirms.length, 1);
+	} finally { s.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("main J (simulated TUI): a 1-minute grant is refused after 61 s of real time", { timeout: 180_000 }, async () => {
 	const s = await openMain([{ tool: "request_authorization", args: { operations: [{ kind: "shell", value: MAIN_RM }], ttl_minutes: 1 }, id: "j0" }, { tool: "bash", args: { command: "sleep 61" }, id: "j1" }, { tool: "bash", args: { command: MAIN_RM }, id: "j2" }, { text: "done" }], { ui: approve });
 	try {

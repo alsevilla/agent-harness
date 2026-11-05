@@ -1,7 +1,7 @@
 // Stage 1 child-only guard. Loaded after pause-gate and decision-relay in every child (main never loads it).
 // Reads PI_SAFETY_GRANTS once and removes it from the process environment before any tool can run; an invalid envelope blocks all tool calls.
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CHILD_GRANT_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
+import { CHILD_GRANT_ENV, CHILD_GRANT_NOTE_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
 import { createLookupNudge, launchLookupTools } from "./lookup-nudge.ts";
 import { capWorkerContext, workerBudgetFromEnv, workerMaskFromEnv } from "./handoff-window.ts";
@@ -12,6 +12,9 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	// Read-only role or launch: the candidate root it may not change. Read once and removed, like the grant envelope.
 	const readOnlyRoot = process.env[CHILD_READONLY_ENV] || undefined;
 	delete process.env[CHILD_READONLY_ENV];
+	// Why main's launch carried no approval although one was requested (advisory; appended to grantable refusals).
+	const grantNote = process.env[CHILD_GRANT_NOTE_ENV] || undefined;
+	delete process.env[CHILD_GRANT_NOTE_ENV];
 	const store = createGrantStore();
 	let invalid: string | undefined;
 	let gateCommits = false;
@@ -31,7 +34,7 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const reads = new Set<string>(); // files this worker has read in this run (read before edit)
 	pi.on("tool_call", (event, ctx) => {
 		if (invalid) return { block: true, reason: invalid };
-		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot, reads }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
+		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot, reads, grantNote }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
 	});
 	// Workers only: a repeated read that returns unchanged text becomes a one-line note (read-dedupe.ts).
 	const dedupe = createReadDedupe();
