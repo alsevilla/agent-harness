@@ -96,6 +96,41 @@ test("read-only role: writes into the candidate are refused (not grantable); rea
 	assert.equal(guardToolCall(writer, "bash", { command: "npm test > out.log" }, candidate), undefined, "a writing role is unaffected");
 });
 
+// Field report (bg-7@9d52a35084a7, test-engineer): read-only Betterwright verification was refused before it ran, and earlier read-only tasks
+// got "[READ_ONLY_ROLE] redirects output into the candidate checkout" for the sibling worktrees/<repo>/_scratch and _evidence folders.
+// PowerShell writers counted -Value script text, -ItemType Directory and -Encoding as paths resolved inside the candidate.
+test("read-only role: PowerShell and shell writes to the sibling worktrees _scratch/_evidence folders pass; the candidate stays protected", () => {
+	const candidate = slash(path.join(root, "RFID", "RFIDAttendance-Rust"));
+	fs.mkdirSync(candidate, { recursive: true });
+	const scratch = slash(path.join(root, "RFID", "worktrees", "RFIDAttendance-Rust", "_scratch", "sim800c"));
+	const evidence = slash(path.join(root, "RFID", "worktrees", "RFIDAttendance-Rust", "_evidence", "sim800c"));
+	const ro = { scope: "child" as const, store: createGrantStore(), agentDir, readOnlyRoot: candidate };
+	const call = (command: string) => guardToolCall(ro, "powershell", { command }, candidate) as { block: boolean; reason: string } | undefined;
+	for (const ok of [
+		`New-Item -ItemType Directory -Force -Path "${scratch}"`,
+		`Set-Content -Path "${scratch}/check.js" -Value "const ok = await page.isVisible('#kbd'); console.log(ok)" -Encoding utf8`,
+		`Set-Content -LiteralPath '${scratch}/check.js' -Value 'x' -NoNewline`,
+		`Add-Content -Path "${evidence}/REPORT.md" -Value "STATUS: PASS"`,
+		`"done" | Out-File -FilePath "${evidence}/result.txt" -Encoding utf8`,
+		`New-Item -Path "${evidence}" -Name "REPORT.md" -ItemType File -Value "x" -Force`,
+		`Set-Content "${scratch}/a.txt" "value"`,
+		`npx betterwright run < "${scratch}/check.js" > "${evidence}/betterwright.txt" 2>&1`,
+		`mkdir -p "${evidence}"`,
+	]) assert.equal(call(ok), undefined, ok);
+	for (const [bad, why] of [
+		[`Set-Content -Path src/app.tsx -Value "x"`, /set-content writes into the candidate checkout \(src\/app\.tsx\)/],
+		[`Set-Content src/app.tsx "x"`, /set-content writes into the candidate checkout \(src\/app\.tsx\)/],
+		[`New-Item -Name x.ts -ItemType File`, /new-item writes into the candidate checkout \(\.\/x\.ts\)/],
+		[`"x" | Out-File -FilePath "${candidate}/a.txt"`, /out-file writes into the candidate checkout/],
+		[`npm test > $env:TEMP\\x.log`, /redirects output to a target with a variable or substitution the guard cannot resolve \(\$env:TEMP\\x\.log\); use the literal absolute _scratch or _evidence path from the packet/],
+	] as const) {
+		const r = call(bad);
+		assert.ok(r?.block, bad);
+		assert.match(r!.reason, /\[READ_ONLY_ROLE\]/, bad);
+		assert.match(r!.reason, why, bad);
+	}
+});
+
 // Claude Code practices: read before edit, and no approval for a delete it cannot resolve.
 test("read before edit: a worker edits or overwrites an existing file only after reading it in this run; new files are fine", () => {
 	const dir = slash(path.join(root, "rbe"));

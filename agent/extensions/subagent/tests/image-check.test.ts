@@ -87,4 +87,5 @@ test("shared guidance: tool discipline", () => {
 	assert.match(core, /Never poll with sleep; use the command's own wait or timeout/);
 	assert.match(core, /Avoid interactive commands \(git rebase -i, git add -p, editors, pagers\): there is no terminal/);
 	assert.match(core, /Create no file the task does not need, such as new docs or helper scripts; prefer editing existing files/);
+	assert.match(core, /Write scripts, logs and reports to the packet's _scratch and _evidence paths by their literal absolute path, not through variables\. When the harness guard blocks a call, quote its block reason \(rule, target and next step\) in your handoff/);
 });
