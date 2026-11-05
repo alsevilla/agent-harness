@@ -81,4 +81,4 @@ A bounded keyword search found no license or origin notice in the other profile 
 
 ## Runtime dependencies (not bundled)
 
-These are installed through npm or Pi and are not vendored in this repository: `pi-claude-subscription-connector`, `pi-mcp-adapter`, `@bacnh85/pi-serena`, `graphify-pi`, `@dietrichgebert/ponytail`, QMD, and Pi's own dependency tree. Each keeps its own license. Their licenses were not audited here.
+These are installed through npm or Pi and are not vendored in this repository: `pi-claude-subscription-connector`, `pi-mcp-adapter`, Serena (`serena-agent`, reached by the `serena` skill through its own command line and project server; GPL-3.0-or-later, not bundled), `graphify-pi`, `@dietrichgebert/ponytail`, QMD, and Pi's own dependency tree. Each keeps its own license. Their licenses were not audited here.

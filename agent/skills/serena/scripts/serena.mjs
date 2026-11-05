@@ -4,6 +4,7 @@
 //   node serena.mjs find <Name or Owner/name> [path] [--body] [--kind <kind>]   where a symbol is defined (and its body)
 //   node serena.mjs refs <name or Owner/name> [path]   code references, each with its enclosing symbol
 //   node serena.mjs status                             what this machine has: Serena, its server, this project
+//   node serena.mjs stop                               stop the server this skill started (the next query starts a fresh one)
 // Serena (uv tool install serena-agent) answers through the language server: a small read-only server (serena_server.py, Serena's
 // own project server) starts on first use, serves every project on this machine and exits after 30 idle minutes. The first query of a
 // project waits while its language servers start. When Serena is missing or cannot serve the project, a built-in heuristic parser
@@ -16,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { findCommand as heuristicFind, outlineCommand as heuristicOutline, refsCommand as heuristicRefs, langOf } from "./symbols.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.HARNESS_SERENA_PORT || 24227);
+const port = () => Number(process.env.HARNESS_SERENA_PORT || 24227); // read per call, so a caller (or test) can point elsewhere
 const QUERY_TIMEOUT_MS = Number(process.env.HARNESS_SERENA_TIMEOUT_SECONDS || 300) * 1000;
 const START_TIMEOUT_MS = 90_000;
 const MAX_ANSWER_CHARS = 40_000;
@@ -85,7 +86,7 @@ async function request(route, body, timeoutMs) {
 	if (!secret) throw new Unavailable(`no auth_secret in ${configFile()}`);
 	const init = { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" }, signal: AbortSignal.timeout(timeoutMs) };
 	if (body !== undefined) init.body = JSON.stringify(body);
-	const response = await fetch(`http://127.0.0.1:${PORT}${route}`, init);
+	const response = await fetch(`http://127.0.0.1:${port()}${route}`, init);
 	const text = await response.text();
 	if (response.status === 400) throw new Error(text.trim());
 	if (!response.ok) throw new Unavailable(`Serena server answered HTTP ${response.status}`);
@@ -96,20 +97,20 @@ const alive = async () => { try { return JSON.parse(await request("/heartbeat", 
 async function ensureServer(python) {
 	if (await alive()) return;
 	fs.mkdirSync(STATE_DIR, { recursive: true });
-	const lock = path.join(STATE_DIR, `start-${PORT}.lock`);
+	const lock = path.join(STATE_DIR, `start-${port()}.lock`);
 	let owner = false;
 	try { fs.writeFileSync(lock, String(process.pid), { flag: "wx" }); owner = true; } catch {
 		try { if (Date.now() - fs.statSync(lock).mtimeMs > START_TIMEOUT_MS) { fs.rmSync(lock, { force: true }); fs.writeFileSync(lock, String(process.pid), { flag: "wx" }); owner = true; } } catch { /* another caller is starting it */ }
 	}
-	const logFile = path.join(STATE_DIR, `server-${PORT}.log`);
+	const logFile = path.join(STATE_DIR, `server-${port()}.log`);
 	let exited;
 	try {
 		if (owner) {
 			const log = fs.openSync(logFile, "w");
-			const child = spawn(python, [path.join(HERE, "serena_server.py"), String(PORT)], { detached: true, stdio: ["ignore", log, log], windowsHide: true });
+			const child = spawn(python, [path.join(HERE, "serena_server.py"), String(port())], { detached: true, stdio: ["ignore", log, log], windowsHide: true });
 			child.on("exit", (code) => { exited = code ?? "signal"; });
 			child.unref();
-			fs.writeFileSync(path.join(STATE_DIR, `server-${PORT}.json`), JSON.stringify({ pid: child.pid, port: PORT, startedAt: new Date().toISOString() }));
+			fs.writeFileSync(path.join(STATE_DIR, `server-${port()}.json`), JSON.stringify({ pid: child.pid, port: port(), startedAt: new Date().toISOString() }));
 		}
 		const deadline = Date.now() + START_TIMEOUT_MS;
 		while (Date.now() < deadline) {
@@ -121,7 +122,7 @@ async function ensureServer(python) {
 			}
 			await new Promise((r) => setTimeout(r, 500));
 		}
-		throw new Unavailable(`the Serena server did not start within ${START_TIMEOUT_MS / 1000} s (log: ${path.join(STATE_DIR, `server-${PORT}.log`)})`);
+		throw new Unavailable(`the Serena server did not start within ${START_TIMEOUT_MS / 1000} s (log: ${path.join(STATE_DIR, `server-${port()}.log`)})`);
 	} finally { if (owner) fs.rmSync(lock, { force: true }); }
 }
 
@@ -217,6 +218,22 @@ export async function serenaRefs(serena, name, target) {
 	return [`${out.length} reference${out.length === 1 ? "" : "s"} to ${def.name_path} (${def.relative_path}:${range(def.body_location)})`, ...out].join("\n");
 }
 
+/** Stop the server this skill started (recorded pid, still answering with this machine's Serena secret). */
+export async function stopServer() {
+	const stateFile = path.join(STATE_DIR, `server-${port()}.json`);
+	let pid;
+	try { pid = JSON.parse(fs.readFileSync(stateFile, "utf8")).pid; } catch { /* no record */ }
+	if (!(await alive())) {
+		fs.rmSync(stateFile, { force: true });
+		return `No Serena server is running on 127.0.0.1:${port()}; the next query starts one.`;
+	}
+	if (!Number.isInteger(pid)) return `A Serena server answers on 127.0.0.1:${port()}, but this skill has no record of starting it; stop it yourself.`;
+	try { process.kill(pid); } catch (error) { return `Could not stop the Serena server (pid ${pid}): ${error.message}`; }
+	for (let i = 0; i < 20 && (await alive()); i++) await new Promise((r) => setTimeout(r, 500));
+	fs.rmSync(stateFile, { force: true });
+	return `Stopped the Serena server (pid ${pid}); the next query starts a fresh one with new language servers.`;
+}
+
 // ---- Fallback.
 function heuristic(command, args, opts, reason, cwd) {
 	const note = `[heuristic parser, not Serena: ${reason}]`;
@@ -235,7 +252,8 @@ const USAGE = `usage:
   node serena.mjs outline <file>...
   node serena.mjs find <Name or Owner/name> [path] [--body] [--kind <kind>]
   node serena.mjs refs <name or Owner/name> [path]
-  node serena.mjs status`;
+  node serena.mjs status
+  node serena.mjs stop`;
 
 export async function main(argv, cwd = process.cwd()) {
 	const [command, ...rest] = argv;
@@ -244,10 +262,11 @@ export async function main(argv, cwd = process.cwd()) {
 	const words = rest.filter((a, i) => a !== "--body" && a !== "--kind" && !(kindAt >= 0 && i === kindAt + 1));
 	// Paths resolve against the caller's folder; the first word of find and refs is a name.
 	const args = words.map((a, i) => (command === "outline" || i > 0 ? path.resolve(cwd, a) : a));
+	if (command === "stop") return stopServer();
 	if (command === "status") {
 		const python = serenaPython();
 		const root = projectRoot(cwd);
-		return [`Serena: ${python ?? "not installed (uv tool install serena-agent)"}`, `server on 127.0.0.1:${PORT}: ${(await alive()) ? "running" : "not running (starts on first query)"}`,
+		return [`Serena: ${python ?? "not installed (uv tool install serena-agent)"}`, `server on 127.0.0.1:${port()}: ${(await alive()) ? "running" : "not running (starts on first query)"}`,
 			`project ${root}: ${fs.existsSync(path.join(root, ".serena", "project.yml")) ? "set up (.serena/project.yml)" : "not set up yet"}`].join("\n");
 	}
 	if (!["outline", "find", "refs"].includes(command) || !args.length) throw new Error(USAGE);

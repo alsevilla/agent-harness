@@ -17,7 +17,6 @@
   "packages": [
     "npm:pi-claude-subscription-connector",
     "npm:pi-mcp-adapter",
-    "npm:@bacnh85/pi-serena",
     {
       "source": "npm:graphify-pi",
       "extensions": [

@@ -44,7 +44,7 @@ const MARKERS = {
 	noAutomaticGraphBuild: "Missing graphs never authorize a fresh graph build",
 	codeNavigationHeading: "## Code navigation integrations",
 	candidateNavigationHeading: "## Candidate navigation and shared retrieval",
-	serenaProjectPath: "pass project explicitly as",
+	serenaProjectPath: "Run the Serena helper on the candidate",
 	qmdSearchMention: "qmd_search",
 	graphReferenceHeading: "## Graph reference location",
 	globalGraphHeading: "## Global graph reference",
@@ -75,7 +75,6 @@ function makeWorld(name, spec = {}) {
 	fs.mkdirSync(home, { recursive: true });
 	fs.mkdirSync(path.join(candidate, ".git"), { recursive: true });
 	if (spec.ponytail) { writeFile(path.join(modules, "@dietrichgebert", "ponytail", "pi-extension", "index.js")); writeFile(path.join(modules, "@dietrichgebert", "ponytail", "skills", "ponytail-review", "SKILL.md")); }
-	if (spec.serena) writeFile(path.join(modules, "@bacnh85", "pi-serena", "extensions", "index.ts"));
 	if (spec.graphifyExtension) writeFile(path.join(modules, "graphify-pi", "extensions", "graphify.ts"));
 	if (spec.graphifySkill) writeFile(path.join(agentDir, "skills", "graphify", "SKILL.md"));
 	const qmdExtension = path.join(base, "qmd", "extensions", "qmd", "index.ts");
@@ -126,8 +125,8 @@ for (const role of ROLES) {
 const minimal = { ponytail: true };
 const customRole = { name: "custom-role", systemPrompt: "CUSTOM ROLE BODY: read and report only.", tools: ["read", "grep", "find", "ls"] };
 const SHAPES = [
-	{ name: "minimal-general-worker", role: "general-worker", spec: minimal, description: "general-worker; Ponytail only; no graph, no global graph, no QMD/Serena/Graphify, no package" },
-	{ name: "full-graph-qmd-package-general-worker", role: "general-worker", spec: { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true, pkg: true }, description: "general-worker with Ponytail, QMD, Serena, Graphify extension and skill, project graph, global graph and package root" },
+	{ name: "minimal-general-worker", role: "general-worker", spec: minimal, description: "general-worker; Ponytail only; no graph, no global graph, no QMD or Graphify (the serena skill ships with the harness), no package" },
+	{ name: "full-graph-qmd-package-general-worker", role: "general-worker", spec: { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: true, projectGraph: true, globalGraph: true, pkg: true }, description: "general-worker with Ponytail, QMD, the serena skill, Graphify extension and skill, project graph, global graph and package root" },
 	{ name: "package-custom-role", role: "custom-role", spec: { pkg: true }, description: "non-configured role (read/grep/find/ls allowlist) with a package root" },
 ];
 const fixtureRows = [];

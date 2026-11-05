@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, resolve, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { assertNoHooks, parseRequest, runBounded, Singleton } from './core.ts';
+import { stopServer } from '../../skills/serena/scripts/serena.mjs';
 
 function file(path:string,label:string) {
  if(!isAbsolute(path)||!existsSync(path)||!statSync(path).isFile())throw Error(`${label} must name an existing absolute file.`);
@@ -29,16 +30,14 @@ export function graphTarget(cwd:string,explicit?:string) {
 export default function refresh(pi:ExtensionAPI) {
  const folder=dirname(fileURLToPath(import.meta.url)); const gate=new Singleton();
  pi.registerCommand('refresh',{
-  description:'Refresh graph code, QMD collections, or existing Serena worker without a model turn',
+  description:'Refresh graph code, QMD collections, or restart the serena skill\'s Serena server without a model turn',
   handler:async(args,ctx)=>{
    try {
     const request=parseRequest(args);
     await gate.run(async()=>{
      if(request.kind==='serena') {
-      if(!pi.getCommands().some(command=>command.name==='serena-restart'))throw Error('Serena extension is not loaded. Reload/install its configured extension first.');
-      // Public Pi API dispatches registered commands before agent prompting.
-      pi.sendUserMessage('/serena-restart',{expandPromptTemplates:true});
-      ctx.ui.notify('Requested existing Serena worker restart; its command reports the result.','info'); return;
+      // The serena skill's server (agent/skills/serena) replaces pi-serena's worker: stopping it makes the next query start fresh language servers.
+      ctx.ui.notify(await stopServer(),'info'); return;
      }
      const configPath=join(folder,'config.json');
      const config=existsSync(configPath)?JSON.parse(readFileSync(configPath,'utf8')):{};

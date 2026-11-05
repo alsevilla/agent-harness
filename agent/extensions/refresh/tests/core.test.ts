@@ -51,10 +51,13 @@ test('graph resolves candidate Git root, never initializes and rejects output ju
   assert.equal(graphTarget(candidate,other),other);
  }finally{rmSync(temp,{recursive:true,force:true})}
 });
-test('Serena forwarding requires registered command and never requests a plain model turn',async()=>{
- let handler:any;const messages:any[]=[];const notices:any[]=[];let available=false;
- refresh({registerCommand:(_name:any,options:any)=>handler=options.handler,getCommands:()=>available?[{name:'serena-restart'}]:[],sendUserMessage:(...args:any[])=>messages.push(args)} as any);
- const ctx={cwd:process.cwd(),ui:{notify:(...args:any[])=>notices.push(args)}};
- await handler('serena',ctx);assert.equal(messages.length,0);assert.match(notices[0][0],/not loaded/);
- available=true;await handler('serena',ctx);assert.deepEqual(messages,[['/serena-restart',{expandPromptTemplates:true}]]);
+test('/refresh serena stops the serena skill server (here: none running) and never requests a model turn',async()=>{
+ const saved=process.env.HARNESS_SERENA_PORT;process.env.HARNESS_SERENA_PORT='1'; // nothing listens on port 1, so no real server is touched
+ try {
+  let handler:any;const messages:any[]=[];const notices:any[]=[];
+  refresh({registerCommand:(_name:any,options:any)=>handler=options.handler,sendUserMessage:(...args:any[])=>messages.push(args)} as any);
+  await handler('serena',{cwd:process.cwd(),ui:{notify:(...args:any[])=>notices.push(args)}});
+  assert.equal(messages.length,0);
+  assert.deepEqual(notices,[['No Serena server is running on 127.0.0.1:1; the next query starts one.','info']]);
+ } finally { if(saved===undefined)delete process.env.HARNESS_SERENA_PORT;else process.env.HARNESS_SERENA_PORT=saved; }
 });
