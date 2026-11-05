@@ -175,7 +175,7 @@ test("state card wiring: appended last as a hidden custom message, with or witho
 });
 
 // Claude Haiku 5.5 prices a request over 100k input tokens at 5x; workers kept every tool output, so a long debugger run crossed it.
-import { capWorkerContext, DEFAULT_WORKER_MASK_TOKENS, estimateTokens, workerMaskFromEnv, WORKER_MASK_ENV } from "../handoff-window.ts";
+import { capWorkerContext, DEFAULT_WORKER_MASK_TOKENS, estimateTokens, workerBudgetFromEnv, workerMaskFromEnv, WORKER_BUDGET_ENV, WORKER_MASK_ENV } from "../handoff-window.ts";
 test("worker cap: threshold from the environment, 0 turns it off, nonsense keeps the default", () => {
 	assert.equal(DEFAULT_WORKER_MASK_TOKENS, 80_000);
 	assert.equal(workerMaskFromEnv({}), 80_000);
@@ -184,21 +184,56 @@ test("worker cap: threshold from the environment, 0 turns it off, nonsense keeps
 	assert.equal(workerMaskFromEnv({ [WORKER_MASK_ENV]: "500" }), 80_000, "below 20k is refused");
 	assert.equal(workerMaskFromEnv({ [WORKER_MASK_ENV]: "lots" }), 80_000);
 });
-test("worker cap: nothing changes below the threshold; above it older large outputs are masked like main's, newest five kept", () => {
-	const call = (i: number) => ({ role: "assistant", content: [{ type: "toolCall", id: `c${i}`, name: "read", arguments: { path: `/w/src/f${i}.ts` } }] });
-	const out = (i: number, size: number) => ({ role: "toolResult", toolCallId: `c${i}`, toolName: "read", isError: false, content: [{ type: "text", text: "x".repeat(size) }] });
-	const run = (n: number, size: number) => Array.from({ length: n }, (_, i) => [call(i), out(i, size)]).flat() as never[];
-	const small = run(12, 4000); // ~12k tokens
-	assert.ok(estimateTokens(small) < 80_000);
-	assert.equal(capWorkerContext(small, 80_000), undefined, "a short worker run is untouched");
-	const big = run(12, 30_000); // ~90k tokens
-	assert.ok(estimateTokens(big) >= 80_000);
-	const capped = capWorkerContext(big, 80_000)!;
-	assert.ok(capped, "masked from the threshold");
-	const texts = capped.filter((m: any) => m.role === "toolResult").map((m: any) => m.content[0].text);
-	assert.equal(texts.filter((t: string) => t.startsWith("[older read output, shortened: /w/src/f")).length, 5, "oldest whole batch of five");
-	assert.equal(texts.filter((t: string) => t.length === 30_000).length, 7, "the rest, including the newest five, word for word");
-	assert.ok(estimateTokens(capped) < estimateTokens(big) * 0.65);
-	assert.equal(capWorkerContext(big, 0), undefined, "0 is off");
-	assert.equal(big.filter((m: any) => m.role === "toolResult")[0].content[0].text.length, 30_000, "input not mutated");
+const capCall = (i: number) => ({ role: "assistant", content: [{ type: "toolCall", id: `c${i}`, name: "read", arguments: { path: `/w/src/f${i}.ts` } }] });
+const capOut = (i: number, size: number) => ({ role: "toolResult", toolCallId: `c${i}`, toolName: "read", isError: false, content: [{ type: "text", text: "x".repeat(size) }] });
+const run = (n: number, size: number) => Array.from({ length: n }, (_, i) => [capCall(i), capOut(i, size)]).flat() as never[];
+const capOutputs = (messages: any[]) => messages.filter((m) => m.role === "toolResult").map((m) => m.content[0].text as string);
+
+test("worker cap: budget from the environment, never below the trigger", () => {
+	assert.equal(workerBudgetFromEnv({}), 95_000);
+	assert.equal(workerBudgetFromEnv({ [WORKER_BUDGET_ENV]: "70000", [WORKER_MASK_ENV]: "80000" }), 80_000);
+	assert.equal(workerBudgetFromEnv({ [WORKER_BUDGET_ENV]: "120000" }), 120_000);
+});
+
+test("worker cap: nothing changes below the trigger", () => {
+	const small = run(12, 4000);
+	const r = capWorkerContext(small, 80_000);
+	assert.equal(r.messages, undefined);
+	assert.equal(r.step, undefined);
+	assert.equal(r.before, estimateTokens(small));
+	assert.equal(capWorkerContext(run(12, 30_000), 0).messages, undefined, "0 is off");
+});
+
+test("worker cap: normal batching first, re-measured; it stops at the first step that fits the budget", () => {
+	const big = run(12, 30_000); // ~90k: over the trigger, under the budget after one batch
+	const r = capWorkerContext(big, 80_000, 95_000);
+	assert.equal(r.step, "batch");
+	assert.equal(capOutputs(r.messages!).filter((t) => t.startsWith("[older read output, shortened")).length, 5, "oldest whole batch of five");
+	assert.equal(capOutputs(r.messages!).filter((t) => t.length === 30_000).length, 7, "the rest word for word");
+	assert.ok(r.after < 95_000 && r.after < r.before);
+	assert.equal(capOutputs(big)[0].length, 30_000, "input not mutated");
+});
+
+test("worker cap: still over budget after batching, every older output is masked, then outputs are bounded, then 'over'", () => {
+	const allOlder = capWorkerContext(run(9, 45_000), 80_000, 95_000); // ~101k, nine outputs: no whole batch beyond the newest five
+	assert.equal(allOlder.step, "all-older");
+	assert.equal(capOutputs(allOlder.messages!).filter((t) => t.startsWith("[older read output")).length, 4, "all four older outputs");
+	assert.ok(allOlder.after < 95_000);
+
+	const bounded = capWorkerContext(run(6, 80_000), 80_000, 95_000); // the newest five alone are ~100k
+	assert.equal(bounded.step, "bounded");
+	const texts = capOutputs(bounded.messages!);
+	assert.equal(texts[texts.length - 1].length, 80_000, "the latest result stays whole");
+	assert.match(texts[texts.length - 2], /^x{2000}\n\[… 76,000 characters shortened to stay in budget; read again with offset and limit, or rerun, if you need them …\]\nx{2000}$/);
+	assert.ok(bounded.after < 95_000);
+
+	const over = capWorkerContext(run(2, 400_000), 80_000, 95_000); // the latest result alone is over budget
+	assert.equal(over.step, "over", "the caller asks the host to compact");
+	assert.ok(over.after >= 95_000);
+});
+
+test("worker cap: the system prompt counts toward the trigger and the budget", () => {
+	const mid = run(12, 20_000); // ~60k of messages
+	assert.equal(capWorkerContext(mid, 80_000, 95_000).step, undefined);
+	assert.equal(capWorkerContext(mid, 80_000, 95_000, 25_000).step, "batch", "with a 25k system prompt it is over the trigger");
 });

@@ -137,7 +137,7 @@ export function maskedLine(tool: string, label: string, length: number): string 
 }
 
 /** Returns a new message list with older large read/bash/grep/find/ls outputs masked, or undefined when nothing changes. Never mutates its input. */
-export function maskToolOutputs<T extends Message>(messages: readonly T[], window: number): T[] | undefined {
+export function maskToolOutputs<T extends Message>(messages: readonly T[], window: number, batched = true): T[] | undefined {
 	if (!(window > 0)) return undefined;
 	const calls = new Map<string, any>();
 	for (const m of messages) if (m?.role === "assistant" && Array.isArray(m.content)) for (const part of m.content as any[]) if (part?.type === "toolCall" && typeof part.id === "string") calls.set(part.id, part.arguments);
@@ -148,7 +148,8 @@ export function maskToolOutputs<T extends Message>(messages: readonly T[], windo
 		if (text === undefined || text.length < MASK_MIN) return;
 		outputs.push({ index, tool: String(m.toolName), length: text.length, id: m.toolCallId });
 	});
-	const batch = Math.floor(Math.max(0, outputs.length - window) / window) * window;
+	// Batched (default): whole batches only, so the cached prefix changes once per batch. Unbatched: every output older than the window.
+	const batch = batched ? Math.floor(Math.max(0, outputs.length - window) / window) * window : Math.max(0, outputs.length - window);
 	if (batch === 0) return undefined;
 	const out = messages.slice();
 	for (const o of outputs.slice(0, batch)) {
@@ -158,21 +159,35 @@ export function maskToolOutputs<T extends Message>(messages: readonly T[], windo
 	return out;
 }
 
-// Workers keep every tool output word for word, so a long worker run can pass Claude Haiku 5.5's long-context line: a request with more
-// than 100k input tokens is priced 5x (input, output, cache read and write). A debugger run that averaged ~107k per request cost $0.20
-// instead of ~$0.06. From WORKER_MASK_ENV estimated tokens (default 80k, leaving room for the system prompt and tools) a worker's older
-// large tool outputs are masked like main's, in stable batches; below it nothing changes. 0 turns it off.
+// Threshold-triggered worker masking with budget fallbacks (best effort; the estimate is approximate and compaction is asynchronous,
+// so this is not a hard bound). Workers keep every tool output word for word, and Claude Haiku 5.5 prices a request over 100k input
+// tokens at 5x: a debugger run that averaged ~107k per request cost $0.20 instead of ~$0.06. From WORKER_MASK_ENV estimated tokens
+// (default 80k) the request is shortened in steps, re-measuring after each, and stops at the first that fits WORKER_BUDGET_ENV (95k):
+//   batch      main's stable batching (older large outputs, newest five kept, whole batches only)
+//   all-older  every older large output, not just whole batches
+//   bounded    remaining large outputs except the latest cut to head and tail
+//   over       still over budget: the caller asks the host to compact once per run
 export const WORKER_MASK_ENV = "PI_SUBAGENT_WORKER_MASK_TOKENS";
+export const WORKER_BUDGET_ENV = "PI_SUBAGENT_WORKER_TOKEN_BUDGET";
 export const DEFAULT_WORKER_MASK_TOKENS = 80_000;
+export const DEFAULT_WORKER_TOKEN_BUDGET = 95_000;
 const MIN_WORKER_MASK_TOKENS = 20_000;
-export function workerMaskFromEnv(env: NodeJS.ProcessEnv = process.env): number {
-	const raw = env[WORKER_MASK_ENV];
-	if (raw === undefined || raw.trim() === "") return DEFAULT_WORKER_MASK_TOKENS;
+const BOUND_CHARS = 8_000; // an output over this is cut to its first and last BOUND_KEEP characters in the bounded step
+const BOUND_KEEP = 2_000;
+const tokensFromEnv = (raw: string | undefined, fallback: number, allowOff: boolean): number => {
+	if (raw === undefined || raw.trim() === "") return fallback;
 	const n = Number(raw.trim());
-	if (n === 0) return 0;
-	return Number.isFinite(n) && n >= MIN_WORKER_MASK_TOKENS ? Math.floor(n) : DEFAULT_WORKER_MASK_TOKENS;
+	if (allowOff && n === 0) return 0;
+	return Number.isFinite(n) && n >= MIN_WORKER_MASK_TOKENS ? Math.floor(n) : fallback;
+};
+export function workerMaskFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+	return tokensFromEnv(env[WORKER_MASK_ENV], DEFAULT_WORKER_MASK_TOKENS, true);
 }
-/** Rough request size: characters of text and tool-call arguments divided by 4 (images not counted). */
+/** The budget the fallbacks aim under; never below the trigger. */
+export function workerBudgetFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+	return Math.max(tokensFromEnv(env[WORKER_BUDGET_ENV], DEFAULT_WORKER_TOKEN_BUDGET, false), workerMaskFromEnv(env));
+}
+/** Rough request size: characters of text, thinking and tool-call arguments divided by 4 (images not counted). */
 export function estimateTokens(messages: readonly Message[]): number {
 	let chars = 0;
 	for (const m of messages) {
@@ -187,10 +202,42 @@ export function estimateTokens(messages: readonly Message[]): number {
 	}
 	return Math.ceil(chars / 4);
 }
-/** A worker's request with older large tool outputs masked once it reaches `from` estimated tokens; undefined below it or when nothing changes. */
-export function capWorkerContext<T extends Message>(messages: readonly T[], from: number): T[] | undefined {
-	if (!(from > 0) || estimateTokens(messages) < from) return undefined;
-	return maskToolOutputs(messages, DEFAULT_HANDOFF_WINDOW);
+/** Cut every text tool output over BOUND_CHARS, except the latest tool result, to its head and tail. Undefined when nothing changes. */
+export function boundToolOutputs<T extends Message>(messages: readonly T[]): T[] | undefined {
+	let latest = -1;
+	messages.forEach((m, i) => { if (m?.role === "toolResult") latest = i; });
+	let changed = false;
+	const out = messages.map((m, i) => {
+		if (i === latest || m?.role !== "toolResult") return m;
+		const text = textOf(m.content);
+		if (text === undefined || text.length <= BOUND_CHARS) return m;
+		changed = true;
+		const cut = text.length - 2 * BOUND_KEEP;
+		return { ...m, content: [{ type: "text", text: `${text.slice(0, BOUND_KEEP)}\n[… ${cut.toLocaleString("en-US")} characters shortened to stay in budget; read again with offset and limit, or rerun, if you need them …]\n${text.slice(-BOUND_KEEP)}` }] } as T;
+	});
+	return changed ? out : undefined;
+}
+export type CapStep = "batch" | "all-older" | "bounded" | "over";
+export interface CapResult<T> { messages?: T[]; step?: CapStep; before: number; after: number }
+/**
+ * Worker request shortening. `base` is the estimated size of everything outside `messages` (the system prompt and tools). Nothing
+ * changes below `from`; above it each step runs only while the re-measured request is still at or over `budget`.
+ */
+export function capWorkerContext<T extends Message>(messages: readonly T[], from: number, budget = Math.max(from, DEFAULT_WORKER_TOKEN_BUDGET), base = 0): CapResult<T> {
+	const before = base + estimateTokens(messages);
+	if (!(from > 0) || before < from) return { before, after: before };
+	let current = messages as T[];
+	let step: CapStep | undefined;
+	let size = before;
+	const attempt = (next: T[] | undefined, name: CapStep) => {
+		if (!next) return;
+		current = next; step = name; size = base + estimateTokens(next);
+	};
+	attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW), "batch");
+	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false), "all-older");
+	if (size >= budget) attempt(boundToolOutputs(current), "bounded");
+	if (size >= budget) step = "over";
+	return { messages: current === messages ? undefined : current, step, before, after: size };
 }
 
 /** Both request-only shortenings in order: subagent results first, then main's own large tool outputs. */
