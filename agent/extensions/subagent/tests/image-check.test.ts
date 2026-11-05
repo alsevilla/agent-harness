@@ -53,3 +53,12 @@ test("shared guidance: start at named locations, stop at the stop condition, lon
 	const policy = fs.readFileSync(new URL("../../../AGENTS.md", import.meta.url), "utf8");
 	assert.match(policy, /known locations \(files, symbols, failing tests\), evidence paths, allowed\/forbidden scope, checks, a stop condition and requested output/);
 });
+
+// Field report: main called an undeclared codemode tool twice in a fresh session ("Tool codemode not found").
+test("main's subagent tool registers the declared-tools rules as prompt guidelines; workers never load it", () => {
+	const index = fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+	assert.match(index, /promptGuidelines: MAIN_TOOL_GUIDELINES/);
+	assert.match(index, /Call only tools declared in this session/);
+	assert.match(index, /codemode is not available unless it is declared/);
+	assert.doesNotMatch(fs.readFileSync(new URL("../safety-guard-entry.ts", import.meta.url), "utf8"), /MAIN_TOOL_GUIDELINES/);
+});
