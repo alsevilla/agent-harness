@@ -81,3 +81,29 @@ test("main chooses tiers at plan time and keeps a task's tier for its first fix 
 	assert.ok(main.includes("Choose each task's modelTier when you plan, before launching any"));
 	assert.ok(main.includes("Keep the task's modelTier for the first fix round; choose capable explicitly only after a second failure on the same check."));
 });
+
+// SquidAgent (arXiv 2610.08647): parallel work pays re-exploration and alignment overheads; parallelize only when each item's expected
+// output is large against them, and give siblings one identical shared block first.
+test("parallel only when each item's expected output outweighs re-exploration and alignment; siblings share an identical first block", () => {
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("Run a batch in parallel only when each item's expected output"));
+	assert.ok(routing.includes("Every parallel packet starts with one shared block, identical text in every sibling"));
+	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("Start every sibling packet with the same shared block, identical text"));
+});
+
+// One routing level ("Is Progressive Disclosure All You Need?", arXiv 2607.17598: a second routing level never helped): the frontend and
+// backend routers name each module's guide directly, every named file exists, and the stale engineering-harness guide copies stay gone.
+test("skill routers reach module guides in one level; stale engineering-harness guide copies are gone", () => {
+	for (const domain of ["frontend", "backend"]) {
+		const router = read(`agent/skills/${domain}/SKILL.md`);
+		const modules = readdirSync(new URL(`../agent/skills/${domain}/`, import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory() && d.name !== "references").map((d) => d.name);
+		for (const m of modules) {
+			const hasGuide = readdirSync(new URL(`../agent/skills/${domain}/${m}/`, import.meta.url)).includes("guide.md");
+			assert.ok(router.includes(hasGuide ? `${m}/guide.md` : `${m}/index.md`), `${domain} router names ${m}'s ${hasGuide ? "guide" : "index"} directly`);
+		}
+		for (const ref of router.match(/[a-z-]+\/(?:guide|index)\.md/g) ?? []) assert.ok(readdirSync(new URL(`../agent/skills/${domain}/${ref.split("/")[0]}/`, import.meta.url)).includes(ref.split("/")[1]), `${domain}: ${ref} exists`);
+	}
+	for (const m of readdirSync(new URL("../agent/skills/engineering-harness/", import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)) {
+		assert.ok(!readdirSync(new URL(`../agent/skills/engineering-harness/${m}/`, import.meta.url)).includes("guide.md"), `engineering-harness/${m}/guide.md is a stale copy of index.md`);
+	}
+});
