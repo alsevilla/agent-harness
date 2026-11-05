@@ -2377,8 +2377,12 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
 	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
 	const miss = decision.grantable ? guard.store.grantMiss?.(guard.scope, canonicalCwd(cwd), decision.op) : undefined;
-	const note = !miss && decision.grantable && guard.scope === "child" ? (guard.grantNote ? ` At launch: ${guard.grantNote}.` : guard.store.size() === 0 ? " This worker was launched with no approved operations." : "") : "";
-	return { block: true, reason: blockReason(decision, guard.scope, guard.gateCommits === true) + (miss ? ` ${GRANT_MISS_TEXT[miss]}` : "") + note };
+	const reason = blockReason(decision, guard.scope, guard.gateCommits === true);
+	// Only a refusal that invites an approval gets the launch note: a commit-form refusal ("use git commit -F ...") needs no approval,
+	// and a note about approvals there sent a worker looking for one it did not need.
+	const invitesApproval = /; grantable: /.test(reason);
+	const note = !miss && invitesApproval && guard.scope === "child" ? (guard.grantNote ? ` At launch: ${guard.grantNote}.` : guard.store.size() === 0 ? " This worker was launched with no approved operations." : "") : "";
+	return { block: true, reason: reason + (miss ? ` ${GRANT_MISS_TEXT[miss]}` : "") + note };
 }
 const GRANT_MISS_TEXT: Record<GrantMiss, string> = {
 	"other-text": "An approval exists in this folder for a different command text: run the approved command exactly as approved, with nothing added (no redirection such as 2>&1, no cd, no chained command), or ask for a new approval.",
