@@ -2,6 +2,7 @@
 // Reads PI_SAFETY_GRANTS once and removes it from the process environment before any tool can run; an invalid envelope blocks all tool calls.
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_GRANT_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
+import { createReadDedupe } from "./read-dedupe.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
@@ -30,4 +31,11 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		if (invalid) return { block: true, reason: invalid };
 		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot, reads }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
 	});
+	// Workers only: a repeated read that returns unchanged text becomes a one-line note (read-dedupe.ts).
+	const dedupe = createReadDedupe();
+	pi.on("tool_result", (event, ctx) => {
+		const content = dedupe.onResult(event.toolName, event.input, event.content, event.isError === true, ctx.cwd);
+		return content ? { content } : undefined;
+	});
+	pi.on("session_compact", () => dedupe.reset());
 }
