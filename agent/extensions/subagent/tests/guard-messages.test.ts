@@ -163,6 +163,30 @@ test("read-only role, Windows paths: heredoc scripts to the sibling _scratch pas
 	assert.equal(readOnlyViolation("bash", { command: "echo x > ../worktrees/RFIDAttendance-Rust/_scratch/sim800c/r.txt" }, root, root), undefined, "a relative path that leaves the checkout");
 });
 
+// Field report (op 74876b9d82fc35d2): a read-only test-engineer created its browser script in the task _scratch folder, then could not
+// fix a selector in it with sed -i: every in-place edit was refused whatever the file. sed -i and perl -i are judged by their files.
+test("read-only role: sed -i and perl -i edit files in the sibling _scratch; candidate files stay refused with destination and root", () => {
+	const root = "D:/work/RFID/RFIDAttendance-Rust";
+	const script = "D:/work/RFID/worktrees/RFIDAttendance-Rust/_scratch/sim800c/heartbeat-scroll-completion-run.js";
+	const check = (command: string) => readOnlyViolation("bash", { command }, root, root);
+	for (const ok of [
+		`sed -i 's/Reason/REASON/' ${script}`,
+		`sed -i.bak -e 's/Reason/REASON/' "${script}"`,
+		`sed -i -E 's/"Reason"/"REASON"/g' ${script.replace(/\//g, "\\")}`,
+		`sed --in-place=.bak --expression='s/a/b/' ${script}`,
+		`sed -i -f D:/work/RFID/worktrees/RFIDAttendance-Rust/_scratch/sim800c/fix.sed ${script}`,
+		`perl -pi -e 's/Reason/REASON/' ${script}`,
+		`perl -i.bak -pe 's/a/b/' "${script}"`,
+		"sed -n 1,5p src/app.tsx",
+	]) assert.equal(check(ok), undefined, ok);
+	for (const [bad, why] of [
+		["sed -i 's/a/b/' src/app.tsx", /sed -i edits into the candidate checkout \(src\/app\.tsx resolves to D:\/work\/RFID\/RFIDAttendance-Rust\/src\/app\.tsx, inside protected root D:\/work\/RFID\/RFIDAttendance-Rust\)/],
+		[`sed -i -e 's/a/b/' ${script} src/app.test.tsx`, /resolves to D:\/work\/RFID\/RFIDAttendance-Rust\/src\/app\.test\.tsx/],
+		["perl -pi -e 's/a/b/' D:\\work\\RFID\\RFIDAttendance-Rust\\vite.config.ts", /perl -i edits into the candidate checkout .* resolves to D:\/work\/RFID\/RFIDAttendance-Rust\/vite\.config\.ts, inside protected root/],
+		["sed -i 's/a/b/' $f", /sed -i edits to a target with a variable or substitution the guard cannot resolve \(\$f\)/],
+	] as const) assert.match(check(bad) ?? "", why, bad);
+});
+
 // Claude Code practices: read before edit, and no approval for a delete it cannot resolve.
 test("read before edit: a worker edits or overwrites an existing file only after reading it in this run; new files are fine", () => {
 	const dir = slash(path.join(root, "rbe"));

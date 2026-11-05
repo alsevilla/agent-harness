@@ -2081,6 +2081,36 @@ function insideRoot(target: string, cwd: string, root: string): boolean {
 // no target. A heredoc body is data unless a shell reads it; PowerShell here-strings are string literals.
 const HEREDOC = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/g;
 const SHELL_NAME = "(?:\\S*[\\\\/])?(?:bash|sh|zsh|dash|ksh|pwsh|powershell)(?:\\.exe)?\\b";
+// Field report: a read-only test-engineer could create its _scratch browser script but not fix it with sed -i, because every in-place
+// edit was refused whatever the file. sed -i and perl -i are now judged by the files they edit, like every other write.
+/** Whether sed/perl edits in place, and which files. Option values (-e script, -f file, -l N, -M module, -I dir) are not files. */
+export function inPlaceFiles(name: "sed" | "perl", args: string[]): { inPlace: boolean; files: string[] } {
+	const takesValue = name === "sed" ? new Set(["e", "f", "l"]) : new Set(["e", "E", "M", "m", "I", "x", "C", "d", "D"]);
+	const scriptOpts = name === "sed" ? new Set(["e", "f"]) : new Set(["e", "E"]);
+	let inPlace = false, hasScript = false;
+	const positionals: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--") { positionals.push(...args.slice(i + 1)); break; }
+		if (arg.startsWith("--")) {
+			const [key, inline] = arg.slice(2).split(/=(.*)/s);
+			if (key === "in-place") inPlace = true;
+			else if (name === "sed" && (key === "expression" || key === "file")) { hasScript = true; if (inline === undefined) i++; }
+			else if (name === "sed" && key === "line-length" && inline === undefined) i++;
+			continue;
+		}
+		if (!arg.startsWith("-") || arg === "-") { positionals.push(arg); continue; }
+		for (let k = 1; k < arg.length; k++) {
+			const c = arg[k];
+			if (c === "i") { inPlace = true; break; } // the rest of the cluster is the backup suffix
+			if (takesValue.has(c)) { if (scriptOpts.has(c)) hasScript = true; if (k === arg.length - 1) i++; break; }
+			if (name === "perl" && c === "0") break; // -0[octal]
+		}
+	}
+	const files = hasScript ? positionals : positionals.slice(1); // without -e/-f the first positional is the script (perl: the program)
+	return { inPlace, files };
+}
+
 export function withoutDataBodies(text: string): string {
 	const literal = text.replace(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g, "'here-string'");
 	const lines = literal.split(/\r?\n/);
@@ -2122,7 +2152,10 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 			continue;
 		}
 		if (["npm", "pnpm", "yarn", "bun", "pip", "pip3", "cargo", "dotnet", "go"].includes(name) && RO_PKG.has(positionals[0]?.toLowerCase() ?? "")) return `${name} ${positionals[0]} changes dependencies`;
-		if ((name === "sed" || name === "perl") && lower.some((a) => /^-[a-z]*i/.test(a) || a === "--in-place")) return `${name} -i edits files in place`;
+		if (name === "sed" || name === "perl") {
+			const edit = inPlaceFiles(name, args);
+			if (edit.inPlace) for (const file of edit.files) { const why = roTarget(`${name} -i edits`, file, cwd, root); if (why) return why; }
+		}
 		if (RO_DEST_LAST.has(name) && positionals.length) { const why = roTarget(`${name} writes`, positionals[positionals.length - 1], cwd, root); if (why) return why; }
 		if (RO_DEST_ALL.has(name)) for (const p of positionals) { const why = roTarget(`${name} writes`, p, cwd, root); if (why) return why; }
 		if (PS_WRITERS.has(name)) for (const p of psWriteTargets(args)) { const why = roTarget(`${name} writes`, p, cwd, root); if (why) return why; }
