@@ -807,7 +807,7 @@ test("lease envelope: tampered role, branch, candidate or shape fails closed; ol
 // Field report: `pi update --extensions` was blocked as an agent launch, and an approval for it looked like it did nothing.
 test("pi commands: help, version and list run; package commands are PI_PACKAGE; anything else launches an agent", () => {
 	for (const command of ["pi list", "pi --help", "pi -h", "pi --version", "npx pi --version"]) assert.deepEqual(rules(command), [], command);
-	for (const command of ["pi update --extensions", "pi update", "pi install git:github.com/example/tools", "pi remove npm:x", "pi uninstall npm:x", "pi config", "npx pi update", "node C:/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js update"]) {
+	for (const command of ["pi update --extensions", "pi update", "pi update --all", "pi update --models", "pi update --extension git:github.com/example/tools", "pi update git:github.com/alsevilla/agent-harness", "pi install git:github.com/example/tools", "pi remove npm:x", "pi uninstall npm:x", "pi config", "npx pi update", "node C:/npm/node_modules/@earendil-works/pi-coding-agent/dist/cli.js update"]) {
 		assert.deepEqual(classifyShell(command), { rules: ["PI_PACKAGE"], grantable: true }, command);
 	}
 	for (const command of ["pi", "pi --mode rpc", "pi -p hello", "pi list --mode rpc", "pi \"list\" now", "npx pi -p x", "node /x/pi-coding-agent/dist/cli.js --mode rpc"]) assert.deepEqual(rules(command), ["LAUNCH_PI"], command);
