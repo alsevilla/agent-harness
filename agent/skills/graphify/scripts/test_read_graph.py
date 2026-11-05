@@ -19,7 +19,7 @@ class GraphAccessTests(unittest.TestCase):
             {"id": "a", "label": "Gateway", "repo": "service"},
             {"id": "b", "label": "EventService", "repo": "service"},
             {"id": "c", "label": "Database", "repo": "service"},
-            {"id": "d", "label": "Gateway", "repo": "go"}],
+            {"id": "d", "label": "Gateway", "repo": "web"}],
             "links": [{"source": "a", "target": "b", "relation": "calls"},
                       {"source": "b", "target": "c", "relation": "writes"}]}))
 

@@ -427,7 +427,7 @@ Before recommending new infrastructure, inventory what already exists.
 ### Frontend
 
 Look for:
-- SolidJS version/conventions;
+- frontend framework version/conventions;
 - shared primitives/components;
 - tokens/CSS variables;
 - forms/tables/dialogs;
@@ -436,8 +436,7 @@ Look for:
 - browser/E2E tests;
 - accessibility/visual baselines.
 
-If SolidJS semantics are material, recommend `frontend-worker` +
-`solidjs-engineering`.
+If frontend framework semantics are material, recommend `frontend-worker`.
 
 ### Backend
 

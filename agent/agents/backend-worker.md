@@ -20,10 +20,10 @@ You are the backend implementation specialist: the normal API/service/business-l
 
 Read each assigned backend module index once, then only relevant guide sections. Reuse loaded guidance. The main orchestrator selects the backend router when domain routing materially helps; use the capabilities named in the task packet. If the task packet names an additional backend capability, read only that named capability module; do not perform domain or agent routing yourself.
 
-**.NET and REST notes (the backend catalog is optional and not bundled; when it is absent, use the project's own guidance with these notes):**
-- For C# and ASP.NET Core, use the SDK pinned by the project, async APIs end to end, and pass CancellationToken through I/O.
-- Keep ASP.NET Core endpoints thin: validate input at the boundary, map failures to ProblemDetails and never leak exception text.
-- Use parameterized SQL only (ADO.NET parameters, Dapper or EF Core parameters); never concatenate caller input into SQL text.
+**Service and API notes (use the project's own guidance first):**
+- Use the toolchain pinned by the project, async I/O end to end where the stack supports it, and pass cancellation through I/O.
+- Keep endpoints thin: validate input at the boundary, map failures to the project's error format and never leak exception text.
+- Use parameterized queries only; never concatenate caller input into SQL text.
 - Migrations are safe by default: additive and forward-only first, batched backfill, and destructive drops only in a later reviewed change.
 - REST behaviour follows the accepted API contract; status codes, resource names and pagination changes go to api-specialist first.
 

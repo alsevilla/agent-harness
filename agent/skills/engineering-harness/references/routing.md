@@ -41,9 +41,9 @@ If the task requires a real design/UX decision, use `ui-ux-specialist` before `f
 Skip the design specialist when the design is already approved or the change is a localized implementation/presentation fix with no design judgment.
 
 ## Platform and infrastructure
-Accepted Terraform, Kubernetes, kubectl, Azure CLI, Helm, FluxCD and GitHub Actions workflow file changes -> `platform-worker` (editing only; it never applies, triggers, publishes or deploys). Unresolved infrastructure design, topology or release timing -> `devops-specialist` first (read-only); release execution and delivery -> `release-engineer`.
-Route by the named technology: FluxCD is GitOps; InfluxDB Flux is a query language and goes to the owning data role, not `platform-worker`, unless the task names both. Jira JQL, Confluence CQL and gh/curl automation -> `general-worker`; NRQL -> `observability-specialist`; REST contracts -> `api-specialist`.
-Grafana dashboards, queries, alerts and Kiali mesh diagnosis -> `observability-specialist`; approved Grafana/Kiali provisioning and Snyk, SonarQube or Prisma Cloud CI gate wiring -> `platform-worker` (gate results enforced as set by policy; never suppressed); scanner vulnerability, IAM and compliance policy -> `security-specialist`. Prisma Cloud is the security platform, not Prisma ORM.
+Accepted infrastructure-as-code, deployment manifest and CI workflow file changes -> `platform-worker` (editing only; it never applies, triggers, publishes or deploys). Unresolved infrastructure design, topology or release timing -> `devops-specialist` first (read-only); release execution and delivery -> `release-engineer`.
+Route by what the named technology is, not by a shared word in its name. Issue-tracker, wiki and gh/curl automation -> `general-worker`; observability query languages -> `observability-specialist`; REST contracts -> `api-specialist`.
+Dashboard, query, alert and service-mesh diagnosis -> `observability-specialist`; approved monitoring provisioning and security-scanner CI gate wiring -> `platform-worker` (gate results enforced as set by policy; never suppressed); scanner vulnerability, IAM and compliance policy -> `security-specialist`.
 
 ## Verification
 Workers must run focused tests/checks appropriate to their implementation.

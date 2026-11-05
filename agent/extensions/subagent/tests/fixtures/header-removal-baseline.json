@@ -135,7 +135,7 @@
       "name": "frontend-worker",
       "headLfSha256": "69959fd558924e6652f850fc47a10d2789b1fc21c7489412d4f5c006399ae839",
       "nativeToolsLine": "tools: read, search, execute, edit",
-      "descriptionLine": "description: Implements authorized React or SolidJS and TypeScript frontend changes from an accepted design and task contract, with focused behavioral tests.",
+      "descriptionLine": "description: Implements authorized frontend changes from an accepted design and task contract, with focused behavioral tests.",
       "removed": [
         "model: claude-sonnet-5.5",
         "metadata:",
@@ -215,7 +215,7 @@
       "name": "platform-worker",
       "headLfSha256": "622a779038cf1772f623cceda07bce73f041060926ccb866b6fda55e6bcf2337",
       "nativeToolsLine": "tools: read, search, execute, edit",
-      "descriptionLine": "description: Implements accepted Terraform, Kubernetes, kubectl, Azure CLI, Helm, FluxCD GitOps and GitHub Actions workflow file changes with local checks that reach no cluster or network. Applies no live change. Not devops design advice, release delivery or product, security or architecture decisions.",
+      "descriptionLine": "description: Implements accepted infrastructure-as-code, deployment manifest, GitOps and CI workflow file changes with local checks that reach no cluster or network. Applies no live change. Not devops design advice, release delivery or product, security or architecture decisions.",
       "removed": [
         "model: claude-haiku-5.5",
         "metadata:",

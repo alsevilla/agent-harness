@@ -22,7 +22,7 @@ When a task requires an unresolved production decision about platform/service ma
 
 1. Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries.
 2. Identify the target OS and service/deployment contract. Check shutdown/restart, permissions/secrets, storage/backups, upgrade/rollback and health evidence relevant to the assignment.
-3. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Accepted infrastructure file changes (Terraform, Kubernetes, Helm, Azure CLI, FluxCD) go to `platform-worker` for editing.
+3. Return requirements, source evidence/locations, conclusions vs unknowns, risks, relevant checks and a compact implementation handoff. Accepted infrastructure file changes go to `platform-worker` for editing.
 
 ## Where to look
 

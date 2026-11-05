@@ -21,7 +21,7 @@ Named procedure ownership in this profile:
 
 ## Frontend modules
 ux-flow-wireframer, design-dashboards, design-motion-principles, frontend-design,
-ui-ux-pro-max, accessible-ui-patterns, solidjs-engineering, web-design-guidelines,
+ui-ux-pro-max, accessible-ui-patterns, web-design-guidelines,
 typescript-advanced-types live under frontend/<name>/index.md.
 Choose frontend-design OR ui-ux-pro-max for broad direction unless distinct needs
 justify both. Modules grant guidance, not design/implementation authority.

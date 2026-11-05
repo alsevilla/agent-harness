@@ -16,17 +16,13 @@ Distinguish:
 - AUDIT EVENT: persistent record of important user or administrative action.
 - HEALTH SIGNAL: current indication that a component can perform its responsibility.
 
-**NRQL notes:**
-- NRQL is New Relic's query language and is not SQL, so do not carry SQL idioms into it.
-- Bound every query with SINCE and UNTIL and facet deliberately, because unbounded queries cost time and money.
-- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write.
-- Analysis queries stay read-only; NerdGraph or New Relic API writes are never implied by query design.
-
-**Grafana and Kiali notes:**
-- Grafana dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.
-- Kiali: diagnose service-mesh traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.
+**Query and dashboard notes:**
+- Use the monitoring service's own query language; do not carry SQL idioms into a language that is not SQL.
+- Bound every query by time range and group deliberately, because unbounded queries cost time and money.
+- Dashboards, queries and alert rules: advise on panels, queries and alert conditions; `platform-worker` implements approved provisioning or configuration changes.
+- Service mesh: diagnose traffic, routing and mTLS behaviour from evidence; mesh configuration changes go to `platform-worker` once approved.
 - Alert thresholds and severities come from the team's approved policy; never invent them.
-- Diagnosis stays read-only; no Grafana or Kiali write is implied by it.
+- Dashboard, alert and workload changes alter shared observability state and need explicit authority before any write; analysis and diagnosis stay read-only.
 
 ## Before starting
 

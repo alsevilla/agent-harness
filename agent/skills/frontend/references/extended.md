@@ -32,8 +32,7 @@ harness. It is not a second lifecycle.
 
 When frontend concerns are material, invoke `Skill(frontend)` before selecting a
 frontend capability or routing `ui-ux-specialist` / `frontend-worker`. Do not
-jump directly from the main session to `solidjs-engineering`,
-`frontend-design`, `accessible-ui-patterns`, or another frontend capability.
+jump directly from the main session to `frontend-design`, `accessible-ui-patterns`, or another frontend capability.
 
 
 ## Router Means Dispatch, Not Orchestrator Substitution
@@ -119,7 +118,6 @@ but this skill does not create a second orchestrator.
 | `design-dashboards` | Dashboard UX/information design | `ui-ux-specialist` | Operational dashboards, KPI layouts, monitoring, tables/charts, dashboard critique/redesign/spec | `agent/skills/frontend/design-dashboards/index.md` |
 | `design-motion-principles` | Motion + micro-interactions | `ui-ux-specialist`, then `frontend-worker` | Transitions, enter/exit behavior, hover/press feedback, purposeful motion, motion audit | `agent/skills/frontend/design-motion-principles/index.md` |
 | `frontend-design` | Distinct visual direction | `ui-ux-specialist` | New page/surface or intentional visual redesign where aesthetic direction is materially open | `agent/skills/frontend/frontend-design/index.md` |
-| `solidjs-engineering` | SolidJS implementation correctness | `frontend-worker` | Fine-grained reactivity, reactive props, effects/memos, cleanup, resources, list rendering, Solid lifecycle/SSR/testing | `agent/skills/frontend/solidjs-engineering/index.md` |
 | `typescript-advanced-types` | Advanced TS type engineering | `frontend-worker` | Complex generics, conditional/mapped/template types, reusable type utilities, type-safe API/form/state work | `agent/skills/frontend/typescript-advanced-types/index.md` |
 | `ui-ux-pro-max` | Broad UI/UX design intelligence | `ui-ux-specialist` | Design system search, layout/color/typography/icons/charts/general UX guidance when no narrower skill fully owns the concern | `agent/skills/frontend/ui-ux-pro-max/index.md` |
 | `ux-flow-wireframer` | User-flow + low-fidelity structure | `ui-ux-specialist` | New or materially changed multi-step flows, dead-end/redundancy audit, branches/recovery, Mermaid flow map, text wireframes before visual design/code | `agent/skills/frontend/ux-flow-wireframer/index.md` |
@@ -195,7 +193,7 @@ Use:
 
 `ui-ux-pro-max`
 
-For SolidJS repositories, use its general UX/design guidance only. It has no dedicated SolidJS stack profile; do not substitute React implementation advice for SolidJS.
+Use its stack profile only when it matches the project's framework; otherwise use its general UX/design guidance only.
 
 ### Existing UI audit
 
@@ -206,24 +204,6 @@ Use:
 Add `accessible-ui-patterns` when the review needs deeper behavioral keyboard/focus/form analysis.
 
 This audit capability does not replace the engineering harness `verify` or `review` phase.
-
-### SolidJS implementation
-
-Use:
-
-`solidjs-engineering`
-
-Use it for Solid-specific implementation/review concerns such as:
-- reactive props;
-- signals/memos/effects;
-- cleanup/ownership;
-- resources/Suspense;
-- list identity;
-- Solid lifecycle/SSR boundaries;
-- Solid component testing.
-
-This skill does not own visual design. If design/UX is materially unresolved,
-apply the Frontend Design Gate first.
 
 ### Complex TypeScript
 
@@ -240,31 +220,25 @@ Do not invoke it for ordinary TypeScript just because TypeScript is present.
 
 | Task | Recommended capabilities |
 |---|---|
-| Device admin dashboard redesign | `design-dashboards` + `accessible-ui-patterns`; optionally one visual-direction skill |
+| Admin dashboard redesign | `design-dashboards` + `accessible-ui-patterns`; optionally one visual-direction skill |
 | New branded landing/admin surface | `frontend-design` + `accessible-ui-patterns` |
 | General design-system exploration | `ui-ux-pro-max` + `accessible-ui-patterns` where needed |
 | New onboarding/setup/admin flow | `ux-flow-wireframer` first; then the narrow visual/accessibility capability actually needed |
 | Modal/menu/tab interaction | `accessible-ui-patterns` |
 | Animation polish | `design-motion-principles` + `accessible-ui-patterns` |
 | UI implementation review | `web-design-guidelines`; add `accessible-ui-patterns` for deeper behavior |
-| Type-heavy SolidJS API/form layer | `solidjs-engineering` + `typescript-advanced-types` only when the type problem is genuinely advanced |
-| Ordinary SolidJS component implementation | `solidjs-engineering` when framework semantics are material; otherwise use `frontend-worker` and repository conventions |
+| Type-heavy API/form layer | `typescript-advanced-types` only when the type problem is genuinely advanced |
+| Ordinary component implementation | `frontend-worker` and repository conventions |
 
 ---
 
 Do not load every capability automatically. Prefer the most specific capability
 that owns the concern.
 
-## SolidJS Rule
+## Framework Rule
 
-For SolidJS projects, repository evidence and `solidjs-engineering` govern
-framework implementation.
-
-Do not silently substitute React-specific implementation guidance from a
-frontend capability for SolidJS guidance.
-
-UI/UX skills decide design intent; `solidjs-engineering` decides Solid-specific
-implementation technique under the authorized `frontend-worker`.
+Repository evidence governs framework implementation. Do not substitute another
+framework's implementation guidance from a frontend capability.
 
 ## Research, Copy, and Handoff Boundary
 
