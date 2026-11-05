@@ -76,6 +76,15 @@ test("without Serena, or in a worktree it cannot serve, the heuristic parser ans
 		assert.match(await main(["refs", "drain", "src"], dir), /^\[heuristic parser, not Serena: .*\]\n1 reference to drain in 1 file\n/);
 		assert.match(await main(["outline", path.join(dir, "src", "q.rs")], dir), /^\[heuristic parser, not Serena: .*\]\n.*q\.rs \(3 lines, 2 symbols\)/);
 		assert.equal(projectRoot(path.join(dir, "src")), dir);
+		// Outside any git checkout (a Copilot session in a plain folder, for example): no project, the heuristic answers.
+		const plain = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "serena-plain-")));
+		fs.writeFileSync(path.join(plain, "a.py"), "def f():\n    return 1\n");
+		fs.writeFileSync(path.join(plain, "python"), "");
+		process.env.HARNESS_SERENA_PYTHON = path.join(plain, "python");
+		assert.match(await main(["find", "f"], plain), /^\[heuristic parser, not Serena: .* is not a git checkout and has no \.serena\/project\.yml/);
+		assert.equal(fs.existsSync(path.join(plain, ".serena")), false);
+		fs.rmSync(plain, { recursive: true, force: true });
+		process.env.HARNESS_SERENA_PYTHON = path.join(dir, "no-python");
 		await assert.rejects(main(["find", "drain", os.tmpdir()], dir), /outside the project/);
 		await assert.rejects(main(["nope"], dir), /usage:/);
 

@@ -71,7 +71,9 @@ function projectLanguages(root) {
 }
 function ensureProject(root, python) {
 	if (fs.existsSync(path.join(root, ".serena", "project.yml"))) return;
-	if (!fs.statSync(path.join(root, ".git"), { throwIfNoEntry: false })?.isDirectory()) throw new Unavailable(`Serena is not set up for this worktree (${root} has no .serena/project.yml), and the skill does not add one to a worktree`);
+	const dotGit = fs.statSync(path.join(root, ".git"), { throwIfNoEntry: false });
+	if (!dotGit) throw new Unavailable(`${root} is not a git checkout and has no .serena/project.yml, so Serena has no project to serve`);
+	if (!dotGit.isDirectory()) throw new Unavailable(`Serena is not set up for this worktree (${root} has no .serena/project.yml), and the skill does not add one to a worktree`);
 	const ignored = spawnSync("git", ["-C", root, "check-ignore", "-q", ".serena/project.yml"], { windowsHide: true, timeout: 15_000 });
 	if (ignored.status !== 0) throw new Unavailable(`Serena is not set up for ${root}: add .serena/ to its .gitignore, or run serena project create there yourself`);
 	const languages = projectLanguages(root);
