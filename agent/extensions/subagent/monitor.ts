@@ -1,12 +1,15 @@
 import { matchesKey, Key, getKeybindings, isKeyRelease, truncateToWidth, wrapTextWithAnsi, visibleWidth, ScrollView, MouseRegion, type Component, type ScrollViewScrollbar, type TuiMouseEvent, type TuiMouseEventResult, type TUI } from "@earendil-works/pi-tui";
 import type { ModelSlot, ModelTier } from "./model-routing.ts";
 import { modelProvenance, observeAssistant, observedId, type ObservedModel } from "./provenance.ts";
+import { formatTrace, formatTraceIndex, pickWorker } from "./trace.ts";
 import { AssistantMessageComponent, ToolExecutionComponent, createReadToolDefinition, createBashToolDefinition, createPowerShellToolDefinition, createEditToolDefinition, createWriteToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, type ExtensionAPI, type ExtensionContext, type ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 export type WorkerState = "initializing" | "running" | "pausing" | "paused" | "completed" | "failed" | "aborted";
 export interface ToolActivity {
   id: string; name: string; command: string; startedAt: number; endedAt?: number;
   state: "running" | "ok" | "error"; output: string; args: any; details?: any; revision: number; integration?: "serena" | "graphify" | "qmd";
+  outputChars?: number; // full output length at the end (output itself keeps only the last 12,000 characters)
+  range?: string; // read offset+limit, for /subagent trace
 }
 export type TranscriptEntry = {type: "tool"; id: string} | {type: "assistant"; id: string; text: string; partial: boolean};
 export interface WorkerRecord {
@@ -54,6 +57,9 @@ function toolCommand(name: string, args: any): string {
   const target = args?.relative_path ?? args?.file_path ?? args?.path;
   const symbol = args?.name_path ?? args?.name_path_pattern ?? args?.symbol_name ?? args?.pattern ?? args?.query;
   return [name, target && oneLine(target), symbol && oneLine(symbol)].filter(Boolean).join(" · ").slice(0, 1000);
+}
+function fullTextLength(result: any): number {
+  return (result?.content ?? []).filter((c: any) => c.type === "text").reduce((n: number, c: any) => n + String(c.text ?? "").length, 0);
 }
 function resultText(result: any): string {
   return clean((result?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n")).slice(-12000);
@@ -157,7 +163,7 @@ export class WorkerStore {
       if (integration) (r.integrations[integration] ??= {calls: 0, returned: 0, errors: 0}).calls++;
       const target = args.path ?? args.relative_path ?? args.file_path ?? "";
       if (name === "read" && /graphify-out[\/\\]/i.test(target)) r.graphReferences++;
-      r.tools.push({id: event.toolCallId ?? "tool-" + Date.now() + "-" + r.tools.length, name, command, startedAt: Date.now(), state: "running", output: "", args: displayArgs(args), revision: 1, integration});
+      r.tools.push({id: event.toolCallId ?? "tool-" + Date.now() + "-" + r.tools.length, name, command, startedAt: Date.now(), state: "running", output: "", args: displayArgs(args), revision: 1, integration, ...(args.offset !== undefined || args.limit !== undefined ? { range: `${args.offset ?? 1}+${args.limit ?? "rest"}` } : {})});
       r.transcript.push({type: "tool", id: r.tools.at(-1)!.id});
       r.tools = r.tools.slice(-40);
       r.activity = command; r.events.push(command); r.events = r.events.slice(-40);
@@ -168,7 +174,7 @@ export class WorkerStore {
         const result = event.type === "tool_execution_update" ? event.partialResult : event.result;
         tool.output = resultText(result); tool.details = displayDetails(result?.details); tool.revision++;
         if (event.type === "tool_execution_end" && tool.endedAt === undefined) {
-          tool.endedAt = Date.now(); tool.state = event.isError ? "error" : "ok";
+          tool.endedAt = Date.now(); tool.state = event.isError ? "error" : "ok"; tool.outputChars = fullTextLength(result);
           if (tool.integration) r.integrations[tool.integration][event.isError ? "errors" : "returned"]++;
           r.activity = (event.isError ? "Failed: " : "Finished: ") + tool.command;
         }
@@ -493,10 +499,19 @@ export class WorkerMonitor {
       if (this.timer) clearInterval(this.timer); this.timer = undefined;
       this.store.listeners.clear(); this.ctx = undefined;
     });
-    pi.registerCommand("subagent", { description: "Open live subagent inspector", handler: async (args, ctx) => { this.ctx = ctx; const text = args.trim(); if (!text) await this.menu(ctx); else if (text === "create" || text.startsWith("create ")) await this.create(ctx, text.slice(6)); else if (this.control) await this.control(args, ctx); else await this.open(); } });
-    pi.registerShortcut("ctrl+shift+w", { description: "Inspect running subagents", handler: async ctx => { this.ctx = ctx; await this.open(); } });
+    pi.registerCommand("subagent", { description: "Open live subagent inspector", handler: async (args, ctx) => { this.ctx = ctx; const text = args.trim(); if (!text) await this.menu(ctx); else if (text === "create" || text.startsWith("create ")) await this.create(ctx, text.slice(6)); else if (text === "trace" || text.startsWith("trace ")) this.trace(ctx, text.slice(5).trim()); else if (this.control) await this.control(args, ctx); else await this.open(); } });
+    // Alt+I: Ctrl+Shift+W is Windows Terminal's close-tab key, which closed the whole Pi session instead of opening the inspector.
+    pi.registerShortcut("alt+i", { description: "Inspect running subagents", handler: async ctx => { this.ctx = ctx; await this.open(); } });
   }
   /** Bare /subagent with UI: Inspect (first, preselected) or Edit roles; the roles editor is lazy-imported here only. */
+  /** /subagent trace [#n | role]: one worker's tool calls as plain text (a notice, not a chat message, so main's context does not grow). */
+  trace(ctx: ExtensionContext, selector: string) {
+    const records = [...this.store.records.values()];
+    if (!selector) { ctx.ui.notify(formatTraceIndex(records), "info"); return; }
+    const record = pickWorker(records, selector);
+    ctx.ui.notify(record ? formatTrace(record) : `No worker matches "${selector}". ${formatTraceIndex(records)}`, record ? "info" : "warning");
+  }
+
   private async menu(ctx: ExtensionContext) {
     if (!ctx.hasUI) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, roles, create, or /subagent to inspect", "info"); return; }
     if (this.overlayOpen || this.menuOpen) return;

@@ -1478,7 +1478,7 @@ async function runNodeSuite(): Promise<void> {
 		const shortcuts = new Map<string, any>();
 		const pi: any = { on() {}, registerCommand: (name: string, spec: any) => commands.set(name, spec), registerShortcut: (key: string, spec: any) => shortcuts.set(key, spec), getSettings: () => ({}) };
 		const monitor = new monitorModule.WorkerMonitor(pi);
-		return { monitor, bare: commands.get("subagent").handler as (args: string, ctx: any) => Promise<void>, shortcut: shortcuts.get("ctrl+shift+w").handler as (ctx: any) => Promise<void> };
+		return { monitor, bare: commands.get("subagent").handler as (args: string, ctx: any) => Promise<void>, shortcut: shortcuts.get("alt+i").handler as (ctx: any) => Promise<void> };
 	}
 	// TUI ctx: each custom picker is built by the production factory and driven by the test (answer picks its label, undefined = Escape).
 	function menuCtx(answer: (picker: any) => string | undefined, opts: { mode?: string } = {}) {
@@ -1593,7 +1593,7 @@ async function runNodeSuite(): Promise<void> {
 		assert.equal(customs, 1, "second bare call opened a duplicate window");
 	});
 
-	test("Ctrl+Shift+W while the bare menu is open adds no window and leaves the menu as it was; after Esc the shortcut opens the inspector once", async () => {
+	test("Alt+I while the bare menu is open adds no window and leaves the menu as it was; after Esc the shortcut opens the inspector once", async () => {
 		const h = bareHarness();
 		h.monitor.store.begin("a", "t", "anthropic/claude-opus-5-5", "high");
 		const windows: string[] = [];
@@ -1608,7 +1608,7 @@ async function runNodeSuite(): Promise<void> {
 		await until(() => windows.length >= 1);
 		void h.shortcut(ctx);
 		await new Promise((r) => setTimeout(r, 5));
-		assert.deepEqual(windows, [MENU_TITLE], "Ctrl+Shift+W added a window over the open menu");
+		assert.deepEqual(windows, [MENU_TITLE], "Alt+I added a window over the open menu");
 		assert.equal(menuPicker.selectedLabel(), "Inspect workers (1)", "menu selection changed");
 		closeMenu?.(undefined);
 		await new Promise((r) => setTimeout(r, 5));
@@ -1640,7 +1640,7 @@ async function runNodeSuite(): Promise<void> {
 		const ctx: any = { hasUI: true, mode: "tui", cwd: os.tmpdir(), modelRegistry: registry(), ui: { notify: (m: string) => notes.push(m), select: async () => undefined, confirm: async () => false, onTerminalInput: () => () => {}, custom: () => { customs++; return new Promise(() => {}); } } };
 		void h.shortcut(ctx);
 		await new Promise((r) => setTimeout(r, 5));
-		assert.equal(customs, 1, "Ctrl+Shift+W opened the inspector");
+		assert.equal(customs, 1, "Alt+I opened the inspector");
 		void h.bare("", ctx);
 		await new Promise((r) => setTimeout(r, 5));
 		assert.equal(customs, 1, "bare /subagent added a menu or window over the open inspector");
@@ -1659,7 +1659,7 @@ async function runNodeSuite(): Promise<void> {
 		}
 	});
 
-	test("Ctrl+Shift+W stays the direct inspector: silent with no workers and no menu; with a worker one inspector window at the shared options", async () => {
+	test("Alt+I stays the direct inspector: silent with no workers and no menu; with a worker one inspector window at the shared options", async () => {
 		const h = bareHarness();
 		const log: string[] = [];
 		const ctx: any = { hasUI: true, mode: "tui", cwd: os.tmpdir(), modelRegistry: registry(), ui: { notify: (m: string) => log.push(`notify ${m}`), select: async () => undefined, confirm: async () => false, custom: (_f: unknown, o: any) => { log.push(`custom ${o?.overlay} ${JSON.stringify(o?.overlayOptions)}`); return new Promise(() => {}); } } };

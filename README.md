@@ -88,7 +88,8 @@ Describe the task to main as usual; it routes the work. Useful commands:
 
 | Command | What it does |
 | --- | --- |
-| `/subagent` | Live worker inspector (also `Ctrl+Shift+W`) |
+| `/subagent` | Live worker inspector (also `Alt+I`; it was `Ctrl+Shift+W`, which Windows Terminal uses to close the tab) |
+| `/subagent trace [#n or role]` | One worker's tool calls as plain text to paste for a cost review: target, output size, repeats, whole reads of large files, errors, and the outputs carried longest (no argument lists the workers) |
 | `/subagent list`, `steer #N <message>`, `pause bg-N`, `resume bg-N`, `stop #N`, `result bg-N` | Control running or finished workers without a model call |
 | `/subagent usage` | Usage per role, cost per completed task and main's context size |
 | `/subagent roles` | Edit one role's default model, fallbacks and thinking level |

@@ -542,7 +542,7 @@ async function runNodeSuite(): Promise<void> {
 		}
 	});
 
-	// --- bare menu guard shared by /subagent create, the menu and Ctrl+Shift+W ----------------------------------------------
+	// --- bare menu guard shared by /subagent create, the menu and Alt+I ----------------------------------------------
 
 	test("create holds the menu guard for the whole flow: open refuses, a second create is refused, the guard is released after cancel and after an error", async () => {
 		const pi: any = { on() {}, registerCommand() {}, registerShortcut() {}, getSettings: () => ({}) };
