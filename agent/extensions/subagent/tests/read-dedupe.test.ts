@@ -46,11 +46,11 @@ test("only workers load it: the child guard entry wires tool_result and compacti
 	const entry = fs.readFileSync(new URL("../safety-guard-entry.ts", import.meta.url), "utf8");
 	assert.match(entry, /createReadDedupe\(\)/);
 	assert.match(entry, /pi\.on\("tool_result"/);
-	assert.match(entry, /pi\.on\("session_compact", \(\) => \{ dedupe\.reset\(\); capped = false; compactAsked = false; \}\)/);
+	assert.match(entry, /pi\.on\("session_compact", \(\) => \{ dedupe\.reset\(\); ledger\?\.compacted\(\); capped = false; compactAsked = false; \}\)/);
 	assert.match(entry, /if \(result\.step === "over" && !compactAsked\) \{\s*compactAsked = true;\s*try \{ ctx\?\.compact\?\.\(/, "still over budget after every step: ask the host to compact, once");
 	assert.match(entry, /ctx\?\.getSystemPrompt\?\.\(\)/, "the estimate includes the real system prompt");
 	assert.match(entry, /if \(capped\) return undefined;/, "once older outputs are masked, the duplicate-read note is off (its earlier copy may be gone)");
-	assert.match(entry, /if \(!capped\) \{ capped = true; dedupe\.reset\(\); \}/);
+	assert.match(entry, /if \(result\.messages && !capped\) \{ capped = true; dedupe\.reset\(\); ledger\?\.earlierCopiesGone\(\); \}/);
 	assert.doesNotMatch(fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8"), /read-dedupe/);
 });
 
