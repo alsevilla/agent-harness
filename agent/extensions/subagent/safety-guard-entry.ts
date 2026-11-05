@@ -3,7 +3,7 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_GRANT_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
-import { capWorkerContext, workerMaskFromEnv } from "./handoff-window.ts";
+import { capWorkerContext, workerBudgetFromEnv, workerMaskFromEnv } from "./handoff-window.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
@@ -34,20 +34,30 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	});
 	// Workers only: a repeated read that returns unchanged text becomes a one-line note (read-dedupe.ts).
 	const dedupe = createReadDedupe();
-	// Workers only: past ~80k estimated tokens, older large tool outputs are masked so requests stay under Haiku's 100k price line.
-	// A masked earlier copy can no longer be "used", so the duplicate-read note is off for the rest of the run once masking engages.
+	// Workers only: threshold-triggered masking with budget fallbacks (handoff-window.ts, capWorkerContext). From ~80k estimated tokens,
+	// including the actual system prompt, the request is shortened step by step until it fits the ~95k budget; if it still does not,
+	// the host is asked to compact once. Best effort, not a hard bound. A masked earlier copy can no longer be "used", so the
+	// duplicate-read note is off for the rest of the run once anything is masked.
 	const capFrom = workerMaskFromEnv();
+	const capBudget = workerBudgetFromEnv();
 	let capped = false;
-	pi.on("context", (event: { messages: any[] }) => {
-		const messages = capWorkerContext(event.messages, capFrom);
-		if (!messages) return undefined;
+	let compactAsked = false;
+	pi.on("context", (event: { messages: any[] }, ctx: any) => {
+		let base = 0;
+		try { base = Math.ceil(String(ctx?.getSystemPrompt?.() ?? "").length / 4); } catch { base = 0; }
+		const result = capWorkerContext(event.messages, capFrom, capBudget, base);
+		if (result.step === "over" && !compactAsked) {
+			compactAsked = true;
+			try { ctx?.compact?.({ customInstructions: "Keep the task packet, its stop condition, files changed, checks run with their results, and open problems; drop old tool output." }); } catch { /* best effort */ }
+		}
+		if (!result.messages) return undefined;
 		if (!capped) { capped = true; dedupe.reset(); }
-		return { messages };
+		return { messages: result.messages };
 	});
 	pi.on("tool_result", (event, ctx) => {
 		if (capped) return undefined;
 		const content = dedupe.onResult(event.toolName, event.input, event.content, event.isError === true, ctx.cwd);
 		return content ? { content } : undefined;
 	});
-	pi.on("session_compact", () => { dedupe.reset(); capped = false; });
+	pi.on("session_compact", () => { dedupe.reset(); capped = false; compactAsked = false; });
 }

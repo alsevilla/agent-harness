@@ -135,3 +135,20 @@ test("footer status line: context, tasks, cost per completed task and running jo
 	assert.equal(usageStatusLine(scope, 100000), "harness: ctx ~100,000 tok · 2 tasks · $0.4000/completed task · 1 running · consider /new", "from 100k main is told to start fresh");
 	assert.equal(usageStatusLine(newUsageScope(), 140000), "harness: ctx ~140,000 tok · consider /new");
 });
+
+// Measuring worker masking: the providers' own per-request input (input + cacheRead + cacheWrite), peak and count over 100k, per role.
+test("usage: each role shows its peak request and how many requests were over 100k; slices are unchanged", () => {
+	const scope = newUsageScope();
+	const job = new LogicalUsage(scope, true, "debugger");
+	job.attempt();
+	job.turn({ input: 10, output: 5, cacheRead: 60_000, cacheWrite: 1_000, cost: { total: 0.01 } });
+	job.turn({ input: 10, output: 5, cacheRead: 104_000, cacheWrite: 3_000, cost: { total: 0.05 } });
+	job.turn({ input: 10, output: 5, cacheRead: 110_000, cacheWrite: 500, cost: { total: 0.05 } });
+	job.settle("completed");
+	const other = new LogicalUsage(scope, true, "scout");
+	other.attempt(); other.turn({ input: 5, output: 1, cacheRead: 9_000, cacheWrite: 100, cost: { total: 0.001 } }); other.settle("completed");
+	const text = formatUsageSummary(scope);
+	assert.match(text, /debugger: [^\n]*per completed task; peak request 110,510 tok, 2 requests over 100,000/);
+	assert.match(text, /scout: [^\n]*per completed task; peak request 9,105 tok$/m, "no over-100k note when none was");
+	assert.equal("peakRequest" in scope.background, false, "slices keep their shape");
+});
