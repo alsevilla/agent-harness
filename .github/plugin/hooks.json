@@ -21,8 +21,8 @@
       {
         "type": "command",
         "matcher": "bash|powershell",
-        "bash": "node \"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:?agent-harness: plugin root not set (COPILOT_PLUGIN_ROOT, PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT)}}}/.github/plugin/release-guard.mjs\"",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { [Console]::Error.WriteLine('agent-harness: plugin root not set (COPILOT_PLUGIN_ROOT, PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT)'); exit 1 }; node \"$r/.github/plugin/release-guard.mjs\"; exit $LASTEXITCODE",
+        "bash": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:?agent-harness: plugin root not set (COPILOT_PLUGIN_ROOT, PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT)}}}/.github/plugin/release-guard.mjs\"",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { [Console]::Error.WriteLine('agent-harness: plugin root not set (COPILOT_PLUGIN_ROOT, PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT)'); exit 1 }; node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"$r/.github/plugin/release-guard.mjs\"; exit $LASTEXITCODE",
         "timeoutSec": 10
       }
     ]

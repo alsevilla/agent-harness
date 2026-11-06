@@ -394,9 +394,17 @@ test("hooks find the plugin root from COPILOT_PLUGIN_ROOT, PLUGIN_ROOT or CLAUDE
   expect(none.stderr).toContain("agent-harness: plugin root not set");
 });
 
-// The guard imports safety-core.ts; without "type": "module" in package.json Node printed MODULE_TYPELESS_PACKAGE_JSON on every
-// preToolUse call. A hook should write nothing to stderr on an ordinary allow or deny.
-test("preToolUse guard writes nothing to stderr for an ordinary allow or deny", () => {
-  expect(JSON.parse(read("package.json")).type).toBe("module");
-  for (const command of ["git status", "cat .env"]) expect(guard(command).stderr).toBe("");
+// The guard imports safety-core.ts, so Node prints MODULE_TYPELESS_PACKAGE_JSON on every preToolUse call. Declaring "type": "module"
+// in package.json silenced it but broke Pi on Windows: the profile folder takes its package.json from this repo, and Pi's own CommonJS
+// launcher (~/.pi/agent/bin/pi-launcher.js) then loaded as an ES module ("require is not defined"). The hook command silences only
+// that warning instead, and package.json must never declare a module type.
+test("package.json declares no module type; the guard hook silences only the typeless-package warning and writes nothing to stderr", () => {
+  expect(JSON.parse(read("package.json")).type).toBe(undefined);
+  const flag = "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON";
+  for (const shell of ["bash", "powershell"]) expect(hooks().preToolUse[0][shell]).toContain(`node ${flag} `);
+  for (const command of ["git status", "cat .env"]) {
+    const r = spawnSync("node", [flag, join(plugin, "release-guard.mjs")], { cwd: root, input: JSON.stringify({ sessionId: "s", timestamp: 1, cwd: root, toolName: "bash", toolArgs: { command } }), encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe("");
+  }
 });

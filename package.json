@@ -3,7 +3,6 @@
 	"version": "1.14.0",
 	"description": "Engineering harness for Pi: subagent roles, ask-user and engineering skills.",
 	"license": "MIT",
-	"type": "module",
 	"engines": {
 		"node": ">=22.19.0"
 	},
