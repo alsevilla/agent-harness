@@ -308,3 +308,36 @@ test("risk rules: text a command only writes to a file is data; heredocs a shell
 	];
 	for (const [command, expected, tool] of stillChecked) assert.equal(rule(command, tool), expected, command.split("\n")[0]);
 });
+
+// Field report: a read-only debugger's `$R='<_scratch path>'` then `cargo check ... *> "$R\check-fixed.log"` was refused as a target
+// with a variable the guard cannot resolve. A variable assigned once to a literal, before its use, with nothing able to change it, is
+// resolved; anything less certain stays refused.
+test("read-only role: a variable assigned once to a literal path in the same command is resolved; uncertain variables stay refused", () => {
+	const root = "D:/work/RFID/worktrees/RFIDAttendance-Rust/sms-test-send";
+	const scratch = String.raw`D:\work\RFID\worktrees\RFIDAttendance-Rust\_scratch\sms-test\r1-compile-debug`;
+	const check = (command: string, tool = "powershell") => readOnlyViolation(tool, { command }, root, root);
+	const field = [
+		`$R='${scratch}'`,
+		String.raw`$env:CARGO_TARGET_DIR="$R\target-full"; $env:CARGO_INCREMENTAL='0'`,
+		String.raw`Push-Location "$R\backend-copy"`,
+		String.raw`cargo check --all-targets --offline *> "$R\check-fixed.log"; "exit $LASTEXITCODE"`,
+		"Pop-Location",
+		String.raw`Get-Content "$R\check-fixed.log" -Tail 15`,
+	].join("\n");
+	assert.equal(check(field), undefined, "the field command writes only to its _scratch folder");
+	assert.equal(check(`$Out = "${scratch}"; $L = '${scratch}\\b.log'\ncargo test *> $L; Get-Content "$Out\\a.log"`), undefined, "two variables, double and single quotes");
+	assert.equal(check(`R='${scratch.replace(/\\/g, "/")}'\ncargo check > "$R/check.log" 2>&1`, "bash"), undefined, "bash assignment");
+	assert.equal(check(`export R=${scratch.replace(/\\/g, "/")}; cargo check > "\${R}/check.log"`, "bash"), undefined, "export and \${R}");
+	const refused: Array<[string, RegExp, string?]> = [
+		[String.raw`$R='D:\work\RFID\worktrees\RFIDAttendance-Rust\sms-test-send\src'` + "\n" + String.raw`echo x > "$R\a.rs"`, /into the candidate checkout .*resolves to D:\/work\/RFID\/worktrees\/RFIDAttendance-Rust\/sms-test-send\/src\/a\.rs/],
+		[`$R='${scratch}'\n$R='D:\\work\\x'\necho x > "$R\\a.log"`, /variable or substitution the guard cannot resolve/],
+		[`$R = Get-Location\necho x > "$R\\a.log"`, /variable or substitution/],
+		[`$R='${scratch}'\nSet-Variable -Name R -Value 'D:\\elsewhere'\necho x > "$R\\a.log"`, /variable or substitution/],
+		[`echo x > "$R\\a.log"\n$R='${scratch}'`, /variable or substitution/],
+		[`$R='${scratch}'\nif ($true) { $R = 'D:\\elsewhere' }\necho x > "$R\\a.log"`, /variable or substitution/],
+		[`$Root='${scratch}'\necho x > "$R\\a.log"`, /variable or substitution/],
+		[`R=$(pwd)\necho x > "$R/a.log"`, /variable or substitution/, "bash"],
+		[`R='/tmp/ok'; for R in a b; do :; done\necho x > "$R/a.log"`, /variable or substitution/, "bash"],
+	];
+	for (const [command, why, tool] of refused) assert.match(check(command, tool) ?? "", why, command.split("\n")[0]);
+});
