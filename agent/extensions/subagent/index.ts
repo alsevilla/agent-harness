@@ -350,6 +350,7 @@ async function runAgentAttempt(
         }
     }
     const worker = dispatchDefaults.monitor?.store.begin(agentName, task, model ?? "inherited", (inheritsDispatchConfig ? dispatchDefaults.thinkingLevel : undefined) ?? agent.thinking ?? "provider default", model ? dispatchDefaults.contextWindowFor?.(model) : undefined, agent.modelTier, agent.modelSlot);
+    if (worker) worker.cwd = path.resolve(cwd ?? defaultCwd); // for /subagent changes
     if (worker && dispatchDefaults.jobId) dispatchDefaults.runtime?.note(dispatchDefaults.jobId, worker.id, dispatchDefaults.waitKey);
     let codeIntegrationsEnabled = false;
     try {
@@ -899,7 +900,10 @@ export const MAIN_TOOL_GUIDELINES = [
 	"Call only tools declared in this session: \"Additional tools may be available\" does not make an undeclared tool callable, and codemode is not available unless it is declared.",
 	"To read several files, call read for each one in the same turn (within main's limit of 3 named files), or delegate the reads with the subagent tool; do not wrap reads in a codemode script.",
 	"When the intended structure is known (function signatures, types, module layout), put it in the subagent task packet as a code skeleton beside the expected behavior and checks.",
-	"For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson.",
+	"For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson. Keep the task's modelTier for the first fix round; choose capable explicitly only after a second failure on the same check.",
+	"Run tasks in parallel only when each one's expected output (its code changes and report) is large against what siblings would otherwise rediscover and reconcile; several small items go to one writer. Start every sibling packet with the same shared block, identical text (decisions made, conventions, file map, shared checks), then the item's own part.",
+	"When a change needs two or more writers or crosses layers (backend, database, frontend, platform), launch one read-only planner first (economy; capable across layers or for migrations, security or concurrency) to propose the units, owned files, interfaces, order and checks; accept or edit its proposal and keep the PLAN yours. Skip it for single-writer changes.",
+	"Choose each task's modelTier when you plan, before launching any: economy for bounded edits whose files and focused checks the packet names and that leave no design, API, security, concurrency or persistence decision open (general-worker docs, config and script edits included); capable for open decisions and the integration or final verification that the other tasks feed.",
 	"For main's own lookups use the graph and qmd_search when declared, before grep or find. Workers locate code with the graph, qmd_search and the serena skill (outline, find, refs); in a packet that asks a worker to find code, name the graph report or the known symbols.",
 ];
 

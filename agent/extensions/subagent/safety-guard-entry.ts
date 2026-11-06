@@ -3,6 +3,10 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_GRANT_ENV, CHILD_GRANT_NOTE_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
+import { createExecutionLedger, LEDGER_TYPE } from "./execution-ledger.ts";
+import { createAutoFormat, loadFormatConfig } from "./auto-format.ts";
+import { capShellOutput, outputCapFromEnv } from "./output-cap.ts";
+import * as path from "node:path";
 import { createLookupNudge, launchLookupTools } from "./lookup-nudge.ts";
 import { capWorkerContext, workerBudgetFromEnv, workerMaskFromEnv } from "./handoff-window.ts";
 
@@ -42,11 +46,19 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	// including the actual system prompt, the request is shortened step by step until it fits the ~95k budget; if it still does not,
 	// the host is asked to compact once. Best effort, not a hard bound. A masked earlier copy can no longer be "used", so the
 	// duplicate-read note is off for the rest of the run once anything is masked.
+	// Workers only: the execution ledger (execution-ledger.ts, after Ledger, arXiv 2608.00808). PI_SUBAGENT_LEDGER=0 turns it off.
+	const ledger = process.env.PI_SUBAGENT_LEDGER === "0" ? undefined : createExecutionLedger();
 	const capFrom = workerMaskFromEnv();
 	const capBudget = workerBudgetFromEnv();
 	let capped = false;
 	let compactAsked = false;
 	pi.on("context", (event: { messages: any[] }, ctx: any) => {
+		// The task packet is the first user message ("Task: ..."); the ledger tracks the checks it names.
+		try {
+			const first = event.messages.find((m) => m?.role === "user");
+			const text = typeof first?.content === "string" ? first.content : Array.isArray(first?.content) ? first.content.map((p: any) => p?.text ?? "").join("\n") : "";
+			if (text) ledger?.noteTask(text);
+		} catch { /* the view simply lists no packet checks */ }
 		let base = 0;
 		try { base = Math.ceil(String(ctx?.getSystemPrompt?.() ?? "").length / 4); } catch { base = 0; }
 		const result = capWorkerContext(event.messages, capFrom, capBudget, base);
@@ -54,16 +66,35 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 			compactAsked = true;
 			try { ctx?.compact?.({ customInstructions: "Keep the task packet, its stop condition, files changed, checks run with their results, and open problems; drop old tool output." }); } catch { /* best effort */ }
 		}
-		if (!result.messages) return undefined;
-		if (!capped) { capped = true; dedupe.reset(); }
-		return { messages: result.messages };
+		if (result.messages && !capped) { capped = true; dedupe.reset(); ledger?.earlierCopiesGone(); }
+		// The ledger's state view goes last, after the history, so the cached prefix is untouched; it is rebuilt for every request.
+		let view: string | undefined;
+		try { view = ledger?.view(); } catch { view = undefined; }
+		if (!view) return result.messages ? { messages: result.messages } : undefined;
+		return { messages: [...(result.messages ?? event.messages), { role: "custom", customType: LEDGER_TYPE, content: view, display: false, timestamp: Date.now() }] };
+	});
+	// Registered before the duplicate-read handler, so the ledger records each read's own output (Pi chains tool_result handlers).
+	pi.on("tool_result", (event, ctx) => {
+		if (!ledger) return undefined;
+		try {
+			const content = ledger.onResult(event.toolName, event.input, event.content, event.isError === true, ctx.cwd);
+			return content ? { content } : undefined;
+		} catch { return undefined; }
+	});
+	// Workers only: format a file right after an edit, with commands from the user's profile format.json only (auto-format.ts).
+	const autoFormat = createAutoFormat(loadFormatConfig(path.join(getAgentDir(), "format.json")));
+	pi.on("tool_result", (event, ctx) => {
+		try {
+			const content = autoFormat.onResult(event.toolName, event.input, event.content, event.isError === true, ctx.cwd);
+			return content ? { content } : undefined;
+		} catch { return undefined; }
 	});
 	pi.on("tool_result", (event, ctx) => {
 		if (capped) return undefined;
 		const content = dedupe.onResult(event.toolName, event.input, event.content, event.isError === true, ctx.cwd);
 		return content ? { content } : undefined;
 	});
-	pi.on("session_compact", () => { dedupe.reset(); capped = false; compactAsked = false; });
+	pi.on("session_compact", () => { dedupe.reset(); ledger?.compacted(); capped = false; compactAsked = false; });
 	// Workers only: the first broad grep/find of a run that has not used the Serena helper, QMD or the graph gets one line naming them (lookup-nudge.ts).
 	// The tool set is read at the first result, after every extension has registered and activated its tools.
 	let nudge: ReturnType<typeof createLookupNudge> | undefined;
@@ -71,5 +102,14 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		try { nudge ??= createLookupNudge(launchLookupTools(pi.getActiveTools())); } catch { return undefined; }
 		const content = nudge.onResult(event.toolName, event.input, event.content, event.isError === true);
 		return content ? { content } : undefined;
+	});
+	// Workers only, last: a long shell output keeps its start and end, with the full text on disk (output-cap.ts). After the ledger,
+	// which records the whole output first.
+	const outputCap = outputCapFromEnv();
+	pi.on("tool_result", (event: any) => {
+		try {
+			const content = capShellOutput(event.toolName, event.content, event.details, outputCap);
+			return content ? { content } : undefined;
+		} catch { return undefined; }
 	});
 }

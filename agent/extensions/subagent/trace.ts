@@ -3,8 +3,8 @@
 // Each line is one call: tool, target, output size, and flags for repeats, whole reads of large files and errors. Every output stays in
 // the worker's context for the rest of its run, so the summary ranks outputs by size times the calls that came after them.
 
-export interface TraceTool { name: string; command: string; state: "running" | "ok" | "error"; output: string; outputChars?: number; range?: string; startedAt: number; endedAt?: number }
-export interface TraceRecord { id: string; name: string; task: string; state: string; model: string; reportedModel?: string; startedAt: number; endedAt?: number; tools: TraceTool[] }
+export interface TraceTool { name: string; command: string; state: "running" | "ok" | "error"; output: string; outputChars?: number; range?: string; target?: string; startedAt: number; endedAt?: number }
+export interface TraceRecord { id: string; name: string; task: string; state: string; model: string; reportedModel?: string; cwd?: string; startedAt: number; endedAt?: number; tools: TraceTool[] }
 
 const LARGE_WHOLE_READ = 12_000;
 const TARGET_WIDTH = 72;
@@ -67,5 +67,47 @@ export function formatTrace(r: TraceRecord): string {
 		...(heaviest.length ? [`Carried longest (each output stays in context for the later calls): ${heaviest.join(", ")}`] : []),
 		"",
 		...lines,
+	].join("\n");
+}
+
+// `/subagent changes [worker]` (after Claude Code's /rewind): the files a worker edited or wrote, how they differ from the last commit now,
+// and the exact commands that would undo them. It never runs them: restoring discards every uncommitted change in those files, including
+// any made before the worker started, so the user runs them or main asks for approval first.
+export type GitRead = (cwd: string, args: string[]) => string | undefined;
+export function formatChanges(r: TraceRecord, git: GitRead): string {
+	const counts = new Map<string, { edits: number; writes: number }>();
+	for (const t of r.tools) {
+		if ((t.name !== "edit" && t.name !== "write") || t.state !== "ok" || !t.target) continue;
+		const c = counts.get(t.target) ?? { edits: 0, writes: 0 };
+		if (t.name === "edit") c.edits++; else c.writes++;
+		counts.set(t.target, c);
+	}
+	const head = `Changes by #${workerNumber(r)} ${r.name} (${r.state})${r.cwd ? ` in ${r.cwd}` : ""}`;
+	if (!counts.size) return `${head}: no successful edit or write.`;
+	if (!r.cwd) return `${head}: files ${[...counts.keys()].join(", ")}; the worker's folder is unknown, so their current state cannot be shown.`;
+	const files = [...counts.keys()];
+	const status = new Map<string, string>();
+	for (const line of (git(r.cwd, ["status", "--porcelain=v1", "--untracked-files=all", "--", ...files]) ?? "").split(/\r?\n/)) if (line.length > 3) status.set(line.slice(3).replace(/^"|"$/g, ""), line.slice(0, 2));
+	const stat = new Map<string, string>();
+	for (const line of (git(r.cwd, ["diff", "HEAD", "--numstat", "--", ...files]) ?? "").split(/\r?\n/)) { const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line); if (m) stat.set(m[3], `+${m[1]} -${m[2]}`); }
+	const rel = (f: string) => f.replace(/\\/g, "/").replace(/^\.\//, "");
+	const tracked: string[] = [], added: string[] = [], clean: string[] = [];
+	const lines = files.map((f) => {
+		const key = [...status.keys()].find((k) => k === rel(f) || rel(f).endsWith(`/${k}`) || k.endsWith(rel(f)));
+		const st = key ? status.get(key)! : "";
+		const diff = [...stat.entries()].find(([k]) => k === rel(f) || rel(f).endsWith(`/${k}`) || k.endsWith(rel(f)))?.[1];
+		if (st.includes("?")) added.push(f); else if (st.trim()) tracked.push(f); else clean.push(f);
+		const c = counts.get(f)!;
+		const what = [c.edits ? `${c.edits} edit${c.edits === 1 ? "" : "s"}` : "", c.writes ? `${c.writes} write${c.writes === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
+		return `  ${f}  (${what})  ${st.includes("?") ? "new, untracked" : st.trim() ? `modified ${diff ?? ""}`.trim() : "no uncommitted change now"}`;
+	});
+	const undo = [
+		...(tracked.length ? [`  git restore -- ${tracked.map((f) => (/\s/.test(f) ? `"${f}"` : f)).join(" ")}`] : []),
+		...(added.length ? [`  delete the new files: ${added.join(", ")}`] : []),
+	];
+	return [
+		`${head}:`,
+		...lines,
+		...(undo.length ? ["To undo (not run; it discards every uncommitted change in these files, including any made before this worker; run it yourself or ask main to request approval):", ...undo] : ["Nothing to undo: these files have no uncommitted change now."]),
 	].join("\n");
 }

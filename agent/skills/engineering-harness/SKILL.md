@@ -16,7 +16,7 @@ For "queue this", record the request and order, acknowledge briefly, and continu
 | Unknown location/dependencies | `discover/index.md` | `scout`, only when needed | Handoff with path:line evidence; no PASS accepted from a digest |
 | Unknown-cause failure | `debug/index.md` | `debugger` before speculative fixes | Cause established by evidence |
 | Conflicting evidence / material choice | `knowledge/index.md` / `decision/index.md` | **main owns authorization** | Recorded decision or authority |
-| Necessary dependencies/migration/coordination plan | `plan/index.md` | **main owns PLAN** | READY FOR EXECUTION |
+| Necessary dependencies/migration/coordination plan | `plan/index.md` | `planner` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN** | READY FOR EXECUTION |
 | Authorized implementation | `execute/index.md` | `backend-worker` / `database-worker` / `frontend-worker` / `general-worker` / `platform-worker` | Focused RED/GREEN results in the worker REPORT |
 | Selected independent evidence | `verify/index.md` / `review/index.md` | `test-engineer` / `reviewer` | Result on the exact candidate identity |
 | Requested isolation/integration | `worktree/index.md` / `integrate/index.md` | **main owns orchestration** | Candidate identity and one writer confirmed |

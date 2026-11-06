@@ -1,7 +1,7 @@
 ## PLAN procedure
 This lifecycle procedure is owned by the **main orchestrator**, not by a leaf specialist.
 
-Use only when sequencing/dependencies/risk justify an explicit execution plan.
+Use only when sequencing/dependencies/risk justify an explicit execution plan. When the change needs two or more writers or crosses layers, get the unit proposal from one read-only `planner` run (`../references/routing.md`, "Planning") instead of reading code or sending a scout only to decompose; main then accepts or edits it here.
 
 Produce:
 - scope + acceptance criteria;

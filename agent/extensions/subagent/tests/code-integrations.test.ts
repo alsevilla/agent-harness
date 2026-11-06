@@ -133,7 +133,8 @@ test("reviewer launches with Ponytail absent: normal reviewer integrations and n
     const args: string[] = [];
     assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
     assert.ok(!args.some(arg => /ponytail/i.test(arg)), args.join(" "));
-    assert.equal(args.filter(arg => arg === "--extension").length, 2, "qmd and graphify extensions; pi-serena is never loaded");
+    assert.equal(args.filter(arg => arg === "--extension").length, 1, "the qmd extension only; pi-serena and graphify-pi are never loaded");
+    assert.ok(!args.some(arg => /graphify-pi/i.test(arg)), args.join(" "));
     assert.ok(args.includes(SERENA_SKILL), "serena skill loaded");
     assert.ok(!args.some(arg => /pi-serena/i.test(arg)), args.join(" "));
   });
@@ -168,7 +169,7 @@ test("reviewer with the serena skill absent launches with QMD and Graphify", () 
   assert.equal(run.enabled, true);
   assert.equal(loaded.serena(run), false);
   assert.equal(loaded.qmd(run), true);
-  assert.equal(loaded.graphifyExtension(run), true);
+  assert.equal(loaded.graphifyExtension(run), false, "graphify-pi is installed in the fixture but never loaded");
   assert.deepEqual(integrationFamilies(run.tools), ["qmd_"]);
 });
 test("reviewer keeps read-only tools and excludes edit, write and Serena mutations with Ponytail absent", () => {
@@ -234,12 +235,12 @@ test("reviewer with Ponytail absent and all three optional integrations absent: 
   assert.deepEqual(sorted(run.tools), sorted(agent.tools));
 });
 const partialCases: [string, Present, Record<keyof typeof loaded, boolean>, string[]][] = [
-  ["serena absent", { serena: false }, { ponytail: true, qmd: true, serena: false, graphifyExtension: true, graphifySkill: true }, ["qmd_"]],
-  ["QMD absent", { qmd: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: true, graphifySkill: true }, []],
+  ["serena absent", { serena: false }, { ponytail: true, qmd: true, serena: false, graphifyExtension: false, graphifySkill: true }, ["qmd_"]],
+  ["QMD absent", { qmd: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: false, graphifySkill: true }, []],
   ["Graphify extension absent", { graphifyExtension: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: false, graphifySkill: true }, ["qmd_"]],
-  ["Graphify skill absent", { graphifySkill: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: true, graphifySkill: false }, ["qmd_"]],
-  ["QMD and serena absent", { qmd: false, serena: false }, { ponytail: true, qmd: false, serena: false, graphifyExtension: true, graphifySkill: true }, []],
-  ["QMD and Graphify skill absent", { qmd: false, graphifySkill: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: true, graphifySkill: false }, []],
+  ["Graphify skill absent", { graphifySkill: false }, { ponytail: true, qmd: true, serena: true, graphifyExtension: false, graphifySkill: false }, ["qmd_"]],
+  ["QMD and serena absent", { qmd: false, serena: false }, { ponytail: true, qmd: false, serena: false, graphifyExtension: false, graphifySkill: true }, []],
+  ["QMD and Graphify skill absent", { qmd: false, graphifySkill: false }, { ponytail: true, qmd: false, serena: true, graphifyExtension: false, graphifySkill: false }, []],
 ];
 for (const [label, present, expected, families] of partialCases) {
   test(`general-worker with ${label}: the other integrations and ordinary tools stay`, () => {

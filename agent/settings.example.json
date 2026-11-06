@@ -17,13 +17,6 @@
   "packages": [
     "npm:pi-claude-subscription-connector",
     "npm:pi-mcp-adapter",
-    {
-      "source": "npm:graphify-pi",
-      "extensions": [
-        "extensions/graphify.ts"
-      ],
-      "skills": []
-    },
     "npm:@dietrichgebert/ponytail"
   ],
   "lastChangelogVersion": "1.0.4",

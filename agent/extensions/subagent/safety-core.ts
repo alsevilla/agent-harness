@@ -380,7 +380,7 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 	if (name === "gh") {
 		const [sub1 = "", sub2 = ""] = positionals(lower, GH_VALUE);
 		if ((sub1 === "pr" && sub2 === "merge") || (sub1 === "release" && sub2 === "create")) mergeReleaseSeen = true;
-		if ((sub1 === "pr" && ["create", "merge", "close", "edit", "ready", "review"].includes(sub2)) || sub1 === "release" || (sub1 === "repo" && ["create", "delete", "rename", "edit"].includes(sub2))) add(out, "GIT_PUBLISH");
+		if ((sub1 === "pr" && ["create", "merge", "close", "edit", "ready", "review"].includes(sub2)) || (sub1 === "release" && !["list", "view"].includes(sub2)) || (sub1 === "repo" && ["create", "delete", "rename", "edit"].includes(sub2))) add(out, "GIT_PUBLISH");
 		if (sub1 === "api" && lower.some((a) => ["post", "put", "patch", "delete"].includes(a))) add(out, "GIT_PUBLISH");
 		if (sub1 === "auth") add(out, "PKG_PUBLISH_AUTH");
 		return;

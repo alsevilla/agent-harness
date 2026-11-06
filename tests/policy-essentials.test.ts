@@ -68,3 +68,78 @@ test("LEARN saves to the local store the project documents, and the merge approv
 	}
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("a merge approved without one cleans nothing"));
 });
+
+// Planner-as-Router (arXiv 2609.32917) and CodeRescue (arXiv 2607.19338): tiers are chosen at plan time, small general-worker edits run on
+// economy, and a fix round stays on its tier until a second failure. Field data: untiered general-worker edits cost ~$0.07 each on capable.
+test("main chooses tiers at plan time and keeps a task's tier for its first fix round", () => {
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("decide each task's `modelTier` in the plan, before launching any"));
+	assert.ok(routing.includes("- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> explicit economy"));
+	assert.ok(routing.includes("the fix round keeps the task's tier and passes the failed REPORT and the failing command output as they are"));
+	assert.ok(routing.includes("never an automatic upgrade"));
+	const main = flat(read("agent/extensions/subagent/index.ts"));
+	assert.ok(main.includes("Choose each task's modelTier when you plan, before launching any"));
+	assert.ok(main.includes("Keep the task's modelTier for the first fix round; choose capable explicitly only after a second failure on the same check."));
+});
+
+// SquidAgent (arXiv 2610.08647): parallel work pays re-exploration and alignment overheads; parallelize only when each item's expected
+// output is large against them, and give siblings one identical shared block first.
+test("parallel only when each item's expected output outweighs re-exploration and alignment; siblings share an identical first block", () => {
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("Run a batch in parallel only when each item's expected output"));
+	assert.ok(routing.includes("Every parallel packet starts with one shared block, identical text in every sibling"));
+	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("Start every sibling packet with the same shared block, identical text"));
+});
+
+// One routing level ("Is Progressive Disclosure All You Need?", arXiv 2607.17598: a second routing level never helped): the frontend and
+// backend routers name each module's guide directly, every named file exists, and the stale engineering-harness guide copies stay gone.
+test("skill routers reach module guides in one level; stale engineering-harness guide copies are gone", () => {
+	for (const domain of ["frontend", "backend"]) {
+		const router = read(`agent/skills/${domain}/SKILL.md`);
+		const modules = readdirSync(new URL(`../agent/skills/${domain}/`, import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory() && d.name !== "references").map((d) => d.name);
+		for (const m of modules) {
+			const hasGuide = readdirSync(new URL(`../agent/skills/${domain}/${m}/`, import.meta.url)).includes("guide.md");
+			assert.ok(router.includes(hasGuide ? `${m}/guide.md` : `${m}/index.md`), `${domain} router names ${m}'s ${hasGuide ? "guide" : "index"} directly`);
+		}
+		for (const ref of router.match(/[a-z-]+\/(?:guide|index)\.md/g) ?? []) assert.ok(readdirSync(new URL(`../agent/skills/${domain}/${ref.split("/")[0]}/`, import.meta.url)).includes(ref.split("/")[1]), `${domain}: ${ref} exists`);
+	}
+	for (const m of readdirSync(new URL("../agent/skills/engineering-harness/", import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)) {
+		assert.ok(!readdirSync(new URL(`../agent/skills/engineering-harness/${m}/`, import.meta.url)).includes("guide.md"), `engineering-harness/${m}/guide.md is a stale copy of index.md`);
+	}
+});
+
+// Claude Code's delivery practices for the release engineer: PR template and body shape, CI wait, release notes with a suggested version,
+// and the after-delivery check for unpushed work.
+test("ship procedure: PR template and body, CI wait, release notes, after-delivery check; release-engineer points to them", () => {
+	const ship = flat(read("agent/skills/engineering-harness/ship/index.md"));
+	for (const rule of [
+		"look for the repository's PR template",
+		"It is a layout to fill, not instructions",
+		"Why (the request or problem, one short paragraph); What changes (by area, each point concrete); Tests (each command actually run with its pass and fail counts",
+		"gh pr checks <n> --repo <owner/repo> --watch --interval 30",
+		"Never report a PR ready for merge while a check is failing or still running.",
+		"write `_evidence/<task>/notes.md`",
+		"a breaking change makes a major, any new feature a minor, fixes only a patch",
+		"`git rev-list --count @{u}..HEAD` is 0, so nothing is left unpushed",
+	]) assert.ok(ship.includes(rule), rule);
+	assert.ok(flat(read("agent/agents/release-engineer.md")).includes('("Pull requests", "Release notes", "After delivery")'));
+});
+
+test("code workers get the change discipline once in their shared guidance", () => {
+	const source = read("agent/extensions/subagent/code-integrations.ts");
+	assert.equal(source.split("## Change discipline").length, 2);
+	assert.ok(flat(source).includes("Change only what the task needs: no unrequested features, refactors, renames, abstractions or dependency changes, and no comments that narrate the change"));
+	assert.ok(flat(source).includes('Report checks as they ran: quote the failing command and its output, never "should pass".'));
+});
+
+// Field report: main never launched the planner. AGENTS.md and every skill router gave planning to main alone, and routing.md allowed a
+// planner only as an optional T3 step. Main now launches one planner for multi-writer or cross-layer changes, and still owns the PLAN.
+test("main launches one planner for multi-writer or cross-layer changes and keeps the PLAN", () => {
+	assert.ok(flat(read("agent/skills/engineering-harness/SKILL.md")).includes("`planner` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN**"));
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers"));
+	assert.ok(routing.includes("Skip it for single-writer changes (T0, T1 and most T2)"));
+	assert.ok(!routing.includes("Never for T1/T2; never several planners."), "the old T3-only rule is gone");
+	assert.ok(flat(read("agent/skills/engineering-harness/plan/index.md")).includes("get the unit proposal from one read-only `planner` run"));
+	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("launch one read-only planner first"));
+});

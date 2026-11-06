@@ -1,7 +1,8 @@
 import { matchesKey, Key, getKeybindings, isKeyRelease, truncateToWidth, wrapTextWithAnsi, visibleWidth, ScrollView, MouseRegion, type Component, type ScrollViewScrollbar, type TuiMouseEvent, type TuiMouseEventResult, type TUI } from "@earendil-works/pi-tui";
 import type { ModelSlot, ModelTier } from "./model-routing.ts";
 import { modelProvenance, observeAssistant, observedId, type ObservedModel } from "./provenance.ts";
-import { formatTrace, formatTraceIndex, pickWorker } from "./trace.ts";
+import { formatChanges, formatTrace, formatTraceIndex, pickWorker } from "./trace.ts";
+import { execFileSync } from "node:child_process";
 import { AssistantMessageComponent, ToolExecutionComponent, createReadToolDefinition, createBashToolDefinition, createPowerShellToolDefinition, createEditToolDefinition, createWriteToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, type ExtensionAPI, type ExtensionContext, type ToolRenderers } from "@earendil-works/pi-coding-agent";
 
 export type WorkerState = "initializing" | "running" | "pausing" | "paused" | "completed" | "failed" | "aborted";
@@ -10,10 +11,11 @@ export interface ToolActivity {
   state: "running" | "ok" | "error"; output: string; args: any; details?: any; revision: number; integration?: "serena" | "graphify" | "qmd";
   outputChars?: number; // full output length at the end (output itself keeps only the last 12,000 characters)
   range?: string; // read offset+limit, for /subagent trace
+  target?: string; // edit/write path, for /subagent changes
 }
 export type TranscriptEntry = {type: "tool"; id: string} | {type: "assistant"; id: string; text: string; partial: boolean};
 export interface WorkerRecord {
-  id: string; name: string; task: string; model: string; reportedModel?: string; observed: ObservedModel[]; readonly modelTier?: ModelTier; readonly modelSlot?: ModelSlot;
+  id: string; name: string; task: string; model: string; cwd?: string; reportedModel?: string; observed: ObservedModel[]; readonly modelTier?: ModelTier; readonly modelSlot?: ModelSlot;
   effort: string; state: WorkerState; activity: string; context?: number; contextLimit?: number;
   startedAt: number; endedAt?: number; spawned: boolean; output: string; events: string[];
   textBlocks?: Record<number, string>;
@@ -163,7 +165,7 @@ export class WorkerStore {
       if (integration) (r.integrations[integration] ??= {calls: 0, returned: 0, errors: 0}).calls++;
       const target = args.path ?? args.relative_path ?? args.file_path ?? "";
       if (name === "read" && /graphify-out[\/\\]/i.test(target)) r.graphReferences++;
-      r.tools.push({id: event.toolCallId ?? "tool-" + Date.now() + "-" + r.tools.length, name, command, startedAt: Date.now(), state: "running", output: "", args: displayArgs(args), revision: 1, integration, ...(args.offset !== undefined || args.limit !== undefined ? { range: `${args.offset ?? 1}+${args.limit ?? "rest"}` } : {})});
+      r.tools.push({id: event.toolCallId ?? "tool-" + Date.now() + "-" + r.tools.length, name, command, startedAt: Date.now(), state: "running", output: "", args: displayArgs(args), revision: 1, integration, ...(args.offset !== undefined || args.limit !== undefined ? { range: `${args.offset ?? 1}+${args.limit ?? "rest"}` } : {}), ...((name === "edit" || name === "write") && typeof args.path === "string" ? { target: args.path } : {})});
       r.transcript.push({type: "tool", id: r.tools.at(-1)!.id});
       r.tools = r.tools.slice(-40);
       r.activity = command; r.events.push(command); r.events = r.events.slice(-40);
@@ -499,7 +501,7 @@ export class WorkerMonitor {
       if (this.timer) clearInterval(this.timer); this.timer = undefined;
       this.store.listeners.clear(); this.ctx = undefined;
     });
-    pi.registerCommand("subagent", { description: "Open live subagent inspector", handler: async (args, ctx) => { this.ctx = ctx; const text = args.trim(); if (!text) await this.menu(ctx); else if (text === "create" || text.startsWith("create ")) await this.create(ctx, text.slice(6)); else if (text === "trace" || text.startsWith("trace ")) this.trace(ctx, text.slice(5).trim()); else if (this.control) await this.control(args, ctx); else await this.open(); } });
+    pi.registerCommand("subagent", { description: "Open live subagent inspector", handler: async (args, ctx) => { this.ctx = ctx; const text = args.trim(); if (!text) await this.menu(ctx); else if (text === "create" || text.startsWith("create ")) await this.create(ctx, text.slice(6)); else if (text === "trace" || text.startsWith("trace ")) this.trace(ctx, text.slice(5).trim()); else if (text === "changes" || text.startsWith("changes ")) this.changes(ctx, text.slice(7).trim()); else if (this.control) await this.control(args, ctx); else await this.open(); } });
     // Alt+I: Ctrl+Shift+W is Windows Terminal's close-tab key, which closed the whole Pi session instead of opening the inspector.
     pi.registerShortcut("alt+i", { description: "Inspect running subagents", handler: async ctx => { this.ctx = ctx; await this.open(); } });
   }
@@ -510,6 +512,16 @@ export class WorkerMonitor {
     if (!selector) { ctx.ui.notify(formatTraceIndex(records), "info"); return; }
     const record = pickWorker(records, selector);
     ctx.ui.notify(record ? formatTrace(record) : `No worker matches "${selector}". ${formatTraceIndex(records)}`, record ? "info" : "warning");
+  }
+
+  /** /subagent changes [#n | role]: the files a worker changed and the commands that would undo them (never run here). */
+  changes(ctx: ExtensionContext, selector: string) {
+    const records = [...this.store.records.values()];
+    if (!selector) { ctx.ui.notify(formatTraceIndex(records).replace("/subagent trace", "/subagent changes"), "info"); return; }
+    const record = pickWorker(records, selector);
+    if (!record) { ctx.ui.notify(`No worker matches "${selector}". ${formatTraceIndex(records)}`, "warning"); return; }
+    const git = (cwd: string, args: string[]) => { try { return execFileSync("git", ["-C", cwd, "-c", "core.fsmonitor=false", ...args], { encoding: "utf8", timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }); } catch { return undefined; } };
+    ctx.ui.notify(formatChanges(record, git), "info");
   }
 
   private async menu(ctx: ExtensionContext) {
