@@ -8,7 +8,7 @@ import { createAutoFormat, loadFormatConfig } from "./auto-format.ts";
 import { capShellOutput, outputCapFromEnv } from "./output-cap.ts";
 import * as path from "node:path";
 import { createLookupNudge, launchLookupTools } from "./lookup-nudge.ts";
-import { capWorkerContext, workerBudgetFromEnv, workerMaskFromEnv } from "./handoff-window.ts";
+import { capWorkerContext, workerMaskPolicy } from "./handoff-window.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
@@ -42,14 +42,13 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	});
 	// Workers only: a repeated read that returns unchanged text becomes a one-line note (read-dedupe.ts).
 	const dedupe = createReadDedupe();
-	// Workers only: threshold-triggered masking with budget fallbacks (handoff-window.ts, capWorkerContext). From ~80k estimated tokens,
-	// including the actual system prompt, the request is shortened step by step until it fits the ~95k budget; if it still does not,
+	// Workers only: threshold-triggered masking with budget fallbacks (handoff-window.ts, capWorkerContext). From a threshold that depends on
+	// the model serving the request (workerMaskPolicy: 90k on Claude Haiku 5.5, 200k on Anthropic models without a long-request surcharge,
+	// 80k otherwise), including the actual system prompt, the request is shortened step by step until it fits the budget; if it still does not,
 	// the host is asked to compact once. Best effort, not a hard bound. A masked earlier copy can no longer be "used", so the
 	// duplicate-read note is off for the rest of the run once anything is masked.
 	// Workers only: the execution ledger (execution-ledger.ts, after Ledger, arXiv 2608.00808). PI_SUBAGENT_LEDGER=0 turns it off.
 	const ledger = process.env.PI_SUBAGENT_LEDGER === "0" ? undefined : createExecutionLedger();
-	const capFrom = workerMaskFromEnv();
-	const capBudget = workerBudgetFromEnv();
 	let capped = false;
 	let compactAsked = false;
 	pi.on("context", (event: { messages: any[] }, ctx: any) => {
@@ -61,7 +60,10 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		} catch { /* the view simply lists no packet checks */ }
 		let base = 0;
 		try { base = Math.ceil(String(ctx?.getSystemPrompt?.() ?? "").length / 4); } catch { base = 0; }
-		const result = capWorkerContext(event.messages, capFrom, capBudget, base);
+		// Per request, from the model serving it (a fallback attempt is a new worker on its own model): see workerMaskPolicy.
+		let policy = workerMaskPolicy(undefined);
+		try { policy = workerMaskPolicy(ctx?.model); } catch { /* the default policy */ }
+		const result = capWorkerContext(event.messages, policy.from, policy.budget, base);
 		if (result.step === "over" && !compactAsked) {
 			compactAsked = true;
 			try { ctx?.compact?.({ customInstructions: "Keep the task packet, its stop condition, files changed, checks run with their results, and open problems; drop old tool output." }); } catch { /* best effort */ }

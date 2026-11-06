@@ -293,3 +293,27 @@ test("small-older: many mid-size outputs (long test runs) are masked when large-
 	assert.equal(capOutputs(r.messages!).filter((t) => t.startsWith("[older read output")).length, 55, "all but the newest five");
 	assert.ok(r.after < 95_000);
 });
+
+import { readFileSync } from "node:fs";
+import { FLAT_PRICE_MASK_TOKENS, HAIKU_MASK_TOKENS, workerMaskPolicy } from "../handoff-window.ts";
+test("mask policy follows the model serving the request: Haiku 5.5 from 90k, flat-priced Anthropic models from 200k, others keep 80k; the env setting wins", () => {
+	const haiku = workerMaskPolicy({ provider: "anthropic", id: "claude-haiku-5-5" }, {});
+	assert.deepEqual([haiku.from, haiku.budget], [HAIKU_MASK_TOKENS, 95_000], "under the 100k surcharge line");
+	for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"]) {
+		const p = workerMaskPolicy({ provider: "anthropic", id }, {});
+		assert.deepEqual([p.from, p.budget], [FLAT_PRICE_MASK_TOKENS, FLAT_PRICE_MASK_TOKENS], id);
+	}
+	// Fallbacks run as new workers on their own model; a Copilot-served Claude model, Codex models and unknown ones keep the old default.
+	for (const model of [{ provider: "github-copilot", id: "claude-sonnet-5-5" }, { provider: "openai-codex", id: "gpt-6-luna" }, { provider: "anthropic", id: "claude-haiku-4-5" }, undefined]) {
+		const p = workerMaskPolicy(model, {});
+		assert.deepEqual([p.from, p.budget], [80_000, 95_000], JSON.stringify(model));
+	}
+	const forced = workerMaskPolicy({ provider: "anthropic", id: "claude-sonnet-5-5" }, { [WORKER_MASK_ENV]: "60000" });
+	assert.deepEqual([forced.from, forced.budget], [60_000, 95_000], "an explicit setting overrides the model policy");
+	assert.equal(workerMaskPolicy({ provider: "anthropic", id: "claude-opus-5-5" }, { [WORKER_MASK_ENV]: "0" }).from, 0, "0 still turns it off");
+	assert.equal(workerMaskPolicy({ provider: "anthropic", id: "claude-haiku-5-5" }, { [WORKER_BUDGET_ENV]: "120000" }).budget, 120_000, "the budget setting still applies");
+	assert.equal(workerMaskPolicy({ provider: "anthropic", id: "claude-sonnet-5-5" }, { [WORKER_BUDGET_ENV]: "120000" }).budget, FLAT_PRICE_MASK_TOKENS, "never below the trigger");
+	const entry = readFileSync(new URL("../safety-guard-entry.ts", import.meta.url), "utf8");
+	assert.match(entry, /policy = workerMaskPolicy\(ctx\?\.model\)/, "decided per request from the serving model");
+	assert.match(entry, /capWorkerContext\(event\.messages, policy\.from, policy\.budget, base\)/);
+});

@@ -191,6 +191,26 @@ export function workerMaskFromEnv(env: NodeJS.ProcessEnv = process.env): number 
 export function workerBudgetFromEnv(env: NodeJS.ProcessEnv = process.env): number {
 	return Math.max(tokensFromEnv(env[WORKER_BUDGET_ENV], DEFAULT_WORKER_TOKEN_BUDGET, false), workerMaskFromEnv(env));
 }
+
+// When masking pays depends on the model serving the request. Masking rewrites the cached history from the first masked output, so on a
+// model whose price does not rise with request size it only adds cache writes (a 40-call simulated run: 15% dearer with masking than
+// without). Claude Haiku 5.5 charges 5x for input beyond 100k, so there it pays, and starting at 90k beat 80k on every run length tried
+// (40, 70 and 100 calls) while keeping every request under 100k; shrinking deeper (to 75k) cost more on long runs. Decided per request
+// from the model that serves it, so a fallback attempt (a new worker on the fallback model) follows its own model.
+export const HAIKU_MASK_TOKENS = 90_000;
+export const FLAT_PRICE_MASK_TOKENS = 200_000; // no surcharge: a guard for quality and request size only
+export interface MaskPolicy { from: number; budget: number; reason: string }
+export function workerMaskPolicy(model: { provider?: string; id?: string } | undefined, env: NodeJS.ProcessEnv = process.env): MaskPolicy {
+	if ((env[WORKER_MASK_ENV] ?? "").trim() !== "") return { from: workerMaskFromEnv(env), budget: workerBudgetFromEnv(env), reason: `${WORKER_MASK_ENV} is set` };
+	const provider = String(model?.provider ?? "").toLowerCase();
+	const id = String(model?.id ?? "").toLowerCase();
+	const budget = (from: number) => Math.max(tokensFromEnv(env[WORKER_BUDGET_ENV], DEFAULT_WORKER_TOKEN_BUDGET, false), from);
+	if (provider === "anthropic" && /^claude-haiku-5-5(\b|$)/.test(id)) return { from: HAIKU_MASK_TOKENS, budget: budget(HAIKU_MASK_TOKENS), reason: "Claude Haiku 5.5 charges 5x for input beyond 100k" };
+	if (provider === "anthropic" && /^claude-(sonnet|opus|fable|mythos)-/.test(id)) return { from: FLAT_PRICE_MASK_TOKENS, budget: budget(FLAT_PRICE_MASK_TOKENS), reason: "no long-request surcharge: masking would only add cache writes" };
+	// Other providers (Codex, Copilot, including Copilot's Claude models) and unknown models: their pricing and context limits are not known here.
+	return { from: DEFAULT_WORKER_MASK_TOKENS, budget: budget(DEFAULT_WORKER_MASK_TOKENS), reason: "pricing and context limit not known for this model" };
+}
+
 /** Rough request size: characters of text, thinking and tool-call arguments divided by 4 (images not counted). */
 export function estimateTokens(messages: readonly Message[]): number {
 	let chars = 0;
