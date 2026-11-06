@@ -191,7 +191,7 @@ export function mainContextTokens(ctx: { getContextUsage?: () => { tokens?: unkn
   try { tokens = ctx.getContextUsage?.()?.tokens; } catch { tokens = undefined; }
   return typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? Math.round(tokens) : null;
 }
-const mainContextLine = (tokens: number | null) => `Main context: ${tokens === null ? "unknown" : `~${tokens.toLocaleString("en-US")} tokens (SDK estimate)${tokens >= MAIN_CONTEXT_HINT_TOKENS ? "; consider /new once nothing is running (/reload keeps this history)" : ""}`}`;
+const mainContextLine = (tokens: number | null) => `Main context: ${tokens === null ? "unknown" : `~${tokens.toLocaleString("en-US")} tokens (SDK estimate)${tokens >= MAIN_CONTEXT_HINT_TOKENS ? "; main folds earlier turns into a checkpoint at your next message once it passes PI_SUBAGENT_MAIN_FOLD_TOKENS (default 50k) and nothing is running; /subagent fold does it sooner, /new starts fresh (/reload keeps this history)" : ""}`}`;
 // Plain text for /subagent usage: fixed labels, numeric aggregates only. The main-context line is added only when the caller passes a reading.
 export function formatUsageSummary(scope: UsageScope, mainContext?: number | null, mainCache?: CacheTotals | null): string {
   const text = usageBody(scope);

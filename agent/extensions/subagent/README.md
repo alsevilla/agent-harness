@@ -87,6 +87,18 @@ Main's context would otherwise grow by one full handoff per subagent result. Bef
 - Main's own large tool outputs (`read`, `bash`, `grep`, `find`, `ls`, 2,000 characters or more) follow the same window and batching: older ones become `[older <tool> output, shortened: <file or command>] N characters; run it again if you still need the content`. Errors and shorter outputs stay word for word.
 - `PI_SUBAGENT_HANDOFF_WINDOW` sets the window: `0` turns this off (today's behavior); integers of 5 or more are accepted; anything else uses 10. The default was 5: each batch makes the prompt cache rewrite the history from its first shortened entry, and simulated main sessions (60, 150 and 300 requests, Opus 5.5 and Sonnet 5.5 cache prices) cost less with batches of 10 in every case, while still keeping a 300-request main near 134k tokens instead of 377k with no shortening.
 
+## Main checkpoints
+A long main session slows down and steers worse, because every request carries the whole history (one field session: 478 requests averaging about 159k tokens, main at 348k and visibly slower). At an idle task boundary main's request is folded:
+
+- When: the request starts a new user turn, no job runs and no decision or stopped-job note waits (the state card is empty), and main's request has passed `PI_SUBAGENT_MAIN_FOLD_TOKENS` (default 50k; `0` off) or `/subagent fold` asked for one.
+- What replaces the earlier turns: one hidden `subagent-checkpoint` message built from the saved messages, without a model call. Each earlier user turn lists the user's text word for word (a long paste keeps its first 600 characters), the subagent results in it as their `STATUS`/`NEXT`/`EVIDENCE` line, and main's last reply (400 characters; 4,000 for the last exchange before the fold, so a question main just asked survives). Over 40,000 characters, the oldest turns keep only the user's words.
+- What stays: only the new user message, so no earlier assistant turn is kept whose thinking would no longer match the history before it (newer Claude models reject such edits).
+- Cache: the checkpoint and the fold point stay fixed, so later requests extend the cached prefix; a later fold adds to the same checkpoint and rewrites the cache once. A compaction or a different history starts over.
+- The saved transcript is never changed; `/reload` drops the fold until the next one.
+- Effect: simulated main sessions of 150, 300 and 480 requests used 29%, 46% and 58% fewer input tokens folding at 50k than not folding (36%, 52% and 64% lower cost at Opus 5.5 cache prices), and fewer than folding at 75k, 100k or 150k. Estimates from characters / 4, not a live run.
+
+Why not a model-written summary: long-horizon agent research found such summaries lossy, with losses that compound over repeated compaction (arXiv 2608.06503, 2605.23296), and able to drop rules the agent had been obeying (Governance Decay, 2606.22528); removing content by structure held up best (Beyond Compaction, 2606.11213), and folding finished subtasks out of the working context is the shared idea of Context-Folding (2510.11967) and ReSum (2509.13313).
+
 ## Live inspector
 
 The main panel is hidden until workers exist. It shows session totals and active worker rows:

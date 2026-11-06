@@ -36,7 +36,7 @@ import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "
 import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
 import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
-import { registerHandoffWindow, stateCard } from "./handoff-window.ts";
+import { registerHandoffWindow, requestMainFold, stateCard } from "./handoff-window.ts";
 import { STOPPED_JOBS_DIR } from "./stopped-jobs.ts";
 import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
@@ -1452,12 +1452,13 @@ export default function (pi: ExtensionAPI) {
     });
     monitor.control = async (args, ctx) => {
         if (args.trim() === "roles") { const { editRoleConfig } = await import("./roles-editor.ts"); await editRoleConfig(ctx); return; }
-        const match = args.trim().match(/^(steer|pause|resume|stop|cancel|list|result|usage)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/);
-        if (!match) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, roles, create, or /subagent to inspect", "warning"); return; }
+        const match = args.trim().match(/^(steer|pause|resume|stop|cancel|list|result|usage|fold)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/);
+        if (!match) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, fold, roles, create, or /subagent to inspect", "warning"); return; }
         // Command operations use the same runtime without a model request.
         try {
             const [, action, target, message] = match;
             if (action === "usage") ctx.ui.notify(formatUsageSummary(runtime.usage, mainContextTokens(ctx as any), mainCacheTotals(ctx as any)), "info");
+            else if (action === "fold") ctx.ui.notify(requestMainFold(), "info");
             else if (action === "list") ctx.ui.notify(JSON.stringify(runtime.list()), "info");
             else if (!target) throw new Error("A worker or job ID is required");
             else if (action === "steer") { if (!message?.trim()) throw new Error("A message is required"); ctx.ui.notify(await runtime.steer(target, message), "info"); }

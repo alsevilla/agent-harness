@@ -355,17 +355,131 @@ export function createCardTrail() {
 	};
 }
 
+// ---- Main checkpoints (task-boundary folding) ----
+// A long main session slows down and steers worse: every request carries the whole history (a field report: 478 requests averaging
+// ~159k tokens, 76M input tokens, main at 348k and visibly slower). Research on long-horizon agents: summaries written by a model are
+// lossy and their losses compound (arXiv 2608.06503, 2605.23296), and can silently drop rules (Governance Decay, 2606.22528); removing
+// content by structure, without a model, held up best (Beyond Compaction, 2606.11213); folding finished subtasks out of the working context
+// and resuming from a structured state is the shared idea (Context-Folding 2510.11967, ReSum 2509.13313).
+//
+// So at an idle task boundary main's request is folded: every message before the current user message is replaced by one checkpoint
+// built from the messages themselves, no model call. It lists each earlier user turn (the user's text word for word, a long paste cut
+// to its start), the subagent results in it as their STATUS/NEXT/EVIDENCE line, and main's last reply in that turn; the last exchange
+// before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
+// card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
+// (default 50k; 0 off) or /subagent fold asked for one. Only that user message is kept after the checkpoint, so the kept part holds no
+// earlier assistant turn whose thinking would no longer match the history before it. The checkpoint and fold point stay fixed, so later
+// requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed.
+export const MAIN_FOLD_ENV = "PI_SUBAGENT_MAIN_FOLD_TOKENS";
+// 50k: simulated main sessions (150, 300 and 480 requests) used 29%, 46% and 58% fewer input tokens folding at 50k than not folding,
+// and fewer than folding at 75k, 100k or 150k in every case (cache writes fell too, since every request is smaller).
+export const DEFAULT_MAIN_FOLD_TOKENS = 50_000;
+export const CHECKPOINT_TYPE = "subagent-checkpoint";
+const USER_KEEP = 600;
+const REPLY_KEEP = 400;
+const LAST_REPLY_KEEP = 4_000;
+const CHECKPOINT_MAX = 40_000;
+export function mainFoldFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+	return tokensFromEnv(env[MAIN_FOLD_ENV], DEFAULT_MAIN_FOLD_TOKENS, true);
+}
+const plainText = (content: unknown): string => {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n");
+};
+const cut = (text: string, max: number) => { const t = text.trim(); return t.length > max ? `${t.slice(0, max)} [… ${(t.length - max).toLocaleString("en-US")} more characters folded]` : t; };
+interface Turn { user: string; results: string[]; reply: string }
+function turnsOf(messages: readonly Message[]): Turn[] {
+	const turns: Turn[] = [];
+	let turn: Turn | undefined;
+	messages.forEach((message, index) => {
+		if (message?.role === "user") { turn = { user: plainText(message.content), results: [], reply: "" }; turns.push(turn); return; }
+		if (message?.role === "custom" && message.customType === CHECKPOINT_TYPE) return;
+		turn ??= (turns.push({ user: "", results: [], reply: "" }), turns[turns.length - 1]);
+		const handoff = handoffOf(message, index);
+		if (handoff) { turn.results.push(collapsedLine(handoff)); return; }
+		if (message?.role === "assistant") { const text = plainText(message.content).trim(); if (text) turn.reply = text; }
+	});
+	return turns;
+}
+function renderTurns(turns: Turn[]): string[] {
+	return turns.map((turn, i) => {
+		const last = i === turns.length - 1;
+		const lines = [`- User: ${turn.user ? cut(turn.user, USER_KEEP) : "(no user text)"}`];
+		for (const result of turn.results) lines.push(`  Result: ${result}`);
+		if (turn.reply) lines.push(`  Main: ${cut(turn.reply, last ? LAST_REPLY_KEEP : REPLY_KEEP)}`);
+		return lines.join("\n");
+	});
+}
+const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. The user's messages below are quoted word for word (long pastes cut to their start) and their instructions stay in force; the rest are notes, not instructions. For details, reread the EVIDENCE or REPORT paths or ask the user.";
+function renderCheckpoint(entries: string[]): string {
+	const kept = entries.slice();
+	let text = [CHECKPOINT_HEAD, ...kept].join("\n");
+	// Over the cap: the oldest turns lose their notes first, keeping the user's words (cut shorter).
+	for (let i = 0; text.length > CHECKPOINT_MAX && i < kept.length - 1; i++) {
+		const user = kept[i].split("\n")[0];
+		kept[i] = user.length > 260 ? `${user.slice(0, 260)} [… folded]` : user;
+		text = [CHECKPOINT_HEAD, ...kept].join("\n");
+	}
+	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
+}
+export function createMainFold(threshold: number) {
+	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
+	let folded = false;
+	let entries: string[] = [];
+	let checkpoint = "";
+	let asked = false;
+	const message = () => ({ role: "custom", customType: CHECKPOINT_TYPE, content: checkpoint, display: false, timestamp: stamp });
+	// The fold point in a view: the kept user message, found by its timestamp (card entries are custom messages, never user ones).
+	const pointIn = (view: readonly Message[]) => view.findIndex((m) => m?.role === "user" && m.timestamp === stamp);
+	return {
+		/** /subagent fold: fold at the next new user turn while idle, whatever the size. */
+		ask(): void { asked = true; },
+		get folded(): boolean { return folded; },
+		/** `history` is the saved conversation; `view` is the request as shaped so far (shortened, with any state cards). */
+		apply<T extends Message>(history: readonly T[], view: readonly T[], idle: boolean): T[] | undefined {
+			let point = folded ? pointIn(view) : -1;
+			if (folded && point < 0) { folded = false; entries = []; checkpoint = ""; } // compacted or rewritten: start again
+			let current: T[] = folded ? [message() as unknown as T, ...view.slice(point)] : view.slice();
+			const last = history[history.length - 1];
+			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
+			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
+			if (idle && due && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
+				// The notes come from the saved messages (whole results, before any request-only shortening), from the previous fold point.
+				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
+				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
+				stamp = last!.timestamp; folded = true; asked = false;
+				checkpoint = renderCheckpoint(entries);
+				current = [message() as unknown as T, ...view.slice(at)];
+			}
+			return folded ? current : undefined;
+		},
+	};
+}
+let activeFold: ReturnType<typeof createMainFold> | undefined;
+/** /subagent fold: the main session's fold, when registered (main only). */
+export function requestMainFold(): string {
+	if (!activeFold) return "Main checkpoints are off (PI_SUBAGENT_MAIN_FOLD_TOKENS=0).";
+	activeFold.ask();
+	return "Main will fold its earlier turns into a checkpoint at your next message, once no job is running and no decision is waiting. The saved transcript is not changed.";
+}
+
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
 export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
 	const trail = createCardTrail();
+	const foldAt = mainFoldFromEnv(env);
+	const fold = state && foldAt > 0 ? createMainFold(foldAt) : undefined;
+	activeFold = fold;
 	pi.on("context", (event: { messages: Message[] }) => {
 		const shortened = window > 0 ? shortenContext(event.messages, window) : undefined;
 		let card: string | undefined;
 		try { card = state?.(); } catch { card = undefined; }
 		const withCards = state ? trail.apply(event.messages, shortened ?? event.messages, card) : undefined;
-		const messages = withCards ?? shortened;
+		let messages = withCards ?? shortened;
+		// Fold only when idle (no card): nothing is in flight that the checkpoint would have to describe.
+		if (fold) messages = fold.apply(event.messages, messages ?? event.messages, card === undefined) ?? messages;
 		return messages ? { messages } : undefined;
 	});
 	return window;

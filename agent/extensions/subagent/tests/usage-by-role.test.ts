@@ -123,9 +123,9 @@ test("cost per completed task counts failed and aborted cost against completed t
 });
 
 // The footer was removed (the owner reads /subagent usage); its "consider /new" hint moved to the Main context line.
-test("usage: the Main context line suggests /new from 100k; below it, no hint", () => {
+test("usage: from 100k the Main context line names the checkpoint fold, /subagent fold and /new; below it, no hint", () => {
 	assert.match(formatUsageSummary(newUsageScope(), 99_999), /Main context: ~99,999 tokens \(SDK estimate\)$/);
-	assert.match(formatUsageSummary(newUsageScope(), 131_957), /Main context: ~131,957 tokens \(SDK estimate\); consider \/new once nothing is running \(\/reload keeps this history\)$/);
+	assert.match(formatUsageSummary(newUsageScope(), 131_957), /Main context: ~131,957 tokens \(SDK estimate\); main folds earlier turns into a checkpoint at your next message once it passes PI_SUBAGENT_MAIN_FOLD_TOKENS \(default 50k\) and nothing is running; \/subagent fold does it sooner, \/new starts fresh \(\/reload keeps this history\)$/);
 	assert.match(formatUsageSummary(newUsageScope(), null), /Main context: unknown$/);
 });
 
