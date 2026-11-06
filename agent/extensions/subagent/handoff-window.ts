@@ -216,10 +216,11 @@ export function workerMaskPolicy(model: { provider?: string; id?: string } | und
 	return { from: DEFAULT_WORKER_MASK_TOKENS, budget: budget(DEFAULT_WORKER_MASK_TOKENS), reason: "pricing and context limit not known for this model" };
 }
 
-/** Rough request size: characters of text, thinking and tool-call arguments divided by 4 (images not counted). */
+/** Rough request size: characters of text, native summaries, thinking and tool-call arguments divided by 4 (images not counted). */
 export function estimateTokens(messages: readonly Message[]): number {
 	let chars = 0;
 	for (const m of messages) {
+		if ((m?.role === "compactionSummary" || m?.role === "branchSummary") && typeof m.summary === "string") chars += m.summary.length;
 		const content = (m as any)?.content;
 		if (typeof content === "string") { chars += content.length; continue; }
 		if (!Array.isArray(content)) continue;

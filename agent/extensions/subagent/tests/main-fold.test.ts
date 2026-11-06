@@ -268,3 +268,14 @@ test("a branch summary survives repeated folds, and a new summary resets the fol
 	const after = request([summary, newer, user("resume")]);
 	assert.equal(after.some((m: Msg) => m.customType === CHECKPOINT_TYPE), false, "a new summary starts the fold again");
 });
+
+test("native summary text counts toward the automatic fold threshold", async () => {
+	for (const role of ["compactionSummary", "branchSummary"]) {
+		const request = setup({ [MAIN_FOLD_ENV]: "20000" });
+		const summary = { role, summary: "s".repeat(60_000), timestamp: ++clock };
+		const history = [summary, user("Earlier task."), reply("r".repeat(24_000)), user("Next task.")];
+		const folded = await request(history);
+		assert.ok(folded.some((m) => m.customType === CHECKPOINT_TYPE), `${role}: summary plus recent history crosses 20k tokens`);
+		assert.deepEqual(folded.find((m) => m.role === role), summary, "the summary stays intact");
+	}
+});
