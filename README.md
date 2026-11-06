@@ -164,7 +164,7 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 
 | Asset | Status |
 | --- | --- |
-| Source release | v1.15.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
+| Source release | v1.15.1 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
 | Copilot CLI | Latest release only; no older version is supported |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated |
 | Delivery | Merge and release are unsupported on Copilot; an `ask_user` answer is not authorization |
