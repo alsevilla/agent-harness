@@ -25,7 +25,7 @@ test("env: default 50k, 0 off, values under 20k refused", () => {
 	assert.equal(mainFoldFromEnv({ [MAIN_FOLD_ENV]: "500" }), DEFAULT_MAIN_FOLD_TOKENS);
 });
 
-test("folds at an idle new user turn past the threshold; the checkpoint keeps the user's words, result lines and replies; later requests extend it exactly", async () => {
+test("folds at an idle new user turn past the threshold; user messages stay separate from checkpoint result lines and replies; later requests extend it exactly", async () => {
 	const request = setup({ [MAIN_FOLD_ENV]: "20000" });
 	const history: Msg[] = [];
 	for (let n = 1; n <= 12; n++) history.push(...turn(n));
@@ -40,13 +40,13 @@ test("folds at an idle new user turn past the threshold; the checkpoint keeps th
 	assert.equal(folded.length, history.filter((m) => m.role === "user").length + 1);
 	assert.equal(folded[0].customType, CHECKPOINT_TYPE);
 	assert.equal(folded[0].display, false);
-	assert.deepEqual(folded.at(-1), history.at(-1), "only the new user message is kept: no earlier assistant turn with thinking");
+	assert.deepEqual(folded.at(-1), history.at(-1), "the newest user message stays last");
 	const cp = String(folded[0].content);
 	assert.match(cp, /^\[main checkpoint, not user text\]/);
-	assert.match(cp, /- User: Task 1: please pace the SMS sender \(rule: never push to master\)/, "the user's words, word for word");
+	assert.deepEqual(folded.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"));
 	assert.match(cp, /Result: \[older subagent result, shortened: subagent backend-worker\] STATUS PASS - task 1 done \| NEXT open the PR \| EVIDENCE _evidence\/t1\/REPORT\.md/);
 	assert.match(cp, /Main: Task 12 is done; PR #112 is open\./);
-	assert.match(cp, /- User: x{600} \[… 2,400 more characters folded\]/, "a long paste keeps its start");
+	assert.doesNotMatch(cp, /x{600}/, "notes do not duplicate truncated user previews");
 	assert.match(cp, /Main: Here is my analysis\. Want me to build it\?/, "the last exchange keeps main's question");
 	let previous = folded;
 	for (const next of [reply("Building it.", "c50"), result("c50", 50, 2000), reply("Done.")]) {
@@ -76,7 +76,7 @@ test("never folds while a job runs or a decision waits; a later fold adds to the
 	history.push(user("one more"));
 	const second = await request(history);
 	const cp = String(second[0].content);
-	assert.match(cp, /Task 1: please pace/, "the first fold's notes stay");
+	assert.match(cp, /STATUS PASS - task 1 done/, "the first fold's notes stay");
 	assert.match(cp, /Task 26 is done/, "the new turns are added");
 	assert.deepEqual(second.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"));
 	const compacted = [{ role: "user", content: "summary of everything", timestamp: ++clock }, user("go on")];

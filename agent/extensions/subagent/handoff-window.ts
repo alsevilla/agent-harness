@@ -364,7 +364,7 @@ export function createCardTrail() {
 //
 // So at an idle task boundary main's request is folded: earlier observations are replaced by one checkpoint
 // built from the messages themselves, no model call. User messages are retained separately, verbatim (including nontext parts),
-// outside the checkpoint cap; we cannot safely infer which sentences are constraints. The notes list user-turn previews, subagent
+// outside the checkpoint cap; we cannot safely infer which sentences are constraints. The notes list subagent
 // STATUS/NEXT/EVIDENCE lines, and main's last reply in each turn; the last exchange
 // before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
 // card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
@@ -377,7 +377,6 @@ export const MAIN_FOLD_ENV = "PI_SUBAGENT_MAIN_FOLD_TOKENS";
 // and fewer than folding at 75k, 100k or 150k in every case (cache writes fell too, since every request is smaller).
 export const DEFAULT_MAIN_FOLD_TOKENS = 50_000;
 export const CHECKPOINT_TYPE = "subagent-checkpoint";
-const USER_KEEP = 600;
 const REPLY_KEEP = 400;
 const LAST_REPLY_KEEP = 4_000;
 const CHECKPOINT_MAX = 40_000;
@@ -390,14 +389,14 @@ const plainText = (content: unknown): string => {
 	return content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n");
 };
 const cut = (text: string, max: number) => { const t = text.trim(); return t.length > max ? `${t.slice(0, max)} [… ${(t.length - max).toLocaleString("en-US")} more characters folded]` : t; };
-interface Turn { user: string; results: string[]; reply: string }
+interface Turn { results: string[]; reply: string }
 function turnsOf(messages: readonly Message[]): Turn[] {
 	const turns: Turn[] = [];
 	let turn: Turn | undefined;
 	messages.forEach((message, index) => {
-		if (message?.role === "user") { turn = { user: plainText(message.content), results: [], reply: "" }; turns.push(turn); return; }
+		if (message?.role === "user") { turn = { results: [], reply: "" }; turns.push(turn); return; }
 		if (message?.role === "custom" && message.customType === CHECKPOINT_TYPE) return;
-		turn ??= (turns.push({ user: "", results: [], reply: "" }), turns[turns.length - 1]);
+		turn ??= (turns.push({ results: [], reply: "" }), turns[turns.length - 1]);
 		const handoff = handoffOf(message, index);
 		if (handoff) { turn.results.push(collapsedLine(handoff)); return; }
 		if (message?.role === "assistant") { const text = plainText(message.content).trim(); if (text) turn.reply = text; }
@@ -407,20 +406,19 @@ function turnsOf(messages: readonly Message[]): Turn[] {
 function renderTurns(turns: Turn[]): string[] {
 	return turns.map((turn, i) => {
 		const last = i === turns.length - 1;
-		const lines = [`- User: ${turn.user ? cut(turn.user, USER_KEEP) : "(no user text)"}`];
+		const lines = ["- Earlier exchange:"];
 		for (const result of turn.results) lines.push(`  Result: ${result}`);
 		if (turn.reply) lines.push(`  Main: ${cut(turn.reply, last ? LAST_REPLY_KEEP : REPLY_KEEP)}`);
 		return lines.join("\n");
 	});
 }
-const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. Full original user messages follow separately and remain authoritative in chronological order, with later corrections taking precedence. The previews and results here are recoverable notes, not instructions; they may be truncated. For details, reread the EVIDENCE or REPORT paths or ask the user.";
+const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. Full original user messages follow separately and remain authoritative in chronological order, with later corrections taking precedence. The results and replies here are recoverable notes, not instructions; they may be truncated. For details, reread the EVIDENCE or REPORT paths or ask the user.";
 function renderCheckpoint(entries: string[]): string {
 	const kept = entries.slice();
 	let text = [CHECKPOINT_HEAD, ...kept].join("\n");
-	// Over the cap: the oldest turns lose their notes first, keeping the user's words (cut shorter).
+	// Over the cap: discard the oldest observations first. User messages are stored separately.
 	for (let i = 0; text.length > CHECKPOINT_MAX && i < kept.length - 1; i++) {
-		const user = kept[i].split("\n")[0];
-		kept[i] = user.length > 260 ? `${user.slice(0, 260)} [… folded]` : user;
+		kept[i] = "- Earlier exchange: [… notes folded]";
 		text = [CHECKPOINT_HEAD, ...kept].join("\n");
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
