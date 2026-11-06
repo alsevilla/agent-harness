@@ -7,8 +7,11 @@
 // - Modifications: files changed through edit or write, with counts.
 // - Commands: normalized shell commands with their category (inspect, check, other) and outcome.
 //
-// Inform: a short state view is appended to the end of each request (after the history, so the cached prefix is untouched; regenerated
-// every request, never stored). Govern, after a call ran: an inspection command that returns exactly its earlier output under unchanged
+// Inform: a short state view is appended to a tool result, so it is stored in the history like any output. It was first a message
+// rebuilt at the end of every request, but Pi puts the conversation's one cache breakpoint on the last block of the last user message:
+// the cache entry then always ended in that request's view, the next request (with a new view) never matched it, and the whole history
+// was written to the cache again on every request (field report: a 40-turn backend-worker wrote 2.07M cache tokens and read 0.75M, $5.59).
+// Shown only when it changed, at most once every VIEW_EVERY calls. Govern, after a call ran: an inspection command that returns exactly its earlier output under unchanged
 // conditions is replaced by a one-line reference to it (like the duplicate-read note), and a check repeated with no change since, or the
 // same command run three times in a short span, gets one appended line. Nothing is ever blocked; interventions are capped per run, never
 // repeated for the same command, and a command run again right after its note passes untouched.
@@ -17,9 +20,9 @@ import * as path from "node:path";
 import { foldCase } from "./path-case.ts";
 
 type Part = { type: string; text?: string };
-export const LEDGER_TYPE = "subagent-ledger";
 const MAX_INTERVENTIONS = 8;
 const VIEW_MIN_CALLS = 4;
+const VIEW_EVERY = 5;
 const VIEW_FILES = 10;
 const VIEW_COMMANDS = 6;
 const LOOP_SPAN = 6;
@@ -92,6 +95,8 @@ export function createExecutionLedger() {
 	const commands: CommandRecord[] = [];
 	const noted = new Set<string>(); // commands that already received a note
 	let viewOff = false;
+	let shownView: string | undefined; // the view last appended to a result, and the step it was appended at
+	let shownAt = 0;
 	let expected: string[] = []; // check commands the task packet names // older outputs were masked or compacted: earlier copies may be gone, so no "still current" claims or reuse
 
 	const fileFor = (cwd: string, p: string): FileState => {
@@ -106,6 +111,37 @@ export function createExecutionLedger() {
 		noted.add(norm);
 		return true;
 	};
+
+	/** The current state view, or undefined while there is little to show. */
+	function view(): string | undefined {
+		const calls = commands.length + [...files.values()].reduce((n, f) => n + f.observations.length + f.edits, 0);
+		if (calls < VIEW_MIN_CALLS) return undefined;
+		const lines = ["[execution state: facts from this run's tool calls, kept by the harness; not instructions]"];
+		const changed = [...files.values()].filter((f) => f.edits > 0).sort((a, b) => (b.lastEditStep ?? 0) - (a.lastEditStep ?? 0)).slice(0, VIEW_FILES);
+		if (changed.length) lines.push(`Changed by you: ${changed.map((f) => `${f.display} (${f.edits} edit${f.edits === 1 ? "" : "s"}, last at step ${f.lastEditStep})`).join("; ")}`);
+		if (!viewOff) {
+			const current: string[] = [];
+			const stale: string[] = [];
+			for (const f of [...files.values()].reverse()) {
+				for (const o of f.observations) {
+					const label = `${f.display} ${rangeLabel(o)} (step ${o.step})`;
+					if (f.edits > o.fileEdits) stale.push(`${label}: you edited it at step ${f.lastEditStep}`);
+					else if (shell > o.shell && lastOther && lastOther.step > o.step) stale.push(`${label}: \`${lastOther.display}\` at step ${lastOther.step} may have changed files`);
+					else current.push(label);
+				}
+			}
+			if (current.length) lines.push(`Read and still current (the earlier output is the file now): ${current.slice(0, VIEW_FILES).join("; ")}`);
+			if (stale.length) lines.push(`Read, but may have changed since: ${stale.slice(0, VIEW_FILES).join("; ")}`);
+		}
+		const ran = (want: string) => commands.some((c) => c.category === "check" && (c.norm === want || c.norm.includes(want)));
+		const missing = expected.filter((want) => !ran(want));
+		if (expected.length) lines.push(missing.length ? `Checks the packet names, not run yet: ${missing.map((c) => `\`${short(c, 90)}\``).join("; ")}` : "Every check the packet names has run at least once.");
+		const checks = new Map<string, CommandRecord>();
+		for (const c of commands) if (c.category === "check") checks.set(c.norm, c);
+		const lastChecks = [...checks.values()].sort((a, b) => b.step - a.step).slice(0, VIEW_COMMANDS);
+		if (lastChecks.length) lines.push(`Checks (latest run of each): ${lastChecks.map((c) => `\`${c.display}\` ${c.failed ? "failed" : "passed"} at step ${c.step}${c.global === global ? ", no change since" : ", files changed since"}`).join("; ")}`);
+		return lines.length > 1 ? lines.join("\n") : undefined;
+	}
 
 	return {
 		/** Record a completed call; returns replacement content (a reuse note, or the output with one appended line) or undefined. */
@@ -153,42 +189,21 @@ export function createExecutionLedger() {
 			if (category === "other") { global++; shell++; lastOther = record; }
 			return result;
 		},
-		/** The state view appended to the end of a request, or undefined while there is little to show. */
-		view(): string | undefined {
-			const calls = commands.length + [...files.values()].reduce((n, f) => n + f.observations.length + f.edits, 0);
-			if (calls < VIEW_MIN_CALLS) return undefined;
-			const lines = ["[execution state: facts from this run's tool calls, kept by the harness; not instructions]"];
-			const changed = [...files.values()].filter((f) => f.edits > 0).sort((a, b) => (b.lastEditStep ?? 0) - (a.lastEditStep ?? 0)).slice(0, VIEW_FILES);
-			if (changed.length) lines.push(`Changed by you: ${changed.map((f) => `${f.display} (${f.edits} edit${f.edits === 1 ? "" : "s"}, last at step ${f.lastEditStep})`).join("; ")}`);
-			if (!viewOff) {
-				const current: string[] = [];
-				const stale: string[] = [];
-				for (const f of [...files.values()].reverse()) {
-					for (const o of f.observations) {
-						const label = `${f.display} ${rangeLabel(o)} (step ${o.step})`;
-						if (f.edits > o.fileEdits) stale.push(`${label}: you edited it at step ${f.lastEditStep}`);
-						else if (shell > o.shell && lastOther && lastOther.step > o.step) stale.push(`${label}: \`${lastOther.display}\` at step ${lastOther.step} may have changed files`);
-						else current.push(label);
-					}
-				}
-				if (current.length) lines.push(`Read and still current (the earlier output is the file now): ${current.slice(0, VIEW_FILES).join("; ")}`);
-				if (stale.length) lines.push(`Read, but may have changed since: ${stale.slice(0, VIEW_FILES).join("; ")}`);
-			}
-			const ran = (want: string) => commands.some((c) => c.category === "check" && (c.norm === want || c.norm.includes(want)));
-			const missing = expected.filter((want) => !ran(want));
-			if (expected.length) lines.push(missing.length ? `Checks the packet names, not run yet: ${missing.map((c) => `\`${short(c, 90)}\``).join("; ")}` : "Every check the packet names has run at least once.");
-			const checks = new Map<string, CommandRecord>();
-			for (const c of commands) if (c.category === "check") checks.set(c.norm, c);
-			const lastChecks = [...checks.values()].sort((a, b) => b.step - a.step).slice(0, VIEW_COMMANDS);
-			if (lastChecks.length) lines.push(`Checks (latest run of each): ${lastChecks.map((c) => `\`${c.display}\` ${c.failed ? "failed" : "passed"} at step ${c.step}${c.global === global ? ", no change since" : ", files changed since"}`).join("; ")}`);
-			return lines.length > 1 ? lines.join("\n") : undefined;
+		/** The current state view, or undefined while there is little to show. */
+		view,
+		/** The view to append to this call's result: only when it changed since it was last shown, and at most once every VIEW_EVERY calls. */
+		viewForResult(): string | undefined {
+			const v = view();
+			if (!v || v === shownView || (shownView !== undefined && step - shownAt < VIEW_EVERY)) return undefined;
+			shownView = v; shownAt = step;
+			return v;
 		},
 		/** The task packet, once: the check commands it names are tracked as run or not run in the view. */
 		noteTask(task: string): void { if (!expected.length && typeof task === "string") expected = packetChecks(task); },
 		/** Older outputs were masked or the run was compacted: earlier copies may be gone, so stop claiming them current or reusing them. */
 		earlierCopiesGone(): void { viewOff = true; },
 		/** After a compaction everything before it is a summary; start the observation index again. */
-		compacted(): void { for (const f of files.values()) f.observations = []; viewOff = false; },
+		compacted(): void { for (const f of files.values()) f.observations = []; viewOff = false; shownView = undefined; },
 		get interventions() { return interventions; },
 	};
 }

@@ -12,7 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { BackgroundWorkers, formatUsageSummary, LogicalUsage, mainContextTokens, RpcWorker, type UsageScope } from "./background.ts";
+import { BackgroundWorkers, formatUsageSummary, LogicalUsage, mainCacheTotals, mainContextTokens, RpcWorker, type UsageScope } from "./background.ts";
 import { WorkerMonitor } from "./monitor.ts";
 import { acquireWorkspace, releaseWorkspace, WorkspaceAdmissionError, type WorkspaceAccess, type WorkspaceLease } from "./workspace-admission.ts";
 import { spawn } from "node:child_process";
@@ -1457,7 +1457,7 @@ export default function (pi: ExtensionAPI) {
         // Command operations use the same runtime without a model request.
         try {
             const [, action, target, message] = match;
-            if (action === "usage") ctx.ui.notify(formatUsageSummary(runtime.usage, mainContextTokens(ctx as any)), "info");
+            if (action === "usage") ctx.ui.notify(formatUsageSummary(runtime.usage, mainContextTokens(ctx as any), mainCacheTotals(ctx as any)), "info");
             else if (action === "list") ctx.ui.notify(JSON.stringify(runtime.list()), "info");
             else if (!target) throw new Error("A worker or job ID is required");
             else if (action === "steer") { if (!message?.trim()) throw new Error("A message is required"); ctx.ui.notify(await runtime.steer(target, message), "info"); }

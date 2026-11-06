@@ -16,7 +16,12 @@ import { stoppedJobsCardPart, type StoppedJob } from "./stopped-jobs.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const HANDOFF_WINDOW_ENV = "PI_SUBAGENT_HANDOFF_WINDOW";
-export const DEFAULT_HANDOFF_WINDOW = 5;
+// Main's default: batches of 10. Each batch makes the prompt cache rewrite the history from its first shortened entry, and a simulated
+// main session through this code (60, 150 and 300 requests) cost more with batches of 5 than with 10 in every case, on Opus 5.5
+// (cache read 0.05x) and on Sonnet 5.5 (0.1x). Batches of 10 still keep a 300-request main near 134k tokens instead of 377k.
+// PI_SUBAGENT_HANDOFF_WINDOW sets it (0 off). Workers keep their own window of 5 for the masking steps (WORKER_MASK_WINDOW).
+export const DEFAULT_HANDOFF_WINDOW = 10;
+const WORKER_MASK_WINDOW = 5;
 const MIN_WINDOW = 5; // research guidance: shrinking below 5 recent results hurts more than it saves
 const RESULT_TOOLS = new Set(["subagent", "subagent_control"]);
 const COMPLETION_TYPE = "subagent-completion";
@@ -191,6 +196,26 @@ export function workerMaskFromEnv(env: NodeJS.ProcessEnv = process.env): number 
 export function workerBudgetFromEnv(env: NodeJS.ProcessEnv = process.env): number {
 	return Math.max(tokensFromEnv(env[WORKER_BUDGET_ENV], DEFAULT_WORKER_TOKEN_BUDGET, false), workerMaskFromEnv(env));
 }
+
+// When masking pays depends on the model serving the request. Masking rewrites the cached history from the first masked output, so on a
+// model whose price does not rise with request size it only adds cache writes (a 40-call simulated run: 15% dearer with masking than
+// without). Claude Haiku 5.5 charges 5x for input beyond 100k, so there it pays, and starting at 90k beat 80k on every run length tried
+// (40, 70 and 100 calls) while keeping every request under 100k; shrinking deeper (to 75k) cost more on long runs. Decided per request
+// from the model that serves it, so a fallback attempt (a new worker on the fallback model) follows its own model.
+export const HAIKU_MASK_TOKENS = 90_000;
+export const FLAT_PRICE_MASK_TOKENS = 200_000; // no surcharge: a guard for quality and request size only
+export interface MaskPolicy { from: number; budget: number; reason: string }
+export function workerMaskPolicy(model: { provider?: string; id?: string } | undefined, env: NodeJS.ProcessEnv = process.env): MaskPolicy {
+	if ((env[WORKER_MASK_ENV] ?? "").trim() !== "") return { from: workerMaskFromEnv(env), budget: workerBudgetFromEnv(env), reason: `${WORKER_MASK_ENV} is set` };
+	const provider = String(model?.provider ?? "").toLowerCase();
+	const id = String(model?.id ?? "").toLowerCase();
+	const budget = (from: number) => Math.max(tokensFromEnv(env[WORKER_BUDGET_ENV], DEFAULT_WORKER_TOKEN_BUDGET, false), from);
+	if (provider === "anthropic" && /^claude-haiku-5-5(\b|$)/.test(id)) return { from: HAIKU_MASK_TOKENS, budget: budget(HAIKU_MASK_TOKENS), reason: "Claude Haiku 5.5 charges 5x for input beyond 100k" };
+	if (provider === "anthropic" && /^claude-(sonnet|opus|fable|mythos)-/.test(id)) return { from: FLAT_PRICE_MASK_TOKENS, budget: budget(FLAT_PRICE_MASK_TOKENS), reason: "no long-request surcharge: masking would only add cache writes" };
+	// Other providers (Codex, Copilot, including Copilot's Claude models) and unknown models: their pricing and context limits are not known here.
+	return { from: DEFAULT_WORKER_MASK_TOKENS, budget: budget(DEFAULT_WORKER_MASK_TOKENS), reason: "pricing and context limit not known for this model" };
+}
+
 /** Rough request size: characters of text, thinking and tool-call arguments divided by 4 (images not counted). */
 export function estimateTokens(messages: readonly Message[]): number {
 	let chars = 0;
@@ -264,9 +289,9 @@ export function capWorkerContext<T extends Message>(messages: readonly T[], from
 		if (!next) return;
 		current = next; step = name; size = measure(next);
 	};
-	attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW), "batch");
-	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false), "all-older");
-	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false, SMALL_MASK_MIN), "small-older");
+	attempt(maskToolOutputs(current, WORKER_MASK_WINDOW), "batch");
+	if (size >= budget) attempt(maskToolOutputs(current, WORKER_MASK_WINDOW, false), "all-older");
+	if (size >= budget) attempt(maskToolOutputs(current, WORKER_MASK_WINDOW, false, SMALL_MASK_MIN), "small-older");
 	if (size >= budget) attempt(boundToolOutputs(current), "bounded");
 	if (size >= budget) attempt(lastResort(current), "last-resort");
 	if (size >= budget) step = "over";
@@ -294,16 +319,54 @@ export function stateCard(jobs: readonly StateJob[], epoch: string, openDecision
 	return `[runtime state, not user text] ${parts.join("; ")}. Completions arrive automatically; do not re-launch running work.`;
 }
 
+export const CLEARED_CARD = "[runtime state, not user text] no running jobs and no waiting worker decisions now.";
+
+/**
+ * The state card as if it were stored in the history. Pi puts the conversation's one cache breakpoint on the last block of the last
+ * user message, so a card appended to the end of every request held that breakpoint: each cache entry ended in a card the next request
+ * no longer had there, nothing matched, and main's whole history was written to the cache again on every request while a job ran.
+ * Instead each card text is inserted right after the message that was last when it first appeared, and stays there on every later
+ * request, so requests only extend the cached prefix. A new card is recorded only when the text changes, plus one cleared card when
+ * the state empties, so an old "running" card is never the latest word. Anchors are positions in the raw history (the shortenings map
+ * messages one to one); after a compaction or anything else that moves them, the trail starts again at the end.
+ */
+export function createCardTrail() {
+	let trail: { index: number; stamp: unknown; text: string }[] = [];
+	let current: string | undefined;
+	return {
+		apply<T extends Message>(history: readonly T[], view: readonly T[], card: string | undefined): T[] | undefined {
+			trail = trail.filter((entry) => entry.index < history.length && history[entry.index]?.timestamp === entry.stamp);
+			if (!trail.length) current = undefined; // compacted or rewritten: nothing recorded survives
+			if (card !== current) {
+				const text = card ?? CLEARED_CARD;
+				const last = history.length - 1;
+				if (last >= 0 && (card !== undefined || current !== undefined)) trail.push({ index: last, stamp: history[last]?.timestamp, text });
+				current = card;
+			}
+			if (!trail.length) return undefined;
+			const out: T[] = [];
+			let next = 0;
+			view.forEach((message, i) => {
+				out.push(message);
+				for (; next < trail.length && trail[next].index === i; next++) out.push({ role: "custom", customType: STATE_CARD_TYPE, content: trail[next].text, display: false, timestamp: trail[next].stamp } as unknown as T);
+			});
+			return out;
+		},
+	};
+}
+
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
 export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
+	const trail = createCardTrail();
 	pi.on("context", (event: { messages: Message[] }) => {
 		const shortened = window > 0 ? shortenContext(event.messages, window) : undefined;
 		let card: string | undefined;
 		try { card = state?.(); } catch { card = undefined; }
-		if (!card) return shortened ? { messages: shortened } : undefined;
-		return { messages: [...(shortened ?? event.messages), { role: "custom", customType: STATE_CARD_TYPE, content: card, display: false, timestamp: Date.now() } as Message] };
+		const withCards = state ? trail.apply(event.messages, shortened ?? event.messages, card) : undefined;
+		const messages = withCards ?? shortened;
+		return messages ? { messages } : undefined;
 	});
 	return window;
 }

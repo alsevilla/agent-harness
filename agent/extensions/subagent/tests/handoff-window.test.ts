@@ -13,7 +13,8 @@ const textOf = (m: Msg) => (typeof m.content === "string" ? m.content : m.conten
 const shortened = (m: Msg) => textOf(m).startsWith("[older subagent result, shortened:");
 const deepFreeze = <T>(value: T): T => { if (value && typeof value === "object") { Object.values(value).forEach(deepFreeze); Object.freeze(value); } return value; };
 
-test("env: unset, blank, invalid and below-5 values use 5; 0 is off; 5 and larger are taken", () => {
+test("env: unset, blank, invalid and below-5 values use the default of 10; 0 is off; 5 and larger are taken", () => {
+	assert.equal(DEFAULT_HANDOFF_WINDOW, 10, "main: batches of 10 cost less under caching than 5");
 	for (const raw of [undefined, "", " ", "abc", "-1", "1", "4", "2.5", "99999"]) assert.equal(handoffWindowFromEnv(raw === undefined ? {} : { [HANDOFF_WINDOW_ENV]: raw }), DEFAULT_HANDOFF_WINDOW, String(raw));
 	assert.equal(handoffWindowFromEnv({ [HANDOFF_WINDOW_ENV]: "0" }), 0);
 	assert.equal(handoffWindowFromEnv({ [HANDOFF_WINDOW_ENV]: "5" }), 5);
@@ -105,13 +106,14 @@ test("long field values are clipped to one line each", () => {
 test("wiring: registers one context handler that returns a request-only list, or nothing when there is nothing to shorten; off registers none", async () => {
 	const handlers = new Map<string, (event: unknown) => unknown>();
 	const pi = { on: (name: string, fn: any) => { assert.ok(!handlers.has(name)); handlers.set(name, fn); } };
-	assert.equal(registerHandoffWindow(pi as never, {}), 5);
+	assert.equal(registerHandoffWindow(pi as never, {}), DEFAULT_HANDOFF_WINDOW);
 	assert.deepEqual([...handlers.keys()], ["context"]);
 	const handler = handlers.get("context")!;
 	assert.equal(await handler({ messages: [user("hi"), fg(1)] }), undefined);
-	const event = { messages: Array.from({ length: 10 }, (_, i) => fg(i)) };
+	assert.equal(await handler({ messages: Array.from({ length: 19 }, (_, i) => fg(i)) }), undefined, "19 results do not yet fill a second batch of 10");
+	const event = { messages: Array.from({ length: 20 }, (_, i) => fg(i)) };
 	const result = (await handler(event)) as { messages: Msg[] };
-	assert.equal(result.messages.filter(shortened).length, 5);
+	assert.equal(result.messages.filter(shortened).length, 10);
 	assert.equal(event.messages.filter(shortened).length, 0, "the event's own list is left as it was");
 	const none = new Map<string, unknown>();
 	assert.equal(registerHandoffWindow({ on: (name: string, fn: unknown) => none.set(name, fn) } as never, { [HANDOFF_WINDOW_ENV]: "0" }), 0);
@@ -152,7 +154,7 @@ test("shortenContext applies both rules to one request and leaves it alone when 
 });
 
 // Runtime state card: one hidden trailing line while jobs run or decisions wait; the prefix is untouched.
-import { stateCard, STATE_CARD_TYPE } from "../handoff-window.ts";
+import { CLEARED_CARD, stateCard, STATE_CARD_TYPE } from "../handoff-window.ts";
 test("state card: names running jobs and open decisions, nothing when idle", () => {
 	assert.equal(stateCard([], "ep1", 0), undefined);
 	assert.equal(stateCard([{ jobId: "bg-1", state: "completed" }], "ep1", 0), undefined);
@@ -160,18 +162,36 @@ test("state card: names running jobs and open decisions, nothing when idle", () 
 	assert.match(card, /^\[runtime state, not user text\] running: bg-2@ep1 \(backend-worker\); bg-3@ep1 \(starting, paused\); 1 worker decision waiting/);
 	assert.match(card, /do not re-launch running work/);
 });
-test("state card wiring: appended last as a hidden custom message, with or without the window; the prefix is unchanged", async () => {
+// Pi puts the one conversation cache breakpoint on the last block of the last user message. A card appended to the end of every request
+// held it, so no cache entry ever matched the next request and main's whole history was written to the cache on every request while a job
+// ran. The invariant that matters: each request starts with the previous request's messages exactly (the old entry is a prefix of it).
+test("state card: each card stays where it first appeared, so every request extends the previous one; a change adds a card, emptying adds a cleared card", async () => {
 	const handlers = new Map<string, (event: unknown) => unknown>();
-	let card: string | undefined = "[runtime state, not user text] running: bg-1@e (x).";
+	let card: string | undefined;
 	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, { [HANDOFF_WINDOW_ENV]: "0" }, () => card);
-	const messages = [user("hi"), fg(1)];
-	const out = (await handlers.get("context")!({ messages })) as { messages: Msg[] };
-	assert.equal(out.messages.length, 3);
-	assert.deepEqual(out.messages.slice(0, 2), messages, "prefix untouched");
-	assert.equal(out.messages[2].customType, STATE_CARD_TYPE);
-	assert.equal(out.messages[2].display, false);
-	card = undefined;
-	assert.equal(await handlers.get("context")!({ messages }), undefined, "idle: no change");
+	const at = (i: number) => ({ ...user(`m${i}`), timestamp: i });
+	const history: Msg[] = [at(0)];
+	const request = async () => ((await handlers.get("context")!({ messages: [...history] })) as { messages: Msg[] } | undefined)?.messages ?? [...history];
+	assert.deepEqual(await request(), history, "idle: no card, nothing changes");
+	card = "[runtime state, not user text] running: bg-1@e (x).";
+	let previous = await request();
+	assert.equal(previous.at(-1)!.customType, STATE_CARD_TYPE);
+	assert.equal(previous.at(-1)!.display, false);
+	for (let i = 1; i <= 4; i++) {
+		history.push(at(i));
+		if (i === 3) card = "[runtime state, not user text] running: bg-1@e (backend-worker).";
+		if (i === 4) card = undefined;
+		const next = await request();
+		assert.deepEqual(next.slice(0, previous.length), previous, `request ${i} starts with request ${i - 1} exactly`);
+		previous = next;
+	}
+	const cards = previous.filter((m) => m.customType === STATE_CARD_TYPE).map((m) => String(m.content));
+	assert.deepEqual(cards, ["[runtime state, not user text] running: bg-1@e (x).", "[runtime state, not user text] running: bg-1@e (backend-worker).", CLEARED_CARD], "one card per change, then cleared");
+	assert.equal(previous.at(-1)!.customType, STATE_CARD_TYPE, "the cleared card follows the message that was last when the state emptied");
+	history.splice(0, history.length, at(10), at(11)); // compaction: the anchors are gone
+	card = "[runtime state, not user text] running: bg-2@e (y).";
+	const after = await request();
+	assert.deepEqual(after.filter((m) => m.customType === STATE_CARD_TYPE).map((m) => String(m.content)), [card], "after a compaction the trail starts again");
 });
 
 // Claude Haiku 5.5 prices a request over 100k input tokens at 5x; workers kept every tool output, so a long debugger run crossed it.
@@ -274,4 +294,28 @@ test("small-older: many mid-size outputs (long test runs) are masked when large-
 	assert.equal(r.step, "small-older");
 	assert.equal(capOutputs(r.messages!).filter((t) => t.startsWith("[older read output")).length, 55, "all but the newest five");
 	assert.ok(r.after < 95_000);
+});
+
+import { readFileSync } from "node:fs";
+import { FLAT_PRICE_MASK_TOKENS, HAIKU_MASK_TOKENS, workerMaskPolicy } from "../handoff-window.ts";
+test("mask policy follows the model serving the request: Haiku 5.5 from 90k, flat-priced Anthropic models from 200k, others keep 80k; the env setting wins", () => {
+	const haiku = workerMaskPolicy({ provider: "anthropic", id: "claude-haiku-5-5" }, {});
+	assert.deepEqual([haiku.from, haiku.budget], [HAIKU_MASK_TOKENS, 95_000], "under the 100k surcharge line");
+	for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-mythos-5-1"]) {
+		const p = workerMaskPolicy({ provider: "anthropic", id }, {});
+		assert.deepEqual([p.from, p.budget], [FLAT_PRICE_MASK_TOKENS, FLAT_PRICE_MASK_TOKENS], id);
+	}
+	// Fallbacks run as new workers on their own model; a Copilot-served Claude model, Codex models and unknown ones keep the old default.
+	for (const model of [{ provider: "github-copilot", id: "claude-sonnet-5-5" }, { provider: "openai-codex", id: "gpt-6-luna" }, { provider: "anthropic", id: "claude-haiku-4-5" }, undefined]) {
+		const p = workerMaskPolicy(model, {});
+		assert.deepEqual([p.from, p.budget], [80_000, 95_000], JSON.stringify(model));
+	}
+	const forced = workerMaskPolicy({ provider: "anthropic", id: "claude-sonnet-5-5" }, { [WORKER_MASK_ENV]: "60000" });
+	assert.deepEqual([forced.from, forced.budget], [60_000, 95_000], "an explicit setting overrides the model policy");
+	assert.equal(workerMaskPolicy({ provider: "anthropic", id: "claude-opus-5-5" }, { [WORKER_MASK_ENV]: "0" }).from, 0, "0 still turns it off");
+	assert.equal(workerMaskPolicy({ provider: "anthropic", id: "claude-haiku-5-5" }, { [WORKER_BUDGET_ENV]: "120000" }).budget, 120_000, "the budget setting still applies");
+	assert.equal(workerMaskPolicy({ provider: "anthropic", id: "claude-sonnet-5-5" }, { [WORKER_BUDGET_ENV]: "120000" }).budget, FLAT_PRICE_MASK_TOKENS, "never below the trigger");
+	const entry = readFileSync(new URL("../safety-guard-entry.ts", import.meta.url), "utf8");
+	assert.match(entry, /policy = workerMaskPolicy\(ctx\?\.model\)/, "decided per request from the serving model");
+	assert.match(entry, /capWorkerContext\(event\.messages, policy\.from, policy\.budget, base\)/);
 });

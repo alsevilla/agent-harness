@@ -3,12 +3,12 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_GRANT_ENV, CHILD_GRANT_NOTE_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
-import { createExecutionLedger, LEDGER_TYPE } from "./execution-ledger.ts";
+import { createExecutionLedger } from "./execution-ledger.ts";
 import { createAutoFormat, loadFormatConfig } from "./auto-format.ts";
 import { capShellOutput, outputCapFromEnv } from "./output-cap.ts";
 import * as path from "node:path";
 import { createLookupNudge, launchLookupTools } from "./lookup-nudge.ts";
-import { capWorkerContext, workerBudgetFromEnv, workerMaskFromEnv } from "./handoff-window.ts";
+import { capWorkerContext, workerMaskPolicy } from "./handoff-window.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
@@ -42,14 +42,13 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	});
 	// Workers only: a repeated read that returns unchanged text becomes a one-line note (read-dedupe.ts).
 	const dedupe = createReadDedupe();
-	// Workers only: threshold-triggered masking with budget fallbacks (handoff-window.ts, capWorkerContext). From ~80k estimated tokens,
-	// including the actual system prompt, the request is shortened step by step until it fits the ~95k budget; if it still does not,
+	// Workers only: threshold-triggered masking with budget fallbacks (handoff-window.ts, capWorkerContext). From a threshold that depends on
+	// the model serving the request (workerMaskPolicy: 90k on Claude Haiku 5.5, 200k on Anthropic models without a long-request surcharge,
+	// 80k otherwise), including the actual system prompt, the request is shortened step by step until it fits the budget; if it still does not,
 	// the host is asked to compact once. Best effort, not a hard bound. A masked earlier copy can no longer be "used", so the
 	// duplicate-read note is off for the rest of the run once anything is masked.
 	// Workers only: the execution ledger (execution-ledger.ts, after Ledger, arXiv 2608.00808). PI_SUBAGENT_LEDGER=0 turns it off.
 	const ledger = process.env.PI_SUBAGENT_LEDGER === "0" ? undefined : createExecutionLedger();
-	const capFrom = workerMaskFromEnv();
-	const capBudget = workerBudgetFromEnv();
 	let capped = false;
 	let compactAsked = false;
 	pi.on("context", (event: { messages: any[] }, ctx: any) => {
@@ -61,17 +60,18 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		} catch { /* the view simply lists no packet checks */ }
 		let base = 0;
 		try { base = Math.ceil(String(ctx?.getSystemPrompt?.() ?? "").length / 4); } catch { base = 0; }
-		const result = capWorkerContext(event.messages, capFrom, capBudget, base);
+		// Per request, from the model serving it (a fallback attempt is a new worker on its own model): see workerMaskPolicy.
+		let policy = workerMaskPolicy(undefined);
+		try { policy = workerMaskPolicy(ctx?.model); } catch { /* the default policy */ }
+		const result = capWorkerContext(event.messages, policy.from, policy.budget, base);
 		if (result.step === "over" && !compactAsked) {
 			compactAsked = true;
 			try { ctx?.compact?.({ customInstructions: "Keep the task packet, its stop condition, files changed, checks run with their results, and open problems; drop old tool output." }); } catch { /* best effort */ }
 		}
 		if (result.messages && !capped) { capped = true; dedupe.reset(); ledger?.earlierCopiesGone(); }
-		// The ledger's state view goes last, after the history, so the cached prefix is untouched; it is rebuilt for every request.
-		let view: string | undefined;
-		try { view = ledger?.view(); } catch { view = undefined; }
-		if (!view) return result.messages ? { messages: result.messages } : undefined;
-		return { messages: [...(result.messages ?? event.messages), { role: "custom", customType: LEDGER_TYPE, content: view, display: false, timestamp: Date.now() }] };
+		// Nothing is appended here: a message added to every request would hold Pi's cache breakpoint and change each time, so no cache
+		// entry would ever match the next request. The ledger's view travels in a tool result instead (the last tool_result handler).
+		return result.messages ? { messages: result.messages } : undefined;
 	});
 	// Registered before the duplicate-read handler, so the ledger records each read's own output (Pi chains tool_result handlers).
 	pi.on("tool_result", (event, ctx) => {
@@ -104,12 +104,16 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		return content ? { content } : undefined;
 	});
 	// Workers only, last: a long shell output keeps its start and end, with the full text on disk (output-cap.ts). After the ledger,
-	// which records the whole output first.
+	// which records the whole output first. Then the ledger's state view, when it changed and is due, goes at the end of this result:
+	// stored in the history like the output, so every later request extends the cached prefix instead of replacing its last block.
 	const outputCap = outputCapFromEnv();
 	pi.on("tool_result", (event: any) => {
 		try {
 			const content = capShellOutput(event.toolName, event.content, event.details, outputCap);
-			return content ? { content } : undefined;
+			let view: string | undefined;
+			try { view = ledger?.viewForResult(); } catch { view = undefined; }
+			if (!view) return content ? { content } : undefined;
+			return { content: [...(content ?? event.content ?? []), { type: "text", text: view }] };
 		} catch { return undefined; }
 	});
 }

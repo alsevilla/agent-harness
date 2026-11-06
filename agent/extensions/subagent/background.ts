@@ -149,8 +149,34 @@ function sliceLines(name: string, s: UsageSlice): string[] {
 const tokenTotal = (s: UsageSlice) => s.input + s.output + s.cacheRead + s.cacheWrite;
 function roleLine(name: string, s: UsageSlice, sizes?: RequestSizes): string {
   const n = (v: number) => v.toLocaleString("en-US");
-  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}${perCompleted(s)}${requestNote(sizes)}`;
+  return `  ${name}: ${plural(s.completed + s.failed + s.aborted, "task")}, ${plural(s.attempts, "attempt")}, ${plural(s.turns, "turn")}; input ${n(s.input)} | output ${n(s.output)} | cacheRead ${n(s.cacheRead)} | cacheWrite ${n(s.cacheWrite)}; cost ${costText(s)}${perCompleted(s)}${cacheNote(s)}${requestNote(sizes)}`;
 }
+// Cache health. With prompt caching, each request should read the earlier history back from the cache (0.1x input or less) and write
+// only what is new (1.25x), so cache read should be far above cache write. v1.15.0 shipped a regression where every request rewrote the
+// whole history (a backend-worker read 0.75M and wrote 2.07M, $5.59 for one task) and nothing in this report flagged it.
+export const CACHE_WARN_MIN_TURNS = 5;
+export interface CacheTotals { turns: number; input: number; cacheRead: number; cacheWrite: number }
+export function cacheNote(t: CacheTotals): string {
+  const cached = t.cacheRead + t.cacheWrite;
+  if (cached === 0) return ""; // a provider that reports no cache use (or none yet)
+  const hit = Math.round((100 * t.cacheRead) / (t.input + cached));
+  const rewriting = t.turns >= CACHE_WARN_MIN_TURNS && t.cacheWrite > t.cacheRead;
+  return `; cache hit ${hit}%${rewriting ? " - WARNING: wrote more to the cache than it read, so earlier history is being rewritten instead of reused" : ""}`;
+}
+/** Main's own requests, from the assistant messages on its current branch: cumulative input, cache read and cache write. */
+export function mainCacheTotals(ctx: { sessionManager?: { getBranch?: () => unknown[] } }): CacheTotals | null {
+  let entries: unknown[];
+  try { entries = ctx.sessionManager?.getBranch?.() ?? []; } catch { return null; }
+  const t: CacheTotals = { turns: 0, input: 0, cacheRead: 0, cacheWrite: 0 };
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+  for (const entry of entries as any[]) {
+    const m = entry?.type === "message" ? entry.message : undefined;
+    if (m?.role !== "assistant" || !m.usage) continue;
+    t.turns++; t.input += n(m.usage.input); t.cacheRead += n(m.usage.cacheRead); t.cacheWrite += n(m.usage.cacheWrite);
+  }
+  return t.turns ? t : null;
+}
+const mainCacheLine = (t: CacheTotals) => `Main cache: ${t.turns.toLocaleString("en-US")} requests on this branch; input ${t.input.toLocaleString("en-US")} | cacheRead ${t.cacheRead.toLocaleString("en-US")} | cacheWrite ${t.cacheWrite.toLocaleString("en-US")}${cacheNote(t) || "; no cache use reported"}`;
 // Peak request and requests over the long-context line, to measure worker masking (see LONG_REQUEST_TOKENS).
 function requestNote(sizes?: RequestSizes): string {
   if (!sizes?.peak) return "";
@@ -167,9 +193,10 @@ export function mainContextTokens(ctx: { getContextUsage?: () => { tokens?: unkn
 }
 const mainContextLine = (tokens: number | null) => `Main context: ${tokens === null ? "unknown" : `~${tokens.toLocaleString("en-US")} tokens (SDK estimate)${tokens >= MAIN_CONTEXT_HINT_TOKENS ? "; consider /new once nothing is running (/reload keeps this history)" : ""}`}`;
 // Plain text for /subagent usage: fixed labels, numeric aggregates only. The main-context line is added only when the caller passes a reading.
-export function formatUsageSummary(scope: UsageScope, mainContext?: number | null): string {
+export function formatUsageSummary(scope: UsageScope, mainContext?: number | null, mainCache?: CacheTotals | null): string {
   const text = usageBody(scope);
-  return mainContext === undefined ? text : `${text}\n${mainContextLine(mainContext)}`;
+  const withContext = mainContext === undefined ? text : `${text}\n${mainContextLine(mainContext)}`;
+  return mainCache ? `${withContext}\n${mainCacheLine(mainCache)}` : withContext;
 }
 function usageBody(scope: UsageScope): string {
   const settled = scope.foreground.completed + scope.foreground.failed + scope.foreground.aborted + scope.background.completed + scope.background.failed + scope.background.aborted;
