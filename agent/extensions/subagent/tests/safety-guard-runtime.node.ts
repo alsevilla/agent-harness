@@ -655,9 +655,28 @@ test("child commit: a trusted release-engineer child admits a normal commit with
 	const merging = await runChild(commit, undefined, undefined, "release-engineer", { dir: repo, withLeases: true });
 	assert.equal(merging.ends.length, 1, merging.stderr);
 	assert.match(merging.ends[0].text, /Blocked by harness safety guard \[GIT_COMMIT\]/);
-	assert.match(merging.ends[0].text, /git commit; not automatic here: a merge is in progress \(MERGE_HEAD in .*\): a commit that concludes it records another history, so it is not a normal commit; ask main to request a single-use approval for this exact command\./);
+	assert.match(merging.ends[0].text, /git commit; not automatic here: a merge is in progress \(MERGE_HEAD in .*\) and no base branch is known \(none was bound at launch and origin has no default branch\): only a merge of the PR's base branch concludes automatically; any other merge records another history, so ask main to request a single-use approval for this exact command\./);
 	assert.doesNotMatch(merging.ends[0].text, /cwd = the candidate root/, "no longer blames the folder or branch");
 	fs.rmSync(path.join(repo, ".git", "MERGE_HEAD"));
+	// Owner decision: concluding a merge of the PR's own base (a commit origin's base branch already contains) is automatic.
+	const git = (...args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8", windowsHide: true });
+	assert.equal(git("commit", "-q", "--allow-empty", "-m", "feature work").status, 0, "the feature branch has its own commit, so the merge is a real one");
+	const tree = git("rev-parse", "HEAD^{tree}").stdout.trim();
+	const baseTip = git("commit-tree", tree, "-p", head, "-m", "base moved on").stdout.trim();
+	assert.equal(git("update-ref", "refs/remotes/origin/main", baseTip).status, 0);
+	assert.equal(git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main").status, 0);
+	const unrelated = git("commit-tree", tree, "-p", baseTip, "-m", "not on the base").stdout.trim();
+	fs.writeFileSync(path.join(repo, ".git", "MERGE_HEAD"), `${unrelated}\n`);
+	const notBase = await runChild(commit, undefined, undefined, "release-engineer", { dir: repo, withLeases: true });
+	assert.match(notBase.ends[0].text, /a merge is in progress \(MERGE_HEAD in .*\) and the merged commit is not on origin\/main: only a merge of the PR's base branch concludes automatically/);
+	fs.writeFileSync(path.join(repo, ".git", "MERGE_HEAD"), `${baseTip}\n`);
+	const integration = await runChild(commit, undefined, undefined, "release-engineer", { dir: repo, withLeases: true });
+	assert.equal(integration.ends.length, 1, integration.stderr);
+	assert.doesNotMatch(integration.ends[0].text, /Blocked by harness safety guard/, "a merge of origin's base branch concludes automatically");
+	const parents = git("rev-list", "--parents", "-n", "1", "HEAD").stdout.trim().split(" ").slice(1);
+	assert.equal(parents.length, 2, `a merge commit with two parents: ${integration.ends[0].text}`);
+	assert.ok(parents.includes(baseTip), "one parent is the base tip");
+	assert.equal(fs.existsSync(path.join(repo, ".git", "MERGE_HEAD")), false);
 });
 
 test("main X (simulated TUI): /authorization is read-only and secret-free: it names the push+commit lease and opens no dialog", { timeout: 120_000 }, async () => {

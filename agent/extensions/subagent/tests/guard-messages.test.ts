@@ -366,6 +366,13 @@ test("commit refusals name the condition that failed: folder, branch, detached H
 		fs.writeFileSync(path.join(repo, ".git", "CHERRY_PICK_HEAD"), "x\n");
 		assert.match(why(commit), /a cherry-pick is in progress \(CHERRY_PICK_HEAD in .*\): a commit that concludes it records another history/);
 		fs.rmSync(path.join(repo, ".git", "CHERRY_PICK_HEAD"));
+		const tip = git("rev-parse", "HEAD").stdout.trim();
+		fs.writeFileSync(path.join(repo, ".git", "MERGE_HEAD"), `${tip}\n${tip}\n`);
+		assert.match(why(commit), /a merge is in progress \(MERGE_HEAD in .*\) and it merges more than one commit: only a merge of the PR's base branch concludes automatically/);
+		fs.writeFileSync(path.join(repo, ".git", "MERGE_HEAD"), `${tip}\n`);
+		assert.match(why(commit, repo, { ...target, base: "feat/x" } as typeof target), /and the base branch is the feature branch itself/);
+		assert.match(why(commit, repo, { ...target, base: "main" } as typeof target), /and origin\/main is not fetched here/, "the base bound at launch is used");
+		fs.rmSync(path.join(repo, ".git", "MERGE_HEAD"));
 		git("checkout", "-q", "--detach");
 		assert.match(why(commit), /HEAD is not on a branch \(detached\)/);
 	} finally { fs.rmSync(repo, { recursive: true, force: true }); }
