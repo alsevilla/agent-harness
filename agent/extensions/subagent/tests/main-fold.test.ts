@@ -273,9 +273,31 @@ test("native summary text counts toward the automatic fold threshold", async () 
 	for (const role of ["compactionSummary", "branchSummary"]) {
 		const request = setup({ [MAIN_FOLD_ENV]: "20000" });
 		const summary = { role, summary: "s".repeat(60_000), timestamp: ++clock };
-		const history = [summary, user("Earlier task."), reply("r".repeat(24_000)), user("Next task.")];
+		// Without the summary the request (~15k tokens) is under 20k; with it, over. The ~15k-token reply is what a fold removes.
+		const history = [summary, user("Earlier task."), reply("r".repeat(60_000)), user("Next task.")];
 		const folded = await request(history);
 		assert.ok(folded.some((m) => m.customType === CHECKPOINT_TYPE), `${role}: summary plus recent history crosses 20k tokens`);
 		assert.deepEqual(folded.find((m) => m.role === role), summary, "the summary stays intact");
 	}
+});
+
+// Field-shaped regression: once the part a fold keeps (retained user messages, native summaries) is itself above the threshold,
+// folding again saves little but rewrites the cache from the checkpoint on. A simulated paste-heavy session folded on 63 of 120 user
+// turns (23% cache hit) before the fold had to save at least half the threshold.
+test("no repeated fold when the kept part alone is over the threshold; a fold that pays still happens; /subagent fold always folds", async () => {
+	const request = setup({ [MAIN_FOLD_ENV]: "20000" });
+	const history: Msg[] = [];
+	for (let t = 0; t < 40; t++) history.push(user(`Paste ${t}: ` + "log line ".repeat(330)), reply("Noted."));
+	history.push(user("Next."));
+	const first = await request(history);
+	assert.equal(first.some((m) => m.customType === CHECKPOINT_TYPE), false, "~30k tokens of retained pastes: a fold would save almost nothing");
+	history.push(reply("big ".repeat(15_000)), user("Again."));
+	const second = await request(history);
+	assert.ok(second.some((m) => m.customType === CHECKPOINT_TYPE), "a 60k-character reply to fold away: the fold pays and happens");
+	history.push(reply("ok"), user("More."));
+	assert.equal(String((await request(history)).find((m) => m.customType === CHECKPOINT_TYPE)?.content), String(second.find((m) => m.customType === CHECKPOINT_TYPE)?.content), "the next small turn does not fold again");
+	requestMainFold();
+	history.push(reply("ok"), user("Fold now."));
+	const asked = await request(history);
+	assert.notEqual(String(asked.find((m) => m.customType === CHECKPOINT_TYPE)?.content), String(second.find((m) => m.customType === CHECKPOINT_TYPE)?.content), "/subagent fold folds even when it saves little");
 });

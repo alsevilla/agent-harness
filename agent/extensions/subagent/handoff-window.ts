@@ -482,8 +482,7 @@ export function createMainFold(threshold: number) {
 			if (idle && due && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
 				// The notes come from the saved messages (whole results, before any request-only shortening), from the previous fold point.
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
-				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
-				stamp = last!.timestamp; folded = true; asked = false;
+				const nextEntries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
 				// Reported risks are not recoverable observations: retain them in full outside the notes cap.
 				const risks = history.slice(0, -1).flatMap((m, i) => {
 					const handoff = handoffOf(m, i);
@@ -491,9 +490,17 @@ export function createMainFold(threshold: number) {
 					return handoff.fields.risks.filter((risk) => !noRisk(risk)).map((risk) =>
 						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`);
 				});
-				checkpoint = [renderCheckpoint(entries), ...risks].join("\n");
-				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
-				current = [...prefixBefore(at), message() as unknown as T, ...users as T[], ...view.slice(at)];
+				const nextCheckpoint = [renderCheckpoint(nextEntries), ...risks].join("\n");
+				const nextUsers = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
+				const candidate = [...prefixBefore(at), { role: "custom", customType: CHECKPOINT_TYPE, content: nextCheckpoint, display: false, timestamp: last!.timestamp } as unknown as T, ...nextUsers as T[], ...view.slice(at)];
+				// Fold only when it pays: every fold rewrites the cache from the checkpoint on, so a fold that saves little (once the kept
+				// part - native summaries, retained user messages - is itself near the threshold) costs more than it saves. A simulated
+				// paste-heavy session folded on 63 of 120 user turns at a 23% cache hit before this check. /subagent fold always folds.
+				if (asked || estimateTokens(current) - estimateTokens(candidate) >= threshold / 2) {
+					entries = nextEntries; checkpoint = nextCheckpoint; users = nextUsers;
+					stamp = last!.timestamp; folded = true; asked = false;
+					current = [...prefixBefore(at), message() as unknown as T, ...users as T[], ...view.slice(at)];
+				}
 			}
 			return folded ? current : undefined;
 		},
