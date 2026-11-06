@@ -101,12 +101,34 @@ test("masking or compaction: no 'still current' claims or reuse while earlier co
 	assert.doesNotMatch(l.view()!, /a\.rs whole file/, "reads from before the compaction are gone from the index");
 });
 
-test("the worker entry wires the ledger: view appended last, result handler before the duplicate-read handler, off with PI_SUBAGENT_LEDGER=0", () => {
+// The view used to be a message appended to every request; it held Pi's one cache breakpoint and changed each time, so every request
+// wrote the whole history to the cache again (field report: 2.07M cache-write vs 0.75M cache-read tokens, $5.59 for one worker task).
+test("the worker entry wires the ledger: the view rides in a tool result, never in a per-request message; handler order; off with PI_SUBAGENT_LEDGER=0", () => {
 	const entry = fs.readFileSync(new URL("../safety-guard-entry.ts", import.meta.url), "utf8");
 	assert.match(entry, /process\.env\.PI_SUBAGENT_LEDGER === "0" \? undefined : createExecutionLedger\(\)/);
-	assert.match(entry, /\[\.\.\.\(result\.messages \?\? event\.messages\), \{ role: "custom", customType: LEDGER_TYPE, content: view, display: false/);
+	const context = entry.slice(entry.indexOf('pi.on("context"'), entry.indexOf('pi.on("tool_result"'));
+	assert.doesNotMatch(context, /role: "custom"|\.view\(\)/, "the context hook adds no message");
+	assert.match(entry, /view = ledger\?\.viewForResult\(\)/);
+	assert.ok(entry.indexOf("ledger?.viewForResult()") > entry.indexOf("capShellOutput("), "after the output cap, so a capped output cannot cut it");
 	assert.ok(entry.indexOf("ledger.onResult(") < entry.indexOf("dedupe.onResult("), "the ledger sees each read's own output");
 	assert.match(entry, /ledger\?\.earlierCopiesGone\(\)/);
 	assert.match(entry, /ledger\?\.compacted\(\)/);
 	assert.doesNotMatch(fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8"), /execution-ledger/, "workers only");
+});
+
+test("viewForResult: shown when it first has something, then only when it changed and at least 5 calls later; a compaction shows it again", () => {
+	const l = createExecutionLedger();
+	const shown: number[] = [];
+	const call = (n: number, tool: string, input: Record<string, unknown>) => { l.onResult(tool, input, [{ type: "text", text: "x".repeat(50) }], false, "/w"); if (l.viewForResult()) shown.push(n); };
+	for (let n = 1; n <= 4; n++) call(n, "read", { path: `src/f${n}.rs` });
+	assert.deepEqual(shown, [4], "the first view, once there is enough to show");
+	for (let n = 5; n <= 8; n++) call(n, "read", { path: `src/f${n}.rs` });
+	assert.deepEqual(shown, [4], "changed, but not yet 5 calls later");
+	call(9, "read", { path: "src/f9.rs" });
+	assert.deepEqual(shown, [4, 9]);
+	for (let n = 10; n <= 20; n++) call(n, "bash", { command: "git status" }); // inspections do not change the view
+	assert.deepEqual(shown, [4, 9], "an unchanged view is not shown again");
+	l.compacted();
+	call(21, "read", { path: "src/g1.rs" }); call(22, "read", { path: "src/g2.rs" });
+	assert.deepEqual(shown, [4, 9, 21], "after a compaction the view is shown again at the next call, then waits again");
 });

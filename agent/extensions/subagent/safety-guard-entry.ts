@@ -3,7 +3,7 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CHILD_GRANT_ENV, CHILD_GRANT_NOTE_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
-import { createExecutionLedger, LEDGER_TYPE } from "./execution-ledger.ts";
+import { createExecutionLedger } from "./execution-ledger.ts";
 import { createAutoFormat, loadFormatConfig } from "./auto-format.ts";
 import { capShellOutput, outputCapFromEnv } from "./output-cap.ts";
 import * as path from "node:path";
@@ -67,11 +67,9 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 			try { ctx?.compact?.({ customInstructions: "Keep the task packet, its stop condition, files changed, checks run with their results, and open problems; drop old tool output." }); } catch { /* best effort */ }
 		}
 		if (result.messages && !capped) { capped = true; dedupe.reset(); ledger?.earlierCopiesGone(); }
-		// The ledger's state view goes last, after the history, so the cached prefix is untouched; it is rebuilt for every request.
-		let view: string | undefined;
-		try { view = ledger?.view(); } catch { view = undefined; }
-		if (!view) return result.messages ? { messages: result.messages } : undefined;
-		return { messages: [...(result.messages ?? event.messages), { role: "custom", customType: LEDGER_TYPE, content: view, display: false, timestamp: Date.now() }] };
+		// Nothing is appended here: a message added to every request would hold Pi's cache breakpoint and change each time, so no cache
+		// entry would ever match the next request. The ledger's view travels in a tool result instead (the last tool_result handler).
+		return result.messages ? { messages: result.messages } : undefined;
 	});
 	// Registered before the duplicate-read handler, so the ledger records each read's own output (Pi chains tool_result handlers).
 	pi.on("tool_result", (event, ctx) => {
@@ -104,12 +102,16 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		return content ? { content } : undefined;
 	});
 	// Workers only, last: a long shell output keeps its start and end, with the full text on disk (output-cap.ts). After the ledger,
-	// which records the whole output first.
+	// which records the whole output first. Then the ledger's state view, when it changed and is due, goes at the end of this result:
+	// stored in the history like the output, so every later request extends the cached prefix instead of replacing its last block.
 	const outputCap = outputCapFromEnv();
 	pi.on("tool_result", (event: any) => {
 		try {
 			const content = capShellOutput(event.toolName, event.content, event.details, outputCap);
-			return content ? { content } : undefined;
+			let view: string | undefined;
+			try { view = ledger?.viewForResult(); } catch { view = undefined; }
+			if (!view) return content ? { content } : undefined;
+			return { content: [...(content ?? event.content ?? []), { type: "text", text: view }] };
 		} catch { return undefined; }
 	});
 }

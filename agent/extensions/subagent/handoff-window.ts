@@ -294,16 +294,54 @@ export function stateCard(jobs: readonly StateJob[], epoch: string, openDecision
 	return `[runtime state, not user text] ${parts.join("; ")}. Completions arrive automatically; do not re-launch running work.`;
 }
 
+export const CLEARED_CARD = "[runtime state, not user text] no running jobs and no waiting worker decisions now.";
+
+/**
+ * The state card as if it were stored in the history. Pi puts the conversation's one cache breakpoint on the last block of the last
+ * user message, so a card appended to the end of every request held that breakpoint: each cache entry ended in a card the next request
+ * no longer had there, nothing matched, and main's whole history was written to the cache again on every request while a job ran.
+ * Instead each card text is inserted right after the message that was last when it first appeared, and stays there on every later
+ * request, so requests only extend the cached prefix. A new card is recorded only when the text changes, plus one cleared card when
+ * the state empties, so an old "running" card is never the latest word. Anchors are positions in the raw history (the shortenings map
+ * messages one to one); after a compaction or anything else that moves them, the trail starts again at the end.
+ */
+export function createCardTrail() {
+	let trail: { index: number; stamp: unknown; text: string }[] = [];
+	let current: string | undefined;
+	return {
+		apply<T extends Message>(history: readonly T[], view: readonly T[], card: string | undefined): T[] | undefined {
+			trail = trail.filter((entry) => entry.index < history.length && history[entry.index]?.timestamp === entry.stamp);
+			if (!trail.length) current = undefined; // compacted or rewritten: nothing recorded survives
+			if (card !== current) {
+				const text = card ?? CLEARED_CARD;
+				const last = history.length - 1;
+				if (last >= 0 && (card !== undefined || current !== undefined)) trail.push({ index: last, stamp: history[last]?.timestamp, text });
+				current = card;
+			}
+			if (!trail.length) return undefined;
+			const out: T[] = [];
+			let next = 0;
+			view.forEach((message, i) => {
+				out.push(message);
+				for (; next < trail.length && trail[next].index === i; next++) out.push({ role: "custom", customType: STATE_CARD_TYPE, content: trail[next].text, display: false, timestamp: trail[next].stamp } as unknown as T);
+			});
+			return out;
+		},
+	};
+}
+
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
 export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
+	const trail = createCardTrail();
 	pi.on("context", (event: { messages: Message[] }) => {
 		const shortened = window > 0 ? shortenContext(event.messages, window) : undefined;
 		let card: string | undefined;
 		try { card = state?.(); } catch { card = undefined; }
-		if (!card) return shortened ? { messages: shortened } : undefined;
-		return { messages: [...(shortened ?? event.messages), { role: "custom", customType: STATE_CARD_TYPE, content: card, display: false, timestamp: Date.now() } as Message] };
+		const withCards = state ? trail.apply(event.messages, shortened ?? event.messages, card) : undefined;
+		const messages = withCards ?? shortened;
+		return messages ? { messages } : undefined;
 	});
 	return window;
 }
