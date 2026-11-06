@@ -93,7 +93,10 @@ function makeRepo(dir: string): string {
 		assert.equal(run.status, 0, `git ${args.join(" ")}: ${run.stderr}`);
 	};
 	git("init", "-q");
-	git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "init");
+	// A local identity, so commits inside the fixture do not depend on the machine's git config.
+	git("config", "user.name", "t");
+	git("config", "user.email", "t@example.test");
+	git("commit", "-q", "--allow-empty", "-m", "init");
 	git("branch", "feat/x");
 	git("remote", "add", "origin", ORIGIN);
 	return canonicalCwd(dir);
@@ -509,6 +512,16 @@ test("lease lifecycle (index): only a user- or package-source release-engineer l
 	].join("\n"));
 	const argv1 = process.argv[1];
 	const launchEnv = process.env.PI_LAUNCH_PROBE;
+	// Every non-reviewer launch requires Ponytail in the profile. Without it installed here, point the profile at a scratch folder that holds a stub.
+	const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
+	const ponytail = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "npm", "node_modules", "@dietrichgebert", "ponytail", "pi-extension", "index.js");
+	if (!fs.existsSync(ponytail)) {
+		const profile = path.join(dir, "profile");
+		const stub = path.join(profile, "npm", "node_modules", "@dietrichgebert", "ponytail", "pi-extension", "index.js");
+		fs.mkdirSync(path.dirname(stub), { recursive: true });
+		fs.writeFileSync(stub, "export default function ponytailStub() {}\n");
+		process.env.PI_CODING_AGENT_DIR = profile;
+	}
 	const s = await openMain([{ tool: "request_authorization", args: { push_branch: { branch: "feat/x" } }, id: "w0" }, { text: "done" }], { ui: approve, repo: true, dir });
 	const agentFile = path.join(s.cwd, ".pi", "agents", "release-engineer.md");
 	fs.mkdirSync(path.dirname(agentFile), { recursive: true });
@@ -534,6 +547,7 @@ test("lease lifecycle (index): only a user- or package-source release-engineer l
 	} finally {
 		process.argv[1] = argv1;
 		if (launchEnv === undefined) delete process.env.PI_LAUNCH_PROBE; else process.env.PI_LAUNCH_PROBE = launchEnv;
+		if (agentDirEnv === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = agentDirEnv;
 		s.cleanup();
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

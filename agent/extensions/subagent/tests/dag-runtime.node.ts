@@ -133,7 +133,7 @@ check("public callback ignores forged sixth-argument prepared dispatch", async (
 check("eight forms SDK enum and mixed same-role positions use actual package models", async () => {
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	try {
 		const sdk = await import(piAiUrl);
 		const { discoverAgents, packageRoot } = await import(new URL("../agents.ts", import.meta.url).href);
@@ -202,7 +202,7 @@ check("eight forms SDK enum and mixed same-role positions use actual package mod
 check("modelSlot fallback runs in single, parallel, chain and dag, foreground and background, with per-entry provenance", async () => {
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	try {
 	const sdk = await import(piAiUrl);
 	const call = (arguments_: any) => ({ type: "toolCall" as const, id: "slot", name: "subagent", arguments: arguments_ });
@@ -322,7 +322,7 @@ check("accepted package role configuration survives a later user-registry change
 	assert.equal(baseline.source, "package");
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	const registry = path.join(userDir, "roles.json");
 	const previous = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : undefined;
 	const pi = fakePi(); subagentExtension(pi);
@@ -362,7 +362,7 @@ check("package backend-worker tier failures never upgrade to capable", async () 
 	assert.ok(baseline.modelTiers?.capable, "the package role has a configured capable tier");
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	try {
 	for (const scenario of ["ordinary failure", "availability after tool activity", "abort"] as const) {
 		const pi = fakePi(); subagentExtension(pi);
@@ -399,7 +399,7 @@ check("omitted tiers keep package defaults in legacy and mixed chain positions",
 	assert.equal(baseline.source, "package");
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	const pi = fakePi(); subagentExtension(pi);
 	const tool = pi.tools.get("subagent")!;
 	const single = tool.execute("omitted-tier-single", { background: false, agentScope: "both", agent: "backend-worker", task: "legacy single" }, undefined, undefined, dagCtx(makeRepo("omitted-tier-single")));
@@ -478,7 +478,7 @@ const API_TIERS = { economy: "anthropic/claude-haiku-5-5", capable: "anthropic/c
 check("api-specialist tiers follow shipped and overlaid roles.json: both configured tiers launch and an empty modelTiers overlay refuses every tier before any child spawns", async () => {
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	const cases: Array<[unknown, "economy" | "capable", RegExp | "launch"]> = [
 		[undefined, "economy", "launch"],
 		[undefined, "capable", "launch"],
@@ -517,7 +517,7 @@ check("explicit package role tier selects configured model without changing role
 	const tool = pi.tools.get("subagent")!;
 	const guardDir = path.join(userDir, "npm", "node_modules", "pi-claude-subscription-connector", "extensions");
 	fs.mkdirSync(guardDir, { recursive: true });
-	fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	installGuard(guardDir);
 	try {
 	const launch = tool.execute("tier-package", { background: false, agentScope: "both", agent: "backend-worker", task: "tier probe", modelTier: "economy" }, undefined, undefined, dagCtx(makeRepo("tier-package")));
 	await waitFor(() => children().length === 1, "canonical package role launches");
@@ -666,6 +666,12 @@ const created: string[] = [];
 const aliases: Array<{ dir: string; link: string }> = [];
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const guardSource = path.join(originalAgentDir ?? path.join(os.homedir(), '.pi', 'agent'), 'npm', 'node_modules', 'pi-claude-subscription-connector', 'extensions', 'subscription-guard.ts');
+// The installed Claude subscription guard when present; on a clean machine or CI a no-op extension stands in (these tests check
+// model routing, not the guard).
+const installGuard = (guardDir: string) => {
+	if (fs.existsSync(guardSource)) fs.copyFileSync(guardSource, path.join(guardDir, "subscription-guard.ts"));
+	else fs.writeFileSync(path.join(guardDir, "subscription-guard.ts"), "export default function subscriptionGuardStub() {}\n");
+};
 const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "dag-admission-user-"));
 
 before(async () => {
