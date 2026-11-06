@@ -2,7 +2,7 @@
 // so a long session stops carrying its whole history (field report: main at 348k tokens, 478 requests averaging ~159k, visibly slower).
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHECKPOINT_TYPE, DEFAULT_MAIN_FOLD_TOKENS, MAIN_FOLD_ENV, mainFoldFromEnv, registerHandoffWindow, requestMainFold, retainedUser, STATE_CARD_TYPE } from "../handoff-window.ts";
+import { CHECKPOINT_TYPE, DEFAULT_MAIN_FOLD_TOKENS, MAIN_FOLD_ENV, mainFoldFromEnv, registerHandoffWindow, requestMainFold, STATE_CARD_TYPE } from "../handoff-window.ts";
 
 type Msg = Record<string, any>;
 let clock = 0;
