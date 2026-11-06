@@ -105,9 +105,9 @@ test("the README's command table lists /subagent fold", async () => {
 
 // User text is the conservative constraint record: do not try to infer which
 // sentences contain requirements, holds, authorization limits or open questions.
-test("requirements anywhere in long messages survive repeated folds and checkpoint pressure", async () => {
+test("requirements anywhere in messages up to 3,000 characters survive repeated folds and checkpoint pressure", async () => {
 	const request = setup({});
-	const text = "Never deploy.\n" + "a".repeat(25_000) + "\nWhich API version? Leave this unresolved.\n" + "b".repeat(25_000) + "\nDo not change the public contract.";
+	const text = "Never deploy.\n" + "a".repeat(1_400) + "\nWhich API version? Leave this unresolved.\n" + "b".repeat(1_400) + "\nDo not change the public contract.";
 	const original = { ...user(text), content: [{ type: "text", text }, { type: "image", data: "original-image", mimeType: "image/png" }] };
 	const history = [original, reply("Acknowledged.")];
 	for (let n = 0; n < 3; n++) {
@@ -125,7 +125,7 @@ test("requirements anywhere in long messages survive repeated folds and checkpoi
 });
 
 test("the native session branch restores user constraints after compaction and reload without resurrecting another branch", async () => {
-	const original = user("Never push or deploy. " + "detail ".repeat(1000) + " Preserve the schema.");
+	const original = user("Never push or deploy. " + "detail ".repeat(300) + " Preserve the schema.");
 	const current = user("continue");
 	let branch = [original, reply("done"), current].map((message) => ({ type: "message", message }));
 	const handlers = new Map<string, (event: any, ctx?: any) => any>();
@@ -152,4 +152,47 @@ test("restoring a missing middle turn preserves later corrections and host-trans
 	const ctx = { sessionManager: { getBranch: () => [first, middle, latest].map((message) => ({ type: "message", message })) } };
 	const result = handlers.get("context")!({ messages: [first, transformed] }, ctx);
 	assert.deepEqual(result.messages, [first, middle, transformed]);
+});
+
+
+test("older pastes retain 2,000 head and 800 tail characters across text parts, keeping images and newest input", async () => {
+	const request = setup({});
+	const image = { type: "image", data: "keep-image", mimeType: "image/png" };
+	const first = user("a".repeat(3_000));
+	const large = { ...user(""), content: [{ type: "text", text: "H".repeat(1_500) }, image, { type: "text", text: "H".repeat(500) + "M".repeat(5_000) }, { type: "text", text: "T".repeat(800) }] };
+	const latest = user("newest ".repeat(1_000));
+	const history = [first, reply("done"), large, reply("done"), latest];
+	const saved = JSON.stringify(history);
+	requestMainFold();
+	const folded = await request(history);
+	const users = folded.filter((m) => m.role === "user");
+	assert.deepEqual(users[0], first, "exactly 3,000 characters stay whole");
+	assert.deepEqual(users[2], latest, "newest message is never cut");
+	assert.equal(users[1].content[1], image);
+	const text = users[1].content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("");
+	assert.ok(text.startsWith("H".repeat(2_000)));
+	assert.ok(text.endsWith("T".repeat(800)));
+	assert.match(text, /full text is in the saved session/);
+	assert.ok(text.length < 3_000);
+	assert.ok(!text.includes("M"), "the middle of an oversized paste is intentionally omitted");
+	assert.equal(JSON.stringify(history), saved, "saved transcript is untouched");
+	history.push(reply("done"), user("next"));
+	requestMainFold();
+	const again = (await request(history)).filter((m) => m.role === "user");
+	assert.deepEqual(again[1], users[1], "repeated folds do not truncate retained text again");
+	assert.ok(again[2].content.length < 3_000, "the formerly newest paste is bounded once it becomes older");
+});
+
+test("native compaction restoration limits older pastes but preserves the newest message", () => {
+	const older = user("H".repeat(2_000) + "M".repeat(5_000) + "T".repeat(800));
+	const newest = user("newest ".repeat(1_000));
+	const handlers = new Map<string, (event: any, ctx?: any) => any>();
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, {}, () => undefined);
+	const ctx = { sessionManager: { getBranch: () => [older, newest].map((message) => ({ type: "message", message })) } };
+	const { messages } = handlers.get("context")!({ messages: [newest] }, ctx);
+	assert.ok(messages[0].content.startsWith("H".repeat(2_000)));
+	assert.ok(messages[0].content.endsWith("T".repeat(800)));
+	assert.ok(messages[0].content.length < 3_000);
+	assert.deepEqual(messages[1], newest);
+	assert.equal(older.content.length, 7_800, "persisted branch text is unchanged");
 });
