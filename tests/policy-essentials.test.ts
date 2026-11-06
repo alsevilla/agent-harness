@@ -80,6 +80,8 @@ test("main chooses tiers at plan time and keeps a task's tier for its first fix 
 	const main = flat(read("agent/extensions/subagent/index.ts"));
 	assert.ok(main.includes("Choose each task's modelTier when you plan, before launching any"));
 	assert.ok(main.includes("Keep the task's modelTier for the first fix round; choose capable explicitly only after a second failure on the same check."));
+	// resolveModelTier refuses a tier for any non-package agent, so a tier on a created (project-local) agent would fail the whole launch.
+	assert.ok(main.includes("omit modelTier for a project-local agent (agentScope project or both)"));
 });
 
 // SquidAgent (arXiv 2610.08647): parallel work pays re-exploration and alignment overheads; parallelize only when each item's expected
