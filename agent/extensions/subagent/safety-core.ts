@@ -1970,7 +1970,7 @@ function commitTargetLive(target: { candidate: string; pushUrl: string; branch: 
 // told "a normal commit is automatic only with cwd = the candidate root on its feature branch", and the root and branch were checked by
 // hand before anyone found the merge state. Each refusal now names the condition that failed.
 const GIT_STATE_LABEL: Record<string, string> = { MERGE_HEAD: "a merge", CHERRY_PICK_HEAD: "a cherry-pick", REVERT_HEAD: "a revert", "rebase-merge": "a rebase", "rebase-apply": "a rebase or git am", sequencer: "a multi-commit cherry-pick or revert" };
-function commitTargetCheck(target: { candidate: string; pushUrl: string; branch: string }, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): { branch: string } | { why: string } {
+function commitTargetCheck(target: { candidate: string; pushUrl: string; branch: string; base?: string }, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): { branch: string } | { why: string } {
 	if (foldPath(canonicalCwd(root)) !== foldPath(target.candidate)) return { why: `this folder (${slashed(root)}) is not the candidate root this worker was launched for (${slashed(target.candidate)}); run it from there` };
 	if (redirectedGitEnvironment()) return { why: "Git is redirected by environment variables (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_CONFIG_* or similar); unset them" };
 	const top = gitRead(root, ["rev-parse", "--show-toplevel"]);
@@ -1983,9 +1983,36 @@ function commitTargetCheck(target: { candidate: string; pushUrl: string; branch:
 	if (liveUrl(root, branch) !== target.pushUrl) return { why: `the push URL of ${branch} no longer matches the one this worker was launched with` };
 	const gitDir = gitRead(root, ["rev-parse", "--absolute-git-dir"]);
 	if (gitDir?.length !== 1) return { why: "git could not report the repository's .git folder" };
-	const state = UNSAFE_GIT_STATE.find((s) => fs.existsSync(path.join(gitDir[0], s)));
+	const states = UNSAFE_GIT_STATE.filter((s) => fs.existsSync(path.join(gitDir[0], s)));
+	if (states.length === 1 && states[0] === "MERGE_HEAD") {
+		const notBase = baseMergeRefusal(root, gitDir[0], target);
+		if (notBase === undefined) return { branch };
+		return { why: `a merge is in progress (MERGE_HEAD in ${slashed(gitDir[0])}) and ${notBase}: only a merge of the PR's base branch concludes automatically; any other merge records another history, so ask main to request a single-use approval for this exact command` };
+	}
+	const state = states[0];
 	if (state) return { why: `${GIT_STATE_LABEL[state]} is in progress (${state} in ${slashed(gitDir[0])}): a commit that concludes it records another history, so it is not a normal commit; ask main to request a single-use approval for this exact command` };
 	return { branch };
+}
+// Owner decision (field report: an integration merge of the base into the feature branch needed a single-use approval): a trusted
+// release-engineer may conclude a merge automatically when it merges exactly one commit that the remote's base branch already contains,
+// that is, it brings the PR's own base into the feature branch, which the PR's review and checks then cover. The base is the one main
+// bound at launch, else origin's default branch. Undefined when allowed; otherwise why not.
+function baseMergeRefusal(root: string, gitDir: string, target: { branch: string; base?: string }): string | undefined {
+	let heads: string[];
+	try { heads = fs.readFileSync(path.join(gitDir, "MERGE_HEAD"), "utf8").split(/\r?\n/).map((l) => l.trim()).filter(Boolean); } catch { return "MERGE_HEAD cannot be read"; }
+	if (heads.length !== 1 || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(heads[0])) return "it merges more than one commit";
+	let base = target.base;
+	if (base === undefined) {
+		const remoteHead = gitRead(root, ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"]);
+		base = remoteHead?.length === 1 && remoteHead[0].startsWith("refs/remotes/origin/") ? remoteHead[0].slice("refs/remotes/origin/".length) : undefined;
+	}
+	if (base === undefined) return "no base branch is known (none was bound at launch and origin has no default branch)";
+	if (!baseBranchOk(base)) return `the base branch name ${base} is not valid`;
+	if (base === target.branch) return "the base branch is the feature branch itself";
+	const ref = `refs/remotes/origin/${base}`;
+	if (gitExit(root, ["rev-parse", "--verify", "-q", `${ref}^{commit}`]) !== 0) return `origin/${base} is not fetched here`;
+	if (gitExit(root, ["merge-base", "--is-ancestor", heads[0], ref]) !== 0) return `the merged commit is not on origin/${base}`;
+	return undefined;
 }
 /** Why a trusted release-engineer's normal commit was not automatic, for the refusal text; undefined when the cause is not one of these. */
 export function commitRefusalWhy(target: { candidate: string; pushUrl: string; branch: string } | undefined, command: string, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): string | undefined {
