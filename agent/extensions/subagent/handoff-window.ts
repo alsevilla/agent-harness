@@ -449,6 +449,7 @@ function renderCheckpoint(entries: string[]): string {
 }
 export function createMainFold(threshold: number) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
+	let summaryStamp: unknown; // native compaction must reset a fold even when branch recovery restores its anchor
 	let folded = false;
 	let entries: string[] = [];
 	let checkpoint = "";
@@ -463,9 +464,14 @@ export function createMainFold(threshold: number) {
 		get folded(): boolean { return folded; },
 		/** `history` is the saved conversation; `view` is the request as shaped so far (shortened, with any state cards). */
 		apply<T extends Message>(history: readonly T[], view: readonly T[], idle: boolean): T[] | undefined {
+			const summary = view.findLast((m) => m?.role === "compactionSummary");
 			let point = folded ? pointIn(view) : -1;
-			if (folded && point < 0) { folded = false; entries = []; checkpoint = ""; users = []; } // compacted or rewritten: start again
-			let current: T[] = folded ? [message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
+			if ((folded && point < 0) || summary?.timestamp !== summaryStamp) {
+				folded = false; entries = []; checkpoint = ""; users = []; point = -1;
+				summaryStamp = summary?.timestamp;
+			}
+			const prefix = summary ? [summary] : [];
+			let current: T[] = folded ? [...prefix, message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
 			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
@@ -474,9 +480,16 @@ export function createMainFold(threshold: number) {
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
 				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
 				stamp = last!.timestamp; folded = true; asked = false;
-				checkpoint = renderCheckpoint(entries);
+				// Reported risks are not recoverable observations: retain them in full outside the notes cap.
+				const risks = history.slice(0, -1).flatMap((m, i) => {
+					const handoff = handoffOf(m, i);
+					if (!handoff) return [];
+					return handoff.fields.risks.filter((risk) => !noRisk(risk)).map((risk) =>
+						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`);
+				});
+				checkpoint = [renderCheckpoint(entries), ...risks].join("\n");
 				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
-				current = [message() as unknown as T, ...users as T[], ...view.slice(at)];
+				current = [...prefix, message() as unknown as T, ...users as T[], ...view.slice(at)];
 			}
 			return folded ? current : undefined;
 		},

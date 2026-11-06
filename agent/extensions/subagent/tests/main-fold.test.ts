@@ -196,3 +196,53 @@ test("native compaction restoration limits older pastes but preserves the newest
 	assert.deepEqual(messages[1], newest);
 	assert.equal(older.content.length, 7_800, "persisted branch text is unchanged");
 });
+
+test("native compaction resets an existing fold and its summary survives later folds", () => {
+	const handlers = new Map<string, (event: any, ctx?: any) => any>();
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, {}, () => undefined);
+	const request = (messages: Msg[], ctx?: any) => handlers.get("context")!({ messages }, ctx)?.messages ?? messages;
+	const first = user("Investigate.");
+	const foldPoint = user("Continue.");
+	const saved = [first, reply("Old checkpoint reply."), foldPoint];
+	requestMainFold();
+	assert.ok(request(saved).some((m: Msg) => m.customType === CHECKPOINT_TYPE));
+	saved.push(reply("Discovery after the checkpoint."), user("Next step."));
+	let summary = { role: "compactionSummary", summary: "Discovery after the checkpoint.", tokensBefore: 100_000, timestamp: ++clock };
+	const ctx = { sessionManager: { getBranch: () => saved.map((message) => ({ type: "message", message })) } };
+	let compacted = [summary, saved.at(-1)!];
+	let restored = request(compacted, ctx);
+	assert.deepEqual(restored.find((m: Msg) => m.role === "compactionSummary"), summary);
+	assert.equal(restored.some((m: Msg) => m.customType === CHECKPOINT_TYPE), false, "the old fold was reset despite restoring its user anchor");
+	for (let n = 0; n < 2; n++) {
+		saved.push(reply("Recent reply."), user(`More ${n}.`));
+		compacted = [summary, ...saved.slice(-3)];
+		requestMainFold();
+		restored = request(compacted, ctx);
+		assert.equal(restored.filter((m: Msg) => m.role === "compactionSummary").length, 1);
+		assert.deepEqual(restored.find((m: Msg) => m.role === "compactionSummary"), summary, "later folds keep the complete native summary");
+		assert.ok(restored.some((m: Msg) => m.customType === CHECKPOINT_TYPE));
+	}
+	summary = { ...summary, summary: "Newer native summary.", timestamp: ++clock };
+	restored = request([summary, saved.at(-1)!], ctx);
+	assert.deepEqual(restored.find((m: Msg) => m.role === "compactionSummary"), summary);
+	assert.equal(restored.some((m: Msg) => m.customType === CHECKPOINT_TYPE), false, "a second native compaction resets the new fold too");
+});
+
+test("reported risks survive repeated folds even when old checkpoint notes exceed the cap", async () => {
+	const request = setup({});
+	const risk = "Migration remains unresolved: " + "details ".repeat(50) + "keep schema version 7.";
+	const report = result("risky", 1);
+	report.content[0].text = report.content[0].text.replace("RISKS: none", `RISKS: ${risk}`);
+	const history = [user("Investigate migration."), report, reply("See report.")];
+	for (let n = 0; n < 2; n++) {
+		for (let i = 0; i < 110; i++) history.push(user(`Task ${n}-${i}`), reply("notes ".repeat(100)));
+		history.push(user("Continue."));
+		requestMainFold();
+		const folded = await request(history);
+		const checkpoint = String(folded.find((m) => m.customType === CHECKPOINT_TYPE)?.content);
+		assert.ok(checkpoint.includes(`RISKS: ${risk}`), "the full reported risk survives clipping and checkpoint pressure");
+		assert.ok(checkpoint.includes("_evidence/t1/REPORT.md"), "risk provenance remains available");
+		assert.ok(checkpoint.includes("notes folded"), "ordinary old observations were discarded");
+		history.push(reply("Continuing."));
+	}
+});
