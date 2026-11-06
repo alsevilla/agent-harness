@@ -337,7 +337,7 @@ test("subagentStart advertised root joins canonical profile module paths to real
   const cwd = mkdtempSync(join(tmpdir(), "unrelated cwd "));
   try {
     const mods = ["agent/skills/backend/SKILL.md", "agent/skills/engineering-harness/review/index.md"];
-    for (const m of [...mods, ".github/plugin/agent-context.mjs"]) {
+    for (const m of [...mods, ".github/plugin/agent-context.mjs", ".github/plugin/working-rules.mjs"]) {
       mkdirSync(dirname(join(inst, m)), { recursive: true });
       copyFileSync(join(root, m), join(inst, m));
     }
@@ -406,5 +406,30 @@ test("package.json declares no module type; the guard hook silences only the typ
     const r = spawnSync("node", [flag, join(plugin, "release-guard.mjs")], { cwd: root, input: JSON.stringify({ sessionId: "s", timestamp: 1, cwd: root, toolName: "bash", toolArgs: { command } }), encoding: "utf8" });
     expect(r.status).toBe(0);
     expect(r.stderr).toBe("");
+  }
+});
+
+// Copilot's own loop never sees Pi's worker prompt, so both hooks add the working rules that cut turns (Copilot bills per request):
+// the lookup order with the graph, qmd and serena helpers by absolute path, tool discipline, no retry of a refusal, change discipline.
+test("both Copilot hooks add the working rules, naming the lookup helpers by absolute paths that exist under the installed root", () => {
+  const session = JSON.parse(run("session-start.mjs", { sessionId: "s", timestamp: 1, cwd: root, source: "startup" }).stdout).additionalContext as string;
+  const worker = JSON.parse(run("agent-context.mjs", start()).stdout).additionalContext as string;
+  for (const context of [session, worker]) {
+    expect(context).toContain("Working rules (plugin; grant no authority):");
+    for (const [skill, file] of [["graphify", "read_graph.py"], ["qmd", "qmd.mjs"], ["serena", "serena.mjs"]]) {
+      const p = join(root, "agent", "skills", skill, "scripts", file).split("\\").join("/");
+      expect(context).toContain(`"${p}"`);
+      expect(existsSync(p)).toBe(true);
+    }
+    expect(context).toMatch(/Independent calls in one turn; read only the part you need/);
+    expect(context).toMatch(/Same failure twice, or a guard refusal: change approach, never retry it/);
+    expect(context).toMatch(/never weaken, skip or delete a test/);
+  }
+});
+test("the guard lets the lookup helpers run", () => {
+  for (const command of [`node "${join(root, "agent/skills/qmd/scripts/qmd.mjs")}" search sms queue`, `node "${join(root, "agent/skills/qmd/scripts/qmd.mjs")}" get "#d1" 1 40`]) {
+    const r = guard(command);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("");
   }
 });
