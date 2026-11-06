@@ -79,13 +79,13 @@ Single, parallel, chain and DAG launches, foreground or background, share one pr
 ## Older results in main's requests
 Main's context would otherwise grow by one full handoff per subagent result. Before each model request in the main session, the extension shortens older results in that request only; the saved transcript is never changed.
 
-- The newest 5 results (foreground `subagent` results and background completion notices that carry a `STATUS` line) stay word for word.
-- Older ones are shortened in batches of 5, to one line: `[older subagent result, shortened: <job or tool> <agents>] STATUS … | NEXT … | EVIDENCE … | may be outdated; full report: EVIDENCE or subagent_control result`. A shortened line never changes afterwards, so the cached request prefix changes once per batch, not on every result.
+- The newest 10 results (foreground `subagent` results and background completion notices that carry a `STATUS` line) stay word for word.
+- Older ones are shortened in batches of 10, to one line: `[older subagent result, shortened: <job or tool> <agents>] STATUS … | NEXT … | EVIDENCE … | may be outdated; full report: EVIDENCE or subagent_control result`. A shortened line never changes afterwards, so the cached request prefix changes once per batch, not on every result.
 - Never shortened: any non-PASS `STATUS`, any `RISKS` other than `none`, errors, failed, aborted or partial (`INCOMPLETE HANDOFF`) background notices, launch receipts, and any result the one-line form would not at least halve.
 - Handoff check: when a worker settles normally (stop reason `stop`) and its last reply has no `STATUS` line, the runtime sends it one follow-up prompt asking it to put details in its REPORT file and reply with the four handoff lines; the next settle closes it. At most one nudge per worker process.
-- While background jobs run or worker decisions wait, each main request also ends with one hidden `subagent-state` line naming the running `bg-N@epoch` jobs, their roles and the waiting decisions, so a compacted conversation still knows what is in flight; it is appended last, so the cached prefix is unchanged.
+- While background jobs run or worker decisions wait, main's request carries one hidden `subagent-state` line naming the running `bg-N@epoch` jobs, their roles and the waiting decisions, so a compacted conversation still knows what is in flight. Each line stays where it first appeared, a change adds a new one and a cleared line follows when the state empties, so later requests extend the cached prefix instead of rewriting it.
 - Main's own large tool outputs (`read`, `bash`, `grep`, `find`, `ls`, 2,000 characters or more) follow the same window and batching: older ones become `[older <tool> output, shortened: <file or command>] N characters; run it again if you still need the content`. Errors and shorter outputs stay word for word.
-- `PI_SUBAGENT_HANDOFF_WINDOW` sets the window: `0` turns this off (today's behavior); integers of 5 or more are accepted; anything else uses 5.
+- `PI_SUBAGENT_HANDOFF_WINDOW` sets the window: `0` turns this off (today's behavior); integers of 5 or more are accepted; anything else uses 10. The default was 5: each batch makes the prompt cache rewrite the history from its first shortened entry, and simulated main sessions (60, 150 and 300 requests, Opus 5.5 and Sonnet 5.5 cache prices) cost less with batches of 10 in every case, while still keeping a 300-request main near 134k tokens instead of 377k with no shortening.
 
 ## Live inspector
 

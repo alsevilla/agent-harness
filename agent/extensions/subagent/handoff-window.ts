@@ -16,7 +16,12 @@ import { stoppedJobsCardPart, type StoppedJob } from "./stopped-jobs.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const HANDOFF_WINDOW_ENV = "PI_SUBAGENT_HANDOFF_WINDOW";
-export const DEFAULT_HANDOFF_WINDOW = 5;
+// Main's default: batches of 10. Each batch makes the prompt cache rewrite the history from its first shortened entry, and a simulated
+// main session through this code (60, 150 and 300 requests) cost more with batches of 5 than with 10 in every case, on Opus 5.5
+// (cache read 0.05x) and on Sonnet 5.5 (0.1x). Batches of 10 still keep a 300-request main near 134k tokens instead of 377k.
+// PI_SUBAGENT_HANDOFF_WINDOW sets it (0 off). Workers keep their own window of 5 for the masking steps (WORKER_MASK_WINDOW).
+export const DEFAULT_HANDOFF_WINDOW = 10;
+const WORKER_MASK_WINDOW = 5;
 const MIN_WINDOW = 5; // research guidance: shrinking below 5 recent results hurts more than it saves
 const RESULT_TOOLS = new Set(["subagent", "subagent_control"]);
 const COMPLETION_TYPE = "subagent-completion";
@@ -284,9 +289,9 @@ export function capWorkerContext<T extends Message>(messages: readonly T[], from
 		if (!next) return;
 		current = next; step = name; size = measure(next);
 	};
-	attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW), "batch");
-	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false), "all-older");
-	if (size >= budget) attempt(maskToolOutputs(current, DEFAULT_HANDOFF_WINDOW, false, SMALL_MASK_MIN), "small-older");
+	attempt(maskToolOutputs(current, WORKER_MASK_WINDOW), "batch");
+	if (size >= budget) attempt(maskToolOutputs(current, WORKER_MASK_WINDOW, false), "all-older");
+	if (size >= budget) attempt(maskToolOutputs(current, WORKER_MASK_WINDOW, false, SMALL_MASK_MIN), "small-older");
 	if (size >= budget) attempt(boundToolOutputs(current), "bounded");
 	if (size >= budget) attempt(lastResort(current), "last-resort");
 	if (size >= budget) step = "over";

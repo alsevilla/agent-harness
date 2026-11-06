@@ -13,7 +13,8 @@ const textOf = (m: Msg) => (typeof m.content === "string" ? m.content : m.conten
 const shortened = (m: Msg) => textOf(m).startsWith("[older subagent result, shortened:");
 const deepFreeze = <T>(value: T): T => { if (value && typeof value === "object") { Object.values(value).forEach(deepFreeze); Object.freeze(value); } return value; };
 
-test("env: unset, blank, invalid and below-5 values use 5; 0 is off; 5 and larger are taken", () => {
+test("env: unset, blank, invalid and below-5 values use the default of 10; 0 is off; 5 and larger are taken", () => {
+	assert.equal(DEFAULT_HANDOFF_WINDOW, 10, "main: batches of 10 cost less under caching than 5");
 	for (const raw of [undefined, "", " ", "abc", "-1", "1", "4", "2.5", "99999"]) assert.equal(handoffWindowFromEnv(raw === undefined ? {} : { [HANDOFF_WINDOW_ENV]: raw }), DEFAULT_HANDOFF_WINDOW, String(raw));
 	assert.equal(handoffWindowFromEnv({ [HANDOFF_WINDOW_ENV]: "0" }), 0);
 	assert.equal(handoffWindowFromEnv({ [HANDOFF_WINDOW_ENV]: "5" }), 5);
@@ -105,13 +106,14 @@ test("long field values are clipped to one line each", () => {
 test("wiring: registers one context handler that returns a request-only list, or nothing when there is nothing to shorten; off registers none", async () => {
 	const handlers = new Map<string, (event: unknown) => unknown>();
 	const pi = { on: (name: string, fn: any) => { assert.ok(!handlers.has(name)); handlers.set(name, fn); } };
-	assert.equal(registerHandoffWindow(pi as never, {}), 5);
+	assert.equal(registerHandoffWindow(pi as never, {}), DEFAULT_HANDOFF_WINDOW);
 	assert.deepEqual([...handlers.keys()], ["context"]);
 	const handler = handlers.get("context")!;
 	assert.equal(await handler({ messages: [user("hi"), fg(1)] }), undefined);
-	const event = { messages: Array.from({ length: 10 }, (_, i) => fg(i)) };
+	assert.equal(await handler({ messages: Array.from({ length: 19 }, (_, i) => fg(i)) }), undefined, "19 results do not yet fill a second batch of 10");
+	const event = { messages: Array.from({ length: 20 }, (_, i) => fg(i)) };
 	const result = (await handler(event)) as { messages: Msg[] };
-	assert.equal(result.messages.filter(shortened).length, 5);
+	assert.equal(result.messages.filter(shortened).length, 10);
 	assert.equal(event.messages.filter(shortened).length, 0, "the event's own list is left as it was");
 	const none = new Map<string, unknown>();
 	assert.equal(registerHandoffWindow({ on: (name: string, fn: unknown) => none.set(name, fn) } as never, { [HANDOFF_WINDOW_ENV]: "0" }), 0);
