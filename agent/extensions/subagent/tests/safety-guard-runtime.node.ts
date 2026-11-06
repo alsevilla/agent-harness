@@ -648,6 +648,16 @@ test("child commit: a trusted release-engineer child admits a normal commit with
 	assert.doesNotMatch(withLease.ends[0].text, /Blocked by harness safety guard/);
 	const other = await runChild(commit, undefined, undefined, "general-worker", { dir: repo, withLeases: true });
 	assert.doesNotMatch(other.ends[0].text, /Blocked by harness safety guard/, "policy-only for other roles");
+	// Field report: concluding an integration merge at the right root on the right branch was refused with "a normal commit is automatic
+	// only with cwd = the candidate root on its feature branch", and root and branch were checked by hand. The refusal names the merge.
+	const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", windowsHide: true }).stdout.trim();
+	fs.writeFileSync(path.join(repo, ".git", "MERGE_HEAD"), `${head}\n`);
+	const merging = await runChild(commit, undefined, undefined, "release-engineer", { dir: repo, withLeases: true });
+	assert.equal(merging.ends.length, 1, merging.stderr);
+	assert.match(merging.ends[0].text, /Blocked by harness safety guard \[GIT_COMMIT\]/);
+	assert.match(merging.ends[0].text, /git commit; not automatic here: a merge is in progress \(MERGE_HEAD in .*\): a commit that concludes it records another history, so it is not a normal commit; ask main to request a single-use approval for this exact command\./);
+	assert.doesNotMatch(merging.ends[0].text, /cwd = the candidate root/, "no longer blames the folder or branch");
+	fs.rmSync(path.join(repo, ".git", "MERGE_HEAD"));
 });
 
 test("main X (simulated TUI): /authorization is read-only and secret-free: it names the push+commit lease and opens no dialog", { timeout: 120_000 }, async () => {

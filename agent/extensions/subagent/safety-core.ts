@@ -1963,16 +1963,41 @@ function redirectedGitEnvironment(): boolean {
 }
 
 function commitTargetLive(target: { candidate: string; pushUrl: string; branch: string }, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): string | undefined {
-	if (foldPath(canonicalCwd(root)) !== foldPath(target.candidate) || redirectedGitEnvironment()) return undefined;
+	const check = commitTargetCheck(target, root, liveUrl);
+	return "branch" in check ? check.branch : undefined;
+}
+// Field report: a trusted release-engineer concluding an integration merge (MERGE_HEAD present) at the right root on the right branch was
+// told "a normal commit is automatic only with cwd = the candidate root on its feature branch", and the root and branch were checked by
+// hand before anyone found the merge state. Each refusal now names the condition that failed.
+const GIT_STATE_LABEL: Record<string, string> = { MERGE_HEAD: "a merge", CHERRY_PICK_HEAD: "a cherry-pick", REVERT_HEAD: "a revert", "rebase-merge": "a rebase", "rebase-apply": "a rebase or git am", sequencer: "a multi-commit cherry-pick or revert" };
+function commitTargetCheck(target: { candidate: string; pushUrl: string; branch: string }, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): { branch: string } | { why: string } {
+	if (foldPath(canonicalCwd(root)) !== foldPath(target.candidate)) return { why: `this folder (${slashed(root)}) is not the candidate root this worker was launched for (${slashed(target.candidate)}); run it from there` };
+	if (redirectedGitEnvironment()) return { why: "Git is redirected by environment variables (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_CONFIG_* or similar); unset them" };
 	const top = gitRead(root, ["rev-parse", "--show-toplevel"]);
-	if (top?.length !== 1 || foldPath(canonicalCwd(top[0])) !== foldPath(root)) return undefined;
+	if (top?.length !== 1) return { why: "git could not read this folder as a repository" };
+	if (foldPath(canonicalCwd(top[0])) !== foldPath(root)) return { why: `this folder is inside the repository whose top level is ${slashed(top[0])}, not at its root; run it from the candidate root` };
 	const head = gitRead(root, ["symbolic-ref", "-q", "HEAD"]);
-	if (head?.length !== 1 || !head[0].startsWith("refs/heads/")) return undefined;
+	if (head?.length !== 1 || !head[0].startsWith("refs/heads/")) return { why: "HEAD is not on a branch (detached); check out the feature branch" };
 	const branch = validatePushBranch(head[0].slice("refs/heads/".length));
-	if (branch !== target.branch || liveUrl(root, branch) !== target.pushUrl) return undefined;
+	if (branch !== target.branch) return { why: `the checked-out branch is ${branch}, not the launch's feature branch ${target.branch}` };
+	if (liveUrl(root, branch) !== target.pushUrl) return { why: `the push URL of ${branch} no longer matches the one this worker was launched with` };
 	const gitDir = gitRead(root, ["rev-parse", "--absolute-git-dir"]);
-	if (gitDir?.length !== 1 || UNSAFE_GIT_STATE.some((s) => fs.existsSync(path.join(gitDir[0], s)))) return undefined;
-	return branch;
+	if (gitDir?.length !== 1) return { why: "git could not report the repository's .git folder" };
+	const state = UNSAFE_GIT_STATE.find((s) => fs.existsSync(path.join(gitDir[0], s)));
+	if (state) return { why: `${GIT_STATE_LABEL[state]} is in progress (${state} in ${slashed(gitDir[0])}): a commit that concludes it records another history, so it is not a normal commit; ask main to request a single-use approval for this exact command` };
+	return { branch };
+}
+/** Why a trusted release-engineer's normal commit was not automatic, for the refusal text; undefined when the cause is not one of these. */
+export function commitRefusalWhy(target: { candidate: string; pushUrl: string; branch: string } | undefined, command: string, root: string, liveUrl: (candidate: string, branch: string) => string | undefined): string | undefined {
+	if (!target) return "this worker was launched without a feature-branch push target, so no commit is automatic; ask main";
+	const normal = parseNormalCommit(command);
+	if (!normal) return undefined;
+	try {
+		const check = commitTargetCheck(target, root, liveUrl);
+		if ("why" in check) return check.why;
+		if (normal.file !== undefined && !automaticArtifactAllowed(normal.file, target)) return `the -F message file ${normal.file} is not in this task's _scratch or _evidence folder next to the candidate; write it there`;
+	} catch { return undefined; }
+	return undefined;
 }
 
 // Artifact groups accepted without a lease: worktrees/<primary checkout basename> (legacy) or worktrees/<repo name of the live-verified origin>.
@@ -2380,12 +2405,12 @@ function programOf(op: GuardOp): string {
 	const name = path.basename(words[0] ?? "").replace(/\.(exe|cmd|bat)$/i, "");
 	return ["git", "gh", "npm", "pnpm", "yarn"].includes(name.toLowerCase()) && /^[a-z][a-z-]*$/.test(words[1] ?? "") ? `${name} ${words[1]}` : name || "(empty)";
 }
-export function blockReason(decision: Extract<Decision, { action: "block" }>, scope: GuardScope, gateCommits: boolean): string {
+export function blockReason(decision: Extract<Decision, { action: "block" }>, scope: GuardScope, gateCommits: boolean, commitWhy?: string): string {
 	const head = `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: `;
 	if (scope === "child" && gateCommits && decision.rules.length === 1 && decision.rules[0] === "GIT_COMMIT" && decision.op.kind === "shell") {
 		const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
 		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}.`;
-		if (parseNormalCommit(decision.op.command) !== undefined) return `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
+		if (parseNormalCommit(decision.op.command) !== undefined) return commitWhy ? `${head}git commit; not automatic here: ${commitWhy}.` : `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
 		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
 	}
 	const advice = decision.rules.map((r) => RULE_ADVICE[r]).filter(Boolean);
@@ -2448,7 +2473,8 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
 	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
 	const miss = decision.grantable ? guard.store.grantMiss?.(guard.scope, canonicalCwd(cwd), decision.op) : undefined;
-	const reason = blockReason(decision, guard.scope, guard.gateCommits === true);
+	const commitWhy = guard.scope === "child" && guard.gateCommits === true && decision.op.kind === "shell" && decision.rules.length === 1 && decision.rules[0] === "GIT_COMMIT" ? commitRefusalWhy(guard.pushTarget, decision.op.command, decision.op.cwd, liveUrl) : undefined;
+	const reason = blockReason(decision, guard.scope, guard.gateCommits === true, commitWhy);
 	// Only a refusal that invites an approval gets the launch note: a commit-form refusal ("use git commit -F ...") needs no approval,
 	// and a note about approvals there sent a worker looking for one it did not need.
 	const invitesApproval = /; grantable: /.test(reason);
