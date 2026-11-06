@@ -5,7 +5,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
-import { createGrantStore, guardToolCall, REDACTED_ENV_SCRIPT, REDACTED_ENV_SCRIPT_SHA256, redactedEnvRead, validateArtifactDir, readOnlyViolation } from "../safety-core.ts";
+import { commitRefusalWhy, createGrantStore, guardToolCall, REDACTED_ENV_SCRIPT, REDACTED_ENV_SCRIPT_SHA256, redactedEnvRead, validateArtifactDir, readOnlyViolation } from "../safety-core.ts";
+import { spawnSync } from "node:child_process";
 import { redactEnv } from "../read-env-redacted.mjs";
 
 const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "guard-msg-")));
@@ -340,4 +341,32 @@ test("read-only role: a variable assigned once to a literal path in the same com
 		[`R='/tmp/ok'; for R in a b; do :; done\necho x > "$R/a.log"`, /variable or substitution/, "bash"],
 	];
 	for (const [command, why, tool] of refused) assert.match(check(command, tool) ?? "", why, command.split("\n")[0]);
+});
+
+// Field report: a trusted release-engineer concluding a merge was told only "a normal commit is automatic only with cwd = the candidate
+// root on its feature branch". Each condition that keeps a normal commit from being automatic now has its own reason.
+test("commit refusals name the condition that failed: folder, branch, detached HEAD, merge-like state, message file, no target", () => {
+	const repo = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "commit-why-")));
+	const git = (...args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8", windowsHide: true });
+	try {
+		git("init", "-q"); git("config", "user.name", "t"); git("config", "user.email", "t@example.test");
+		git("commit", "-q", "--allow-empty", "-m", "init"); git("checkout", "-q", "-b", "feat/x");
+		fs.mkdirSync(path.join(repo, "sub"));
+		const url = "https://github.com/owner/repo.git";
+		const target = { candidate: repo.replace(/\\/g, "/"), pushUrl: url, branch: "feat/x" };
+		const live = () => url;
+		const why = (command: string, cwd = repo, t: typeof target | undefined = target, l = live) => commitRefusalWhy(t, command, cwd, l) ?? "";
+		const commit = 'git commit -m "x"';
+		assert.equal(commitRefusalWhy(target, commit, repo, live), undefined, "the good case has no refusal reason");
+		assert.match(why(commit, path.join(repo, "sub")), /this folder \(.*sub\) is not the candidate root this worker was launched for/);
+		assert.match(why(commit, repo, { ...target, branch: "feat/y" }), /the checked-out branch is feat\/x, not the launch's feature branch feat\/y/);
+		assert.match(why(commit, repo, target, () => "https://github.com/other/repo.git"), /push URL of feat\/x no longer matches/);
+		assert.match(why('git commit -F "/elsewhere/msg.txt"'), /the -F message file \/elsewhere\/msg\.txt is not in this task's _scratch or _evidence folder/);
+		assert.match(commitRefusalWhy(undefined, commit, repo, live) ?? "", /launched without a feature-branch push target/);
+		fs.writeFileSync(path.join(repo, ".git", "CHERRY_PICK_HEAD"), "x\n");
+		assert.match(why(commit), /a cherry-pick is in progress \(CHERRY_PICK_HEAD in .*\): a commit that concludes it records another history/);
+		fs.rmSync(path.join(repo, ".git", "CHERRY_PICK_HEAD"));
+		git("checkout", "-q", "--detach");
+		assert.match(why(commit), /HEAD is not on a branch \(detached\)/);
+	} finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
