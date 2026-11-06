@@ -671,7 +671,7 @@ const ChainItem = Type.Object({
 });
 
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
-	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
+	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents (.pi/agents, for example from /subagent create); they take no modelTier.',
 	default: "user",
 });
 
@@ -903,7 +903,7 @@ export const MAIN_TOOL_GUIDELINES = [
 	"For a fix round or retry, the subagent task packet passes the failed attempt's REPORT path and its failing command output as they are; do not replace them with a summary or a lesson. Keep the task's modelTier for the first fix round; choose capable explicitly only after a second failure on the same check.",
 	"Run tasks in parallel only when each one's expected output (its code changes and report) is large against what siblings would otherwise rediscover and reconcile; several small items go to one writer. Start every sibling packet with the same shared block, identical text (decisions made, conventions, file map, shared checks), then the item's own part.",
 	"When a change needs two or more writers or crosses layers (backend, database, frontend, platform), launch one read-only planner first (economy; capable across layers or for migrations, security or concurrency) to propose the units, owned files, interfaces, order and checks; accept or edit its proposal and keep the PLAN yours. Skip it for single-writer changes.",
-	"Choose each task's modelTier when you plan, before launching any: economy for bounded edits whose files and focused checks the packet names and that leave no design, API, security, concurrency or persistence decision open (general-worker docs, config and script edits included); capable for open decisions and the integration or final verification that the other tasks feed.",
+	"Choose each task's modelTier when you plan, before launching any: economy for bounded edits whose files and focused checks the packet names and that leave no design, API, security, concurrency or persistence decision open (general-worker docs, config and script edits included); capable for open decisions and the integration or final verification that the other tasks feed. Tiers exist only for the harness roles: omit modelTier for a project-local agent (agentScope project or both), which runs on the model its own file names.",
 	"For main's own lookups use the graph and qmd_search when declared, before grep or find. Workers locate code with the graph, qmd_search and the serena skill (outline, find, refs); in a packet that asks a worker to find code, name the graph report or the known symbols.",
 ];
 
