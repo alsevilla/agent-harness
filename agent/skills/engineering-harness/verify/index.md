@@ -23,6 +23,12 @@ Return one disposition:
 - INCONCLUSIVE: explain what could not be established.
 
 Prefer focused, high-value checks before broad suites.
+Match evidence to the claim: compilation/type checks establish different facts from
+runtime behavior, and mocked tests do not establish live integration success. Check
+the changed contract's relevant failure and boundary cases as well as its happy path.
+When attributing a failure to the baseline, use existing comparable baseline evidence
+or an authorized isolated check; otherwise mark the attribution unknown. Do not fix
+unrelated failures or waive a required gate because a failure appears pre-existing.
 Do not rerun expensive suites without a reason.
 Mark each required check as a result, NOT RUN with reason, or justified not-applicable with reason; UI focus/browser checks only when UI is affected or assigned. Reuse an earlier result only for unchanged tested bytes, the same relevant environment and the same contract; otherwise rerun the affected check (`references/token-efficiency.md`, "Bounded checklist and evidence reuse").
 Record commands actually run and relevant results in the assigned REPORT file; the reply follows the child handoff format.

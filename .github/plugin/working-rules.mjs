@@ -16,5 +16,6 @@ export function workingRules(root) {
 		"- Same failure twice, or a guard refusal: change approach, never retry it.",
 		"- Change only what the task needs, in the code's own style; edit lines, not whole files; never weaken, skip or delete a test. Fix causes, reuse helpers and preserve error contracts; do not hide failures as success.",
 		"- Use configured auth; check presence/status, not values. No env or credential-store dumps, probing after auth failure, or secrets in args, URLs, logs, reports or fixtures. Output caps do not redact secrets.",
+		"- Use repo generators/formatters; no hand-patched outputs or unrelated churn.",
 	];
 }
