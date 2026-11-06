@@ -93,6 +93,7 @@ Describe the task to main as usual; it routes the work. Useful commands:
 | `/subagent trace [#n or role]` | One worker's tool calls as plain text to paste for a cost review: target, output size, repeats, whole reads of large files, errors, and the outputs carried longest (no argument lists the workers) |
 | `/subagent list`, `steer #N <message>`, `pause bg-N`, `resume bg-N`, `stop #N`, `result bg-N` | Control running or finished workers without a model call |
 | `/subagent usage` | Usage per role, cost per completed task and main's context size |
+| `/subagent fold` | Fold main's earlier turns into a checkpoint at your next message, whatever the size (main also folds by itself from 50k tokens when idle; see [Main checkpoints](#context-and-cost)) |
 | `/subagent roles` | Edit one role's default model, fallbacks and thinking level |
 | `/subagent create` | Preview and create a project-local role (operator only) |
 | `/authorization`, `/revoke-authorization` | Show or withdraw session approvals |
