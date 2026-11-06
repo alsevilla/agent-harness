@@ -95,3 +95,10 @@ test("/subagent fold folds at the next idle user turn whatever the size; 0 turns
 	setup({ [MAIN_FOLD_ENV]: "0" });
 	assert.match(requestMainFold(), /off/);
 });
+
+test("the README's command table lists /subagent fold", async () => {
+	const { readFileSync } = await import("node:fs");
+	const readme = readFileSync(new URL("../../../../README.md", import.meta.url), "utf8");
+	assert.match(readme, /^\| `\/subagent fold` \| /m);
+	assert.match(readme, /^## Context and cost$/m, "the row's link target exists");
+});
