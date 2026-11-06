@@ -14,6 +14,7 @@ export function workingRules(root) {
 		`- Lookup for code the packet does not locate: graph (python "${skill("graphify", "read_graph.py")}" query --graph <graph.json> --query "<words>"), then once QMD (node "${skill("qmd", "qmd.mjs")}" search <words>), then Serena (node "${skill("serena", "serena.mjs")}" outline <file> | find <Name> | refs <Name>), then grep/glob. Read named files directly. A missing helper prints a note: skip it.`,
 		"- Independent calls in one turn; read only the part you need; no sleep polling or interactive commands; long output to a _scratch log.",
 		"- Same failure twice, or a guard refusal: change approach, never retry it.",
-		"- Change only what the task needs, in the code's own style; edit lines, not whole files; never weaken, skip or delete a test.",
+		"- Change only what the task needs, in the code's own style; edit lines, not whole files; never weaken, skip or delete a test. Fix causes, reuse helpers and preserve error contracts; do not hide failures as success.",
+		"- Use configured auth; check presence/status, not values. No env or credential-store dumps, probing after auth failure, or secrets in args, URLs, logs, reports or fixtures. Output caps do not redact secrets.",
 	];
 }

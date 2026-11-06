@@ -9,6 +9,13 @@ Produce a compact Discovery Brief:
 - recommended next phase.
 
 Do not implement. Do not turn discovery into a repository-wide survey.
+Within the existing lookup order, start from the supplied path or symbol and the
+smallest plausible subsystem. For text-search fallback, locate filenames first when
+the location is unknown, then read matching ranges; narrow a truncated query rather
+than requesting a larger dump. Follow the relevant caller, contract and nearby tests.
+Use history only to resolve a specific question about intent or past behavior.
+Stop when the worker has the entry point, affected callers, reusable pattern and
+relevant checks; name remaining unknowns instead of expanding into unrelated code.
 Use Scout only when repository reconnaissance is genuinely needed. Scout is a read-only role: main delegates discovery reads to it, batched as one question-driven packet, instead of reading itself.
 Load `references/extended.md` only for broad/cross-system discovery.
 
