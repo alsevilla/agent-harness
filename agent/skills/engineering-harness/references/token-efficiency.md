@@ -10,7 +10,7 @@ Read only when investigating token consumption, oversized results, repetitive ro
 - Skip `scout` when exact source scope is already known; avoid routine `oracle` or reviewer calls.
 - Let implementation workers run focused relevant checks; reserve independent roles for critical risks per existing policy. Never skip justified independent checks.
 - Keep PLAN, DECISION, INTEGRATE sequencing with main.
-- Before dispatch, preflight each packet once: task, role scope, exact candidate, authority boundary, acceptance checks and scratch/evidence paths. Drop anything outside that role.
+- Before dispatch, preflight each packet once: task, role scope, exact candidate, authority boundary, acceptance checks and scratch/evidence paths. For an optional role, state the unresolved question and the decision its answer changes; omit the role if neither exists. Required independent checks stay required. Drop anything outside that role.
 - Reference a shared governing contract or evidence path instead of pasting history or full prior reports into several packets. Put reusable common context in one artifact and send only the role-specific delta.
 - State only deviations from leaf, local-only and native-tool boilerplate; name a module only when it differs from the role default; omit instructions meant for other roles.
 - Guidance only, not a runtime-enforced budget or token measurement. Never drop a critical risk, failed check or blocker to meet a length target.
@@ -60,8 +60,21 @@ Measure orchestrator input/output tokens separately from child tokens and provid
 `node --experimental-strip-types scripts/measure-child-prompt.mjs --label <name> --out <absolute dir outside the repository> [--agent-dir <empty absolute dir outside the repository>]` writes `measure-<name>.json` and each assembled prompt for five roles, in live and package shapes. `--agent-dir` measures the missing-integration profile; a non-reviewer launch is refused when Ponytail is absent, as in `index.ts`. The script reports characters and hashes only; it does not count tokens.
 
 ### Benchmark procedure (only when authorized; paid runs are not part of this repository)
-1. Fix constraints for both arms: model and fallback per role, thinking level, task packet, acceptance checks, cwd fixture, integration availability and cache state (cold or warm).
-2. Record the static measurement for each arm and compare characters and prompt hashes.
-3. If a tokenizer is authorized, count the assembled system prompt and tool schemas with it; keep those counts separate from characters.
-4. Per task and arm, repeat N runs and record main and child input (cached and uncached), output tokens, cost, wall time and acceptance-check results, with the Pi usage ledger path.
-5. Report medians with N, the constraint table, failures and retries. Differences within run-to-run variance are not savings.
+Use cost per successfully solved task: total billed cost of all attempts, including failures and retries, divided by the number that pass the same acceptance checks. Report success rate alongside it; when none succeed, report cost and zero successes rather than a ratio.
+
+1. Freeze task fixtures, acceptance checks, starting commit, tools, model, thinking level, fallback policy, run/time limits and integration availability. Use the same model for main and workers in the initial comparison so role/model differences do not confound delegation. Record cold/warm cache conditions and actual serving models.
+2. Compare these arms under those conditions:
+
+   | Configuration | Question |
+   |---|---|
+   | Strong single agent with the same model and tools | Does delegation improve success enough to pay for itself? |
+   | Harness with request shaping disabled | What does delegation itself cost? |
+   | Current full Pi harness | What do the shaping mechanisms save together? |
+   | Full harness with one mechanism disabled per arm | Which mechanisms contribute? |
+
+   Record the exact revision and settings for every arm. Disabling shaping includes handoff masking, worker masking, duplicate-read suppression, ledger, output caps and main folds; use documented controls where available and record any experimental patch for mechanisms without an off switch. This procedure adds no global toggle.
+3. Test mechanical fixes, debugging, multi-file features and long sessions separately. Repeat each task/arm the same predeclared number of times and vary run order. Long-session checks place requirements and authorization limits at the beginning, middle and end of long user messages, then check them after repeated folds.
+4. Measure mandatory T0 delegation separately against a narrowly scoped experimental direct T0 route; if retaining the orchestrator boundary, compare several related mechanical actions batched into one worker launch. Record worker startup/packet/handoff overhead. These are experimental arms, not changes to the shipped routing policy.
+5. Record per run: success/acceptance evidence, requirement violations, main and child input/output/cache-read/cache-write tokens, billed cost including all failed attempts and retries, elapsed time, and missing usage records. Keep static characters or tokenizer estimates separate from provider usage and billing.
+6. Report success rate, total cost per success, medians and spread with run count, failures and retries, plus the fixed-condition table. Differences within run-to-run variation are not demonstrated savings. Missing usage makes cost accounting partial.
+7. Benchmark Pi and Copilot separately. Request shaping is Pi-only; Copilot constructs its own requests. Shared guidance and hooks establish no equivalent token or billed saving. Keep model-inference results distinct from runtime/mock tests and static prompt-size measurements.

@@ -15,6 +15,9 @@ Add Scout first only when location/blast radius is unknown. Add a specialist onl
 Debugger may be skipped when evidence already establishes the cause and the remaining work is implementation-only.
 If a speculative fix fails or produces an unexplained regression, use debugger before another speculative patch.
 
+## Optional roles
+Before launching an optional scout, planner, specialist, verifier or reviewer, name in its packet the uncertainty it will resolve and the decision that changes based on its answer. Skip the optional role when no such decision remains. Independent checks required for material risks remain required. This is packet guidance, not a new router or runtime gate.
+
 ## Specialists
 Specialists are conditional. Do not summon a specialist merely because code touches that domain. Use one only when there is a material unresolved decision or risk that the worker should not decide alone.
 

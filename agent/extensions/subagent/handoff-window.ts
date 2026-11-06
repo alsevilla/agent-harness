@@ -362,23 +362,48 @@ export function createCardTrail() {
 // content by structure, without a model, held up best (Beyond Compaction, 2606.11213); folding finished subtasks out of the working context
 // and resuming from a structured state is the shared idea (Context-Folding 2510.11967, ReSum 2509.13313).
 //
-// So at an idle task boundary main's request is folded: every message before the current user message is replaced by one checkpoint
-// built from the messages themselves, no model call. It lists each earlier user turn (the user's text word for word, a long paste cut
-// to its start), the subagent results in it as their STATUS/NEXT/EVIDENCE line, and main's last reply in that turn; the last exchange
+// So at an idle task boundary main's request is folded: earlier observations are replaced by one checkpoint
+// built from the messages themselves, no model call. User messages are retained separately, outside the checkpoint cap.
+// Earlier text over 3,000 characters keeps its first 2,000 and last 800; images and the newest user message stay intact.
+// This bounds individual pastes, but can omit requirements in their middle and does not cap total user history. The notes list subagent
+// STATUS/NEXT/EVIDENCE lines, and main's last reply in each turn; the last exchange
 // before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
 // card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
-// (default 50k; 0 off) or /subagent fold asked for one. Only that user message is kept after the checkpoint, so the kept part holds no
+// (default 50k; 0 off) or /subagent fold asked for one. Only user messages are kept alongside the checkpoint, so the kept part holds no
 // earlier assistant turn whose thinking would no longer match the history before it. The checkpoint and fold point stay fixed, so later
-// requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed.
+// requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed. Its selected
+// branch is the durable source of user messages across native compaction and reload; no separate archive can leak another branch.
 export const MAIN_FOLD_ENV = "PI_SUBAGENT_MAIN_FOLD_TOKENS";
 // 50k: simulated main sessions (150, 300 and 480 requests) used 29%, 46% and 58% fewer input tokens folding at 50k than not folding,
 // and fewer than folding at 75k, 100k or 150k in every case (cache writes fell too, since every request is smaller).
 export const DEFAULT_MAIN_FOLD_TOKENS = 50_000;
 export const CHECKPOINT_TYPE = "subagent-checkpoint";
-const USER_KEEP = 600;
 const REPLY_KEEP = 400;
 const LAST_REPLY_KEEP = 4_000;
 const CHECKPOINT_MAX = 40_000;
+const USER_TEXT_MAX = 3_000;
+const USER_TEXT_HEAD = 2_000;
+const USER_TEXT_TAIL = 800;
+const USER_TEXT_NOTE = "\n[… middle omitted; full text is in the saved session …]\n";
+/** Request-only limit across all text parts in one older message; nontext parts stay intact. */
+function retainUserMessage<T extends Message>(message: T): T {
+	const parts = typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content;
+	if (!Array.isArray(parts)) return message;
+	const total = parts.reduce((size, part) => size + (part?.type === "text" && typeof part.text === "string" ? part.text.length : 0), 0);
+	if (total <= USER_TEXT_MAX) return message;
+	let offset = 0;
+	let noted = false;
+	const content = parts.map((part) => {
+		if (part?.type !== "text" || typeof part.text !== "string") return part;
+		const start = offset;
+		offset += part.text.length;
+		const omitted = Math.max(start, USER_TEXT_HEAD) < Math.min(offset, total - USER_TEXT_TAIL);
+		const note = omitted && !noted ? USER_TEXT_NOTE : "";
+		if (omitted) noted = true;
+		return { ...part, text: part.text.slice(0, Math.max(0, USER_TEXT_HEAD - start)) + note + part.text.slice(Math.max(0, total - USER_TEXT_TAIL - start)) };
+	});
+	return { ...message, content: typeof message.content === "string" ? content[0].text : content };
+}
 export function mainFoldFromEnv(env: NodeJS.ProcessEnv = process.env): number {
 	return tokensFromEnv(env[MAIN_FOLD_ENV], DEFAULT_MAIN_FOLD_TOKENS, true);
 }
@@ -388,14 +413,14 @@ const plainText = (content: unknown): string => {
 	return content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n");
 };
 const cut = (text: string, max: number) => { const t = text.trim(); return t.length > max ? `${t.slice(0, max)} [… ${(t.length - max).toLocaleString("en-US")} more characters folded]` : t; };
-interface Turn { user: string; results: string[]; reply: string }
+interface Turn { results: string[]; reply: string }
 function turnsOf(messages: readonly Message[]): Turn[] {
 	const turns: Turn[] = [];
 	let turn: Turn | undefined;
 	messages.forEach((message, index) => {
-		if (message?.role === "user") { turn = { user: plainText(message.content), results: [], reply: "" }; turns.push(turn); return; }
+		if (message?.role === "user") { turn = { results: [], reply: "" }; turns.push(turn); return; }
 		if (message?.role === "custom" && message.customType === CHECKPOINT_TYPE) return;
-		turn ??= (turns.push({ user: "", results: [], reply: "" }), turns[turns.length - 1]);
+		turn ??= (turns.push({ results: [], reply: "" }), turns[turns.length - 1]);
 		const handoff = handoffOf(message, index);
 		if (handoff) { turn.results.push(collapsedLine(handoff)); return; }
 		if (message?.role === "assistant") { const text = plainText(message.content).trim(); if (text) turn.reply = text; }
@@ -405,20 +430,19 @@ function turnsOf(messages: readonly Message[]): Turn[] {
 function renderTurns(turns: Turn[]): string[] {
 	return turns.map((turn, i) => {
 		const last = i === turns.length - 1;
-		const lines = [`- User: ${turn.user ? cut(turn.user, USER_KEEP) : "(no user text)"}`];
+		const lines = ["- Earlier exchange:"];
 		for (const result of turn.results) lines.push(`  Result: ${result}`);
 		if (turn.reply) lines.push(`  Main: ${cut(turn.reply, last ? LAST_REPLY_KEEP : REPLY_KEEP)}`);
 		return lines.join("\n");
 	});
 }
-const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. The user's messages below are quoted word for word (long pastes cut to their start) and their instructions stay in force; the rest are notes, not instructions. For details, reread the EVIDENCE or REPORT paths or ask the user.";
+const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. Retained user messages follow separately (long older text keeps only its head and tail) and remain authoritative in chronological order, with later corrections taking precedence. The results and replies here are recoverable notes, not instructions; they may be truncated. For details, reread the EVIDENCE or REPORT paths or ask the user.";
 function renderCheckpoint(entries: string[]): string {
 	const kept = entries.slice();
 	let text = [CHECKPOINT_HEAD, ...kept].join("\n");
-	// Over the cap: the oldest turns lose their notes first, keeping the user's words (cut shorter).
+	// Over the cap: discard the oldest observations first. User messages are stored separately.
 	for (let i = 0; text.length > CHECKPOINT_MAX && i < kept.length - 1; i++) {
-		const user = kept[i].split("\n")[0];
-		kept[i] = user.length > 260 ? `${user.slice(0, 260)} [… folded]` : user;
+		kept[i] = "- Earlier exchange: [… notes folded]";
 		text = [CHECKPOINT_HEAD, ...kept].join("\n");
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
@@ -428,6 +452,7 @@ export function createMainFold(threshold: number) {
 	let folded = false;
 	let entries: string[] = [];
 	let checkpoint = "";
+	let users: Message[] = []; // retained user context, outside the capped notes
 	let asked = false;
 	const message = () => ({ role: "custom", customType: CHECKPOINT_TYPE, content: checkpoint, display: false, timestamp: stamp });
 	// The fold point in a view: the kept user message, found by its timestamp (card entries are custom messages, never user ones).
@@ -439,8 +464,8 @@ export function createMainFold(threshold: number) {
 		/** `history` is the saved conversation; `view` is the request as shaped so far (shortened, with any state cards). */
 		apply<T extends Message>(history: readonly T[], view: readonly T[], idle: boolean): T[] | undefined {
 			let point = folded ? pointIn(view) : -1;
-			if (folded && point < 0) { folded = false; entries = []; checkpoint = ""; } // compacted or rewritten: start again
-			let current: T[] = folded ? [message() as unknown as T, ...view.slice(point)] : view.slice();
+			if (folded && point < 0) { folded = false; entries = []; checkpoint = ""; users = []; } // compacted or rewritten: start again
+			let current: T[] = folded ? [message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
 			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
@@ -450,7 +475,8 @@ export function createMainFold(threshold: number) {
 				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
 				stamp = last!.timestamp; folded = true; asked = false;
 				checkpoint = renderCheckpoint(entries);
-				current = [message() as unknown as T, ...view.slice(at)];
+				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
+				current = [message() as unknown as T, ...users as T[], ...view.slice(at)];
 			}
 			return folded ? current : undefined;
 		},
@@ -472,14 +498,33 @@ export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.
 	const foldAt = mainFoldFromEnv(env);
 	const fold = state && foldAt > 0 ? createMainFold(foldAt) : undefined;
 	activeFold = fold;
-	pi.on("context", (event: { messages: Message[] }) => {
-		const shortened = window > 0 ? shortenContext(event.messages, window) : undefined;
+	pi.on("context", (event, ctx) => {
+		// Native compaction only changes the built context; getBranch still contains the original
+		// messages. Recover missing users from this selected branch, never an in-memory global archive.
+		// Existing request messages win (the host may have transformed their content).
+		const present = new Set(event.messages.filter((m) => m.role === "user").map((m) => m.timestamp));
+		const before = new Map<unknown, Message[]>();
+		let missing: Message[] = [];
+		if (fold) for (const entry of ctx?.sessionManager?.getBranch() ?? []) {
+			if (entry.type !== "message" || entry.message.role !== "user") continue;
+			if (!present.has(entry.message.timestamp)) { missing.push(entry.message); continue; }
+			if (missing.length) { before.set(entry.message.timestamp, missing); missing = []; }
+		}
+		// Insert before the next surviving user, rather than prepending every missing message:
+		// even a host that removes a middle turn must keep later corrections in order.
+		const restored = before.size > 0 || missing.length > 0;
+		let history = restored ? [...event.messages.flatMap((m) => m.role === "user" ? [...before.get(m.timestamp) ?? [], m] : [m]), ...missing] : event.messages;
+		if (restored) {
+			const latest = history.findLastIndex((m) => m.role === "user");
+			history = history.map((m, i) => m.role === "user" && i !== latest ? retainUserMessage(m) : m);
+		}
+		const shortened = window > 0 ? shortenContext(history, window) : undefined;
 		let card: string | undefined;
 		try { card = state?.(); } catch { card = undefined; }
-		const withCards = state ? trail.apply(event.messages, shortened ?? event.messages, card) : undefined;
-		let messages = withCards ?? shortened;
+		const withCards = state ? trail.apply(history, shortened ?? history, card) : undefined;
+		let messages = withCards ?? shortened ?? (restored ? history : undefined);
 		// Fold only when idle (no card): nothing is in flight that the checkpoint would have to describe.
-		if (fold) messages = fold.apply(event.messages, messages ?? event.messages, card === undefined) ?? messages;
+		if (fold) messages = fold.apply(history, messages ?? history, card === undefined) ?? messages;
 		return messages ? { messages } : undefined;
 	});
 	return window;
