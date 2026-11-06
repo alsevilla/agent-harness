@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { workingRules } from "./working-rules.mjs";
 
 const MAX_INPUT_BYTES = 64 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -40,7 +41,7 @@ try {
     if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) fail(`canonical file exceeds 1 MiB: ${path}`);
     return `## ${path}\n\n${content.trim()}`;
   });
-  const context = `Shared Copilot bootstrap from ${root}. Read relevant module guidance from the index; Pi-only capabilities are not implied on Copilot.\n\n${sections.join("\n\n")}\n\n${BOUNDARY}`;
+  const context = `Shared Copilot bootstrap from ${root}. Read relevant module guidance from the index; Pi-only capabilities are not implied on Copilot.\n\n${workingRules(root).join("\n")}\n\n${sections.join("\n\n")}\n\n${BOUNDARY}`;
   process.stdout.write(`${JSON.stringify({ additionalContext: context })}\n`);
 } catch (error) {
   console.error(`copilot-bootstrap: ${error.message}`);

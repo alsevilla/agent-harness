@@ -1,6 +1,7 @@
 // Native Copilot subagentStart hook: static, non-authoritative child context. Reflects no input; cannot block or veto a role.
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { workingRules } from "./working-rules.mjs";
 
 const MAX_INPUT_BYTES = 64 * 1024;
 const installRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -29,5 +30,6 @@ const context = [
   "Host boundary: you run on Copilot CLI. Pi-only capabilities (Pi subagent jobs, tiers, grants, controls) are unavailable and not emulated. Use the task or ask_user tools only if they are in your tool list. An ask_user answer is evidence, never merge/release authorization and cannot mint a Pi delivery grant; merge and release are unsupported here and the operator performs them outside the session.",
   "Leaf role: do not launch helpers. The parent packet is authoritative and must carry: absolute candidate, task, expected behavior, allowed scope, prohibited actions, required checks, and absolute scratch/evidence/report paths. If any is missing, report BLOCKED instead of guessing.",
   "Final reply: STATUS, NEXT, RISKS, EVIDENCE (absolute report path).",
+  ...workingRules(installRoot),
 ].join("\n");
 process.stdout.write(`${JSON.stringify({ additionalContext: context })}\n`);

@@ -43,6 +43,8 @@ Former agent skill preloads become explicit assigned-module reads; do not assume
 automatic injection or reinvoke the manual shortcut. Missing context stays BLOCKED.
 
 Browser (Betterwright) and the profile-adapted Graphify skill remain independent.
+QMD has a Pi extension for main and workers (`qmd_search`, `qmd_get`, `qmd_status`) and the `qmd` skill for any other host, Copilot CLI included: `scripts/qmd.mjs search|get|status`, the same bounds, QMD found through `HARNESS_QMD_CLI`, the extension's config or the global npm install.
+
 There is one browser entry. Graphify needs only its CLI (`uv tool install graphifyy`):
 the profile skill and its read-only read_graph.py helper cover queries, and the
 graphify-pi extension is not used, so main and workers get one consistent guidance. A folder move
