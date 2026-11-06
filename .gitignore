@@ -65,3 +65,6 @@ agent/run-state/
 _evidence
 _scratch
 install
+
+mcp-last-seen-version.json
+trust.json

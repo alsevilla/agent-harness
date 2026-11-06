@@ -546,16 +546,16 @@
       "defaultModelTier": "economy",
       "tiers": {
         "economy": {
-          "model": "openai-codex/gpt-6-luna",
+          "model": "anthropic/claude-haiku-5-5",
           "fallbackModel": [
-            "anthropic/claude-haiku-5-5"
+            "openai-codex/gpt-6-luna"
           ],
           "thinking": "medium"
         },
         "capable": {
-          "model": "openai-codex/gpt-6.1-sol",
+          "model": "anthropic/claude-sonnet-5-5",
           "fallbackModel": [
-            "anthropic/claude-sonnet-5-5"
+            "openai-codex/gpt-6.1-sol"
           ],
           "thinking": "medium"
         }
