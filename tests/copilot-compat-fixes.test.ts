@@ -393,3 +393,10 @@ test("hooks find the plugin root from COPILOT_PLUGIN_ROOT, PLUGIN_ROOT or CLAUDE
   expect(none.status).not.toBe(0);
   expect(none.stderr).toContain("agent-harness: plugin root not set");
 });
+
+// The guard imports safety-core.ts; without "type": "module" in package.json Node printed MODULE_TYPELESS_PACKAGE_JSON on every
+// preToolUse call. A hook should write nothing to stderr on an ordinary allow or deny.
+test("preToolUse guard writes nothing to stderr for an ordinary allow or deny", () => {
+  expect(JSON.parse(read("package.json")).type).toBe("module");
+  for (const command of ["git status", "cat .env"]) expect(guard(command).stderr).toBe("");
+});
