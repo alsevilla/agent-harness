@@ -30,6 +30,6 @@ const context = [
   "Host boundary: you run on Copilot CLI. Pi-only capabilities (Pi subagent jobs, tiers, grants, controls) are unavailable and not emulated. Use the task or ask_user tools only if they are in your tool list. An ask_user answer is evidence, never merge/release authorization and cannot mint a Pi delivery grant; merge and release are unsupported here and the operator performs them outside the session.",
   "Leaf role: do not launch helpers. The parent packet is authoritative and must carry: absolute candidate, task, expected behavior, allowed scope, prohibited actions, required checks, and absolute scratch/evidence/report paths. If any is missing, report BLOCKED instead of guessing.",
   "Final reply: STATUS, NEXT, RISKS, EVIDENCE (absolute report path).",
-  ...workingRules(installRoot),
+  ...workingRules(installRoot, true),
 ].join("\n");
 process.stdout.write(`${JSON.stringify({ additionalContext: context })}\n`);

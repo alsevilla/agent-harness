@@ -21,6 +21,10 @@
    the exception and replacement evidence; small size alone is not an exception.
 5. Make the smallest correct change; run focused checks, then broader regression
    only when relevant. Do not weaken valid expectations to fit incorrect behavior.
+   Before handoff, inspect the task-scoped diff once for accidental edits, formatting
+   churn or unrelated changes. Compare with the starting state when the candidate was
+   already dirty; preserve existing user work. This is the writer's completion check,
+   not independent REVIEW. If it leads to another edit, rerun affected checks.
 6. Record RED/GREEN commands and outcomes (or exception/replacement evidence) in the assigned REPORT file, not the reply:
    the exact candidate, changed files, checks/results, missing evidence and
    residual risk. The main session selects independent Verify/Review using global
@@ -31,6 +35,9 @@
    `references/run-manifest.md` (Candidate fingerprint recipe) gives the content-hash recipe; it is guidance, not enforcement. The reply follows the canonical four-line handoff (`references/token-efficiency.md`, "Child final report").
 
 ## Dispatch and completion checklist
+- Follow the repository's package manager, generator and formatter. Edit generator inputs and regenerate outputs with the existing command; if generation is unavailable, report the missing evidence instead of claiming synchronized artifacts. Keep lockfile updates tied to intended dependency changes and formatting limited to affected files where supported.
+- Complete the behavior change across affected callers, configuration and user-facing documentation within the accepted scope. Follow existing compatibility conventions; an unresolved breaking-contract decision returns to main rather than becoming an implicit implementation choice.
+- A regression check should fail for the original defect and pass for the intended behavior. Assert observable results and relevant failure/boundary cases, not a copy of the implementation or only that a mock was called. Reuse the existing test setup; do not add a framework for a small fix.
 - Use one implementation worker per candidate; it owns the writes. Add independent Verify/Review or a specialist only for a justified risk under `references/routing.md`, and name that risk in the packet.
 - Packet brief: keep one compact shared brief as one shared artifact referenced by each packet, and send only the role-specific delta. It holds task, absolute candidate, accepted decisions and interfaces, role scope, file ownership, authority and mutation boundary, essential restrictions, required checks, completion criteria and scratch/evidence paths. Use canonical references (governing plan, contract, REPORT path) instead of copied history or policy.
 - Before dispatch and at completion, mark each required check as a result (command, exit code, outcome), NOT RUN with reason, or justified not-applicable with reason. UI focus/browser checks are not universal: require them only when UI is affected or assigned.
