@@ -2289,7 +2289,53 @@ export function readOnlyViolation(toolName: string, input: Record<string, unknow
 		return insideRoot(p, cwd, root) ? `${toolName} changes a file in the candidate checkout` : undefined;
 	}
 	if (toolName !== "bash" && toolName !== "powershell") return undefined;
-	return readOnlyShell(withoutDataBodies(String(input?.command ?? "")), cwd, root);
+	return readOnlyShell(withLiteralVariables(withoutDataBodies(String(input?.command ?? ""))), cwd, root);
+}
+
+// Field report: a read-only debugger's PowerShell `$R='C:\...\_scratch\sms-test\r1-compile-debug'` followed by
+// `cargo check ... *> "$R\check-fixed.log"` was refused: the target holds a variable the guard cannot resolve, although the same command
+// assigned it a literal _scratch path two lines earlier. A variable is replaced by its value only when that is certain: assigned exactly
+// once, as a whole line or ;-statement (PowerShell `$R = '...'`, Bash `R='...'` or `export R=...`), to a literal with no $, backtick or %,
+// and used after the assignment; and the command has nothing that could change it later (Set-/New-/Remove-/Clear-Variable, read, unset,
+// declare, typeset, local, for, foreach). Anything else stays unresolved, and so refused as before.
+const VAR_CHANGERS = /\b(?:Set-Variable|New-Variable|Remove-Variable|Clear-Variable|sv|read|unset|declare|typeset|local|readonly|for|foreach|mapfile|readarray|getopts)\b/i;
+const PS_LITERAL_SET = /^\s*\$([A-Za-z_]\w*)\s*=\s*(?:'([^'$`%]*)'|"([^"$`%]*)")\s*$/;
+const SH_LITERAL_SET = /^\s*(?:export\s+)?([A-Za-z_]\w*)=(?:'([^'$`%]*)'|"([^"$`%]*)"|([^\s$`%'";&|<>()]+))\s*$/;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function withLiteralVariables(text: string): string {
+	if (VAR_CHANGERS.test(text)) return text;
+	const found: { name: string; value: string; end: number; ps: boolean }[] = [];
+	let offset = 0;
+	for (const line of text.split(/(?<=\n)/)) {
+		let at = offset;
+		for (const piece of line.split(/(?<=;)/)) {
+			const statement = piece.replace(/;$/, "").replace(/\r?\n$/, "");
+			const ps = PS_LITERAL_SET.exec(statement);
+			const sh = ps ? null : SH_LITERAL_SET.exec(statement);
+			const m = ps ?? sh;
+			if (m) found.push({ name: m[1], value: m[2] ?? m[3] ?? m[4] ?? "", end: at + piece.length, ps: !!ps });
+			at += piece.length;
+		}
+		offset += line.length;
+	}
+	// Every replacement is found in the original text, then applied in one pass.
+	const edits: { at: number; length: number; value: string }[] = [];
+	for (const v of found) {
+		const name = escapeRe(v.name);
+		const same = (n: string) => (v.ps ? n.toLowerCase() === v.name.toLowerCase() : n === v.name);
+		if (found.filter((w) => same(w.name)).length !== 1) continue; // assigned more than once: not certain
+		// Any other assignment of this name (inside a block, with a computed value, a one-command prefix) makes it uncertain too.
+		const assigns = v.ps ? new RegExp(`\\$${name}\\s*=(?!=)`, "gi") : new RegExp(`(?:^|[\\s;&|(])${name}=`, "g");
+		if ((text.match(assigns) ?? []).length !== 1) continue;
+		const use = v.ps ? new RegExp(`\\$(?:\\{${name}\\}|${name}(?![\\w:]))`, "gi") : new RegExp(`\\$(?:\\{${name}\\}|${name}(?!\\w))`, "g");
+		for (const m of text.matchAll(use)) if ((m.index ?? 0) >= v.end) edits.push({ at: m.index ?? 0, length: m[0].length, value: v.value });
+	}
+	if (!edits.length) return text;
+	edits.sort((a, b) => a.at - b.at);
+	let out = "";
+	let from = 0;
+	for (const e of edits) { if (e.at < from) continue; out += text.slice(from, e.at) + e.value; from = e.at + e.length; }
+	return out + text.slice(from);
 }
 
 // ---- User permission rules: <agent dir>/harness-permissions.json, written by the user only (agents cannot: it is a CONFIG_WRITE path).
