@@ -37,10 +37,10 @@ test("folds at an idle new user turn past the threshold; the checkpoint keeps th
 	assert.equal(mid.some((m) => m.customType === CHECKPOINT_TYPE), false, "only at a new user turn");
 	history.push(user("yes"));
 	const folded = await request(history);
-	assert.equal(folded.length, 2);
+	assert.equal(folded.length, history.filter((m) => m.role === "user").length + 1);
 	assert.equal(folded[0].customType, CHECKPOINT_TYPE);
 	assert.equal(folded[0].display, false);
-	assert.deepEqual(folded[1], history.at(-1), "only the new user message is kept: no earlier assistant turn with thinking");
+	assert.deepEqual(folded.at(-1), history.at(-1), "only the new user message is kept: no earlier assistant turn with thinking");
 	const cp = String(folded[0].content);
 	assert.match(cp, /^\[main checkpoint, not user text\]/);
 	assert.match(cp, /- User: Task 1: please pace the SMS sender \(rule: never push to master\)/, "the user's words, word for word");
@@ -78,7 +78,7 @@ test("never folds while a job runs or a decision waits; a later fold adds to the
 	const cp = String(second[0].content);
 	assert.match(cp, /Task 1: please pace/, "the first fold's notes stay");
 	assert.match(cp, /Task 26 is done/, "the new turns are added");
-	assert.equal(second.length, 2);
+	assert.deepEqual(second.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"));
 	const compacted = [{ role: "user", content: "summary of everything", timestamp: ++clock }, user("go on")];
 	const after = await request(compacted);
 	assert.equal(after.some((m) => m.customType === CHECKPOINT_TYPE), false, "after a compaction the old fold point is gone: start over");
@@ -101,4 +101,55 @@ test("the README's command table lists /subagent fold", async () => {
 	const readme = readFileSync(new URL("../../../../README.md", import.meta.url), "utf8");
 	assert.match(readme, /^\| `\/subagent fold` \| /m);
 	assert.match(readme, /^## Context and cost$/m, "the row's link target exists");
+});
+
+// User text is the conservative constraint record: do not try to infer which
+// sentences contain requirements, holds, authorization limits or open questions.
+test("requirements anywhere in long messages survive repeated folds and checkpoint pressure", async () => {
+	const request = setup({});
+	const text = "Never deploy.\n" + "a".repeat(25_000) + "\nWhich API version? Leave this unresolved.\n" + "b".repeat(25_000) + "\nDo not change the public contract.";
+	const original = { ...user(text), content: [{ type: "text", text }, { type: "image", data: "original-image", mimeType: "image/png" }] };
+	const history = [original, reply("Acknowledged.")];
+	for (let n = 0; n < 3; n++) {
+		// Enough notes to exercise the 40k checkpoint cap as well as repeated folds.
+		for (let i = 0; i < 25; i++) history.push(user(`turn ${n}-${i}`), reply("notes ".repeat(1000)), result(`large-${n}-${i}`, i));
+		history.push(user(`continue ${n}`));
+		requestMainFold();
+		const before = JSON.stringify(history);
+		const folded = await request(history);
+		assert.equal(JSON.stringify(history), before, "saved messages are unchanged");
+		assert.deepEqual(folded.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"), "all user content and nontext parts stay verbatim, once and in order");
+		assert.ok(String(folded[0].content).length < 41_000, "only recoverable notes are capped");
+		history.push(reply("Continuing."));
+	}
+});
+
+test("the native session branch restores user constraints after compaction and reload without resurrecting another branch", async () => {
+	const original = user("Never push or deploy. " + "detail ".repeat(1000) + " Preserve the schema.");
+	const current = user("continue");
+	let branch = [original, reply("done"), current].map((message) => ({ type: "message", message }));
+	const handlers = new Map<string, (event: any, ctx?: any) => any>();
+	const register = () => registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, {}, () => undefined);
+	const compacted = [{ role: "compactionSummary", summary: "Lossy summary", tokensBefore: 100_000, timestamp: ++clock }, current];
+	const ctx = { sessionManager: { getBranch: () => branch } };
+	register();
+	const first = handlers.get("context")!({ messages: compacted }, ctx).messages;
+	assert.deepEqual(first.filter((m: Msg) => m.role === "user"), [original, current]);
+	register(); // fresh extension instance, same persisted branch
+	assert.deepEqual(handlers.get("context")!({ messages: compacted }, ctx).messages, first);
+	assert.equal(handlers.get("context")!({ messages: [original, current] }, ctx), undefined, "no duplicate when already present");
+	branch = [{ type: "message", message: current }]; // fork/rewind selected another branch
+	assert.equal(handlers.get("context")!({ messages: compacted }, ctx), undefined, "no stale in-memory constraint archive");
+});
+
+test("restoring a missing middle turn preserves later corrections and host-transformed messages", () => {
+	const first = user("Never deploy.");
+	const middle = user("You may deploy staging.");
+	const latest = user("Stop all deployment.");
+	const handlers = new Map<string, (event: any, ctx?: any) => any>();
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, {}, () => undefined);
+	const transformed = { ...latest, content: latest.content + " [host expansion]" };
+	const ctx = { sessionManager: { getBranch: () => [first, middle, latest].map((message) => ({ type: "message", message })) } };
+	const result = handlers.get("context")!({ messages: [first, transformed] }, ctx);
+	assert.deepEqual(result.messages, [first, middle, transformed]);
 });

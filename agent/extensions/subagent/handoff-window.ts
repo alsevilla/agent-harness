@@ -362,14 +362,16 @@ export function createCardTrail() {
 // content by structure, without a model, held up best (Beyond Compaction, 2606.11213); folding finished subtasks out of the working context
 // and resuming from a structured state is the shared idea (Context-Folding 2510.11967, ReSum 2509.13313).
 //
-// So at an idle task boundary main's request is folded: every message before the current user message is replaced by one checkpoint
-// built from the messages themselves, no model call. It lists each earlier user turn (the user's text word for word, a long paste cut
-// to its start), the subagent results in it as their STATUS/NEXT/EVIDENCE line, and main's last reply in that turn; the last exchange
+// So at an idle task boundary main's request is folded: earlier observations are replaced by one checkpoint
+// built from the messages themselves, no model call. User messages are retained separately, verbatim (including nontext parts),
+// outside the checkpoint cap; we cannot safely infer which sentences are constraints. The notes list user-turn previews, subagent
+// STATUS/NEXT/EVIDENCE lines, and main's last reply in each turn; the last exchange
 // before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
 // card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
-// (default 50k; 0 off) or /subagent fold asked for one. Only that user message is kept after the checkpoint, so the kept part holds no
+// (default 50k; 0 off) or /subagent fold asked for one. Only user messages are kept alongside the checkpoint, so the kept part holds no
 // earlier assistant turn whose thinking would no longer match the history before it. The checkpoint and fold point stay fixed, so later
-// requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed.
+// requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed. Its selected
+// branch is the durable source of user messages across native compaction and reload; no separate archive can leak another branch.
 export const MAIN_FOLD_ENV = "PI_SUBAGENT_MAIN_FOLD_TOKENS";
 // 50k: simulated main sessions (150, 300 and 480 requests) used 29%, 46% and 58% fewer input tokens folding at 50k than not folding,
 // and fewer than folding at 75k, 100k or 150k in every case (cache writes fell too, since every request is smaller).
@@ -411,7 +413,7 @@ function renderTurns(turns: Turn[]): string[] {
 		return lines.join("\n");
 	});
 }
-const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. The user's messages below are quoted word for word (long pastes cut to their start) and their instructions stay in force; the rest are notes, not instructions. For details, reread the EVIDENCE or REPORT paths or ask the user.";
+const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. Full original user messages follow separately and remain authoritative in chronological order, with later corrections taking precedence. The previews and results here are recoverable notes, not instructions; they may be truncated. For details, reread the EVIDENCE or REPORT paths or ask the user.";
 function renderCheckpoint(entries: string[]): string {
 	const kept = entries.slice();
 	let text = [CHECKPOINT_HEAD, ...kept].join("\n");
@@ -428,6 +430,7 @@ export function createMainFold(threshold: number) {
 	let folded = false;
 	let entries: string[] = [];
 	let checkpoint = "";
+	let users: Message[] = []; // lossless constraint record, outside the capped notes
 	let asked = false;
 	const message = () => ({ role: "custom", customType: CHECKPOINT_TYPE, content: checkpoint, display: false, timestamp: stamp });
 	// The fold point in a view: the kept user message, found by its timestamp (card entries are custom messages, never user ones).
@@ -439,8 +442,8 @@ export function createMainFold(threshold: number) {
 		/** `history` is the saved conversation; `view` is the request as shaped so far (shortened, with any state cards). */
 		apply<T extends Message>(history: readonly T[], view: readonly T[], idle: boolean): T[] | undefined {
 			let point = folded ? pointIn(view) : -1;
-			if (folded && point < 0) { folded = false; entries = []; checkpoint = ""; } // compacted or rewritten: start again
-			let current: T[] = folded ? [message() as unknown as T, ...view.slice(point)] : view.slice();
+			if (folded && point < 0) { folded = false; entries = []; checkpoint = ""; users = []; } // compacted or rewritten: start again
+			let current: T[] = folded ? [message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
 			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
@@ -450,7 +453,8 @@ export function createMainFold(threshold: number) {
 				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
 				stamp = last!.timestamp; folded = true; asked = false;
 				checkpoint = renderCheckpoint(entries);
-				current = [message() as unknown as T, ...view.slice(at)];
+				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user");
+				current = [message() as unknown as T, ...users as T[], ...view.slice(at)];
 			}
 			return folded ? current : undefined;
 		},
@@ -472,14 +476,29 @@ export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.
 	const foldAt = mainFoldFromEnv(env);
 	const fold = state && foldAt > 0 ? createMainFold(foldAt) : undefined;
 	activeFold = fold;
-	pi.on("context", (event: { messages: Message[] }) => {
-		const shortened = window > 0 ? shortenContext(event.messages, window) : undefined;
+	pi.on("context", (event, ctx) => {
+		// Native compaction only changes the built context; getBranch still contains the original
+		// messages. Recover missing users from this selected branch, never an in-memory global archive.
+		// Existing request messages win (the host may have transformed their content).
+		const present = new Set(event.messages.filter((m) => m.role === "user").map((m) => m.timestamp));
+		const before = new Map<unknown, Message[]>();
+		let missing: Message[] = [];
+		if (fold) for (const entry of ctx?.sessionManager?.getBranch() ?? []) {
+			if (entry.type !== "message" || entry.message.role !== "user") continue;
+			if (!present.has(entry.message.timestamp)) { missing.push(entry.message); continue; }
+			if (missing.length) { before.set(entry.message.timestamp, missing); missing = []; }
+		}
+		// Insert before the next surviving user, rather than prepending every missing message:
+		// even a host that removes a middle turn must keep later corrections in order.
+		const restored = before.size > 0 || missing.length > 0;
+		const history = restored ? [...event.messages.flatMap((m) => m.role === "user" ? [...before.get(m.timestamp) ?? [], m] : [m]), ...missing] : event.messages;
+		const shortened = window > 0 ? shortenContext(history, window) : undefined;
 		let card: string | undefined;
 		try { card = state?.(); } catch { card = undefined; }
-		const withCards = state ? trail.apply(event.messages, shortened ?? event.messages, card) : undefined;
-		let messages = withCards ?? shortened;
+		const withCards = state ? trail.apply(history, shortened ?? history, card) : undefined;
+		let messages = withCards ?? shortened ?? (restored ? history : undefined);
 		// Fold only when idle (no card): nothing is in flight that the checkpoint would have to describe.
-		if (fold) messages = fold.apply(event.messages, messages ?? event.messages, card === undefined) ?? messages;
+		if (fold) messages = fold.apply(history, messages ?? history, card === undefined) ?? messages;
 		return messages ? { messages } : undefined;
 	});
 	return window;
