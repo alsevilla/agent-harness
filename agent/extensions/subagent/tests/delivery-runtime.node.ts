@@ -61,9 +61,12 @@ function installTripwire(): void {
 	fs.mkdirSync(GH_CONFIG, { recursive: true });
 	fs.mkdirSync(HOME_DIR, { recursive: true });
 	fs.writeFileSync(TRIPWIRE_SH, `${shimFn("git")}\n${shimFn("gh")}\n`);
-	// Pi resolves its code integration under HOME; copy the installed package into the isolated home (scratch only).
+	// Pi resolves its code integration under HOME; copy the installed package into the isolated home (scratch only). Without an
+	// installed Ponytail (a clean machine or CI) a no-op extension stands in: these suites test the harness, not Ponytail.
 	const ponytail = path.join("agent", "npm", "node_modules", "@dietrichgebert", "ponytail");
-	fs.cpSync(path.join(installedProfileRoot, ponytail), path.join(HOME_DIR, ".pi", ponytail), { recursive: true });
+	const installed = path.join(installedProfileRoot, ponytail);
+	if (fs.existsSync(path.join(installed, "pi-extension", "index.js"))) fs.cpSync(installed, path.join(HOME_DIR, ".pi", ponytail), { recursive: true });
+	else { fs.mkdirSync(path.join(HOME_DIR, ".pi", ponytail, "pi-extension"), { recursive: true }); fs.writeFileSync(path.join(HOME_DIR, ".pi", ponytail, "pi-extension", "index.js"), "export default function ponytailStub() {}\n"); }
 }
 const tripwireLog = () => (fs.existsSync(TRIPWIRE_LOG) ? fs.readFileSync(TRIPWIRE_LOG, "utf8") : "");
 function assertNoTripwire(where: string): void { assert.equal(tripwireLog(), "", `${where}: git/gh argv reached the bash tripwire`); }

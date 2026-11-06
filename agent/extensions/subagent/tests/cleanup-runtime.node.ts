@@ -62,9 +62,12 @@ function installTripwire(): void {
 	fs.mkdirSync(GH_CONFIG, { recursive: true });
 	fs.mkdirSync(HOME_DIR, { recursive: true });
 	fs.writeFileSync(TRIPWIRE_SH, `${shimFn("git")}\n${shimFn("gh")}\n`);
-	// Pi resolves its code integration under HOME; copy the installed package into the isolated home (scratch only).
+	// Pi resolves its code integration under HOME; copy the installed package into the isolated home (scratch only). Without an
+	// installed Ponytail (a clean machine or CI) a no-op extension stands in: these suites test the harness, not Ponytail.
 	const ponytail = path.join("agent", "npm", "node_modules", "@dietrichgebert", "ponytail");
-	fs.cpSync(path.join(installedProfileRoot, ponytail), path.join(HOME_DIR, ".pi", ponytail), { recursive: true });
+	const installed = path.join(installedProfileRoot, ponytail);
+	if (fs.existsSync(path.join(installed, "pi-extension", "index.js"))) fs.cpSync(installed, path.join(HOME_DIR, ".pi", ponytail), { recursive: true });
+	else { fs.mkdirSync(path.join(HOME_DIR, ".pi", ponytail, "pi-extension"), { recursive: true }); fs.writeFileSync(path.join(HOME_DIR, ".pi", ponytail, "pi-extension", "index.js"), "export default function ponytailStub() {}\n"); }
 }
 const tripwireLog = () => (fs.existsSync(TRIPWIRE_LOG) ? fs.readFileSync(TRIPWIRE_LOG, "utf8") : "");
 function assertNoTripwire(where: string): void { assert.equal(tripwireLog(), "", `${where}: git/gh argv reached the bash tripwire`); }
@@ -208,7 +211,9 @@ async function openMain(steps: SdkStep[], opts: { ui?: { confirm: (...a: any[]) 
 // Mandatory fingerprint binding of a merge approval through the real request_authorization tool: dialog content, reuse only on an equal live state, change-during-dialog refusal.
 function boundRepo(): { dir: string; repoDir: string } {
 	const dir = fs.mkdtempSync(path.join(scratchBase, "delivery-bound-"));
-	const repoDir = path.join(dir, "project");
+	// A worktree-shaped candidate (<parent>/worktrees/<repo>/<task>): since plain-branch cleanup (#38), a candidate outside worktrees/
+	// lists only the artifact folders its merge approval named, and this test is about the checkout entry.
+	const repoDir = path.join(dir, "worktrees", "project", "task");
 	makeRepo(repoDir, GITHUB_ORIGIN);
 	const run = spawnSync("git", ["checkout", "-q", "feat/x"], { cwd: repoDir, windowsHide: true });
 	assert.equal(run.status, 0, String(run.stderr));
@@ -340,7 +345,7 @@ test("real main session: cleanup refusals fail closed before any launch and a me
 	fs.rmSync(TRIPWIRE_LOG, { force: true });
 	const t = cleanupTask();
 	const { dir, repoDir } = boundRepo();
-	const req = mergeReq(repoDir, "q1");
+	const req = mergeReq(repoDir, "q1", { cwd: repoDir });
 	const ask = (agent: string, extra: Record<string, unknown>, id: string): SdkStep => ({ tool: "subagent", id, args: { agent, task: "cleanup", background: false, cwd: CPRIMARY, cleanup: { checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true }, ...extra } });
 	const s = await openMain([
 		req,
@@ -360,7 +365,7 @@ test("real main session: cleanup refusals fail closed before any launch and a me
 		assert.match(r[1].text, /"state":"RETAINED"/);
 		assert.match(r[1].text, /no known owner/, "a merged PR alone is not enough: unknown ownership retains");
 		assert.doesNotMatch(r[1].text, /"state":"READY"|"state":"PENDING_UNVERIFIED"/, "unknown ownership is never pending-unverified, let alone ready");
-		assert.match(r[1].text, /never deleted automatically/, "artifact folders are reported RETAINED");
+		assert.match(r[1].text, /removed by the same cleanup after the checkout/, "artifact folders are listed for the same cleanup, after the checkout");
 		for (const [i, why] of [[2, /single-mode launch of the trusted release-engineer/], [3, /single-mode launch of the trusted release-engineer/], [4, /no known owner/], [5, /cwd|primary|worktrees/]] as const) {
 			assert.equal(r[i].isError, true, `q${i + 1}: ${r[i].text}`);
 			assert.match(r[i].text, /^Invalid cleanup:/, `q${i + 1}`);
