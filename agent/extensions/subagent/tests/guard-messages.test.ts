@@ -282,3 +282,29 @@ test("gh release list and view pass the guard; create, delete, edit, upload and 
 	assert.equal(run("gh release view v1.14.0 --repo acme/widgets"), undefined);
 	for (const c of ["gh release create v1.2.3 --repo acme/widgets --target abc --title x --generate-notes", "gh release delete v1.0.0 --repo a/b", "gh release edit v1 --notes x", "gh release upload v1 x.zip", "gh release list && gh release delete v1"]) assert.ok(run(c), c);
 });
+
+// Field report: a read-only test-engineer's `cat > _scratch/.../x.mjs <<'EOF'` was refused five times in a row, as SECRET (the script
+// mentioned .env) or PROC_KILL (it contained Stop-Process): the risk rules read the body of a file being written. A body this command
+// only writes or prints is data; one a shell, an interpreter or a pipe reads still runs, so it stays checked.
+test("risk rules: text a command only writes to a file is data; heredocs a shell, interpreter or pipe runs stay checked", () => {
+	const cwd = "D:/work/RFID/worktrees/RFIDAttendance-Rust/sms-test-send";
+	const scratch = "D:/work/RFID/worktrees/RFIDAttendance-Rust/_scratch/sms-test/iv";
+	const run = (command: string, tool = "bash") => guardToolCall({ scope: "child", store: createGrantStore(), agentDir: "D:/profile/.pi/agent", readOnlyRoot: cwd, reads: new Set() } as any, tool, { command }, cwd) as { block?: boolean; reason?: string } | undefined;
+	const rule = (command: string, tool = "bash") => /\[([A-Z_]+)\]/.exec(run(command, tool)?.reason ?? "")?.[1];
+	for (const body of ["dotenv.config({ path: '.env' });", "Stop-Process -Id 33480 -Force", "rm -rf /tmp/build", "cat ~/.ssh/id_rsa"]) {
+		for (const command of [`cat > ${scratch}/start.mjs <<'EOF'\n${body}\nEOF`, `mkdir -p ${scratch} && cat <<EOF > ${scratch}/b.sh\n${body}\nEOF`, `tee ${scratch}/c.txt <<'EOF'\n${body}\nEOF`]) {
+			assert.equal(run(command)?.block, undefined, `${command.split("\n")[0]} | ${body}`);
+		}
+	}
+	assert.equal(run(`@'\nStop-Process -Id 1 -Force\n'@ | Set-Content -Path "${scratch}/k.ps1"`, "powershell")?.block, undefined, "a here-string written to a file is data");
+	const stillChecked: Array<[string, string, string?]> = [
+		[`bash <<'EOF'\nStop-Process -Id 1 -Force\nEOF`, "PROC_KILL"],
+		[`cat <<'EOF' | bash\nrm -rf /tmp/build\nEOF`, "DESTRUCTIVE_FS"],
+		[`python - <<'E'\nopen('.env').read()\nE`, "SECRET"],
+		[`node - <<'EOF'\nrequire('fs').readFileSync('.env')\nEOF`, "SECRET"],
+		[`cat > ${scratch}/x.sh <<'EOF' | sh\nrm -rf /tmp/build\nEOF`, "DESTRUCTIVE_FS"],
+		[`cat .env > ${scratch}/copy.txt`, "SECRET"],
+		[`@'\nnote\n'@ | Set-Content -Path "${scratch}/n.txt"; Stop-Process -Id 1 -Force`, "PROC_KILL", "powershell"],
+	];
+	for (const [command, expected, tool] of stillChecked) assert.equal(rule(command, tool), expected, command.split("\n")[0]);
+});

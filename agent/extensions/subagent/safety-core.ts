@@ -438,7 +438,8 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 // Git Bash argv collapses each backslash pair before the shell parses it (a run of n reaches the shell as ceil(n/2)): classify raw and collapsed text, a conservative union. Grant text stays raw (decideToolCall).
 // shortcut: collapse applies on every platform and shell (over-blocks PowerShell/POSIX text with backslash pairs), upgrade by gating on the verified Git Bash argv transport.
 export function classifyShell(command: string, gateCommits = false): ShellClassification {
-	const text = String(command ?? "");
+	// Text a command only writes to a file (or prints) is data, not commands: see withoutFileBodies.
+	const text = withoutFileBodies(String(command ?? ""));
 	const out = new Set<RiskRule>();
 	classifyVariants(text, out);
 	// Commits are gated only in the trusted release-engineer child; elsewhere git commit stays unclassified as before.
@@ -2221,6 +2222,30 @@ export function withoutDataBodies(text: string): string {
 			let j = i + 1;
 			while (j < lines.length && (m[1] ? lines[j].replace(/^\t+/, "") : lines[j]) !== end) j++;
 			if (shell) continue; // a shell reads these lines: keep them as commands
+			lines.splice(i + 1, Math.max(0, j - i - 1)); // drop the body, keep the delimiter line
+		}
+	}
+	return out.join("\n");
+}
+// For the risk rules (classifyShell): a heredoc body is data only when this command writes it to a file or prints it - `cat > f <<EOF`,
+// `cat <<EOF > f`, `tee f <<EOF`, `cat <<EOF` - and nothing is piped onward; likewise a PowerShell here-string piped straight to
+// Set-Content, Out-File or Add-Content, or redirected to a file. Bodies a shell, an interpreter (python -, node -) or a pipe reads stay
+// checked: they run. Field report: a read-only test-engineer's `cat > _scratch/.../x.mjs <<'EOF'` was refused five times in a row,
+// as SECRET (the script mentioned .env) or PROC_KILL (it contained Stop-Process), though writing a file runs none of it.
+const FILE_READER = /^\s*(?:\S*[\\/])?(?:cat|tee)(?:\.exe)?(?:\s|$)/i;
+export function withoutFileBodies(text: string): string {
+	const literal = text.replace(/@(['"])\r?\n[\s\S]*?\r?\n\1@(?=\s*(?:\|\s*(?:Set-Content|Out-File|Add-Content)\b|>))/gi, "'here-string'");
+	const lines = literal.split(/\r?\n/);
+	const out: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		out.push(line);
+		for (const m of line.matchAll(HEREDOC)) {
+			const reader = line.slice(0, m.index).split(/[;&|]+/).pop() ?? "";
+			if (!FILE_READER.test(reader) || line.slice(m.index).includes("|")) continue; // run or piped onward: keep the lines as commands
+			const end = m[3];
+			let j = i + 1;
+			while (j < lines.length && (m[1] ? lines[j].replace(/^\t+/, "") : lines[j]) !== end) j++;
 			lines.splice(i + 1, Math.max(0, j - i - 1)); // drop the body, keep the delimiter line
 		}
 	}

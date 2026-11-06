@@ -1453,7 +1453,7 @@ export default function (pi: ExtensionAPI) {
     monitor.control = async (args, ctx) => {
         if (args.trim() === "roles") { const { editRoleConfig } = await import("./roles-editor.ts"); await editRoleConfig(ctx); return; }
         const match = args.trim().match(/^(steer|pause|resume|stop|cancel|list|result|usage|fold)(?:\s+(\S+))?(?:\s+([\s\S]+))?$/);
-        if (!match) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, fold, roles, create, or /subagent to inspect", "warning"); return; }
+        if (!match) { ctx.ui.notify("Use /subagent steer #N message, pause bg-N, resume bg-N, stop bg-N, list, result bg-N, usage, fold, trace [#N or role], changes [#N or role], roles, create, or /subagent to inspect", "warning"); return; }
         // Command operations use the same runtime without a model request.
         try {
             const [, action, target, message] = match;
