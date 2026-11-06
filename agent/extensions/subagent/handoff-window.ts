@@ -449,7 +449,7 @@ function renderCheckpoint(entries: string[]): string {
 }
 export function createMainFold(threshold: number) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
-	let summaryStamp: unknown; // native compaction must reset a fold even when branch recovery restores its anchor
+	let summaryStamp: unknown; // native compaction or branch summaries must reset a fold even when branch recovery restores its anchor
 	let folded = false;
 	let entries: string[] = [];
 	let checkpoint = "";
@@ -464,14 +464,17 @@ export function createMainFold(threshold: number) {
 		get folded(): boolean { return folded; },
 		/** `history` is the saved conversation; `view` is the request as shaped so far (shortened, with any state cards). */
 		apply<T extends Message>(history: readonly T[], view: readonly T[], idle: boolean): T[] | undefined {
-			const summary = view.findLast((m) => m?.role === "compactionSummary");
+			// Pi's own summaries (a native compaction, or a branch summary after /tree) are kept whole, in order, ahead of the checkpoint:
+			// turnsOf has no place for them, so a fold would otherwise drop them. A new or changed summary starts the fold again.
+			const summaries = view.filter((m) => m?.role === "compactionSummary" || m?.role === "branchSummary");
+			const summaryKey = summaries.map((m) => String(m.timestamp)).join(",");
 			let point = folded ? pointIn(view) : -1;
-			if ((folded && point < 0) || summary?.timestamp !== summaryStamp) {
+			if ((folded && point < 0) || summaryKey !== summaryStamp) {
 				folded = false; entries = []; checkpoint = ""; users = []; point = -1;
-				summaryStamp = summary?.timestamp;
+				summaryStamp = summaryKey;
 			}
-			const prefix = summary ? [summary] : [];
-			let current: T[] = folded ? [...prefix, message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
+			const prefixBefore = (end: number) => summaries.filter((m) => view.indexOf(m) < end);
+			let current: T[] = folded ? [...prefixBefore(point), message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
 			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
@@ -489,7 +492,7 @@ export function createMainFold(threshold: number) {
 				});
 				checkpoint = [renderCheckpoint(entries), ...risks].join("\n");
 				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
-				current = [...prefix, message() as unknown as T, ...users as T[], ...view.slice(at)];
+				current = [...prefixBefore(at), message() as unknown as T, ...users as T[], ...view.slice(at)];
 			}
 			return folded ? current : undefined;
 		},

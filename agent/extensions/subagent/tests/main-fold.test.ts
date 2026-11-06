@@ -246,3 +246,25 @@ test("reported risks survive repeated folds even when old checkpoint notes excee
 		history.push(reply("Continuing."));
 	}
 });
+
+// Pi also writes a branchSummary after /tree navigation with a summary; like a compaction summary, a fold must not drop it.
+test("a branch summary survives repeated folds, and a new summary resets the fold", () => {
+	const handlers = new Map<string, (event: any, ctx?: any) => any>();
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, {}, () => undefined);
+	const ctx = { sessionManager: { getBranch: () => [] } };
+	const request = (messages: Msg[]) => handlers.get("context")!({ messages }, ctx)?.messages ?? messages;
+	const summary = { role: "branchSummary", summary: "Earlier branch: chose schema v7; never deploy.", fromId: "x", timestamp: ++clock };
+	const history: Msg[] = [summary, user("go on"), reply("ok")];
+	for (let n = 0; n < 2; n++) {
+		history.push(user(`next ${n}`));
+		requestMainFold();
+		const folded = request(history);
+		assert.ok(folded.some((m: Msg) => m.customType === CHECKPOINT_TYPE), `fold ${n}`);
+		assert.deepEqual(folded.filter((m: Msg) => m.role === "branchSummary"), [summary], "kept whole, once, ahead of the checkpoint");
+		assert.equal(folded[0], summary);
+		history.push(reply("more"));
+	}
+	const newer = { role: "compactionSummary", summary: "Compacted.", tokensBefore: 90_000, timestamp: ++clock };
+	const after = request([summary, newer, user("resume")]);
+	assert.equal(after.some((m: Msg) => m.customType === CHECKPOINT_TYPE), false, "a new summary starts the fold again");
+});
