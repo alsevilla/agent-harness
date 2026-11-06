@@ -37,8 +37,8 @@ Confirm the exact candidate and the supplied evidence (tests, RED/GREEN or justi
    - CRITICAL: data loss, security vulnerability, corruption, severe concurrency flaw, broken core behavior.
    - HIGH: likely production bug, incorrect state transition, significant regression.
    - MEDIUM: real defect with limited impact or important maintainability problem.
-   - LOW: minor improvement.
-3. For every significant finding give severity, affected file/location, exact problem, realistic failure scenario and recommended correction.
+   - LOW: small concrete defect or documented-standard violation with limited impact.
+3. Apply the assigned module's finding discipline: establish change attribution when reviewing a diff, support each defect with a concrete causal path, and keep findings concise and actionable.
 4. Finish with exactly one verdict:
 
 APPROVE

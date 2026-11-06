@@ -897,6 +897,7 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 
 /** Rules Pi appends to main's system prompt through the subagent tool: call only declared tools, and batch reads without codemode. */
 export const MAIN_TOOL_GUIDELINES = [
+	"Report outcomes to the user as the evidence shows them: a worker's FAIL, BLOCKED or INCONCLUSIVE, a check marked NOT RUN, or a skipped step is said plainly with its reason, never rounded up to done or verified; when something is done and verified, say so without hedging.",
 	"Call only tools declared in this session: \"Additional tools may be available\" does not make an undeclared tool callable, and codemode is not available unless it is declared.",
 	"To read several files, call read for each one in the same turn (within main's limit of 3 named files), or delegate the reads with the subagent tool; do not wrap reads in a codemode script.",
 	"When the intended structure is known (function signatures, types, module layout), put it in the subagent task packet as a code skeleton beside the expected behavior and checks.",

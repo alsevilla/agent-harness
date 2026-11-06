@@ -20,6 +20,10 @@ Read only when investigating token consumption, oversized results, repetitive ro
 - Reuse a prior PASS or RED/GREEN result only for unchanged tested bytes (HEAD plus a scoped diff hash or changed-file content hashes), the same relevant environment (runtime, dependencies and configuration the check reads) and the same contract. Otherwise rerun the affected checks, not the whole suite.
 - Cite the canonical REPORT path for earlier results instead of copying them into new packets.
 
+## Edit confirmation
+- A successful edit result confirms the write, not correctness. Avoid rereading a whole file just to confirm that the edit landed; use the task-scoped diff and relevant checks. For an ambiguous or partial result, a formatter change or a concurrent change, inspect the affected range before continuing. Required read-before-edit checks still apply.
+- Adapted from [Codex's task-execution guidance](https://github.com/openai/codex/blob/4980f9585a0a2dea0cdc4bb0cee4e631b75fcf5c/codex-rs/protocol/src/prompts/base_instructions/default.md#task-execution) and [editing constraints](https://github.com/openai/codex/blob/4980f9585a0a2dea0cdc4bb0cee4e631b75fcf5c/codex-rs/core/gpt-5.2-codex_prompt.md#editing-constraints). These source links are informational; use this local guidance without fetching another prompt.
+
 ## Compaction batching
 - Compact only ranges the reply or a finished step has consumed (tool output, resolved threads). Batch consumed ranges into one batched compaction call instead of folding after every reply.
 - Each summary keeps open goals, active holds (user pause, stop, no-publication restriction), live job IDs and candidate identity. Split an oversized range into several smaller summaries in the same call.
