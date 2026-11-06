@@ -21,6 +21,10 @@
    the exception and replacement evidence; small size alone is not an exception.
 5. Make the smallest correct change; run focused checks, then broader regression
    only when relevant. Do not weaken valid expectations to fit incorrect behavior.
+   Before handoff, inspect the task-scoped diff once for accidental edits, formatting
+   churn or unrelated changes. Compare with the starting state when the candidate was
+   already dirty; preserve existing user work. This is the writer's completion check,
+   not independent REVIEW. If it leads to another edit, rerun affected checks.
 6. Record RED/GREEN commands and outcomes (or exception/replacement evidence) in the assigned REPORT file, not the reply:
    the exact candidate, changed files, checks/results, missing evidence and
    residual risk. The main session selects independent Verify/Review using global
