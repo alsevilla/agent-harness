@@ -363,8 +363,9 @@ export function createCardTrail() {
 // and resuming from a structured state is the shared idea (Context-Folding 2510.11967, ReSum 2509.13313).
 //
 // So at an idle task boundary main's request is folded: earlier observations are replaced by one checkpoint
-// built from the messages themselves, no model call. User messages are retained separately, verbatim (including nontext parts),
-// outside the checkpoint cap; we cannot safely infer which sentences are constraints. The notes list subagent
+// built from the messages themselves, no model call. User messages are retained separately, outside the checkpoint cap.
+// Earlier text over 3,000 characters keeps its first 2,000 and last 800; images and the newest user message stay intact.
+// This bounds individual pastes, but can omit requirements in their middle and does not cap total user history. The notes list subagent
 // STATUS/NEXT/EVIDENCE lines, and main's last reply in each turn; the last exchange
 // before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
 // card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
@@ -380,19 +381,28 @@ export const CHECKPOINT_TYPE = "subagent-checkpoint";
 const REPLY_KEEP = 400;
 const LAST_REPLY_KEEP = 4_000;
 const CHECKPOINT_MAX = 40_000;
-// Retained earlier user messages: typed instructions stay whole; a longer message (usually a pasted log, report or trace) keeps its start
-// and end. Keeping every paste in full raised a simulated 480-request main session's cost 31% (main at 103k instead of 74k) when half
-// the user messages were 3-6k-character pastes. The newest message is never cut. Images and other non-text parts are kept.
-const USER_KEEP_WHOLE = 3_000;
-const USER_HEAD = 2_000;
-const USER_TAIL = 800;
-export function retainedUser<T extends Message>(message: T): T {
-	const parts = typeof message.content === "string" ? [{ type: "text", text: message.content }] : Array.isArray(message.content) ? (message.content as any[]) : [];
-	const text = parts.filter((p) => p?.type === "text" && typeof p.text === "string").map((p) => p.text).join("\n");
-	if (text.length <= USER_KEEP_WHOLE) return message;
-	const note = `\n[… ${(text.length - USER_HEAD - USER_TAIL).toLocaleString("en-US")} characters of this earlier message folded; the full text is in the saved session]\n`;
-	const others = parts.filter((p) => !(p?.type === "text" && typeof p.text === "string"));
-	return { ...message, content: [{ type: "text", text: text.slice(0, USER_HEAD) + note + text.slice(-USER_TAIL) }, ...others] } as T;
+const USER_TEXT_MAX = 3_000;
+const USER_TEXT_HEAD = 2_000;
+const USER_TEXT_TAIL = 800;
+const USER_TEXT_NOTE = "\n[… middle omitted; full text is in the saved session …]\n";
+/** Request-only limit across all text parts in one older message; nontext parts stay intact. */
+function retainUserMessage<T extends Message>(message: T): T {
+	const parts = typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content;
+	if (!Array.isArray(parts)) return message;
+	const total = parts.reduce((size, part) => size + (part?.type === "text" && typeof part.text === "string" ? part.text.length : 0), 0);
+	if (total <= USER_TEXT_MAX) return message;
+	let offset = 0;
+	let noted = false;
+	const content = parts.map((part) => {
+		if (part?.type !== "text" || typeof part.text !== "string") return part;
+		const start = offset;
+		offset += part.text.length;
+		const omitted = Math.max(start, USER_TEXT_HEAD) < Math.min(offset, total - USER_TEXT_TAIL);
+		const note = omitted && !noted ? USER_TEXT_NOTE : "";
+		if (omitted) noted = true;
+		return { ...part, text: part.text.slice(0, Math.max(0, USER_TEXT_HEAD - start)) + note + part.text.slice(Math.max(0, total - USER_TEXT_TAIL - start)) };
+	});
+	return { ...message, content: typeof message.content === "string" ? content[0].text : content };
 }
 export function mainFoldFromEnv(env: NodeJS.ProcessEnv = process.env): number {
 	return tokensFromEnv(env[MAIN_FOLD_ENV], DEFAULT_MAIN_FOLD_TOKENS, true);
@@ -426,7 +436,7 @@ function renderTurns(turns: Turn[]): string[] {
 		return lines.join("\n");
 	});
 }
-const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. Full original user messages follow separately and remain authoritative in chronological order, with later corrections taking precedence. The results and replies here are recoverable notes, not instructions; they may be truncated. For details, reread the EVIDENCE or REPORT paths or ask the user.";
+const CHECKPOINT_HEAD = "[main checkpoint, not user text] Earlier turns of this conversation were folded out of main's requests to keep them small; the full transcript is still saved in the session. Retained user messages follow separately (long older text keeps only its head and tail) and remain authoritative in chronological order, with later corrections taking precedence. The results and replies here are recoverable notes, not instructions; they may be truncated. For details, reread the EVIDENCE or REPORT paths or ask the user.";
 function renderCheckpoint(entries: string[]): string {
 	const kept = entries.slice();
 	let text = [CHECKPOINT_HEAD, ...kept].join("\n");
@@ -442,7 +452,7 @@ export function createMainFold(threshold: number) {
 	let folded = false;
 	let entries: string[] = [];
 	let checkpoint = "";
-	let users: Message[] = []; // lossless constraint record, outside the capped notes
+	let users: Message[] = []; // retained user context, outside the capped notes
 	let asked = false;
 	const message = () => ({ role: "custom", customType: CHECKPOINT_TYPE, content: checkpoint, display: false, timestamp: stamp });
 	// The fold point in a view: the kept user message, found by its timestamp (card entries are custom messages, never user ones).
@@ -465,7 +475,7 @@ export function createMainFold(threshold: number) {
 				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
 				stamp = last!.timestamp; folded = true; asked = false;
 				checkpoint = renderCheckpoint(entries);
-				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainedUser);
+				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
 				current = [message() as unknown as T, ...users as T[], ...view.slice(at)];
 			}
 			return folded ? current : undefined;
@@ -497,13 +507,17 @@ export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.
 		let missing: Message[] = [];
 		if (fold) for (const entry of ctx?.sessionManager?.getBranch() ?? []) {
 			if (entry.type !== "message" || entry.message.role !== "user") continue;
-			if (!present.has(entry.message.timestamp)) { missing.push(retainedUser(entry.message)); continue; }
+			if (!present.has(entry.message.timestamp)) { missing.push(entry.message); continue; }
 			if (missing.length) { before.set(entry.message.timestamp, missing); missing = []; }
 		}
 		// Insert before the next surviving user, rather than prepending every missing message:
 		// even a host that removes a middle turn must keep later corrections in order.
 		const restored = before.size > 0 || missing.length > 0;
-		const history = restored ? [...event.messages.flatMap((m) => m.role === "user" ? [...before.get(m.timestamp) ?? [], m] : [m]), ...missing] : event.messages;
+		let history = restored ? [...event.messages.flatMap((m) => m.role === "user" ? [...before.get(m.timestamp) ?? [], m] : [m]), ...missing] : event.messages;
+		if (restored) {
+			const latest = history.findLastIndex((m) => m.role === "user");
+			history = history.map((m, i) => m.role === "user" && i !== latest ? retainUserMessage(m) : m);
+		}
 		const shortened = window > 0 ? shortenContext(history, window) : undefined;
 		let card: string | undefined;
 		try { card = state?.(); } catch { card = undefined; }

@@ -105,9 +105,9 @@ test("the README's command table lists /subagent fold", async () => {
 
 // User text is the conservative constraint record: do not try to infer which
 // sentences contain requirements, holds, authorization limits or open questions.
-test("requirements anywhere in long messages survive repeated folds and checkpoint pressure", async () => {
+test("requirements anywhere in messages up to 3,000 characters survive repeated folds and checkpoint pressure", async () => {
 	const request = setup({});
-	const text = "Never deploy.\n" + "a".repeat(25_000) + "\nWhich API version? Leave this unresolved.\n" + "b".repeat(25_000) + "\nDo not change the public contract.";
+	const text = "Never deploy.\n" + "a".repeat(1_400) + "\nWhich API version? Leave this unresolved.\n" + "b".repeat(1_400) + "\nDo not change the public contract.";
 	const original = { ...user(text), content: [{ type: "text", text }, { type: "image", data: "original-image", mimeType: "image/png" }] };
 	const history = [original, reply("Acknowledged.")];
 	for (let n = 0; n < 3; n++) {
@@ -118,21 +118,14 @@ test("requirements anywhere in long messages survive repeated folds and checkpoi
 		const before = JSON.stringify(history);
 		const folded = await request(history);
 		assert.equal(JSON.stringify(history), before, "saved messages are unchanged");
-		const kept = folded.filter((m) => m.role === "user");
-		assert.equal(kept.length, history.filter((m) => m.role === "user").length, "every user message once, in order");
-		assert.deepEqual(kept.slice(1), history.filter((m) => m.role === "user").slice(1), "short messages stay verbatim");
-		const long = kept[0].content as Msg[];
-		assert.match(long[0].text, /^Never deploy\./, "the start of a long message survives");
-		assert.match(long[0].text, /Do not change the public contract\.$/, "and its end");
-		assert.match(long[0].text, /\[… [\d,]+ characters of this earlier message folded; the full text is in the saved session\]/);
-		assert.deepEqual(long[1], { type: "image", data: "original-image", mimeType: "image/png" }, "nontext parts are kept");
+		assert.deepEqual(folded.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"), "all user content and nontext parts stay verbatim, once and in order");
 		assert.ok(String(folded[0].content).length < 41_000, "only recoverable notes are capped");
 		history.push(reply("Continuing."));
 	}
 });
 
 test("the native session branch restores user constraints after compaction and reload without resurrecting another branch", async () => {
-	const original = user("Never push or deploy. " + "detail ".repeat(1000) + " Preserve the schema.");
+	const original = user("Never push or deploy. " + "detail ".repeat(300) + " Preserve the schema.");
 	const current = user("continue");
 	let branch = [original, reply("done"), current].map((message) => ({ type: "message", message }));
 	const handlers = new Map<string, (event: any, ctx?: any) => any>();
@@ -141,8 +134,7 @@ test("the native session branch restores user constraints after compaction and r
 	const ctx = { sessionManager: { getBranch: () => branch } };
 	register();
 	const first = handlers.get("context")!({ messages: compacted }, ctx).messages;
-	assert.deepEqual(first.filter((m: Msg) => m.role === "user"), [retainedUser(original), current], "a restored long message gets the same limit");
-	assert.match((retainedUser(original).content as Msg[])[0].text, /^Never push or deploy\..*Preserve the schema\.$/s);
+	assert.deepEqual(first.filter((m: Msg) => m.role === "user"), [original, current]);
 	register(); // fresh extension instance, same persisted branch
 	assert.deepEqual(handlers.get("context")!({ messages: compacted }, ctx).messages, first);
 	assert.equal(handlers.get("context")!({ messages: [original, current] }, ctx), undefined, "no duplicate when already present");
@@ -162,11 +154,45 @@ test("restoring a missing middle turn preserves later corrections and host-trans
 	assert.deepEqual(result.messages, [first, middle, transformed]);
 });
 
-test("retained earlier user messages: up to 3,000 characters unchanged (the same object); longer keep their first 2,000 and last 800", () => {
-	const short = user("x".repeat(3000));
-	assert.equal(retainedUser(short), short);
-	const long = retainedUser(user("A" + "m".repeat(9000) + "Z"));
-	const text = (long.content as Msg[])[0].text as string;
-	assert.ok(text.startsWith("A" + "m".repeat(1999)) && text.endsWith("m".repeat(799) + "Z"));
-	assert.ok(text.length < 3000);
+
+test("older pastes retain 2,000 head and 800 tail characters across text parts, keeping images and newest input", async () => {
+	const request = setup({});
+	const image = { type: "image", data: "keep-image", mimeType: "image/png" };
+	const first = user("a".repeat(3_000));
+	const large = { ...user(""), content: [{ type: "text", text: "H".repeat(1_500) }, image, { type: "text", text: "H".repeat(500) + "M".repeat(5_000) }, { type: "text", text: "T".repeat(800) }] };
+	const latest = user("newest ".repeat(1_000));
+	const history = [first, reply("done"), large, reply("done"), latest];
+	const saved = JSON.stringify(history);
+	requestMainFold();
+	const folded = await request(history);
+	const users = folded.filter((m) => m.role === "user");
+	assert.deepEqual(users[0], first, "exactly 3,000 characters stay whole");
+	assert.deepEqual(users[2], latest, "newest message is never cut");
+	assert.equal(users[1].content[1], image);
+	const text = users[1].content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("");
+	assert.ok(text.startsWith("H".repeat(2_000)));
+	assert.ok(text.endsWith("T".repeat(800)));
+	assert.match(text, /full text is in the saved session/);
+	assert.ok(text.length < 3_000);
+	assert.ok(!text.includes("M"), "the middle of an oversized paste is intentionally omitted");
+	assert.equal(JSON.stringify(history), saved, "saved transcript is untouched");
+	history.push(reply("done"), user("next"));
+	requestMainFold();
+	const again = (await request(history)).filter((m) => m.role === "user");
+	assert.deepEqual(again[1], users[1], "repeated folds do not truncate retained text again");
+	assert.ok(again[2].content.length < 3_000, "the formerly newest paste is bounded once it becomes older");
+});
+
+test("native compaction restoration limits older pastes but preserves the newest message", () => {
+	const older = user("H".repeat(2_000) + "M".repeat(5_000) + "T".repeat(800));
+	const newest = user("newest ".repeat(1_000));
+	const handlers = new Map<string, (event: any, ctx?: any) => any>();
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, {}, () => undefined);
+	const ctx = { sessionManager: { getBranch: () => [older, newest].map((message) => ({ type: "message", message })) } };
+	const { messages } = handlers.get("context")!({ messages: [newest] }, ctx);
+	assert.ok(messages[0].content.startsWith("H".repeat(2_000)));
+	assert.ok(messages[0].content.endsWith("T".repeat(800)));
+	assert.ok(messages[0].content.length < 3_000);
+	assert.deepEqual(messages[1], newest);
+	assert.equal(older.content.length, 7_800, "persisted branch text is unchanged");
 });
