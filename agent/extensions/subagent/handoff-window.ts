@@ -380,6 +380,20 @@ export const CHECKPOINT_TYPE = "subagent-checkpoint";
 const REPLY_KEEP = 400;
 const LAST_REPLY_KEEP = 4_000;
 const CHECKPOINT_MAX = 40_000;
+// Retained earlier user messages: typed instructions stay whole; a longer message (usually a pasted log, report or trace) keeps its start
+// and end. Keeping every paste in full raised a simulated 480-request main session's cost 31% (main at 103k instead of 74k) when half
+// the user messages were 3-6k-character pastes. The newest message is never cut. Images and other non-text parts are kept.
+const USER_KEEP_WHOLE = 3_000;
+const USER_HEAD = 2_000;
+const USER_TAIL = 800;
+export function retainedUser<T extends Message>(message: T): T {
+	const parts = typeof message.content === "string" ? [{ type: "text", text: message.content }] : Array.isArray(message.content) ? (message.content as any[]) : [];
+	const text = parts.filter((p) => p?.type === "text" && typeof p.text === "string").map((p) => p.text).join("\n");
+	if (text.length <= USER_KEEP_WHOLE) return message;
+	const note = `\n[… ${(text.length - USER_HEAD - USER_TAIL).toLocaleString("en-US")} characters of this earlier message folded; the full text is in the saved session]\n`;
+	const others = parts.filter((p) => !(p?.type === "text" && typeof p.text === "string"));
+	return { ...message, content: [{ type: "text", text: text.slice(0, USER_HEAD) + note + text.slice(-USER_TAIL) }, ...others] } as T;
+}
 export function mainFoldFromEnv(env: NodeJS.ProcessEnv = process.env): number {
 	return tokensFromEnv(env[MAIN_FOLD_ENV], DEFAULT_MAIN_FOLD_TOKENS, true);
 }
@@ -451,7 +465,7 @@ export function createMainFold(threshold: number) {
 				entries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
 				stamp = last!.timestamp; folded = true; asked = false;
 				checkpoint = renderCheckpoint(entries);
-				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user");
+				users = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainedUser);
 				current = [message() as unknown as T, ...users as T[], ...view.slice(at)];
 			}
 			return folded ? current : undefined;
@@ -483,7 +497,7 @@ export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.
 		let missing: Message[] = [];
 		if (fold) for (const entry of ctx?.sessionManager?.getBranch() ?? []) {
 			if (entry.type !== "message" || entry.message.role !== "user") continue;
-			if (!present.has(entry.message.timestamp)) { missing.push(entry.message); continue; }
+			if (!present.has(entry.message.timestamp)) { missing.push(retainedUser(entry.message)); continue; }
 			if (missing.length) { before.set(entry.message.timestamp, missing); missing = []; }
 		}
 		// Insert before the next surviving user, rather than prepending every missing message:

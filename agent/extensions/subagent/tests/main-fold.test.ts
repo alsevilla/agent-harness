@@ -2,7 +2,7 @@
 // so a long session stops carrying its whole history (field report: main at 348k tokens, 478 requests averaging ~159k, visibly slower).
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHECKPOINT_TYPE, DEFAULT_MAIN_FOLD_TOKENS, MAIN_FOLD_ENV, mainFoldFromEnv, registerHandoffWindow, requestMainFold, STATE_CARD_TYPE } from "../handoff-window.ts";
+import { CHECKPOINT_TYPE, DEFAULT_MAIN_FOLD_TOKENS, MAIN_FOLD_ENV, mainFoldFromEnv, registerHandoffWindow, requestMainFold, retainedUser, STATE_CARD_TYPE } from "../handoff-window.ts";
 
 type Msg = Record<string, any>;
 let clock = 0;
@@ -118,7 +118,14 @@ test("requirements anywhere in long messages survive repeated folds and checkpoi
 		const before = JSON.stringify(history);
 		const folded = await request(history);
 		assert.equal(JSON.stringify(history), before, "saved messages are unchanged");
-		assert.deepEqual(folded.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"), "all user content and nontext parts stay verbatim, once and in order");
+		const kept = folded.filter((m) => m.role === "user");
+		assert.equal(kept.length, history.filter((m) => m.role === "user").length, "every user message once, in order");
+		assert.deepEqual(kept.slice(1), history.filter((m) => m.role === "user").slice(1), "short messages stay verbatim");
+		const long = kept[0].content as Msg[];
+		assert.match(long[0].text, /^Never deploy\./, "the start of a long message survives");
+		assert.match(long[0].text, /Do not change the public contract\.$/, "and its end");
+		assert.match(long[0].text, /\[… [\d,]+ characters of this earlier message folded; the full text is in the saved session\]/);
+		assert.deepEqual(long[1], { type: "image", data: "original-image", mimeType: "image/png" }, "nontext parts are kept");
 		assert.ok(String(folded[0].content).length < 41_000, "only recoverable notes are capped");
 		history.push(reply("Continuing."));
 	}
@@ -134,7 +141,8 @@ test("the native session branch restores user constraints after compaction and r
 	const ctx = { sessionManager: { getBranch: () => branch } };
 	register();
 	const first = handlers.get("context")!({ messages: compacted }, ctx).messages;
-	assert.deepEqual(first.filter((m: Msg) => m.role === "user"), [original, current]);
+	assert.deepEqual(first.filter((m: Msg) => m.role === "user"), [retainedUser(original), current], "a restored long message gets the same limit");
+	assert.match((retainedUser(original).content as Msg[])[0].text, /^Never push or deploy\..*Preserve the schema\.$/s);
 	register(); // fresh extension instance, same persisted branch
 	assert.deepEqual(handlers.get("context")!({ messages: compacted }, ctx).messages, first);
 	assert.equal(handlers.get("context")!({ messages: [original, current] }, ctx), undefined, "no duplicate when already present");
@@ -152,4 +160,13 @@ test("restoring a missing middle turn preserves later corrections and host-trans
 	const ctx = { sessionManager: { getBranch: () => [first, middle, latest].map((message) => ({ type: "message", message })) } };
 	const result = handlers.get("context")!({ messages: [first, transformed] }, ctx);
 	assert.deepEqual(result.messages, [first, middle, transformed]);
+});
+
+test("retained earlier user messages: up to 3,000 characters unchanged (the same object); longer keep their first 2,000 and last 800", () => {
+	const short = user("x".repeat(3000));
+	assert.equal(retainedUser(short), short);
+	const long = retainedUser(user("A" + "m".repeat(9000) + "Z"));
+	const text = (long.content as Msg[])[0].text as string;
+	assert.ok(text.startsWith("A" + "m".repeat(1999)) && text.endsWith("m".repeat(799) + "Z"));
+	assert.ok(text.length < 3000);
 });
