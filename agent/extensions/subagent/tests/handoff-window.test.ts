@@ -319,3 +319,23 @@ test("mask policy follows the model serving the request: Haiku 5.5 from 90k, fla
 	assert.match(entry, /policy = workerMaskPolicy\(ctx\?\.model\)/, "decided per request from the serving model");
 	assert.match(entry, /capWorkerContext\(event\.messages, policy\.from, policy\.budget, base\)/);
 });
+
+// A recorded worker run showed "[unchanged: ... use that earlier copy]" next to "[older read output, shortened ...]" for the same call:
+// once masking shortens the earlier copy, the duplicate note must not point at it.
+import { STALE_NOTE } from "../handoff-window.ts";
+test("worker masking rewords a duplicate note whose earlier copy it shortened; a note whose copy is still whole stays", () => {
+	let n = 0;
+	const call = (name: string, args: object) => { const id = `t${++n}`; return [{ role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] }, id] as const; };
+	const result = (id: string, name: string, text: string) => ({ role: "toolResult", toolCallId: id, toolName: name, content: [{ type: "text", text }] });
+	const note = "[unchanged: this read returned exactly what it returned earlier in this run for a.rs (same range); use that earlier copy.]";
+	const msgs: any[] = [{ role: "user", content: "Task" }];
+	const [a1, id1] = call("read", { path: "a.rs" }); msgs.push(a1, result(id1, "read", "a".repeat(20_000)));
+	const [a2, id2] = call("read", { path: "a.rs" }); msgs.push(a2, result(id2, "read", note));
+	for (let i = 0; i < 12; i++) { const [a, id] = call("read", { path: `f${i}.rs` }); msgs.push(a, result(id, "read", "x".repeat(20_000))); }
+	const capped = capWorkerContext(msgs, 30_000, 40_000).messages!;
+	const texts = capped.filter((m: any) => m.role === "toolResult").map((m: any) => m.content[0].text as string);
+	assert.match(texts[0], /^\[older read output, shortened: a\.rs/, "the earlier copy was masked");
+	assert.equal(texts[1], STALE_NOTE, "so the note no longer points at it");
+	const whole = [msgs[0], a1, result(id1, "read", "a".repeat(20_000)), a2, result(id2, "read", note)];
+	assert.equal(capWorkerContext(whole, 30_000, 40_000).messages, undefined, "under the threshold nothing changes, the note included");
+});
