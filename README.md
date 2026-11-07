@@ -156,6 +156,34 @@ The longer main runs, the more it saves, because its history otherwise grows wit
 
 What these numbers are not: scripted runs and size estimates, not a billing benchmark of live models. A real model may choose different calls once it sees shortened output, and your tasks set the mix. `/subagent usage` shows your own cost per completed task and each role's cache hit share.
 
+### OpenAI sandbox simulation
+
+An independent offline replay on 2026-11-07 exercises the current shaping functions
+with seven fixed workloads and four OpenAI pricing profiles. It does not run live
+models or the Pi CLI, and its fixtures differ from the Claude-session simulations
+above. [Script, workload definitions, cache assumptions and results](docs/simulations/openai-shaping.md)
+are included so the numbers can be reproduced.
+
+Positive percentages below mean savings; **negative percentages mean increases**.
+Costs cover input only, using Standard API rates with an idealized warm cache and
+30-minute writes—not Codex subscription billing or total task cost.
+
+| Scenario | Estimated input-token saving | Input-cost saving: GPT-6.1 Sol / Terra | Input-cost saving: GPT-6 Astra / Luna |
+| --- | ---: | ---: | ---: |
+| Long worker, 30 calls | 61.6% | 25.1% | 36.3% |
+| Repeated reads, 30 calls | 52.1% | 61.9% | 58.9% |
+| Ordinary worker, 30 calls | **−2.0%** | **−2.8%** | **−2.5%** |
+| Main, 10 user turns | 6.9% | **−22.5%** | **−12.5%** |
+| Main, 150 requests | 40.2% | 10.0% | 23.8% |
+| Main, 300 requests | 50.0% | 29.2% | 39.3% |
+| Main, 480 requests | 66.0% | 55.5% | 62.7% |
+
+Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%.
+All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x
+input/cache rates. [Official pricing](https://developers.openai.com/api/docs/pricing).
+The 480-request baseline crosses that boundary; its shaped counterpart does not.
+The short-main regression shows why fewer tokens do not always mean lower cost.
+
 ## Context and cost
 
 - **Old results collapse.** In main's requests, the newest ten subagent results stay word for word and older settled PASS results become one line each, in batches of ten, so the cached prefix rarely changes. Main's own old large file and command outputs are masked the same way. `PI_SUBAGENT_HANDOFF_WINDOW=0` turns both off.
