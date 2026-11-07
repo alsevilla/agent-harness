@@ -44,6 +44,19 @@ test("the state view: changed files, reads still current or changed since, and t
 	assert.doesNotMatch(l.view()!, /git status/, "inspection changes nothing");
 });
 
+test("inspection reuse notes must at least halve output, including command overhead", () => {
+	for (const command of ["git status", `rg ${"long_pattern".repeat(20)}`]) {
+		const display = command.length > 90 ? `${command.slice(0, 89)}…` : command;
+		const note = `[unchanged: \`${display}\` returned exactly what it returned at step 1, and no file changed since; use that earlier output.]`;
+		for (const length of [200, note.length * 2 - 1, note.length * 2]) {
+			const l = createExecutionLedger();
+			const content = text("x".repeat(length));
+			l.onResult("bash", { command }, content, false, cwd);
+			assert.deepEqual(l.onResult("bash", { command }, content, false, cwd), length >= note.length * 2 ? text(note) : undefined);
+		}
+	}
+});
+
 test("an inspection repeated with no change and the same output becomes a one-line reference; changed output passes", () => {
 	const l = createExecutionLedger();
 	const out = text("x".repeat(500));

@@ -296,7 +296,31 @@ export function capWorkerContext<T extends Message>(messages: readonly T[], from
 	if (size >= budget) attempt(boundToolOutputs(current), "bounded");
 	if (size >= budget) attempt(lastResort(current), "last-resort");
 	if (size >= budget) step = "over";
+	if (current !== messages) current = retargetStaleNotes(current);
 	return { messages: current === messages ? undefined : current, step, before, after: size, scale };
+}
+
+// A duplicate note ("[unchanged: ... use that earlier copy]", from the duplicate-read check or the ledger) points at an earlier output
+// of the same call. Once masking shortens that earlier output, the note points at nothing: a recorded worker run showed a read note
+// next to "[older read output, shortened ...]" for the same call. Such a note is reworded to say the earlier copy was shortened. The
+// earlier output comes first, so its masking already rewrites the cache from there and changing the later note adds no cost.
+export const STALE_NOTE = "[unchanged when it ran, but the earlier copy it pointed to has since been shortened; run the call again if you still need the content]";
+function retargetStaleNotes<T extends Message>(list: T[]): T[] {
+	const calls = new Map<string, string>();
+	for (const m of list) if (m?.role === "assistant" && Array.isArray(m.content)) for (const part of m.content as any[]) if (part?.type === "toolCall" && typeof part.id === "string") calls.set(part.id, `${part.name}\0${JSON.stringify(part.arguments ?? null)}`);
+	const latest = new Map<string, string>(); // call key -> the latest earlier output that is not itself a note
+	let changed = false;
+	const out = list.map((m) => {
+		if (m?.role !== "toolResult" || typeof m.toolCallId !== "string") return m;
+		const key = calls.get(m.toolCallId);
+		const text = textOf(m.content);
+		if (key === undefined || text === undefined) return m;
+		if (!text.startsWith("[unchanged: ")) { latest.set(key, text); return m; }
+		if (!latest.get(key)?.startsWith("[older ")) return m;
+		changed = true;
+		return { ...m, content: [{ type: "text", text: STALE_NOTE }] } as T;
+	});
+	return changed ? out : list;
 }
 
 /** Both request-only shortenings in order: subagent results first, then main's own large tool outputs. */
