@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { parseRequest, runBounded, Singleton, assertNoHooks } from '../core.ts';
-import refresh, {candidateRoot,graphTarget} from '../index.ts';
+import refresh, {candidateRoot,defaultGraphPython,graphTarget} from '../index.ts';
 import { mkdtempSync,mkdirSync,writeFileSync,existsSync,symlinkSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,24 @@ test('parses exact targets and rejects extra commands', () => {
  assert.throws(() => parseRequest('qmd embed'));
  assert.throws(() => parseRequest('graph relative/path'));
  assert.throws(() => parseRequest('serena junk'));
+ assert.deepEqual(parseRequest('graph --init'), {kind:'graph', init:true});
+ assert.deepEqual(parseRequest('graph --init "C:/Repo With Space"'), {kind:'graph', root:'C:/Repo With Space', init:true});
+ assert.throws(() => parseRequest('graph --init relative/path'));
+ assert.throws(() => parseRequest('graph --initx'));
+ assert.throws(() => parseRequest('qmd --init'));
+});
+test('graph --init builds only where no graph exists, never in a linked worktree',()=>{
+ const temp=mkdtempSync(join(tmpdir(),'pi-refresh-init-'));
+ try{
+  const primary=join(temp,'primary'),worktree=join(temp,'worktree');
+  mkdirSync(join(primary,'.git'),{recursive:true});mkdirSync(worktree);writeFileSync(join(worktree,'.git'),'gitdir: '+join(primary,'.git','worktrees','w'));
+  assert.equal(graphTarget(primary,undefined,true),primary);
+  assert.equal(existsSync(join(primary,'graphify-out')),false,'choosing the target writes nothing');
+  assert.throws(()=>graphTarget(worktree,undefined,true),/linked worktree.*primary checkout/);
+  mkdirSync(join(primary,'graphify-out'));writeFileSync(join(primary,'graphify-out','graph.json'),'{}');
+  assert.throws(()=>graphTarget(primary,undefined,true),/already has graphify-out\/graph.json/);
+  assert.equal(graphTarget(primary),primary);
+ }finally{rmSync(temp,{recursive:true,force:true})}
 });
 test('rejects hooks including YAML inline objects', () => {
  assertNoHooks({collections:{notes:{path:'x'}}});
@@ -44,7 +62,7 @@ test('graph resolves candidate Git root, never initializes and rejects output ju
  try{
   mkdirSync(join(candidate,'nested'),{recursive:true});mkdirSync(join(candidate,'.git'));mkdirSync(other);
   assert.equal(candidateRoot(join(candidate,'nested')),candidate);
-  assert.throws(()=>graphTarget(candidate),/no existing/);assert.equal(existsSync(join(candidate,'graphify-out')),false);
+  assert.throws(()=>graphTarget(candidate),/no existing.*--init/);assert.equal(existsSync(join(candidate,'graphify-out')),false);
   mkdirSync(join(other,'graphify-out'));writeFileSync(join(other,'graphify-out','graph.json'),'{}');
   symlinkSync(join(other,'graphify-out'),join(candidate,'graphify-out'),'junction');
   assert.throws(()=>graphTarget(candidate),/outside/);
@@ -60,4 +78,8 @@ test('/refresh serena stops the serena skill server (here: none running) and nev
   assert.equal(messages.length,0);
   assert.deepEqual(notices,[['No Serena server is running on 127.0.0.1:1; the next query starts one.','info']]);
  } finally { if(saved===undefined)delete process.env.HARNESS_SERENA_PORT;else process.env.HARNESS_SERENA_PORT=saved; }
+});
+test('default Graphify interpreter is the uv tool install location on each platform',()=>{
+ assert.match(defaultGraphPython('win32','D:/h'),/AppData[\\/]Roaming[\\/]uv[\\/]tools[\\/]graphifyy[\\/]Scripts[\\/]python\.exe$/);
+ assert.match(defaultGraphPython('linux','/h'),/\.local[\\/]share[\\/]uv[\\/]tools[\\/]graphifyy[\\/]bin[\\/]python$/);
 });
