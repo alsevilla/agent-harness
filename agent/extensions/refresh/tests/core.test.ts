@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { parseRequest, runBounded, Singleton, assertNoHooks } from '../core.ts';
-import refresh, {candidateRoot,defaultGraphPython,graphTarget} from '../index.ts';
+import refresh, {candidateRoot,datedBackups,defaultGraphPython,graphTarget} from '../index.ts';
 import { mkdtempSync,mkdirSync,writeFileSync,existsSync,symlinkSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -82,4 +82,13 @@ test('/refresh serena stops the serena skill server (here: none running) and nev
 test('default Graphify interpreter is the uv tool install location on each platform',()=>{
  assert.match(defaultGraphPython('win32','D:/h'),/AppData[\\/]Roaming[\\/]uv[\\/]tools[\\/]graphifyy[\\/]Scripts[\\/]python\.exe$/);
  assert.match(defaultGraphPython('linux','/h'),/\.local[\\/]share[\\/]uv[\\/]tools[\\/]graphifyy[\\/]bin[\\/]python$/);
+});
+test('dated backup folders in graphify-out are counted with their size; other folders are not',()=>{
+ const temp=mkdtempSync(join(tmpdir(),'pi-refresh-backups-'));
+ try{
+  assert.deepEqual(datedBackups(join(temp,'missing')),{count:0,names:[],bytes:0});
+  for(const name of ['2026-11-06','2026-11-07','cache'])mkdirSync(join(temp,name));
+  writeFileSync(join(temp,'2026-11-06','graph.json'),'x'.repeat(100));writeFileSync(join(temp,'2026-11-07','graph.json'),'y'.repeat(50));writeFileSync(join(temp,'cache','a.json'),'z'.repeat(999));
+  assert.deepEqual(datedBackups(temp),{count:2,names:['2026-11-06','2026-11-07'],bytes:150});
+ }finally{rmSync(temp,{recursive:true,force:true})}
 });

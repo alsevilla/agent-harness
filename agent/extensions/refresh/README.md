@@ -10,6 +10,8 @@ Reload Pi, then use:
 
 These commands never ask the orchestrator model. Both graph commands run `graphify update`, which extracts code only, with no LLM; semantic document/image extraction is separate. A worktree without a graph must explicitly select the intended primary checkout; its graph still describes that checkout. Graphs are built only when you run `--init`: workers never build or update one, and no installs, global-graph rebuilds, QMD embedding, pull commands, or periodic maintenance run automatically.
 
+Graph commands make no backup copies. Graphify itself copies the whole graph into a dated `graphify-out/YYYY-MM-DD` folder before each day's overwrite of a graph built with an LLM or given curated labels (pi-graphify's pipeline does both) and never removes those folders, so the output grows with every update; `/refresh graph` turns that off (`GRAPHIFY_NO_BACKUP=1`). Graphify still refuses a rebuild that would shrink the graph (`GRAPHIFY_FORCE=0`), and the code graph can always be rebuilt. Dated folders an earlier tool left are listed with their size after each refresh; delete them if you do not need them.
+
 Graph output is explicitly confined to the selected checkout's `graphify-out` rather than inherited `GRAPHIFY_OUT` overrides; output links outside that checkout are refused. This is a code graph refresh, not an LLM semantic extraction.
 
 QMD uses `../qmd/config.json`, including `indexName`, and checks its effective global YAML. Configured collection update hooks are rejected because they can run arbitrary commands. Index writes refresh text/BM25 and may invalidate old embeddings; no replacement embeddings are generated.

@@ -43,6 +43,14 @@ export function graphTarget(cwd:string,explicit?:string,init=false) {
 export function defaultGraphPython(platform=process.platform,home=homedir()):string {
  return platform==='win32'?join(home,'AppData','Roaming','uv','tools','graphifyy','Scripts','python.exe'):join(home,'.local','share','uv','tools','graphifyy','bin','python');
 }
+// Graphify's pre-overwrite snapshots: graphify-out/YYYY-MM-DD folders.
+export function datedBackups(output:string):{count:number;names:string[];bytes:number} {
+ if(!existsSync(output))return {count:0,names:[],bytes:0};
+ const names=readdirSync(output).filter(name=>/^\d{4}-\d{2}-\d{2}$/.test(name)&&statSync(join(output,name)).isDirectory()).sort();
+ let bytes=0;const pending=names.map(name=>join(output,name));
+ while(pending.length){const path=pending.pop()!;const stat=statSync(path);if(stat.isDirectory())for(const name of readdirSync(path))pending.push(join(path,name));else bytes+=stat.size}
+ return {count:names.length,names,bytes};
+}
 export function gitIgnores(root:string,path:string):boolean {
  return spawnSync('git',['check-ignore','-q',path],{cwd:root,windowsHide:true,stdio:'ignore'}).status===0;
 }
@@ -66,8 +74,12 @@ export default function refresh(pi:ExtensionAPI) {
       const root=graphTarget(ctx.cwd,request.root,request.init);
       const python=file(config.graphPythonPath??defaultGraphPython(),'Graphify Python (install with uv tool install graphifyy, or set graphPythonPath in config.json)',true);
       ctx.ui.notify(`${request.init?'Building':'Updating'} code graph in ${root}`,'info');
-      // graphify update re-extracts code only (no LLM); on a checkout without a graph it builds the first one.
-      output=await runBounded(python,['-m','graphify','update',root],root,timeout,undefined,{...process.env,GRAPHIFY_OUT:join(root,'graphify-out'),GRAPHIFY_FORCE:'0',GRAPHIFY_NO_TIPS:'1',PYTHONUTF8:'1'});
+      // graphify update re-extracts code only (no LLM); on a checkout without a graph it builds the first one. GRAPHIFY_NO_BACKUP: Graphify
+      // otherwise copies the whole graph into a dated graphify-out/YYYY-MM-DD folder before each day's overwrite of an LLM-built or
+      // labelled graph and never removes them. GRAPHIFY_FORCE=0 still refuses a rebuild that would shrink the graph.
+      output=await runBounded(python,['-m','graphify','update',root],root,timeout,undefined,{...process.env,GRAPHIFY_OUT:join(root,'graphify-out'),GRAPHIFY_FORCE:'0',GRAPHIFY_NO_BACKUP:'1',GRAPHIFY_NO_TIPS:'1',PYTHONUTF8:'1'});
+      const backups=datedBackups(join(root,'graphify-out'));
+      if(backups.count)output+=`\n${backups.count} dated backup folder(s) in graphify-out (${backups.names.join(', ')}; ${backups.bytes<1048576?`${Math.ceil(backups.bytes/1024)} KB`:`${Math.ceil(backups.bytes/1048576)} MB`}) are copies Graphify made before earlier overwrites. /refresh graph makes none; delete them if you do not need them.`;
       if(request.init&&!gitIgnores(root,'graphify-out'))output+='\ngraphify-out is not ignored by Git here; add it to .gitignore so the graph is not committed.';
      }else {
       const qmd=JSON.parse(readFileSync(join(folder,'..','qmd','config.json'),'utf8'));
