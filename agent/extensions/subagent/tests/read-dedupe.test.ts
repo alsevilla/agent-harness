@@ -7,39 +7,52 @@ import { createReadDedupe, duplicateReadNote } from "../read-dedupe.ts";
 const text = (t: string) => [{ type: "text", text: t }];
 const cwd = "/w/app";
 
+test("duplicate notes must at least halve the returned text, including long path overhead", () => {
+	for (const file of ["a.ts", `${"nested/".repeat(80)}a.ts`]) {
+		const size = duplicateReadNote(file).length;
+		for (const length of [0, 1, size, size * 2 - 1, size * 2]) {
+			const d = createReadDedupe();
+			const content = text("x".repeat(length));
+			assert.equal(d.onResult("read", { path: file }, content, false, cwd), undefined);
+			const result = d.onResult("read", { path: file }, content, false, cwd);
+			assert.deepEqual(result, length >= size * 2 ? text(duplicateReadNote(file)) : undefined, `${file}: ${length}`);
+		}
+	}
+});
+
 test("a repeat read of unchanged text becomes a one-line note; the first read and changed text pass through", () => {
 	const d = createReadDedupe();
-	assert.equal(d.onResult("read", { path: "src/a.ts" }, text("one"), false, cwd), undefined, "first read kept");
-	assert.deepEqual(d.onResult("read", { path: "src/a.ts" }, text("one"), false, cwd), text(duplicateReadNote("src/a.ts")));
-	assert.deepEqual(d.onResult("read", { path: "/w/app/src/a.ts" }, text("one"), false, cwd), text(duplicateReadNote("/w/app/src/a.ts")), "relative and absolute name the same file");
-	assert.equal(d.onResult("read", { path: "src/a.ts" }, text("two"), false, cwd), undefined, "changed content (for example after a shell edit) is kept");
-	assert.deepEqual(d.onResult("read", { path: "src/a.ts" }, text("two"), false, cwd), text(duplicateReadNote("src/a.ts")), "and the new text is what later repeats compare with");
+	assert.equal(d.onResult("read", { path: "src/a.ts" }, text("one".repeat(600)), false, cwd), undefined, "first read kept");
+	assert.deepEqual(d.onResult("read", { path: "src/a.ts" }, text("one".repeat(600)), false, cwd), text(duplicateReadNote("src/a.ts")));
+	assert.deepEqual(d.onResult("read", { path: "/w/app/src/a.ts" }, text("one".repeat(600)), false, cwd), text(duplicateReadNote("/w/app/src/a.ts")), "relative and absolute name the same file");
+	assert.equal(d.onResult("read", { path: "src/a.ts" }, text("two".repeat(600)), false, cwd), undefined, "changed content (for example after a shell edit) is kept");
+	assert.deepEqual(d.onResult("read", { path: "src/a.ts" }, text("two".repeat(600)), false, cwd), text(duplicateReadNote("src/a.ts")), "and the new text is what later repeats compare with");
 	assert.match(duplicateReadNote("src/a.ts"), /^\[unchanged: .*src\/a\.ts \(same range\); use that earlier copy/);
 });
 
 test("another range, errors, images, other tools and missing paths pass through", () => {
 	const d = createReadDedupe();
-	d.onResult("read", { path: "a.ts" }, text("x"), false, cwd);
-	assert.equal(d.onResult("read", { path: "a.ts", offset: 40, limit: 20 }, text("x"), false, cwd), undefined, "a different range is its own read");
-	assert.ok(d.onResult("read", { path: "a.ts", offset: 40, limit: 20 }, text("x"), false, cwd), "the same range repeats");
-	assert.equal(d.onResult("read", { path: "a.ts" }, text("x"), true, cwd), undefined, "an error result is never replaced");
+	d.onResult("read", { path: "a.ts" }, text("x".repeat(600)), false, cwd);
+	assert.equal(d.onResult("read", { path: "a.ts", offset: 40, limit: 20 }, text("x".repeat(600)), false, cwd), undefined, "a different range is its own read");
+	assert.ok(d.onResult("read", { path: "a.ts", offset: 40, limit: 20 }, text("x".repeat(600)), false, cwd), "the same range repeats");
+	assert.equal(d.onResult("read", { path: "a.ts" }, text("x".repeat(600)), true, cwd), undefined, "an error result is never replaced");
 	const image = [{ type: "image", data: "AAAA", mimeType: "image/png" }];
 	assert.equal(d.onResult("read", { path: "shot.png" }, image, false, cwd), undefined);
 	assert.equal(d.onResult("read", { path: "shot.png" }, image, false, cwd), undefined, "images always pass (the model must see them)");
-	assert.equal(d.onResult("bash", { command: "cat a.ts" }, text("x"), false, cwd), undefined);
-	assert.equal(d.onResult("read", {}, text("x"), false, cwd), undefined);
+	assert.equal(d.onResult("bash", { command: "cat a.ts" }, text("x".repeat(600)), false, cwd), undefined);
+	assert.equal(d.onResult("read", {}, text("x".repeat(600)), false, cwd), undefined);
 	assert.equal(d.onResult("read", { path: "a.ts" }, [], false, cwd), undefined);
 });
 
 test("an edit or write of the file, and a compaction, forget what was seen", () => {
 	const d = createReadDedupe();
-	d.onResult("read", { path: "a.ts" }, text("x"), false, cwd);
+	d.onResult("read", { path: "a.ts" }, text("x".repeat(600)), false, cwd);
 	d.onResult("edit", { path: "a.ts", oldText: "x", newText: "x" }, text("ok"), false, cwd);
-	assert.equal(d.onResult("read", { path: "a.ts" }, text("x"), false, cwd), undefined, "after an edit the next read is kept");
+	assert.equal(d.onResult("read", { path: "a.ts" }, text("x".repeat(600)), false, cwd), undefined, "after an edit the next read is kept");
 	d.onResult("write", { path: "/w/app/a.ts", content: "x" }, text("ok"), false, cwd);
-	assert.equal(d.onResult("read", { path: "a.ts" }, text("x"), false, cwd), undefined, "after a write too");
+	assert.equal(d.onResult("read", { path: "a.ts" }, text("x".repeat(600)), false, cwd), undefined, "after a write too");
 	d.reset();
-	assert.equal(d.onResult("read", { path: "a.ts" }, text("x"), false, cwd), undefined, "after compaction the earlier copy may be gone, so the read is kept");
+	assert.equal(d.onResult("read", { path: "a.ts" }, text("x".repeat(600)), false, cwd), undefined, "after compaction the earlier copy may be gone, so the read is kept");
 });
 
 test("only workers load it: the child guard entry wires tool_result and compaction; main's extension does not", () => {
@@ -59,4 +72,14 @@ test("serena guidance: read a small named file or symbol directly; a large sourc
 	const source = fs.readFileSync(new URL("../code-integrations.ts", import.meta.url), "utf8");
 	assert.match(source, /When the packet names a small file or a symbol, read it directly\. For a large source file \(several hundred lines\), run outline first, then read only the range you need \(or find --body\), instead of reading it whole\. Use grep for renames and every textual occurrence: it also finds comments and strings, which refs skips\. Otherwise locate code with Serena before grep or find/);
 	assert.doesNotMatch(source, /to find every reference or caller/, "language-server references bought precision, not savings, and missed rename sites");
+});
+
+// A read too small to replace is still the latest copy of its range: a later read matching an older copy is not "unchanged".
+test("a small read between two identical large reads makes the earlier copy stale", () => {
+	const d = createReadDedupe();
+	const big = text("line\n".repeat(400));
+	assert.equal(d.onResult("read", { path: "a.ts" }, big, false, cwd), undefined);
+	assert.equal(d.onResult("read", { path: "a.ts" }, text("short"), false, cwd), undefined, "the file shrank: kept");
+	assert.equal(d.onResult("read", { path: "a.ts" }, big, false, cwd), undefined, "back to the original text: kept in full, since the latest copy differed");
+	assert.deepEqual(d.onResult("read", { path: "a.ts" }, big, false, cwd), text(duplicateReadNote("a.ts")), "a repeat of that is unchanged again");
 });

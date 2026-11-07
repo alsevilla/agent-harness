@@ -174,8 +174,9 @@ export function createExecutionLedger() {
 			const justNoted = noted.has(norm) && earlier && earlier.step === step - 1;
 			let result: Part[] | undefined;
 			if (earlier && !justNoted && earlier.global === global) {
-				if (category === "inspect" && !viewOff && !isError && earlier.hash === record.hash && output.length >= 200 && intervene(norm)) {
-					result = [{ type: "text", text: `[unchanged: \`${record.display}\` returned exactly what it returned at step ${earlier.step}, and no file changed since; use that earlier output.]` }];
+				const note = `[unchanged: \`${record.display}\` returned exactly what it returned at step ${earlier.step}, and no file changed since; use that earlier output.]`;
+				if (category === "inspect" && !viewOff && !isError && earlier.hash === record.hash && note.length * 2 <= output.length && intervene(norm)) {
+					result = [{ type: "text", text: note }];
 				} else if (category === "check" && intervene(norm)) {
 					result = [...((content as Part[]) ?? []), { type: "text", text: `[harness] Same check as step ${earlier.step} (${earlier.failed ? "failed" : "passed"} then), and no file changed since. Rerun it only for a cause outside the files (environment, a service, flakiness); otherwise act on that result.` }];
 				}

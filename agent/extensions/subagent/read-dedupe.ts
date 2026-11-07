@@ -29,10 +29,16 @@ export function createReadDedupe() {
 			if (toolName === "edit" || toolName === "write") { seen.delete(file); return undefined; }
 			if (toolName !== "read" || isError || !Array.isArray(content) || content.length === 0) return undefined;
 			if (!content.every((part: Part) => part?.type === "text" && typeof part.text === "string")) return undefined; // images and mixed results pass
-			const digest = hash((content as Part[]).map((part) => part.text).join("\n"));
+			const text = (content as Part[]).map((part) => part.text).join("\n");
+			const note = duplicateReadNote(args.path);
 			const range = JSON.stringify([args.offset ?? null, args.limit ?? null]);
 			const ranges = seen.get(file) ?? new Map<string, string>();
-			if (ranges.get(range) === digest) return [{ type: "text", text: duplicateReadNote(args.path) }];
+			// Match handoff collapsing: a reference must at least halve the output it replaces. A read too small for that is still the
+			// latest copy of the range, so forget the earlier one: otherwise a later read that matches the earlier text would be called
+			// unchanged although the copy just before it showed different text.
+			if (note.length * 2 > text.length) { ranges.delete(range); return undefined; }
+			const digest = hash(text);
+			if (ranges.get(range) === digest) return [{ type: "text", text: note }];
 			ranges.set(range, digest);
 			seen.set(file, ranges);
 			return undefined;
