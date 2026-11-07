@@ -1,6 +1,6 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe.
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, and a long main session costs up to 61% less ([Token savings](#token-savings)).
 
 ## Table of contents
 
@@ -12,6 +12,7 @@ A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding age
 - [Use it](#use-it)
 - [Roles](#roles)
 - [Safety and delivery](#safety-and-delivery)
+- [Token savings](#token-savings)
 - [Context and cost](#context-and-cost)
 - [Optional components](#optional-components)
 - [Copilot CLI limits](#copilot-cli-limits)
@@ -131,6 +132,29 @@ A `tool_call` guard runs on main and every worker. It blocks risky shell operati
 **Optional OS sandbox (Linux and macOS).** Set `PI_SUBAGENT_SANDBOX=on` (or `require`, which refuses to launch without it) to run each worker under bubblewrap (`bwrap`) on Linux or Seatbelt (`sandbox-exec`) on macOS: the filesystem is read-only except the worker's checkout (writing roles only), the task's `_evidence`/`_scratch` folders, the temp folder and a few state folders; add more with `PI_SUBAGENT_SANDBOX_WRITABLE`. Network stays on, because the worker must reach the model. It is off by default; Windows has no equivalent here (use WSL2 for it).
 
 Details, limits and every check: [subagent README](agent/extensions/subagent/README.md#safety-guard).
+
+## Token savings
+
+Measured with our own simulations: the real Pi CLI driven by a scripted stand-in model that records every request it receives. Each scenario runs the same tool calls twice, once with the harness's request shaping and once without, so the difference is the shaping alone. Cost is input-token equivalents at Anthropic prompt-cache prices (cache read 0.1x, cache write 1.25x of the input price); sizes are characters / 4.
+
+| Scenario | Without shaping | With the harness | Saving |
+| --- | --- | --- | --- |
+| Long worker task: 30 tool calls over large files and logs | 2.81M tokens sent, peak request 164k, 15 of 31 requests over 100k | 1.44M sent, peak 79k, none over 100k | **49% fewer tokens**, peak halved. Cost: **73% lower (3.7x cheaper) on Claude Haiku 5.5**, which charges 5x for a request over 100k; 9% lower on models without that surcharge |
+| Worker re-reading the same files | 354k sent | 233k sent | **34% fewer tokens, 36% lower cost** |
+| Main session: 10 user turns with subagent results | 1.37M sent, peak 85k | 864k sent, peak 61k | **37% fewer tokens, 21% lower cost** |
+| Ordinary worker task: few large or repeated outputs | 645k sent | 620k sent | 4% fewer tokens, 4% lower cost: shaping stays out of the way when there is little to save |
+
+The longer main runs, the more it saves, because its history otherwise grows with every request. A simulated main session under the same cache model, at Opus 5.5 cache prices:
+
+| Main requests | Input tokens | Cost | Main's request at the end |
+| --- | --- | --- | --- |
+| 150 | 29% fewer | 37% lower | 84k -> 40k tokens |
+| 300 | 42% fewer | 47% lower | 135k -> 83k tokens |
+| 480 | 55% fewer | 61% lower | 195k -> 85k tokens |
+
+**Cache-safe.** Shortening that rewrote the cached prefix every request would cost more than it saves, so every rule is built to keep the prefix stable: in all 232 recorded requests the system prompt and tool definitions stayed identical within each run, and older outputs are shortened in batches, so the cache is rewritten rarely. Masking has a price: on the long worker task the cache hit rate falls from 94% to 83%, which is why its saving at flat prices is 9% rather than 49%. That masking is also what keeps every request under Haiku's 100k surcharge.
+
+What these numbers are not: scripted runs and size estimates, not a billing benchmark of live models. A real model may choose different calls once it sees shortened output, and your tasks set the mix. `/subagent usage` shows your own cost per completed task and each role's cache hit share.
 
 ## Context and cost
 
