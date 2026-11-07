@@ -1,15 +1,17 @@
 import { spawn } from 'node:child_process';
 import { isAbsolute, win32 } from 'node:path';
 
-export function parseRequest(text: string): {kind:'graph'|'qmd'|'serena'; root?:string} {
+export function parseRequest(text: string): {kind:'graph'|'qmd'|'serena'; root?:string; init?:true} {
  const match=text.trim().match(/^(graph|qmd|serena)(?:\s+(.+))?$/);
- if(!match) throw Error('Usage: /refresh graph ["absolute project root"] | qmd | serena');
+ if(!match) throw Error('Usage: /refresh graph [--init] ["absolute project root"] | qmd | serena');
  const kind=match[1] as 'graph'|'qmd'|'serena';
  let root=match[2]?.trim();
+ let init=false;
+ if(kind==='graph' && root && /^--init(\s|$)/.test(root)) { init=true; root=root.slice(6).trim()||undefined; }
  if(kind!=='graph' && root) throw Error(`${kind} accepts no arguments.`);
  if(root?.startsWith('"') && root.endsWith('"')) root=root.slice(1,-1);
  if(root && (!isAbsolute(root) && !win32.isAbsolute(root) || /[\r\n\0"]/.test(root))) throw Error('Graph target must be one absolute directory.');
- return root ? {kind,root} : {kind};
+ return {kind,...(root?{root}:{}),...(init?{init:true as const}:{})};
 }
 export function assertNoHooks(config:any) {
  if(!config || typeof config.collections!=='object' || !config.collections) throw Error('Invalid QMD collections configuration.');

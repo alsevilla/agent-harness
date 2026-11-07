@@ -3,13 +3,16 @@ import { existsSync, readFileSync, realpathSync, statSync, readdirSync } from 'n
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, relative } from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertNoHooks, parseRequest, runBounded, Singleton } from './core.ts';
 import { stopServer } from '../../skills/serena/scripts/serena.mjs';
 
-function file(path:string,label:string) {
+// keepLink: run the path as given. A virtualenv's python (uv tools on Linux and macOS) is a symlink to the base interpreter; resolving it
+// would run outside the environment, where the installed module is missing.
+function file(path:string,label:string,keepLink=false) {
  if(!isAbsolute(path)||!existsSync(path)||!statSync(path).isFile())throw Error(`${label} must name an existing absolute file.`);
- return realpathSync(path);
+ return keepLink?path:realpathSync(path);
 }
 export function candidateRoot(cwd:string) {
  let root=realpathSync(cwd);const original=root;
@@ -19,18 +22,48 @@ function within(root:string,path:string) {
  const rel=relative(root,realpathSync(path));
  if(rel==='..'||rel.startsWith('..\\')||rel.startsWith('../')||isAbsolute(rel))throw Error('Graph output links outside the selected checkout; refresh refused.');
 }
-export function graphTarget(cwd:string,explicit?:string) {
- const root=realpathSync(explicit??candidateRoot(cwd));
+// init: build the first graph. Refused where one exists (that is a plain update) and in a linked worktree, whose graph would describe one
+// branch and go with the worktree at cleanup: workers in every worktree already find the primary checkout's graph.
+export function graphTarget(cwd:string,explicit?:string,init=false) {
+ const selected=realpathSync(explicit??cwd);
+ if(!statSync(selected).isDirectory())throw Error('Graph target must be a directory.');
+ const root=candidateRoot(selected);
  const output=join(root,'graphify-out');
- if(!statSync(root).isDirectory()||!existsSync(join(output,'graph.json')))throw Error('Target has no existing graphify-out/graph.json. Specify the intended absolute checkout; /refresh does not initialize graphs.');
+ const exists=existsSync(join(output,'graph.json'));
+ if(init){
+  if(exists)throw Error(`${root} already has graphify-out/graph.json; use /refresh graph to update it.`);
+  const git=join(root,'.git');
+  if(existsSync(git)&&statSync(git).isFile()){
+   const match=/^gitdir:\s*(.+)\s*$/m.exec(readFileSync(git,'utf8'));
+   if(!match)throw Error('Cannot resolve the checkout Git directory.');
+   const gitDir=realpathSync(resolve(root,match[1].trim())),commonFile=join(gitDir,'commondir');
+   if(existsSync(commonFile)&&realpathSync(resolve(gitDir,readFileSync(commonFile,'utf8').trim()))!==gitDir)throw Error('This is a linked worktree. Build the graph in the primary checkout (/refresh graph --init "<primary checkout>"); workers in every worktree use it.');
+  }
+ }else if(!exists)throw Error('Target has no existing graphify-out/graph.json. Build one with /refresh graph --init, or name the intended absolute checkout.');
+ if(!existsSync(output))return root;
  const pending=[output];let checked=0;
  while(pending.length){const path=pending.pop()!;if(++checked>10000)throw Error('Graph output has too many entries to validate.');within(root,path);if(statSync(path).isDirectory())for(const name of readdirSync(path))pending.push(join(path,name))}
  return root;
 }
+// Where uv tool install graphifyy puts the interpreter.
+export function defaultGraphPython(platform=process.platform,home=homedir()):string {
+ return platform==='win32'?join(home,'AppData','Roaming','uv','tools','graphifyy','Scripts','python.exe'):join(home,'.local','share','uv','tools','graphifyy','bin','python');
+}
+// Graphify's pre-overwrite snapshots: graphify-out/YYYY-MM-DD folders.
+export function datedBackups(output:string):{count:number;names:string[];bytes:number} {
+ if(!existsSync(output))return {count:0,names:[],bytes:0};
+ const names=readdirSync(output).filter(name=>/^\d{4}-\d{2}-\d{2}$/.test(name)&&statSync(join(output,name)).isDirectory()).sort();
+ let bytes=0;const pending=names.map(name=>join(output,name));
+ while(pending.length){const path=pending.pop()!;const stat=statSync(path);if(stat.isDirectory())for(const name of readdirSync(path))pending.push(join(path,name));else bytes+=stat.size}
+ return {count:names.length,names,bytes};
+}
+export function gitIgnores(root:string,path:string):boolean {
+ return spawnSync('git',['check-ignore','-q',path],{cwd:root,windowsHide:true,stdio:'ignore'}).status===0;
+}
 export default function refresh(pi:ExtensionAPI) {
  const folder=dirname(fileURLToPath(import.meta.url)); const gate=new Singleton();
  pi.registerCommand('refresh',{
-  description:'Refresh graph code, QMD collections, or restart the serena skill\'s Serena server without a model turn',
+  description:'Build (--init) or refresh the code graph, refresh QMD collections, or restart the serena skill\'s Serena server without a model turn',
   handler:async(args,ctx)=>{
    try {
     const request=parseRequest(args);
@@ -44,10 +77,16 @@ export default function refresh(pi:ExtensionAPI) {
      const timeout=Math.min(600000,Math.max(1000,Number(config.timeoutMs)||120000));
      let output:string;
      if(request.kind==='graph') {
-      const root=graphTarget(ctx.cwd,request.root);
-      const python=file(config.graphPythonPath??join(homedir(),'AppData','Roaming','uv','tools','graphifyy','Scripts','python.exe'),'Graphify Python');
-      ctx.ui.notify(`Updating code graph in ${root}`,'info');
-      output=await runBounded(python,['-m','graphify','update',root],root,timeout,undefined,{...process.env,GRAPHIFY_OUT:join(root,'graphify-out'),GRAPHIFY_FORCE:'0',GRAPHIFY_NO_TIPS:'1',PYTHONUTF8:'1'});
+      const root=graphTarget(ctx.cwd,request.root,request.init);
+      const python=file(config.graphPythonPath??defaultGraphPython(),'Graphify Python (install with uv tool install graphifyy, or set graphPythonPath in config.json)',true);
+      ctx.ui.notify(`${request.init?'Building':'Updating'} code graph in ${root}`,'info');
+      // graphify update re-extracts code only (no LLM); on a checkout without a graph it builds the first one. GRAPHIFY_NO_BACKUP: Graphify
+      // otherwise copies the whole graph into a dated graphify-out/YYYY-MM-DD folder before each day's overwrite of an LLM-built or
+      // labelled graph and never removes them. GRAPHIFY_FORCE=0 still refuses a rebuild that would shrink the graph.
+      output=await runBounded(python,['-m','graphify','update',root],root,timeout,undefined,{...process.env,GRAPHIFY_OUT:join(root,'graphify-out'),GRAPHIFY_FORCE:'0',GRAPHIFY_NO_BACKUP:'1',GRAPHIFY_NO_TIPS:'1',PYTHONUTF8:'1'});
+      const backups=datedBackups(join(root,'graphify-out'));
+      if(backups.count)output+=`\n${backups.count} dated backup folder(s) in graphify-out (${backups.names.join(', ')}; ${backups.bytes<1048576?`${Math.ceil(backups.bytes/1024)} KB`:`${Math.ceil(backups.bytes/1048576)} MB`}) are copies Graphify made before earlier overwrites. /refresh graph makes none; delete them if you do not need them.`;
+      if(request.init&&!gitIgnores(root,'graphify-out'))output+='\ngraphify-out is not ignored by Git here; add it to .gitignore so the graph is not committed.';
      }else {
       const qmd=JSON.parse(readFileSync(join(folder,'..','qmd','config.json'),'utf8'));
       const node=file(qmd.nodePath,'QMD Node'); const cli=file(qmd.cliPath,'QMD CLI');

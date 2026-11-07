@@ -40,7 +40,7 @@ import { registerHandoffWindow, requestMainFold, stateCard } from "./handoff-win
 import { STOPPED_JOBS_DIR } from "./stopped-jobs.ts";
 import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
-import { assembleChildSystemPrompt, configureCodeIntegrations } from "./code-integrations.ts";
+import { assembleChildSystemPrompt, configureCodeIntegrations, launchedIntegrations } from "./code-integrations.ts";
 import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
@@ -366,7 +366,7 @@ async function runAgentAttempt(
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
 	const integrationArgsStart = args.length;
-	codeIntegrationsEnabled = configureCodeIntegrations(args, agent, dispatchDefaults.jobId ? [DECISION_TOOL] : []);
+	codeIntegrationsEnabled = configureCodeIntegrations(args, agent, dispatchDefaults.jobId ? [DECISION_TOOL] : [], undefined, undefined, cwd ?? defaultCwd);
 	// Compact leaf contract, main never loads it. Inserted before the integration extensions: Graphify returns a forced systemPrompt rendered at their turn, so this must run first.
 	if (childContextEligible(agent, codeIntegrationsEnabled)) args.splice(integrationArgsStart, 0, "--extension", path.join(extensionDir, "child-context-entry.ts"));
 
@@ -454,7 +454,7 @@ async function runAgentAttempt(
 			});
 			const client = new RpcWorker(proc, controlPath);
             proc.on("spawn", () => {
-                if (worker) { worker.ponytail = args.some((arg) => /[\\/]@dietrichgebert[\\/]ponytail[\\/]/.test(arg)); dispatchDefaults.monitor?.store.started(worker.id); }
+                if (worker) { worker.ponytail = args.some((arg) => /[\\/]@dietrichgebert[\\/]ponytail[\\/]/.test(arg)); worker.loaded = launchedIntegrations(args); dispatchDefaults.monitor?.store.started(worker.id); }
                 if (client) {
                     void client.send("prompt", "Task: " + task).catch(error => {
                         if (client.closed && currentResult.messages.length) return;
