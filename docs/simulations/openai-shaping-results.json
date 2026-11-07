@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "sourceCommit": "f155d1650e3591a3a6a73cc386ab5607519ef8ac",
+  "sourceCommit": "a5267c787ee2767b21941e849827b9782fb9525b",
   "sourceHashes": {
-    "scripts/simulate-openai-shaping.mjs": "a3085de0e2caa4b0fcaa02a19b673f2ac9ff49caf70a83258e47c669c5ace4f2",
+    "scripts/simulate-openai-shaping.mjs": "3b073c73e1b2cc363204d090c2bd845a44ff98261843c80f424a358a1c1ca03e",
     "agent/extensions/subagent/handoff-window.ts": "caa2839a0adda757e79e8b3ed063c41927bafccd90f3f07184bdc3a3d8411049",
     "agent/extensions/subagent/read-dedupe.ts": "fffdfce68964794c6cf9b0d90e7c2504c60f1edcf7d4298df652b6edb30319de",
     "agent/extensions/subagent/execution-ledger.ts": "5dcdebcc2272ca9db309c1aac654c41ca397802705864f84a9fc0725b3b8c7a2",

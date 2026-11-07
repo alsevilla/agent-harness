@@ -1,6 +1,6 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, and a long main session costs up to 61% less ([Token savings](#token-savings)).
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, and a long main session costs up to 63% less ([Token savings](#token-savings)).
 
 ## Table of contents
 
@@ -135,39 +135,36 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 
 ## Token savings
 
-Original simulation results, before the small-task guards described below: the real Pi CLI driven by a scripted stand-in model that records every request it receives. Each scenario runs the same tool calls twice, once with the harness's request shaping and once without, so the difference is the shaping alone. Cost is input-token equivalents at Anthropic prompt-cache prices (cache read 0.1x, cache write 1.25x of the input price); sizes are characters / 4.
+Three simulations measure what the request shaping saves. Each runs the same work twice, with the harness's shaping and without it, so the difference is the shaping alone. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
+
+### Recorded Pi runs
+
+The real Pi CLI drives a scripted stand-in model that records every request Pi sends it ([method](docs/simulations/pi-shaping.md)). Cost is input-token equivalents at Anthropic prompt-cache prices (cache read 0.1x, cache write 1.25x of the input price); sizes are characters / 4.
 
 | Scenario | Without shaping | With the harness | Saving |
 | --- | --- | --- | --- |
 | Long worker task: 30 tool calls over large files and logs | 2.81M tokens sent, peak request 164k, 15 of 31 requests over 100k | 1.44M sent, peak 79k, none over 100k | **49% fewer tokens**, peak halved. Cost: **73% lower (3.7x cheaper) on Claude Haiku 5.5**, which charges 5x for a request over 100k; 9% lower on models without that surcharge |
 | Worker re-reading the same files | 354k sent | 233k sent | **34% fewer tokens, 36% lower cost** |
-| Main session: 10 user turns with subagent results | 1.37M sent, peak 85k | 864k sent, peak 61k | **37% fewer tokens, 21% lower cost** |
+| Main session: 10 user turns of file reads and shell output | 1.37M sent, peak 85k | 864k sent, peak 61k | **37% fewer tokens, 21% lower cost** |
 | Ordinary worker task: few large or repeated outputs | 645k sent | 620k sent | 4% fewer tokens, 4% lower cost: shaping stays out of the way when there is little to save |
 
-The longer main runs, the more it saves, because its history otherwise grows with every request. A simulated main session under the same cache model, at Opus 5.5 cache prices:
+**Cache-safe.** Shortening that rewrote the cached prefix every request would cost more than it saves, so every rule keeps the prefix stable: in all 232 recorded requests the system prompt and tool definitions stayed identical within each run, and older outputs are shortened in batches, so the cache is rewritten rarely. Masking has a price: on the long worker task the cache hit rate falls from 94% to 83%, which is why its saving at flat prices is 9% rather than 49%. That masking is also what keeps every request under Haiku's 100k surcharge.
+
+### Long main sessions
+
+The longer main runs, the more it saves, because its history otherwise grows with every request. A seeded synthetic session of user messages, subagent results with long reports and main's own reads, through the production context hook, under the same cache model at Opus 5.5 cache prices ([method](docs/simulations/pi-shaping.md#long-main-sessions)):
 
 | Main requests | Input tokens | Cost | Main's request at the end |
 | --- | --- | --- | --- |
-| 150 | 29% fewer | 37% lower | 84k -> 40k tokens |
-| 300 | 42% fewer | 47% lower | 135k -> 83k tokens |
-| 480 | 55% fewer | 61% lower | 195k -> 85k tokens |
+| 150 | 54% fewer | 14% lower | 190k -> 38k tokens |
+| 300 | 73% fewer | 42% lower | 381k -> 82k tokens |
+| 480 | 82% fewer | 63% lower | 601k -> 84k tokens |
 
-**Cache-safe.** Shortening that rewrote the cached prefix every request would cost more than it saves, so every rule is built to keep the prefix stable: in all 232 recorded requests the system prompt and tool definitions stayed identical within each run, and older outputs are shortened in batches, so the cache is rewritten rarely. Masking has a price: on the long worker task the cache hit rate falls from 94% to 83%, which is why its saving at flat prices is 9% rather than 49%. That masking is also what keeps every request under Haiku's 100k surcharge.
+Shortening older results alone costs more than no shaping until about 480 requests (35% more at 150): each batch rewrites the cache from the first shortened result. Checkpoint folding is what turns it into a saving, because it rewrites the cache once and leaves a far smaller history to read on every later request.
 
-What these numbers are not: scripted runs and size estimates, not a billing benchmark of live models. A real model may choose different calls once it sees shortened output, and your tasks set the mix. `/subagent usage` shows your own cost per completed task and each role's cache hit share.
+### Offline replay at OpenAI prices
 
-### OpenAI sandbox simulation
-
-An independent offline replay on 2026-11-07 exercises the current shaping functions
-with seven fixed workloads and four OpenAI pricing profiles. It does not run live
-models or the Pi CLI, and its fixtures differ from the Claude-session simulations
-above. [Script, workload definitions, cache assumptions and results](docs/simulations/openai-shaping.md)
-are included so the numbers can be reproduced.
-
-These results include the small-task guards added after the first replay exposed
-cache and ledger overhead. Positive percentages mean savings.
-Costs cover input only, using Standard API rates with an idealized warm cache and
-30-minute writes—not Codex subscription billing or total task cost.
+An independent offline replay exercises the current shaping functions with seven fixed workloads and four OpenAI pricing profiles ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Positive percentages mean savings. Costs cover input only, using Standard API rates with an idealized warm cache and 30-minute writes: not Codex subscription billing or total task cost.
 
 | Scenario | Estimated input-token saving | Input-cost saving: GPT-6.1 Sol / Terra | Input-cost saving: GPT-6 Astra / Luna |
 | --- | ---: | ---: | ---: |
@@ -179,16 +176,13 @@ Costs cover input only, using Standard API rates with an idealized warm cache an
 | Main, 300 requests | 49.2% | 29.4% | 39.0% |
 | Main, 480 requests | 65.7% | 55.6% | 62.6% |
 
-Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%.
-All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x
-input/cache rates. [Official pricing](https://developers.openai.com/api/docs/pricing).
-The 480-request baseline crosses that boundary; its shaped counterpart does not.
-Before the guards, the ordinary worker cost 2.5–2.8% more and the short main run
-cost 12.5–22.5% more. Both now match their unshaped baseline in these fixtures.
-Main prefix rewrites wait until 25k estimated history tokens; small read-only workers
-defer ledger inventories until 80k characters have been observed. Edits, commands
-and packet-required checks bypass that inventory deferral. This is a conservative
-heuristic, not a guarantee for every workload; the [comparison](docs/simulations/openai-shaping.md#before-and-after) includes longer-run trade-offs.
+Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%. All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x input/cache rates ([official pricing](https://developers.openai.com/api/docs/pricing)). The 480-request baseline crosses that boundary; its shaped counterpart does not.
+
+This replay found two small-task costs, now guarded: the ordinary worker cost 2.5-2.8% more and the short main run 12.5-22.5% more. Main now leaves its history unshortened below 25k estimated tokens, and a read-only worker defers the ledger's state view until it has read 80k characters (an edit, command or packet-required check shows it sooner); both fixtures now match their unshaped baseline. These are conservative heuristics, not a guarantee for every workload; the [before-and-after comparison](docs/simulations/openai-shaping.md#before-and-after) shows the longer-run trade-offs. The recorded Pi runs and long main sessions above give the same results with and without the guards.
+
+### What these numbers are not
+
+Scripted runs and size estimates, not a billing benchmark of live models. A real model may choose different calls once it sees shortened output, and your tasks set the mix. `/subagent usage` shows your own cost per completed task and each role's cache hit share.
 
 ## Context and cost
 
@@ -250,6 +244,7 @@ The plugin shares agents, skills and startup context with Pi. It is a preview wi
 | [Subagent README](agent/extensions/subagent/README.md) | Launch modes, handoffs, guard, grants, cleanup, usage: the technical reference |
 | [docs/copilot-acceptance.md](docs/copilot-acceptance.md) | Copilot CLI acceptance matrix |
 | [docs/knowledge](docs/knowledge/README.md) | Decision and knowledge records |
+| [docs/simulations](docs/simulations/pi-shaping.md) | Token-saving simulations: method, fixtures and results |
 
 ## Contributing
 
@@ -260,6 +255,8 @@ npm test
 ```
 
 Suites that need an installed Pi host are skipped, by name, when none is found; set `NATIVE_PROBE_HOST_MODULES` or install Pi to run them.
+
+After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
 
 ## Licenses
 

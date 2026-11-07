@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "sourceCommit": "a5267c787ee2767b21941e849827b9782fb9525b",
+  "cacheModel": "Anthropic-style: 20-block lookback; Opus 5.5 cache read 0.05x, write 1.25x of input; characters / 4",
+  "results": [
+    {
+      "requests": 150,
+      "none": {
+        "requests": 150,
+        "input": 15322586,
+        "cacheRead": 15132488,
+        "cacheWrite": 190098,
+        "cost": 994247,
+        "lastRequest": 190098
+      },
+      "shorten": {
+        "requests": 150,
+        "input": 9956844,
+        "cacheRead": 9252691,
+        "cacheWrite": 704153,
+        "cost": 1342826,
+        "lastRequest": 82047
+      },
+      "full": {
+        "requests": 150,
+        "input": 7122293,
+        "cacheRead": 6709636,
+        "cacheWrite": 412657,
+        "cost": 851303,
+        "lastRequest": 38193
+      },
+      "tokenSavingPercent": 53.5,
+      "costSavingPercent": 14.4
+    },
+    {
+      "requests": 300,
+      "none": {
+        "requests": 300,
+        "input": 57973547,
+        "cacheRead": 57592140,
+        "cacheWrite": 381407,
+        "cost": 3356366,
+        "lastRequest": 381407
+      },
+      "shorten": {
+        "requests": 300,
+        "input": 26996028,
+        "cacheRead": 25052888,
+        "cacheWrite": 1943140,
+        "cost": 3681569,
+        "lastRequest": 133463
+      },
+      "full": {
+        "requests": 300,
+        "input": 15564632,
+        "cacheRead": 14596075,
+        "cacheWrite": 968557,
+        "cost": 1940500,
+        "lastRequest": 81996
+      },
+      "tokenSavingPercent": 73.2,
+      "costSavingPercent": 42.2
+    },
+    {
+      "requests": 480,
+      "none": {
+        "requests": 480,
+        "input": 145534435,
+        "cacheRead": 144933912,
+        "cacheWrite": 600523,
+        "cost": 7997349,
+        "lastRequest": 600523
+      },
+      "shorten": {
+        "requests": 480,
+        "input": 56360990,
+        "cacheRead": 52334371,
+        "cacheWrite": 4026619,
+        "cost": 7649992,
+        "lastRequest": 193924
+      },
+      "full": {
+        "requests": 480,
+        "input": 25632986,
+        "cacheRead": 24203206,
+        "cacheWrite": 1429780,
+        "cost": 2997385,
+        "lastRequest": 84175
+      },
+      "tokenSavingPercent": 82.4,
+      "costSavingPercent": 62.5
+    }
+  ]
+}

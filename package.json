@@ -8,7 +8,10 @@
 	},
 	"scripts": {
 		"test": "node scripts/run-node-tests.mjs",
-		"test:list": "node scripts/run-node-tests.mjs --list"
+		"test:list": "node scripts/run-node-tests.mjs --list",
+		"simulate:pi": "node scripts/simulate-pi-shaping.mjs",
+		"simulate:main": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-main-sessions.mjs",
+		"simulate:openai": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-openai-shaping.mjs"
 	},
 	"pi": {
 		"extensions": [

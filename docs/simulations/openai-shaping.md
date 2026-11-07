@@ -1,12 +1,9 @@
 # OpenAI shaping simulation
 
-Run on 2026-11-07; exact source hashes and checkout identity are in the results. This is an independent,
-offline sandbox replay, not a rerun of the README's Claude-session fixtures. Those
-original scripts and traces were not available in the repository. No model, Pi CLI,
-subscription, network request or paid inference runs inside this simulation.
+Run on 2026-11-07; exact source hashes and checkout identity are in the results. This is an independent, offline sandbox replay with its own fixtures, separate from the [recorded Pi runs](pi-shaping.md). No model, Pi CLI, subscription, network request or paid inference runs inside this simulation.
 
 ```sh
-node --experimental-strip-types scripts/simulate-openai-shaping.mjs > results.json
+npm run simulate:openai > docs/simulations/openai-shaping-results.json
 ```
 
 Add `--trace` for per-request input/cache counters. The committed

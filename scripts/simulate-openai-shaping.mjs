@@ -1,5 +1,5 @@
 // Offline, deterministic replay of the production shaping functions; no Pi host or model API.
-// Run: node --experimental-strip-types scripts/simulate-openai-shaping.mjs > results.json
+// Run: npm run simulate:openai > docs/simulations/openai-shaping-results.json
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
