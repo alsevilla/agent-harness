@@ -25,14 +25,20 @@ function within(root:string,path:string) {
 // init: build the first graph. Refused where one exists (that is a plain update) and in a linked worktree, whose graph would describe one
 // branch and go with the worktree at cleanup: workers in every worktree already find the primary checkout's graph.
 export function graphTarget(cwd:string,explicit?:string,init=false) {
- const root=realpathSync(explicit??candidateRoot(cwd));
+ const selected=realpathSync(explicit??cwd);
+ if(!statSync(selected).isDirectory())throw Error('Graph target must be a directory.');
+ const root=candidateRoot(selected);
  const output=join(root,'graphify-out');
- if(!statSync(root).isDirectory())throw Error('Graph target must be a directory.');
  const exists=existsSync(join(output,'graph.json'));
  if(init){
   if(exists)throw Error(`${root} already has graphify-out/graph.json; use /refresh graph to update it.`);
   const git=join(root,'.git');
-  if(existsSync(git)&&statSync(git).isFile())throw Error('This is a linked worktree. Build the graph in the primary checkout (/refresh graph --init "<primary checkout>"); workers in every worktree use it.');
+  if(existsSync(git)&&statSync(git).isFile()){
+   const match=/^gitdir:\s*(.+)\s*$/m.exec(readFileSync(git,'utf8'));
+   if(!match)throw Error('Cannot resolve the checkout Git directory.');
+   const gitDir=realpathSync(resolve(root,match[1].trim())),commonFile=join(gitDir,'commondir');
+   if(existsSync(commonFile)&&realpathSync(resolve(gitDir,readFileSync(commonFile,'utf8').trim()))!==gitDir)throw Error('This is a linked worktree. Build the graph in the primary checkout (/refresh graph --init "<primary checkout>"); workers in every worktree use it.');
+  }
  }else if(!exists)throw Error('Target has no existing graphify-out/graph.json. Build one with /refresh graph --init, or name the intended absolute checkout.');
  if(!existsSync(output))return root;
  const pending=[output];let checked=0;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { execFileSync } from 'node:child_process';
 import { parseRequest, runBounded, Singleton, assertNoHooks } from '../core.ts';
 import refresh, {candidateRoot,datedBackups,defaultGraphPython,graphTarget} from '../index.ts';
 import { mkdtempSync,mkdirSync,writeFileSync,existsSync,symlinkSync,rmSync } from 'node:fs';
@@ -23,13 +24,34 @@ test('graph --init builds only where no graph exists, never in a linked worktree
  const temp=mkdtempSync(join(tmpdir(),'pi-refresh-init-'));
  try{
   const primary=join(temp,'primary'),worktree=join(temp,'worktree');
-  mkdirSync(join(primary,'.git'),{recursive:true});mkdirSync(worktree);writeFileSync(join(worktree,'.git'),'gitdir: '+join(primary,'.git','worktrees','w'));
+  mkdirSync(join(primary,'.git','worktrees','w'),{recursive:true});mkdirSync(worktree);writeFileSync(join(worktree,'.git'),'gitdir: '+join(primary,'.git','worktrees','w'));
+  writeFileSync(join(primary,'.git','worktrees','w','commondir'),'../..');
   assert.equal(graphTarget(primary,undefined,true),primary);
   assert.equal(existsSync(join(primary,'graphify-out')),false,'choosing the target writes nothing');
   assert.throws(()=>graphTarget(worktree,undefined,true),/linked worktree.*primary checkout/);
   mkdirSync(join(primary,'graphify-out'));writeFileSync(join(primary,'graphify-out','graph.json'),'{}');
   assert.throws(()=>graphTarget(primary,undefined,true),/already has graphify-out\/graph.json/);
   assert.equal(graphTarget(primary),primary);
+ }finally{rmSync(temp,{recursive:true,force:true})}
+});
+test('explicit nested targets use the checkout root; separate Git directories are not linked worktrees',()=>{
+ const temp=mkdtempSync(join(tmpdir(),'pi-refresh-layout-'));
+ const git=(args:string[])=>execFileSync('git',args,{stdio:'pipe'});
+ try{
+  const primary=join(temp,'primary'),linked=join(temp,'linked'),separate=join(temp,'separate');
+  git(['init',primary]);
+  git(['-C',primary,'-c','user.name=Test','-c','user.email=test@example.com','-c','commit.gpgsign=false','commit','--allow-empty','-m','fixture']);
+  git(['-C',primary,'worktree','add','-b','linked',linked]);
+  mkdirSync(join(primary,'src'));mkdirSync(join(linked,'src'));
+  assert.equal(graphTarget(primary,join(primary,'src'),true),candidateRoot(primary));
+  assert.throws(()=>graphTarget(primary,join(linked,'src'),true),/linked worktree/);
+  mkdirSync(join(primary,'graphify-out'));writeFileSync(join(primary,'graphify-out','graph.json'),'{}');
+  assert.throws(()=>graphTarget(primary,join(primary,'src'),true),/already has/);
+  assert.throws(()=>graphTarget(primary,join(primary,'graphify-out','graph.json'),true),/must be a directory/);
+  git(['init','--separate-git-dir',join(temp,'metadata'),separate]);
+  assert.equal(graphTarget(separate,undefined,true),candidateRoot(separate));
+  assert.equal(existsSync(join(separate,'graphify-out')),false);
+  assert.equal(existsSync(join(linked,'src','graphify-out')),false);
  }finally{rmSync(temp,{recursive:true,force:true})}
 });
 test('rejects hooks including YAML inline objects', () => {
