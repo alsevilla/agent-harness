@@ -1,6 +1,6 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, and a long main session costs up to 63% less ([Token savings](#token-savings)).
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 63% less, and a ten-task session costs 28% less than one Claude Opus 5.5 agent working alone ([Token savings](#token-savings)).
 
 ## Table of contents
 
@@ -135,7 +135,7 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 
 ## Token savings
 
-Three simulations measure what the request shaping saves. Each runs the same work twice, with the harness's shaping and without it, so the difference is the shaping alone. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
+Four simulations measure what the harness saves. Three run the same work with the harness's request shaping and without it, so the difference is the shaping alone; the fourth compares the whole harness with one agent working alone. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
 
 ### Recorded Pi runs
 
@@ -161,6 +161,19 @@ The longer main runs, the more it saves, because its history otherwise grows wit
 | 480 | 82% fewer | 63% lower | 601k -> 84k tokens |
 
 Shortening older results alone costs more than no shaping until about 480 requests (35% more at 150): each batch rewrites the cache from the first shortened result. Checkpoint folding is what turns it into a saving, because it rewrites the cache once and leaves a far smaller history to read on every later request.
+
+### The harness against a single agent
+
+The same ten-task session (four small fixes, three bug hunts, three features, two of them needing a second fix round) done by one model alone in plain Pi, and by the harness: main delegates each phase to a role in its own context, with the production shaping in every context and each role on its model from `agent/roles.json` (implementation on Claude Sonnet 5.5; debugging, planning and test runs on Claude Haiku 5.5) ([method](docs/simulations/delegation.md)). Main runs on the single agent's model. Anthropic list prices, the same cache model as above.
+
+| Main / single-agent model | Single agent, one session | Single agent, fresh session per task | Harness, every role on main's model | Harness, roles on their own models |
+| --- | --- | --- | --- | --- |
+| Claude Opus 5.5 | $12.98, 47.3M tokens sent, peak 428k | $5.21, 7.8M sent, peak 82k | $7.83, 8.9M sent, peak 62k | **$3.74: 28% below the fresh single agent, 71% below one session** |
+| Claude Sonnet 5.5 | $11.18 | $3.34 | $4.72 | **$3.18: 5% below the fresh single agent, 72% below one session** |
+
+Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 41-50% more than a single agent that starts a fresh session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: the bulk of the reading and editing runs on cheaper models in small contexts, and no context grows past 62k tokens. Against one agent kept in one long session, the more common habit, every harness row is cheaper.
+
+The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context. With one extra read per worker launch (the default above), the harness saves 28% under Opus 5.5; it still saves at six (1%) and costs more from eight (11% more). Under Sonnet 5.5 the margin is thin: it saves 5% at one extra read and costs 3% more at two. How many more calls the Haiku roles need barely matters, since they are cheap: three times the reads and checks still saves 25% under Opus. Not modelled: whether each approach finishes the task correctly, which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 
 ### Offline replay at OpenAI prices
 
@@ -256,7 +269,7 @@ npm test
 
 Suites that need an installed Pi host are skipped, by name, when none is found; set `NATIVE_PROBE_HOST_MODULES` or install Pi to run them.
 
-After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
+After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main`, `npm run simulate:delegation` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
 
 ## Licenses
 

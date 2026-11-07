@@ -1,6 +1,6 @@
 # Pi shaping simulations
 
-Two simulations behind the README's [Token savings](../../README.md#token-savings) tables, both run against Anthropic-style prompt caching. Each compares the same work with the harness's request shaping and without it. Results: [`pi-shaping-results.json`](pi-shaping-results.json) and [`main-sessions-results.json`](main-sessions-results.json); each records the commit it ran on.
+Two simulations behind the README's [Token savings](../../README.md#token-savings) tables, both run against Anthropic-style prompt caching; the harness against a single agent is in [delegation.md](delegation.md). Each compares the same work with the harness's request shaping and without it. Results: [`pi-shaping-results.json`](pi-shaping-results.json) and [`main-sessions-results.json`](main-sessions-results.json); each records the commit it ran on.
 
 ## Recorded Pi runs
 
