@@ -73,3 +73,13 @@ test("serena guidance: read a small named file or symbol directly; a large sourc
 	assert.match(source, /When the packet names a small file or a symbol, read it directly\. For a large source file \(several hundred lines\), run outline first, then read only the range you need \(or find --body\), instead of reading it whole\. Use grep for renames and every textual occurrence: it also finds comments and strings, which refs skips\. Otherwise locate code with Serena before grep or find/);
 	assert.doesNotMatch(source, /to find every reference or caller/, "language-server references bought precision, not savings, and missed rename sites");
 });
+
+// A read too small to replace is still the latest copy of its range: a later read matching an older copy is not "unchanged".
+test("a small read between two identical large reads makes the earlier copy stale", () => {
+	const d = createReadDedupe();
+	const big = text("line\n".repeat(400));
+	assert.equal(d.onResult("read", { path: "a.ts" }, big, false, cwd), undefined);
+	assert.equal(d.onResult("read", { path: "a.ts" }, text("short"), false, cwd), undefined, "the file shrank: kept");
+	assert.equal(d.onResult("read", { path: "a.ts" }, big, false, cwd), undefined, "back to the original text: kept in full, since the latest copy differed");
+	assert.deepEqual(d.onResult("read", { path: "a.ts" }, big, false, cwd), text(duplicateReadNote("a.ts")), "a repeat of that is unchanged again");
+});
