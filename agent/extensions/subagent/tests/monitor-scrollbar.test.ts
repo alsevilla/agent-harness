@@ -637,5 +637,7 @@ async function runNodeSuite() {
 		assert.equal(monitor.integrationLabel(record({ ponytail: true })), "ponytail: loaded | serena: no calls observed | qmd: no calls observed | graphify: no calls observed");
 		assert.equal(monitor.integrationLabel(record({ ponytail: true, integrations: { serena: { calls: 3, returned: 3, errors: 0 } }, graphReferences: 2 })),
 			"ponytail: loaded | serena: 3 calls · 3 returned · 0 errors | qmd: no calls observed | graphify: no calls observed | graph references: 2 reads");
+		// A launch without a graph does not load the Graphify skill: the line says so instead of waiting for calls that cannot come.
+		assert.equal(monitor.integrationLabel(record({ loaded: ["serena", "qmd"] })), "serena: no calls observed | qmd: no calls observed | graphify: not loaded");
 	});
 }

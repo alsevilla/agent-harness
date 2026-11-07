@@ -177,7 +177,14 @@ export function unavailableIntegrationGuidance(agentName: string, qmdExtension =
   return `\n## Integrations not loaded in this launch\nNot loaded: ${missing.join(", ")}. The launch continued without them; any tools they would provide are not granted. Use the permitted read, grep and find fallback for the affected navigation; do not call them.\n`;
 }
 
-export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = [], qmdExtension = QMD_EXTENSION, serenaSkill = SERENA_SKILL): boolean {
+/** True when the checkout (or its primary checkout) has Graphify artifacts, or a global corpus covers it; also true when that cannot be resolved. */
+export function graphAvailable(cwd: string, globalDirectory = path.join(os.homedir(), ".graphify")): boolean {
+  return graphReferenceGuidance(cwd, globalDirectory) !== "";
+}
+
+// graphCwd: the worker's launch folder. With it, the Graphify skill loads only when that checkout has a graph, so a project without one
+// carries no graph instructions or lookup step the worker can never use.
+export function configureCodeIntegrations(args: string[], agent: AgentConfig, extraTools: string[] = [], qmdExtension = QMD_EXTENSION, serenaSkill = SERENA_SKILL, graphCwd?: string): boolean {
   // Canonical package roles never launch without an explicit allowlist: omitting --tools would grant every host tool.
   if (agent.source === "package" && !agent.tools?.length) throw new Error(`Package role ${agent.name} has no tools in roles.json; refusing to grant host default tools.`);
   const config = readIntegrationConfig();
@@ -195,6 +202,7 @@ export function configureCodeIntegrations(args: string[], agent: AgentConfig, ex
   // pi-serena is no longer loaded into workers (serena replaces it), so its tool names never reach a worker allowlist.
   const omitted: string[] = ["serena_"];
   for (const item of optional) {
+    if (item.label === "Graphify skill" && graphCwd !== undefined && !graphAvailable(graphCwd)) continue;
     if (fs.existsSync(item.file)) args.push(item.flag, item.file);
     else if (item.toolPrefix) omitted.push(item.toolPrefix);
   }
@@ -221,6 +229,12 @@ function launchCapabilities(args: string[]) {
   const qmd = [...tools].some(tool => tool.startsWith("qmd_"));
   const graphifySkill = files.some(file => /[\\/]graphify[\\/]SKILL\.md$/.test(file));
   return { ponytail, serena: serenaSkill !== undefined, serenaSkill, qmd, graphifySkill };
+}
+
+/** The lookup integrations a launch loads, by the names the live view counts. */
+export function launchedIntegrations(args: string[]): string[] {
+  const cap = launchCapabilities(args);
+  return [cap.serena && "serena", cap.qmd && "qmd", cap.graphifySkill && "graphify"].filter((name): name is string => !!name);
 }
 
 /** Lookup order for code the packet does not locate, naming only the tools this launch has; empty when it has none of them. */

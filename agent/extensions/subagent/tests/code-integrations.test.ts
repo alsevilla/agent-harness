@@ -386,3 +386,24 @@ test("candidate retrieval pins the QMD prior-evidence verification contract, emi
   assert.equal(candidateNavigationGuidance(candidate, false, false), "");
   assert.equal(graphReferenceGuidance(candidate, join(fixtureRoot, "no-global")), "");
 });
+
+test("the Graphify skill loads only for a launch folder with a graph", async () => {
+  const { launchedIntegrations } = await import("../code-integrations.ts");
+  const bare = repoAt("graph-absent");
+  const withGraph = repoAt("graph-present");
+  fs.mkdirSync(join(withGraph, "graphify-out"), { recursive: true });
+  fs.writeFileSync(join(withGraph, "graphify-out", "graph.json"), "{}");
+  withAgentDir({}, (_dir, qmd, serena) => {
+    const graphSkill = (args: string[]) => args.some(arg => /[\\/]graphify[\\/]SKILL\.md$/.test(arg));
+    const none: string[] = [];
+    configureCodeIntegrations(none, role("reviewer"), [], qmd, serena, bare);
+    assert.equal(graphSkill(none), false, none.join(" "));
+    assert.deepEqual(launchedIntegrations(none), ["serena", "qmd"]);
+    const some: string[] = [];
+    configureCodeIntegrations(some, role("reviewer"), [], qmd, serena, withGraph);
+    assert.equal(graphSkill(some), true, some.join(" "));
+    const unspecified: string[] = [];
+    configureCodeIntegrations(unspecified, role("reviewer"), [], qmd, serena);
+    assert.equal(graphSkill(unspecified), true, "without a launch folder the skill loads as before");
+  });
+});

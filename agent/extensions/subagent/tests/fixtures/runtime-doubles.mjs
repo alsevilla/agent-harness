@@ -91,6 +91,9 @@ export function configureCodeIntegrations(args) {
 	if (globalThis.__piTestCodeIntegrationsEnabled === true) { args.push("--extension", "integration-fixture.js"); return true; } // opt-in per test (stands in for Serena/Graphify, which force the prompt); default stays disabled
 	return false;
 }
+export function launchedIntegrations() {
+	return [];
+}
 export const CODE_NAVIGATION_GUIDANCE = "";
 export function graphReferenceGuidance() {
 	return "";
