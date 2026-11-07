@@ -1,6 +1,6 @@
 # OpenAI shaping simulation
 
-Run on 2026-11-07 against production shaping code at `352a2f6`. This is an independent,
+Run on 2026-11-07; exact source hashes and checkout identity are in the results. This is an independent,
 offline sandbox replay, not a rerun of the README's Claude-session fixtures. Those
 original scripts and traces were not available in the repository. No model, Pi CLI,
 subscription, network request or paid inference runs inside this simulation.
@@ -40,6 +40,10 @@ shell-output cap and context cap in their production order. After masking, dedup
 and ledger reuse are disabled as in the worker entry. All four OpenAI models currently
 select the same 80k trigger and 95k budget; no environment overrides are inherited.
 The enabled main arm uses the real ten-result batching and 50k checkpoint policy.
+Main histories below 25k estimated tokens now skip prefix rewriting. Worker ledger
+inventories wait for 80k read characters in read-only runs; edits, commands or
+packet-required checks bypass that deferral. Recording, dedupe and loop warnings
+continue independently of inventory display.
 The baseline disables these transformations. Native compaction, provider usage
 calibration, auto-formatting, lookup nudges, dispatch, system-prompt assembly and
 host request serialization are outside this replay. An assertion fails if a worker
@@ -76,13 +80,31 @@ cache-write and long-context assumptions must not be applied to Codex subscripti
 usage. Equal percentages for Sol/Terra and Astra/Luna follow from their equal relative
 cache rates and identical replay policies; they do not establish equal model behavior.
 
-## Interpretation
+## Before and after
 
-The long worker saves 61.6% of estimated input tokens; repeated reads save 52.1%.
-The ordinary worker uses 2.0% more tokens because its unique, short outputs do not
-benefit from compression and the ledger adds text. The short main run saves 6.9%
-of tokens but increases warm-cache input cost by 22.5% on Sol/Terra and 12.5% on
-Astra/Luna: rewriting cached history costs more than it saves on this workload.
-Longer main runs amortize that rewrite cost. All outcomes, including regressions,
-are included in the README table. These fixtures do not justify changing runtime
-thresholds or claiming a measured improvement in live task cost.
+The [original replay results](https://github.com/alsevilla/agent-harness/blob/f155d1650e3591a3a6a73cc386ab5607519ef8ac/docs/simulations/openai-shaping-results.json)
+exposed two costs: inventories on small, unique reads and cache rewrites on a short
+main history. Two small guards address those cases without a learned router or new
+configuration. The 25k history floor is half the existing default fold threshold;
+an initial 50k-floor trial lost substantially more long-session savings, so it was
+not retained. The read-only inventory floor is about 20k observed tokens. These are
+heuristics evaluated on these fixtures, not independently validated optimal values.
+
+Warm-cache input-cost savings below are percentages against the same unshaped
+baseline; negative values mean increased cost:
+
+| Workload | Sol/Terra before → after | Astra/Luna before → after |
+| --- | ---: | ---: |
+| Long worker | 25.1 → 25.1 | 36.3 → 36.3 |
+| Repeated reads | 61.9 → 62.0 | 58.9 → 59.0 |
+| Ordinary worker | −2.8 → 0.0 | −2.5 → 0.0 |
+| Main, 10 turns | −22.5 → 0.0 | −12.5 → 0.0 |
+| Main, 150 requests | 10.0 → 10.8 | 23.8 → 22.9 |
+| Main, 300 requests | 29.2 → 29.4 | 39.3 → 39.0 |
+| Main, 480 requests | 55.5 → 55.6 | 62.7 → 62.6 |
+
+The two small fixtures now have byte-identical simulated requests to the unshaped
+baseline. Long-worker savings remain intact. Delaying main compression retains more
+tokens early in longer sessions: Astra/Luna lose up to 0.9 percentage points of input
+cost savings here, while Sol/Terra improve slightly. The guards do not guarantee
+zero overhead for every small task, nor establish live behavior or quality parity.

@@ -135,7 +135,7 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 
 ## Token savings
 
-Measured with our own simulations: the real Pi CLI driven by a scripted stand-in model that records every request it receives. Each scenario runs the same tool calls twice, once with the harness's request shaping and once without, so the difference is the shaping alone. Cost is input-token equivalents at Anthropic prompt-cache prices (cache read 0.1x, cache write 1.25x of the input price); sizes are characters / 4.
+Original simulation results, before the small-task guards described below: the real Pi CLI driven by a scripted stand-in model that records every request it receives. Each scenario runs the same tool calls twice, once with the harness's request shaping and once without, so the difference is the shaping alone. Cost is input-token equivalents at Anthropic prompt-cache prices (cache read 0.1x, cache write 1.25x of the input price); sizes are characters / 4.
 
 | Scenario | Without shaping | With the harness | Saving |
 | --- | --- | --- | --- |
@@ -164,29 +164,35 @@ models or the Pi CLI, and its fixtures differ from the Claude-session simulation
 above. [Script, workload definitions, cache assumptions and results](docs/simulations/openai-shaping.md)
 are included so the numbers can be reproduced.
 
-Positive percentages below mean savings; **negative percentages mean increases**.
+These results include the small-task guards added after the first replay exposed
+cache and ledger overhead. Positive percentages mean savings.
 Costs cover input only, using Standard API rates with an idealized warm cache and
 30-minute writes—not Codex subscription billing or total task cost.
 
 | Scenario | Estimated input-token saving | Input-cost saving: GPT-6.1 Sol / Terra | Input-cost saving: GPT-6 Astra / Luna |
 | --- | ---: | ---: | ---: |
 | Long worker, 30 calls | 61.6% | 25.1% | 36.3% |
-| Repeated reads, 30 calls | 52.1% | 61.9% | 58.9% |
-| Ordinary worker, 30 calls | **−2.0%** | **−2.8%** | **−2.5%** |
-| Main, 10 user turns | 6.9% | **−22.5%** | **−12.5%** |
-| Main, 150 requests | 40.2% | 10.0% | 23.8% |
-| Main, 300 requests | 50.0% | 29.2% | 39.3% |
-| Main, 480 requests | 66.0% | 55.5% | 62.7% |
+| Repeated reads, 30 calls | 52.2% | 62.0% | 59.0% |
+| Ordinary worker, 30 calls | 0.0% | 0.0% | 0.0% |
+| Main, 10 user turns | 0.0% | 0.0% | 0.0% |
+| Main, 150 requests | 37.1% | 10.8% | 22.9% |
+| Main, 300 requests | 49.2% | 29.4% | 39.0% |
+| Main, 480 requests | 65.7% | 55.6% | 62.6% |
 
 Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%.
 All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x
 input/cache rates. [Official pricing](https://developers.openai.com/api/docs/pricing).
 The 480-request baseline crosses that boundary; its shaped counterpart does not.
-The short-main regression shows why fewer tokens do not always mean lower cost.
+Before the guards, the ordinary worker cost 2.5–2.8% more and the short main run
+cost 12.5–22.5% more. Both now match their unshaped baseline in these fixtures.
+Main prefix rewrites wait until 25k estimated history tokens; small read-only workers
+defer ledger inventories until 80k characters have been observed. Edits, commands
+and packet-required checks bypass that inventory deferral. This is a conservative
+heuristic, not a guarantee for every workload; the [comparison](docs/simulations/openai-shaping.md#before-and-after) includes longer-run trade-offs.
 
 ## Context and cost
 
-- **Old results collapse.** In main's requests, the newest ten subagent results stay word for word and older settled PASS results become one line each, in batches of ten, so the cached prefix rarely changes. Main's own old large file and command outputs are masked the same way. `PI_SUBAGENT_HANDOFF_WINDOW=0` turns both off.
+- **Old results collapse.** Below 25k estimated history tokens, main leaves old results intact to preserve cache reuse. Above that floor, in main's requests, the newest ten subagent results stay word for word and older settled PASS results become one line each, in batches of ten, so the cached prefix rarely changes. Main's own old large file and command outputs are masked the same way. `PI_SUBAGENT_HANDOFF_WINDOW=0` turns both off.
 - **Main checkpoints.** A long main session slows down and steers worse, because every request carries the whole history. At an idle task boundary (no job running, no decision waiting, a new user message) once main's request passes `PI_SUBAGENT_MAIN_FOLD_TOKENS` (default 50k; `0` off), earlier observations become capped checkpoint notes built from the messages themselves, without a model call: each subagent result as its STATUS/NEXT/EVIDENCE line, and main's last reply per turn. User messages stay separately in the request, in order and outside the notes' size cap. Earlier messages with up to 3,000 text characters stay whole; longer text keeps its first 2,000 and last 800 characters plus a saved-session note. Images and the newest user message are never cut. Pi's selected session branch supplies missing user messages after native compaction or reload; a fork uses only its own branch. Restored messages use the same limit. A requirement in the omitted middle of a long paste can be lost; the guard bounds individual pastes, not total user history. Assistant notes still shorten; keep unresolved decisions in the PLAN. The fold point stays fixed between folds, and the saved transcript is not changed. `/subagent fold` folds at your next message whatever the size, for example right after a merge.
 - **Runtime state card.** When the running jobs or waiting worker decisions change, main's request gets one hidden line naming them (and a cleared line when they end), so a compacted conversation still knows what is in flight. Each line stays where it first appeared, so later requests extend the cached prefix instead of rewriting it.
 - **Shared text first.** Every worker prompt starts with the same shared guidance, so roles with the same model and tools can reuse one cached prefix.
@@ -198,7 +204,7 @@ The short-main regression shows why fewer tokens do not always mean lower cost.
 - **Tool discipline.** Workers follow Claude Code's working rules: independent calls in one turn, partial reads with offset and limit, the read/grep/find tools instead of shell `cat`/`grep`, no `sleep` polling, no interactive commands, and no files the task does not need.
 - **Threshold-triggered masking in workers.** Claude Haiku 5.5 charges 5x for a request over 100k input tokens. Once a worker's request reaches a threshold set by the model serving it (90k on Claude Haiku 5.5; 200k on Anthropic Sonnet, Opus, Fable and Mythos, which have no long-request surcharge, so masking there would only rewrite the cache; 80k on other or unknown models, such as Codex or Copilot fallbacks), measured with the system prompt and calibrated against the provider-reported size of the worker's previous request (characters / 4 undercounts code), it is shortened step by step until it fits the budget (95k, or the threshold if higher): main's stable batching, then every older large output, then every older output of 500 characters or more, then bounded large outputs except the latest, then (last resort) only the latest output kept and bounded to its first and last 8,000 characters; if it is still over, the host is asked to compact once. Best effort, not a hard bound: the estimate is approximate and compaction is asynchronous. `PI_SUBAGENT_WORKER_MASK_TOKENS` (`0` off) and `PI_SUBAGENT_WORKER_TOKEN_BUDGET` tune it, and `/subagent usage` shows each role's peak request and requests over 100k so you can check it.
 - **No duplicate reads.** When a worker reads the same file and range again and gets exactly the same text, the result is a one-line note pointing at its earlier copy. Changed files, other ranges, images and errors pass through.
-- **Execution ledger.** Every few calls, when it has changed, a worker's tool result ends with a short state view (kept in the history, so the cached prefix stays stable): files changed, reads still current or stale, the checks the packet names that have not run yet, and the latest result of each check. An identical repeated inspection becomes a one-line note. `PI_SUBAGENT_LEDGER=0` turns it off.
+- **Execution ledger.** Small read-only runs defer inventory text until 80k read characters have accumulated; an edit, command or packet-required check makes it eligible sooner. Every few calls, when it has changed, a worker's tool result ends with a short state view (kept in the history, so the cached prefix stays stable): files changed, reads still current or stale, the checks the packet names that have not run yet, and the latest result of each check. An identical repeated inspection becomes a one-line note. `PI_SUBAGENT_LEDGER=0` turns it off.
 - **Long shell output capped.** A worker's shell output over 16,000 characters keeps its first 2,000 and last 8,000, and the full text goes to a file the worker can read. `PI_SUBAGENT_OUTPUT_CAP` sets the limit (`0` off).
 - **Keep project `AGENTS.md` short.** Studies of context files found that repository overviews raise cost without improving results, while instructions are followed. Put rules and guardrails in a project's `AGENTS.md`, and move detail (architecture, routes, build notes) into project skills under `.agents/skills/` that agents read only when a task needs them.
 - **Measure by cost per completed task.** `/subagent usage` shows it per role. Cache reads and writes dominate the bill, so fewer tokens alone is not a saving. The [controlled benchmark procedure](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) compares a strong single agent, delegation and request shaping separately; Pi and Copilot need separate results. No live efficiency benchmark is included here.

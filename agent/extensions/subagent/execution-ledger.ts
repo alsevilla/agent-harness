@@ -11,6 +11,7 @@
 // rebuilt at the end of every request, but Pi puts the conversation's one cache breakpoint on the last block of the last user message:
 // the cache entry then always ended in that request's view, the next request (with a new view) never matched it, and the whole history
 // was written to the cache again on every request (field report: a 40-turn backend-worker wrote 2.07M cache tokens and read 0.75M, $5.59).
+// Small read-only runs defer the view until 80k read characters; edits, commands or required checks make it eligible sooner.
 // Shown only when it changed, at most once every VIEW_EVERY calls. Govern, after a call ran: an inspection command that returns exactly its earlier output under unchanged
 // conditions is replaced by a one-line reference to it (like the duplicate-read note), and a check repeated with no change since, or the
 // same command run three times in a short span, gets one appended line. Nothing is ever blocked; interventions are capped per run, never
@@ -25,6 +26,7 @@ const VIEW_MIN_CALLS = 4;
 const VIEW_EVERY = 5;
 const VIEW_FILES = 10;
 const VIEW_COMMANDS = 6;
+const VIEW_READ_CHARS = 80_000; // defer inventories for small read-only runs (~20k observed tokens)
 const LOOP_SPAN = 6;
 
 type Category = "inspect" | "check" | "other";
@@ -97,6 +99,7 @@ export function createExecutionLedger() {
 	let viewOff = false;
 	let shownView: string | undefined; // the view last appended to a result, and the step it was appended at
 	let shownAt = 0;
+	let readChars = 0;
 	let expected: string[] = []; // check commands the task packet names // older outputs were masked or compacted: earlier copies may be gone, so no "still current" claims or reuse
 
 	const fileFor = (cwd: string, p: string): FileState => {
@@ -157,6 +160,7 @@ export function createExecutionLedger() {
 			if (toolName === "read" && typeof args.path === "string") {
 				if (isError) return undefined;
 				const text = textOf(content);
+				readChars += text.length;
 				const coverage = text ? readCoverage(args, text) : undefined;
 				if (coverage) {
 					const f = fileFor(cwd, args.path);
@@ -194,6 +198,7 @@ export function createExecutionLedger() {
 		view,
 		/** The view to append to this call's result: only when it changed since it was last shown, and at most once every VIEW_EVERY calls. */
 		viewForResult(): string | undefined {
+			if (!expected.length && !commands.length && ![...files.values()].some(f => f.edits) && readChars < VIEW_READ_CHARS) return undefined;
 			const v = view();
 			if (!v || v === shownView || (shownView !== undefined && step - shownAt < VIEW_EVERY)) return undefined;
 			shownView = v; shownAt = step;
