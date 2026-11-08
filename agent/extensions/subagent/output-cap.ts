@@ -22,8 +22,41 @@ export function outputCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
 	return n === 0 ? 0 : Math.max(HEAD + TAIL + 1_000, Math.floor(n));
 }
 
+export const OUTPUT_LOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const OUTPUT_ROOT = path.join(os.tmpdir(), "pi-worker-output");
+let lastPrune = 0;
+
+function processRunning(pid: number): boolean {
+	try { process.kill(pid, 0); return true; }
+	catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
+}
+
+/** Best-effort retention. Never recurse, follow links, or touch legacy/unrecognised files. */
+export function pruneWorkerOutput(root: string, now = Date.now(), isRunning = processRunning): void {
+	try {
+		if (!fs.lstatSync(root).isDirectory()) return;
+		for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+			if (!entry.isDirectory() || !/^[1-9]\d*$/.test(entry.name)) continue;
+			const pid = Number(entry.name);
+			if (!Number.isSafeInteger(pid) || pid > 2_147_483_647 || isRunning(pid)) continue;
+			const dir = path.join(root, entry.name);
+			try {
+				for (const name of fs.readdirSync(dir)) {
+					if (!/^[a-f0-9]{16}\.log$/.test(name)) continue;
+					const file = path.join(dir, name);
+					try {
+						const stat = fs.lstatSync(file);
+						if (stat.isFile() && now - stat.mtimeMs > OUTPUT_LOG_RETENTION_MS) fs.unlinkSync(file);
+					} catch { /* raced with another worker or inaccessible */ }
+				}
+				try { fs.rmdirSync(dir); } catch { /* retain nonempty directories */ }
+			} catch { /* cleanup must not interrupt tool results */ }
+		}
+	} catch { /* missing or inaccessible temp directory */ }
+}
+
 /** Replacement content for a long shell output, or undefined to keep it. */
-export function capShellOutput(toolName: string, content: unknown, details: unknown, cap: number, saveDir = path.join(os.tmpdir(), "pi-worker-output")): Part[] | undefined {
+export function capShellOutput(toolName: string, content: unknown, details: unknown, cap: number, saveDir?: string): Part[] | undefined {
 	if (!(cap > 0) || (toolName !== "bash" && toolName !== "powershell") || !Array.isArray(content)) return undefined;
 	const parts = content as Part[];
 	if (!parts.every((p) => p?.type === "text" && typeof p.text === "string")) return undefined;
@@ -32,9 +65,15 @@ export function capShellOutput(toolName: string, content: unknown, details: unkn
 	let full = typeof (details as { fullOutputPath?: unknown })?.fullOutputPath === "string" ? (details as { fullOutputPath: string }).fullOutputPath : undefined;
 	if (!full) {
 		try {
+			const managed = saveDir === undefined;
+			saveDir ??= path.join(OUTPUT_ROOT, String(process.pid));
 			fs.mkdirSync(saveDir, { recursive: true });
 			full = path.join(saveDir, `${createHash("sha256").update(text).digest("hex").slice(0, 16)}.log`);
 			fs.writeFileSync(full, text);
+			if (managed && Date.now() - lastPrune > 60 * 60 * 1_000) {
+				lastPrune = Date.now();
+				pruneWorkerOutput(OUTPUT_ROOT, lastPrune);
+			}
 		} catch { full = undefined; }
 	}
 	const cut = text.length - HEAD - TAIL;
