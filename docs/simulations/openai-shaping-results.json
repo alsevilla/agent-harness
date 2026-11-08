@@ -1,0 +1,937 @@
+{
+  "schema": 1,
+  "sourceCommit": "a5267c787ee2767b21941e849827b9782fb9525b",
+  "sourceHashes": {
+    "scripts/simulate-openai-shaping.mjs": "3b073c73e1b2cc363204d090c2bd845a44ff98261843c80f424a358a1c1ca03e",
+    "agent/extensions/subagent/handoff-window.ts": "caa2839a0adda757e79e8b3ed063c41927bafccd90f3f07184bdc3a3d8411049",
+    "agent/extensions/subagent/read-dedupe.ts": "fffdfce68964794c6cf9b0d90e7c2504c60f1edcf7d4298df652b6edb30319de",
+    "agent/extensions/subagent/execution-ledger.ts": "5dcdebcc2272ca9db309c1aac654c41ca397802705864f84a9fc0725b3b8c7a2",
+    "agent/extensions/subagent/output-cap.ts": "039344068328f9390ff42fed7c02a9d316fff708627d90f6d707f519ea1579fc"
+  },
+  "pricingDate": "2026-11-07",
+  "pricingURL": "https://developers.openai.com/api/docs/pricing",
+  "models": [
+    {
+      "id": "gpt-6.1-sol",
+      "input": 2,
+      "read": 0.1,
+      "write": 2.5
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "input": 1,
+      "read": 0.05,
+      "write": 1.25
+    },
+    {
+      "id": "gpt-6-astra",
+      "input": 10,
+      "read": 1,
+      "write": 12.5
+    },
+    {
+      "id": "gpt-6-luna",
+      "input": 0.1,
+      "read": 0.01,
+      "write": 0.125
+    }
+  ],
+  "results": [
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 1479915,
+        "read": 1243234,
+        "write": 236681,
+        "peak": 83809,
+        "last": 37969,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 61.63409265898786,
+      "inputCostUSD": {
+        "off": 0.9562793999999998,
+        "on": 0.7160258999999999
+      },
+      "inputCostSavingPercent": 25.12377658663356,
+      "noCacheInputCostUSD": {
+        "off": 7.714739999999999,
+        "on": 2.9598299999999997
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 0.4557667,
+        "on": 0.17305500000000001
+      },
+      "inputCostSavingPercent": 62.02991574417349,
+      "noCacheInputCostUSD": {
+        "off": 3.804374,
+        "on": 1.818252
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.11506169999999996,
+        "on": 0.11506169999999996
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 1.1305140000000002,
+        "on": 1.1305140000000002
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.13566679999999998,
+        "on": 0.13566679999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 1.2928719999999998,
+        "on": 1.2928719999999998
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 1.0731215000000005,
+        "on": 0.9569172999999999
+      },
+      "inputCostSavingPercent": 10.82861539909512,
+      "noCacheInputCostUSD": {
+        "off": 16.701982,
+        "on": 10.497962
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 3.4316153000000016,
+        "on": 2.4216508000000005
+      },
+      "inputCostSavingPercent": 29.43116904741626,
+      "noCacheInputCostUSD": {
+        "off": 59.672482,
+        "on": 30.334712
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 9.0005587,
+        "on": 3.9932093999999996
+      },
+      "inputCostSavingPercent": 55.63376082420306,
+      "noCacheInputCostUSD": {
+        "off": 165.06138199999998,
+        "on": 50.042796
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 1479915,
+        "read": 1243234,
+        "write": 236681,
+        "peak": 83809,
+        "last": 37969,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 61.63409265898786,
+      "inputCostUSD": {
+        "off": 0.4781396999999999,
+        "on": 0.35801294999999994
+      },
+      "inputCostSavingPercent": 25.12377658663356,
+      "noCacheInputCostUSD": {
+        "off": 3.8573699999999995,
+        "on": 1.4799149999999999
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 0.22788335,
+        "on": 0.08652750000000001
+      },
+      "inputCostSavingPercent": 62.02991574417349,
+      "noCacheInputCostUSD": {
+        "off": 1.902187,
+        "on": 0.909126
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.05753084999999998,
+        "on": 0.05753084999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 0.5652570000000001,
+        "on": 0.5652570000000001
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.06783339999999999,
+        "on": 0.06783339999999999
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 0.6464359999999999,
+        "on": 0.6464359999999999
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 0.5365607500000003,
+        "on": 0.47845864999999993
+      },
+      "inputCostSavingPercent": 10.82861539909512,
+      "noCacheInputCostUSD": {
+        "off": 8.350991,
+        "on": 5.248981
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 1.7158076500000008,
+        "on": 1.2108254000000003
+      },
+      "inputCostSavingPercent": 29.43116904741626,
+      "noCacheInputCostUSD": {
+        "off": 29.836241,
+        "on": 15.167356
+      }
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 4.50027935,
+        "on": 1.9966046999999998
+      },
+      "inputCostSavingPercent": 55.63376082420306,
+      "noCacheInputCostUSD": {
+        "off": 82.53069099999999,
+        "on": 25.021398
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 1479915,
+        "read": 1243234,
+        "write": 236681,
+        "peak": 83809,
+        "last": 37969,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 61.63409265898786,
+      "inputCostUSD": {
+        "off": 6.591219,
+        "on": 4.2017465000000005
+      },
+      "inputCostSavingPercent": 36.25236090622993,
+      "noCacheInputCostUSD": {
+        "off": 38.573699999999995,
+        "on": 14.799150000000001
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 3.1746045,
+        "on": 1.3027249999999997
+      },
+      "inputCostSavingPercent": 58.964179632455014,
+      "noCacheInputCostUSD": {
+        "off": 19.02187,
+        "on": 9.09126
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.8457419999999998,
+        "on": 0.8457419999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 5.65257,
+        "on": 5.65257
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.9867554999999999,
+        "on": 0.9867554999999999
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 6.464360000000001,
+        "on": 6.464360000000001
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 9.491515000000001,
+        "on": 7.3190729999999995
+      },
+      "inputCostSavingPercent": 22.888253350492537,
+      "noCacheInputCostUSD": {
+        "off": 83.50991,
+        "on": 52.489810000000006
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 31.9828655,
+        "on": 19.503408000000007
+      },
+      "inputCostSavingPercent": 39.01919763881067,
+      "noCacheInputCostUSD": {
+        "off": 298.36241,
+        "on": 151.67355999999987
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 86.112412,
+        "on": 32.1661065
+      },
+      "inputCostSavingPercent": 62.64637611126257,
+      "noCacheInputCostUSD": {
+        "off": 825.3069100000002,
+        "on": 250.21398
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 1479915,
+        "read": 1243234,
+        "write": 236681,
+        "peak": 83809,
+        "last": 37969,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 61.63409265898786,
+      "inputCostUSD": {
+        "off": 0.06591218999999998,
+        "on": 0.042017465
+      },
+      "inputCostSavingPercent": 36.25236090622993,
+      "noCacheInputCostUSD": {
+        "off": 0.385737,
+        "on": 0.14799149999999997
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 0.031746045,
+        "on": 0.013027249999999999
+      },
+      "inputCostSavingPercent": 58.96417963245501,
+      "noCacheInputCostUSD": {
+        "off": 0.1902187,
+        "on": 0.0909126
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.008457419999999998,
+        "on": 0.008457419999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 0.056525700000000026,
+        "on": 0.056525700000000026
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.009867554999999998,
+        "on": 0.009867554999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 0.0646436,
+        "on": 0.0646436
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 0.09491515,
+        "on": 0.07319073
+      },
+      "inputCostSavingPercent": 22.888253350492526,
+      "noCacheInputCostUSD": {
+        "off": 0.8350991000000006,
+        "on": 0.5248981000000001
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 0.3198286549999999,
+        "on": 0.19503408
+      },
+      "inputCostSavingPercent": 39.019197638810674,
+      "noCacheInputCostUSD": {
+        "off": 2.9836241000000014,
+        "on": 1.516735599999999
+      }
+    },
+    {
+      "model": "gpt-6-luna",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 0.8611241199999995,
+        "on": 0.32166106499999997
+      },
+      "inputCostSavingPercent": 62.64637611126255,
+      "noCacheInputCostUSD": {
+        "off": 8.253069099999998,
+        "on": 2.502139800000003
+      }
+    }
+  ]
+}

@@ -1,0 +1,656 @@
+{
+  "schema": 1,
+  "provider": "openai",
+  "cacheModel": "idealized warm complete-message prefixes; no expiry or cross-context reuse",
+  "pricingDate": "2026-11-08",
+  "pricingURL": "https://developers.openai.com/api/docs/pricing",
+  "sourceCommit": "bc3f844affde1baabee3e369cee0760e63976aad",
+  "roleDefaults": {
+    "backend-worker": "gpt-6.1-sol",
+    "debugger": "gpt-6-luna",
+    "planner": "gpt-6-luna",
+    "test-engineer": "gpt-6-luna"
+  },
+  "implementationRouting": [
+    {
+      "task": 1,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna"
+    },
+    {
+      "task": 2,
+      "kind": "bug",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna"
+    },
+    {
+      "task": 3,
+      "kind": "feature",
+      "complexity": "complex",
+      "model": "gpt-6.1-sol",
+      "retryComplexity": "non-complex",
+      "retryModel": "gpt-6-luna"
+    },
+    {
+      "task": 4,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna"
+    },
+    {
+      "task": 5,
+      "kind": "bug",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna"
+    },
+    {
+      "task": 6,
+      "kind": "feature",
+      "complexity": "complex",
+      "model": "gpt-6.1-sol"
+    },
+    {
+      "task": 7,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna",
+      "retryComplexity": "non-complex",
+      "retryModel": "gpt-6-luna"
+    },
+    {
+      "task": 8,
+      "kind": "bug",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna"
+    },
+    {
+      "task": 9,
+      "kind": "feature",
+      "complexity": "complex",
+      "model": "gpt-6.1-sol"
+    },
+    {
+      "task": 10,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "gpt-6-luna"
+    }
+  ],
+  "prices": {
+    "gpt-6-astra": {
+      "input": 10,
+      "output": 50,
+      "read": 1,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
+    "gpt-6.1-sol": {
+      "input": 2,
+      "output": 10,
+      "read": 0.1,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
+    "gpt-6.1-terra": {
+      "input": 1,
+      "output": 5,
+      "read": 0.05,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "read": 0.01,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    }
+  },
+  "assumptions": {
+    "IMPLEMENTATION_COMPLEXITY": [
+      "non-complex",
+      "non-complex",
+      "complex",
+      "non-complex",
+      "non-complex",
+      "complex",
+      "non-complex",
+      "non-complex",
+      "complex",
+      "non-complex"
+    ],
+    "RETRY_COMPLEXITY": "non-complex",
+    "CACHE_MIN_TOKENS": 1024,
+    "CHARS_PER_TOKEN": 4,
+    "WRITE_X": 1.25,
+    "CACHE_LOOKBACK_BLOCKS": 20,
+    "PI_SYSTEM": 7271,
+    "MAIN_SYSTEM": 20580,
+    "CHILD_PROMPT": {
+      "backend-worker": 18809,
+      "debugger": 15674,
+      "planner": 14298,
+      "test-engineer": 17463
+    },
+    "MAIN_FOLD_TOKENS": 50000,
+    "HANDOFF_WINDOW": 10,
+    "SHELL_OUTPUT_CHARS": 16000,
+    "PACKET_CHARS": 1500,
+    "HANDOFF_FINDINGS_CHARS": 1200,
+    "ORIENT_SWEEP": [
+      0,
+      1,
+      2,
+      4,
+      6,
+      8,
+      12
+    ],
+    "ECONOMY_X_SWEEP": [
+      1,
+      1.5,
+      2,
+      3
+    ],
+    "TOOL_SCHEMA_CHARS": 6000,
+    "SUBAGENT_SCHEMA_CHARS": 4000,
+    "SAY_CHARS": 300,
+    "OUTPUT_PER_CALL": 350,
+    "PACKET_OUTPUT": 900,
+    "REPORT_OUTPUT": 500,
+    "REPLY_OUTPUT": 300,
+    "orientDefault": 1,
+    "economyXDefault": 1
+  },
+  "baselines": {
+    "gpt-6-astra": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 87.6494,
+        "byModel": {
+          "gpt-6-astra": 87.6494
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 16.6934,
+        "byModel": {
+          "gpt-6-astra": 16.6934
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 23.6184,
+        "byModel": {
+          "gpt-6-astra": 23.6184
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 5.6424,
+        "byModel": {
+          "gpt-6-astra": 4.4749,
+          "gpt-6.1-sol": 1.0438,
+          "gpt-6-luna": 0.1236
+        }
+      }
+    },
+    "gpt-6.1-sol": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 9.932,
+        "byModel": {
+          "gpt-6.1-sol": 9.932
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 2.6057,
+        "byModel": {
+          "gpt-6.1-sol": 2.6057
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 3.9135,
+        "byModel": {
+          "gpt-6.1-sol": 3.9135
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 1.8933,
+        "byModel": {
+          "gpt-6.1-sol": 1.7696,
+          "gpt-6-luna": 0.1236
+        }
+      }
+    },
+    "gpt-6.1-terra": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 4.966,
+        "byModel": {
+          "gpt-6.1-terra": 4.966
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 1.3028,
+        "byModel": {
+          "gpt-6.1-terra": 1.3028
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 1.9567,
+        "byModel": {
+          "gpt-6.1-terra": 1.9567
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 1.5304,
+        "byModel": {
+          "gpt-6.1-sol": 1.0438,
+          "gpt-6.1-terra": 0.3629,
+          "gpt-6-luna": 0.1236
+        }
+      }
+    },
+    "gpt-6-luna": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 0.8765,
+        "byModel": {
+          "gpt-6-luna": 0.8765
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 0.1669,
+        "byModel": {
+          "gpt-6-luna": 0.1669
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 0.2362,
+        "byModel": {
+          "gpt-6-luna": 0.2362
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 1.2122,
+        "byModel": {
+          "gpt-6.1-sol": 1.0438,
+          "gpt-6-luna": 0.1684
+        }
+      }
+    }
+  },
+  "sweeps": [
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 5.5351,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 5.6424,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 5.7303,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 5.8813,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 6.0805,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 6.2651,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 6.7331,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 5.6424,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 5.7052,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 5.7485,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6-astra",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 5.8599,
+      "singleFresh": 16.6934
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 1.786,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 1.8933,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 1.9811,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 2.1322,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 2.3314,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 2.516,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 2.9839,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 1.8933,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 1.9561,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 1.9994,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-sol",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 2.1108,
+      "singleFresh": 2.6057
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 1.4231,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 1.5304,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 1.6182,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 1.7693,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 1.9685,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 2.153,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 2.621,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 1.5304,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 1.5932,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 1.6365,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6.1-terra",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 1.7478,
+      "singleFresh": 1.3028
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 1.1049,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 1.2122,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 1.3001,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 1.4511,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 1.6503,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 1.8349,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 2.3029,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 1.2122,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 1.275,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 1.3183,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "gpt-6-luna",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 1.4297,
+      "singleFresh": 0.1669
+    }
+  ]
+}

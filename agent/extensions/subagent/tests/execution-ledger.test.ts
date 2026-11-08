@@ -129,10 +129,30 @@ test("the worker entry wires the ledger: the view rides in a tool result, never 
 	assert.doesNotMatch(fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8"), /execution-ledger/, "workers only");
 });
 
+test("small read-only runs do not append inventories; required checks still surface", () => {
+	const l = createExecutionLedger();
+	for (let i = 0; i < 30; i++) {
+		l.onResult("read", { path: `f${i}.ts` }, text("x".repeat(1000)), false, cwd);
+		assert.equal(l.viewForResult(), undefined);
+	}
+	assert.ok(l.view(), "the ledger still records reads");
+	l.noteTask("Run `npm test` before completion.");
+	assert.match(l.viewForResult()!, /not run yet/);
+});
+
+test("small-read inventory deferral does not hide edits or command state", () => {
+	for (const tool of ["edit", "bash"]) {
+		const l = createExecutionLedger();
+		for (let i = 0; i < 4; i++) l.onResult("read", { path: "a.ts", offset: i }, text("small"), false, cwd);
+		l.onResult(tool, tool === "edit" ? { path: "a.ts" } : { command: "npm test" }, text("ok"), false, cwd);
+		assert.match(l.viewForResult()!, tool === "edit" ? /Changed by you/ : /Checks \(latest run/);
+	}
+});
+
 test("viewForResult: shown when it first has something, then only when it changed and at least 5 calls later; a compaction shows it again", () => {
 	const l = createExecutionLedger();
 	const shown: number[] = [];
-	const call = (n: number, tool: string, input: Record<string, unknown>) => { l.onResult(tool, input, [{ type: "text", text: "x".repeat(50) }], false, "/w"); if (l.viewForResult()) shown.push(n); };
+	const call = (n: number, tool: string, input: Record<string, unknown>) => { l.onResult(tool, input, [{ type: "text", text: "x".repeat(20_000) }], false, "/w"); if (l.viewForResult()) shown.push(n); };
 	for (let n = 1; n <= 4; n++) call(n, "read", { path: `src/f${n}.rs` });
 	assert.deepEqual(shown, [4], "the first view, once there is enough to show");
 	for (let n = 5; n <= 8; n++) call(n, "read", { path: `src/f${n}.rs` });

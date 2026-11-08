@@ -323,8 +323,12 @@ function retargetStaleNotes<T extends Message>(list: T[]): T[] {
 	return changed ? out : list;
 }
 
+export const MAIN_SHORTEN_MIN_TOKENS = 25_000;
 /** Both request-only shortenings in order: subagent results first, then main's own large tool outputs. */
 export function shortenContext<T extends Message>(messages: readonly T[], window: number): T[] | undefined {
+	// Small histories are cheap cache hits. Defer prefix rewrites below 25k history
+	// tokens; worker pressure masking and explicit main folding are independent.
+	if (estimateTokens(messages) < MAIN_SHORTEN_MIN_TOKENS) return undefined;
 	const handoffs = collapseHandoffs(messages, window);
 	const masked = maskToolOutputs(handoffs ?? messages, window);
 	return masked ?? handoffs;

@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "sourceCommit": "a5267c787ee2767b21941e849827b9782fb9525b",
+  "piVersion": "1.5.0",
+  "cacheModel": "Anthropic-style: breakpoints on the system block and the last message, 20-block lookback; read 0.1x, write 1.25x of input; Haiku 5.5 5x above 100k; characters / 4",
+  "results": [
+    {
+      "scenario": "long",
+      "toolCalls": 30,
+      "off": {
+        "requests": 31,
+        "systemPromptStable": true,
+        "sent": 2809987,
+        "peak": 164179,
+        "over100k": 15,
+        "cacheRead": 2645759,
+        "cacheWrite": 164184,
+        "hitPercent": 94,
+        "cost": 469806,
+        "haikuCost": 1590202
+      },
+      "on": {
+        "requests": 31,
+        "systemPromptStable": true,
+        "sent": 1436407,
+        "peak": 79378,
+        "over100k": 0,
+        "cacheRead": 1189720,
+        "cacheWrite": 246673,
+        "hitPercent": 83,
+        "cost": 427313,
+        "haikuCost": 427313
+      },
+      "tokenSavingPercent": 48.9,
+      "costSavingPercent": 9,
+      "haikuCostSavingPercent": 73.1
+    },
+    {
+      "scenario": "repetition",
+      "toolCalls": 25,
+      "off": {
+        "requests": 26,
+        "systemPromptStable": true,
+        "sent": 354036,
+        "peak": 27271,
+        "over100k": 0,
+        "cacheRead": 326733,
+        "cacheWrite": 27272,
+        "hitPercent": 92,
+        "cost": 66763,
+        "haikuCost": 66763
+      },
+      "on": {
+        "requests": 26,
+        "systemPromptStable": true,
+        "sent": 232769,
+        "peak": 17079,
+        "over100k": 0,
+        "cacheRead": 215659,
+        "cacheWrite": 17082,
+        "hitPercent": 93,
+        "cost": 42918,
+        "haikuCost": 42918
+      },
+      "tokenSavingPercent": 34.3,
+      "costSavingPercent": 35.7,
+      "haikuCostSavingPercent": 35.7
+    },
+    {
+      "scenario": "standard",
+      "toolCalls": 28,
+      "off": {
+        "requests": 29,
+        "systemPromptStable": true,
+        "sent": 644393,
+        "peak": 34512,
+        "over100k": 0,
+        "cacheRead": 609768,
+        "cacheWrite": 34509,
+        "hitPercent": 95,
+        "cost": 104113,
+        "haikuCost": 104113
+      },
+      "on": {
+        "requests": 29,
+        "systemPromptStable": true,
+        "sent": 619858,
+        "peak": 33243,
+        "over100k": 0,
+        "cacheRead": 586500,
+        "cacheWrite": 33240,
+        "hitPercent": 95,
+        "cost": 100200,
+        "haikuCost": 100200
+      },
+      "tokenSavingPercent": 3.8,
+      "costSavingPercent": 3.8,
+      "haikuCostSavingPercent": 3.8
+    },
+    {
+      "scenario": "main",
+      "toolCalls": 20,
+      "off": {
+        "requests": 30,
+        "systemPromptStable": true,
+        "sent": 1367995,
+        "peak": 84547,
+        "over100k": 0,
+        "cacheRead": 1283440,
+        "cacheWrite": 84551,
+        "hitPercent": 94,
+        "cost": 234033,
+        "haikuCost": 234033
+      },
+      "on": {
+        "requests": 30,
+        "systemPromptStable": true,
+        "sent": 863879,
+        "peak": 60657,
+        "over100k": 0,
+        "cacheRead": 778190,
+        "cacheWrite": 85684,
+        "hitPercent": 90,
+        "cost": 184924,
+        "haikuCost": 184924
+      },
+      "tokenSavingPercent": 36.9,
+      "costSavingPercent": 21,
+      "haikuCostSavingPercent": 21
+    }
+  ]
+}

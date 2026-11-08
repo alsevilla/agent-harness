@@ -1,0 +1,245 @@
+{
+ "fixture": "repo",
+ "prompts": [
+  "Task: Pace the SMS queue sender.\nRead src/queue.rs and src/sender.rs first.\nChecks:\n- `node -e \"console.log(\\\"tests passed\\\")\"`\nStop when the check passes."
+ ],
+ "script": [
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod0.rs",
+    "offset": 1
+   },
+   "id": "r1"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod1.rs",
+    "offset": 1
+   },
+   "id": "r2"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod2.rs",
+    "offset": 1
+   },
+   "id": "r3"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod3.rs",
+    "offset": 1
+   },
+   "id": "r4"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b5"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod4.rs",
+    "offset": 1
+   },
+   "id": "r6"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod5.rs",
+    "offset": 1
+   },
+   "id": "r7"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod6.rs",
+    "offset": 1
+   },
+   "id": "r8"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod7.rs",
+    "offset": 1
+   },
+   "id": "r9"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b10"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod8.rs",
+    "offset": 1
+   },
+   "id": "r11"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod9.rs",
+    "offset": 1
+   },
+   "id": "r12"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod0.rs",
+    "offset": 1
+   },
+   "id": "r13"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod1.rs",
+    "offset": 21
+   },
+   "id": "r14"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b15"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod2.rs",
+    "offset": 41
+   },
+   "id": "r16"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod3.rs",
+    "offset": 61
+   },
+   "id": "r17"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod4.rs",
+    "offset": 81
+   },
+   "id": "r18"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod5.rs",
+    "offset": 101
+   },
+   "id": "r19"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b20"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod6.rs",
+    "offset": 121
+   },
+   "id": "r21"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod7.rs",
+    "offset": 141
+   },
+   "id": "r22"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod8.rs",
+    "offset": 161
+   },
+   "id": "r23"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod9.rs",
+    "offset": 181
+   },
+   "id": "r24"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b25"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod0.rs",
+    "offset": 1
+   },
+   "id": "r26"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod1.rs",
+    "offset": 21
+   },
+   "id": "r27"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod2.rs",
+    "offset": 41
+   },
+   "id": "r28"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod3.rs",
+    "offset": 61
+   },
+   "id": "r29"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b30"
+  },
+  {
+   "text": "STATUS: PASS - done\nNEXT: none\nRISKS: none\nEVIDENCE: none"
+  }
+ ]
+}

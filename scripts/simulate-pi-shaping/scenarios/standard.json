@@ -1,0 +1,243 @@
+{
+ "fixture": "repo",
+ "prompts": [
+  "Task: Pace the SMS queue sender.\nRead src/queue.rs and src/sender.rs first.\nChecks:\n- `node -e \"console.log(\\\"tests passed\\\")\"`\nStop when the check passes."
+ ],
+ "script": [
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/queue.rs"
+   },
+   "id": "c1"
+  },
+  {
+   "tool": "grep",
+   "args": {
+    "pattern": "sender_",
+    "path": "src"
+   },
+   "id": "c2"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/sender.rs"
+   },
+   "id": "c3"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "tests/queue_test.rs"
+   },
+   "id": "c4"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "ls -la src tests"
+   },
+   "id": "c5"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/config.rs"
+   },
+   "id": "c6"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/queue.rs",
+    "offset": 20,
+    "limit": 40
+   },
+   "id": "c7"
+  },
+  {
+   "tool": "edit",
+   "args": {
+    "path": "src/queue.rs",
+    "edits": [
+     {
+      "oldText": "fn queue_3(",
+      "newText": "fn queue_three("
+     }
+    ]
+   },
+   "id": "c8"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "c9"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "c10"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "c11"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "seq 1 6000"
+   },
+   "id": "c12"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/sender.rs"
+   },
+   "id": "c13"
+  },
+  {
+   "tool": "grep",
+   "args": {
+    "pattern": "queue_three",
+    "path": "src"
+   },
+   "id": "c14"
+  },
+  {
+   "tool": "edit",
+   "args": {
+    "path": "src/sender.rs",
+    "edits": [
+     {
+      "oldText": "fn sender_5(",
+      "newText": "fn sender_five("
+     }
+    ]
+   },
+   "id": "c15"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "node -e \"console.log(\\\"tests passed\\\")\""
+   },
+   "id": "c16"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "node -e \"console.log(\\\"tests passed\\\")\""
+   },
+   "id": "c17"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "tests/queue_test.rs",
+    "offset": 1,
+    "limit": 30
+   },
+   "id": "c18"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/config.rs",
+    "offset": 4,
+    "limit": 30
+   },
+   "id": "c19"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "tests/queue_test.rs",
+    "offset": 7,
+    "limit": 30
+   },
+   "id": "c20"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/config.rs",
+    "offset": 10,
+    "limit": 30
+   },
+   "id": "c21"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "tests/queue_test.rs",
+    "offset": 13,
+    "limit": 30
+   },
+   "id": "c22"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/config.rs",
+    "offset": 16,
+    "limit": 30
+   },
+   "id": "c23"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "tests/queue_test.rs",
+    "offset": 19,
+    "limit": 30
+   },
+   "id": "c24"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/config.rs",
+    "offset": 22,
+    "limit": 30
+   },
+   "id": "c25"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "tests/queue_test.rs",
+    "offset": 25,
+    "limit": 30
+   },
+   "id": "c26"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/config.rs",
+    "offset": 28,
+    "limit": 30
+   },
+   "id": "c27"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git diff --stat"
+   },
+   "id": "c28"
+  },
+  {
+   "text": "STATUS: PASS - done\nNEXT: none\nRISKS: none\nEVIDENCE: none"
+  }
+ ]
+}

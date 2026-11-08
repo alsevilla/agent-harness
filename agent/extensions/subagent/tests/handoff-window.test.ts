@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatCompletionNotice } from "../compact-handoff.ts";
-import { collapseHandoffs, collapsedLine, DEFAULT_HANDOFF_WINDOW, HANDOFF_WINDOW_ENV, handoffWindowFromEnv, maskToolOutputs, registerHandoffWindow, shortenContext } from "../handoff-window.ts";
+import { collapseHandoffs, collapsedLine, DEFAULT_HANDOFF_WINDOW, HANDOFF_WINDOW_ENV, handoffWindowFromEnv, maskToolOutputs, registerHandoffWindow, shortenContext, MAIN_SHORTEN_MIN_TOKENS } from "../handoff-window.ts";
 
 type Msg = Record<string, any>;
 const reply = (status: string, risks = "none", extra = "") => `STATUS: ${status}\nNEXT: done\nRISKS: ${risks}\nEVIDENCE: /w/_evidence/t/REPORT.md${extra}`;
@@ -111,7 +111,7 @@ test("wiring: registers one context handler that returns a request-only list, or
 	const handler = handlers.get("context")!;
 	assert.equal(await handler({ messages: [user("hi"), fg(1)] }), undefined);
 	assert.equal(await handler({ messages: Array.from({ length: 19 }, (_, i) => fg(i)) }), undefined, "19 results do not yet fill a second batch of 10");
-	const event = { messages: Array.from({ length: 20 }, (_, i) => fg(i)) };
+	const event = { messages: [user("x".repeat(200_000)), ...Array.from({ length: 20 }, (_, i) => fg(i))] };
 	const result = (await handler(event)) as { messages: Msg[] };
 	assert.equal(result.messages.filter(shortened).length, 10);
 	assert.equal(event.messages.filter(shortened).length, 0, "the event's own list is left as it was");
@@ -145,8 +145,21 @@ test("tool outputs: errors, short outputs, other tools and subagent results are 
 	assert.match(textOf(bash[1]), /^\[older bash output, shortened: git log --stat\]/);
 });
 
+test("small main histories stay byte-identical even with a full batch of collapsible results", () => {
+	const messages = deepFreeze([...Array.from({ length: 30 }, (_, i) => fg(i)), ...reads(10)]);
+	assert.equal(shortenContext(messages, 10), undefined);
+});
+
+test("main prefix rewrites begin at the size floor and still honor the off switch", () => {
+	const results = Array.from({ length: 20 }, (_, i) => fg(i));
+	const atSize = (size: number) => [user("x".repeat((size - estimateTokens(results)) * 4)), ...results];
+	assert.equal(shortenContext(atSize(MAIN_SHORTEN_MIN_TOKENS - 1), 10), undefined);
+	assert.equal(shortenContext(atSize(MAIN_SHORTEN_MIN_TOKENS), 10)!.filter(shortened).length, 10);
+	assert.equal(shortenContext(atSize(MAIN_SHORTEN_MIN_TOKENS), 0), undefined);
+});
+
 test("shortenContext applies both rules to one request and leaves it alone when neither applies", () => {
-	const messages = [...Array.from({ length: 10 }, (_, i) => fg(i)), ...reads(10)];
+	const messages = [user("x".repeat(200_000)), ...Array.from({ length: 10 }, (_, i) => fg(i)), ...reads(10)];
 	const result = shortenContext(messages, 5)!;
 	assert.equal(result.filter(shortened).length, 5);
 	assert.equal(result.filter((m) => m.role === "toolResult" && m.toolName === "read" && masked(m)).length, 5);

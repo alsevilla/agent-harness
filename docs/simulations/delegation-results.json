@@ -1,0 +1,518 @@
+{
+  "schema": 1,
+  "provider": "anthropic",
+  "cacheModel": "system and last-message breakpoints; 20-block lookback",
+  "sourceCommit": "f0dc85c9910832a9b591c9f8396c91495fef58fb",
+  "roleDefaults": {
+    "backend-worker": "claude-sonnet-5-5",
+    "debugger": "claude-haiku-5-5",
+    "planner": "claude-haiku-5-5",
+    "test-engineer": "claude-haiku-5-5"
+  },
+  "implementationRouting": [
+    {
+      "task": 1,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5"
+    },
+    {
+      "task": 2,
+      "kind": "bug",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5"
+    },
+    {
+      "task": 3,
+      "kind": "feature",
+      "complexity": "complex",
+      "model": "claude-sonnet-5-5",
+      "retryComplexity": "non-complex",
+      "retryModel": "claude-haiku-5-5"
+    },
+    {
+      "task": 4,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5"
+    },
+    {
+      "task": 5,
+      "kind": "bug",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5"
+    },
+    {
+      "task": 6,
+      "kind": "feature",
+      "complexity": "complex",
+      "model": "claude-sonnet-5-5"
+    },
+    {
+      "task": 7,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5",
+      "retryComplexity": "non-complex",
+      "retryModel": "claude-haiku-5-5"
+    },
+    {
+      "task": 8,
+      "kind": "bug",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5"
+    },
+    {
+      "task": 9,
+      "kind": "feature",
+      "complexity": "complex",
+      "model": "claude-sonnet-5-5"
+    },
+    {
+      "task": 10,
+      "kind": "fix",
+      "complexity": "non-complex",
+      "model": "claude-haiku-5-5"
+    }
+  ],
+  "prices": {
+    "claude-opus-5-5": {
+      "input": 4,
+      "output": 20,
+      "read": 0.2
+    },
+    "claude-sonnet-5-5": {
+      "input": 2,
+      "output": 10,
+      "read": 0.2
+    },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "read": 0.01,
+      "longFrom": 100000,
+      "longX": 5
+    }
+  },
+  "assumptions": {
+    "IMPLEMENTATION_COMPLEXITY": [
+      "non-complex",
+      "non-complex",
+      "complex",
+      "non-complex",
+      "non-complex",
+      "complex",
+      "non-complex",
+      "non-complex",
+      "complex",
+      "non-complex"
+    ],
+    "RETRY_COMPLEXITY": "non-complex",
+    "CACHE_MIN_TOKENS": 1024,
+    "CHARS_PER_TOKEN": 4,
+    "WRITE_X": 1.25,
+    "CACHE_LOOKBACK_BLOCKS": 20,
+    "PI_SYSTEM": 7271,
+    "MAIN_SYSTEM": 20580,
+    "CHILD_PROMPT": {
+      "backend-worker": 18809,
+      "debugger": 15674,
+      "planner": 14298,
+      "test-engineer": 17463
+    },
+    "MAIN_FOLD_TOKENS": 50000,
+    "HANDOFF_WINDOW": 10,
+    "SHELL_OUTPUT_CHARS": 16000,
+    "PACKET_CHARS": 1500,
+    "HANDOFF_FINDINGS_CHARS": 1200,
+    "ORIENT_SWEEP": [
+      0,
+      1,
+      2,
+      4,
+      6,
+      8,
+      12
+    ],
+    "ECONOMY_X_SWEEP": [
+      1,
+      1.5,
+      2,
+      3
+    ],
+    "TOOL_SCHEMA_CHARS": 6000,
+    "SUBAGENT_SCHEMA_CHARS": 4000,
+    "SAY_CHARS": 300,
+    "OUTPUT_PER_CALL": 350,
+    "PACKET_OUTPUT": 900,
+    "REPORT_OUTPUT": 500,
+    "REPLY_OUTPUT": 300,
+    "orientDefault": 1,
+    "economyXDefault": 1
+  },
+  "baselines": {
+    "claude-opus-5-5": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 12.9783,
+        "byModel": {
+          "claude-opus-5-5": 12.9783
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 5.2114,
+        "byModel": {
+          "claude-opus-5-5": 5.2114
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 7.8269,
+        "byModel": {
+          "claude-opus-5-5": 7.8269
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 2.9312,
+        "byModel": {
+          "claude-opus-5-5": 1.4516,
+          "claude-sonnet-5-5": 1.356,
+          "claude-haiku-5-5": 0.1236
+        }
+      }
+    },
+    "claude-sonnet-5-5": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 11.1765,
+        "byModel": {
+          "claude-sonnet-5-5": 11.1765
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 3.3387,
+        "byModel": {
+          "claude-sonnet-5-5": 3.3387
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 4.7237,
+        "byModel": {
+          "claude-sonnet-5-5": 4.7237
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 2.3746,
+        "byModel": {
+          "claude-sonnet-5-5": 2.251,
+          "claude-haiku-5-5": 0.1236
+        }
+      }
+    },
+    "claude-haiku-5-5": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 2.6438,
+        "byModel": {
+          "claude-haiku-5-5": 2.6438
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 0.1669,
+        "byModel": {
+          "claude-haiku-5-5": 0.1669
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 0.2362,
+        "byModel": {
+          "claude-haiku-5-5": 0.2362
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 1.5244,
+        "byModel": {
+          "claude-sonnet-5-5": 1.356,
+          "claude-haiku-5-5": 0.1684
+        }
+      }
+    }
+  },
+  "sweeps": [
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 2.7843,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 2.9312,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 3.0509,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 3.2545,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 3.5208,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 3.7573,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 4.3428,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 2.9312,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 2.9908,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 3.0404,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-opus-5-5",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 3.1629,
+      "singleFresh": 5.2114
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 2.2277,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 2.3746,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 2.4943,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 2.6979,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 2.9642,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 3.2007,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 3.7861,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 2.3746,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 2.4341,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 2.4837,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-sonnet-5-5",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 2.6063,
+      "singleFresh": 3.3387
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 1.3775,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 1.5244,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 1.6441,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 1.8476,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 2.114,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 2.3504,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 2.9359,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 1.5244,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 1.5839,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 1.6335,
+      "singleFresh": 0.1669
+    },
+    {
+      "main": "claude-haiku-5-5",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 1.7561,
+      "singleFresh": 0.1669
+    }
+  ]
+}

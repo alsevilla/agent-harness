@@ -1,0 +1,187 @@
+{
+ "fixture": "repo",
+ "prompts": [
+  "Look at module 0 and summarize it.",
+  "Look at module 1 and summarize it.",
+  "Look at module 2 and summarize it.",
+  "Rule: never push to master. Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste: Context paste:  Also keep the API stable.",
+  "Look at module 4 and summarize it.",
+  "Look at module 5 and summarize it.",
+  "Look at module 6 and summarize it.",
+  "Look at module 7 and summarize it.",
+  "Look at module 8 and summarize it.",
+  "Look at module 9 and summarize it."
+ ],
+ "script": [
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod0.rs"
+   },
+   "id": "r1"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b2"
+  },
+  {
+   "text": "Module 0 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod1.rs"
+   },
+   "id": "r3"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b4"
+  },
+  {
+   "text": "Module 1 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod2.rs"
+   },
+   "id": "r5"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b6"
+  },
+  {
+   "text": "Module 2 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod3.rs"
+   },
+   "id": "r7"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b8"
+  },
+  {
+   "text": "Module 3 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod4.rs"
+   },
+   "id": "r9"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b10"
+  },
+  {
+   "text": "Module 4 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod5.rs"
+   },
+   "id": "r11"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b12"
+  },
+  {
+   "text": "Module 5 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod6.rs"
+   },
+   "id": "r13"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b14"
+  },
+  {
+   "text": "Module 6 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod7.rs"
+   },
+   "id": "r15"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b16"
+  },
+  {
+   "text": "Module 7 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod8.rs"
+   },
+   "id": "r17"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b18"
+  },
+  {
+   "text": "Module 8 defines 330 handlers; nothing to change. Want me to continue?"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/mod9.rs"
+   },
+   "id": "r19"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "b20"
+  },
+  {
+   "text": "Module 9 defines 330 handlers; nothing to change. Want me to continue?"
+  }
+ ]
+}

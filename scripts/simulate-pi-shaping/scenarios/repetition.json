@@ -1,0 +1,186 @@
+{
+ "fixture": "rep",
+ "prompts": [
+  "Task: Pace the SMS queue sender.\nRead src/queue.rs and src/sender.rs first.\nChecks:\n- `node -e \"console.log(\\\"tests passed\\\")\"`\nStop when the check passes."
+ ],
+ "script": [
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/empty.rs"
+   },
+   "id": "c1"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/tiny.rs"
+   },
+   "id": "c2"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/medium.rs"
+   },
+   "id": "c3"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/large.rs"
+   },
+   "id": "c4"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "c5"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "ls -la src"
+   },
+   "id": "c6"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "find . -name \"*.rs\" -newer src/tiny.rs"
+   },
+   "id": "c7"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/empty.rs"
+   },
+   "id": "c8"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/tiny.rs"
+   },
+   "id": "c9"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/medium.rs"
+   },
+   "id": "c10"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/large.rs"
+   },
+   "id": "c11"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "c12"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "ls -la src"
+   },
+   "id": "c13"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "find . -name \"*.rs\" -newer src/tiny.rs"
+   },
+   "id": "c14"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/empty.rs"
+   },
+   "id": "c15"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/tiny.rs"
+   },
+   "id": "c16"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/medium.rs"
+   },
+   "id": "c17"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/large.rs"
+   },
+   "id": "c18"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "git status --short"
+   },
+   "id": "c19"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "ls -la src"
+   },
+   "id": "c20"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "find . -name \"*.rs\" -newer src/tiny.rs"
+   },
+   "id": "c21"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "cp src/large.rs src/large.bak && printf \"short\\n\" > src/large.rs"
+   },
+   "id": "c22"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/large.rs"
+   },
+   "id": "c23"
+  },
+  {
+   "tool": "bash",
+   "args": {
+    "command": "mv src/large.bak src/large.rs"
+   },
+   "id": "c24"
+  },
+  {
+   "tool": "read",
+   "args": {
+    "path": "src/large.rs"
+   },
+   "id": "c25"
+  },
+  {
+   "text": "STATUS: PASS - done\nNEXT: none\nRISKS: none\nEVIDENCE: none"
+  }
+ ]
+}
