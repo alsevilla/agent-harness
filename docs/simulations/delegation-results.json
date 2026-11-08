@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "sourceCommit": "ce15f922131078241a10315130cf2a0fb2a58808",
+  "sourceCommit": "130a346d11d18ac046e7de63d4483a3458820fd3",
   "roles": {
     "backend-worker": "claude-sonnet-5-5",
     "debugger": "claude-haiku-5-5",
@@ -27,6 +27,37 @@
     }
   },
   "assumptions": {
+    "CHARS_PER_TOKEN": 4,
+    "WRITE_X": 1.25,
+    "CACHE_LOOKBACK_BLOCKS": 20,
+    "PI_SYSTEM": 7271,
+    "MAIN_SYSTEM": 20580,
+    "CHILD_PROMPT": {
+      "backend-worker": 18809,
+      "debugger": 15674,
+      "planner": 14298,
+      "test-engineer": 17463
+    },
+    "MAIN_FOLD_TOKENS": 50000,
+    "HANDOFF_WINDOW": 10,
+    "SHELL_OUTPUT_CHARS": 16000,
+    "PACKET_CHARS": 1500,
+    "HANDOFF_FINDINGS_CHARS": 1200,
+    "ORIENT_SWEEP": [
+      0,
+      1,
+      2,
+      4,
+      6,
+      8,
+      12
+    ],
+    "ECONOMY_X_SWEEP": [
+      1,
+      1.5,
+      2,
+      3
+    ],
     "TOOL_SCHEMA_CHARS": 6000,
     "SUBAGENT_SCHEMA_CHARS": 4000,
     "SAY_CHARS": 300,
