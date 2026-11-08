@@ -2,7 +2,7 @@
 // harness (main delegates to role workers, each in its own context, with the production shaping in every context). Models come from
 // agent/roles.json; prices are first-party Anthropic list prices. What a scripted run cannot know (extra calls a worker needs to orient,
 // extra calls on the economy model) are settings, swept to find where delegation stops paying. Offline; no Pi host, model or network.
-// Run: npm run simulate:delegation > docs/simulations/delegation-results.json
+// Run: npm run --silent simulate:delegation > docs/simulations/delegation-results.json
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -20,7 +20,11 @@ const PRICES = {
 	"claude-sonnet-5-5": { input: 2, output: 10, read: 0.2 },
 	"claude-haiku-5-5": { input: 0.1, output: 0.5, read: 0.01, longFrom: 100_000, longX: 5 },
 };
-const WRITE_X = 1.25;
+const WRITE_X = 1.25, CHARS_PER_TOKEN = 4, CACHE_LOOKBACK_BLOCKS = 20;
+const ORIENT_DEFAULT = 1, ECONOMY_X_DEFAULT = 1;
+const MAIN_FOLD_TOKENS = 50_000, HANDOFF_WINDOW = 10, SHELL_OUTPUT_CHARS = 16_000;
+const PACKET_CHARS = 1_500, HANDOFF_FINDINGS_CHARS = 1_200;
+const ORIENT_SWEEP = [0, 1, 2, 4, 6, 8, 12], ECONOMY_X_SWEEP = [1, 1.5, 2, 3];
 
 // Measured prompt sizes in characters: Pi's own system prompt (recorded runs), main's with the subagent extension (recorded) plus
 // agent/AGENTS.md, and each role's assembled child prompt (scripts/measure-child-prompt.mjs), on top of Pi's. Tool definitions are not in
@@ -35,7 +39,7 @@ const roles = Object.fromEntries(JSON.parse(readFileSync(new URL("../agent/roles
 const roleModel = (name) => { const r = roles[name]; return r.modelTiers[r.defaultModelTier].model.replace(/^anthropic\//, ""); };
 
 const fill = (tag, n) => { let s = ""; let i = 0; while (s.length < n) s += `${tag} ${i++}: the scheduler drains the queue at a fixed pace and records each send.\n`; return s.slice(0, n); };
-const tok = (s) => Math.ceil(s.length / 4);
+const tok = (s) => Math.ceil(s.length / CHARS_PER_TOKEN);
 
 // Ten tasks: four small fixes, three bug hunts, three features, in one user session. Each step is a tool call with the size of its
 // result; `phase` marks who does it under the harness. Two tasks need a second fix round after the user reports a failure.
@@ -70,7 +74,7 @@ function meter(model, systemChars) {
 			const keys = []; const h = createHash("sha256");
 			for (const m of messages) { h.update(JSON.stringify(m)); keys.push(h.copy().digest("hex")); }
 			let hit = -1;
-			for (let k = messages.length - 1; k >= Math.max(0, messages.length - 21); k--) if (entries.has(keys[k])) { hit = k; break; }
+			for (let k = messages.length - 1; k >= Math.max(0, messages.length - 1 - CACHE_LOOKBACK_BLOCKS); k--) if (entries.has(keys[k])) { hit = k; break; }
 			const read = (sysCached ? system : 0) + sizes.slice(0, hit + 1).reduce((a, b) => a + b, 0);
 			const write = (sysCached ? 0 : system) + sizes.slice(hit + 1).reduce((a, b) => a + b, 0);
 			const size = read + write, x = price.longFrom && size > price.longFrom ? price.longX : 1;
@@ -102,14 +106,14 @@ function runWorker(role, model, packet, steps, totals) {
 		let content = [{ type: "text", text: fill(`${s.tool} ${s.arg}`, s.size) }];
 		content = ledger.onResult(s.tool, args, content, false, "/w") ?? content;
 		if (!masked) content = dedupe.onResult(s.tool, args, content, false, "/w") ?? content;
-		content = capShellOutput(s.tool, content, {}, 16_000, scratch) ?? content;
+		content = capShellOutput(s.tool, content, {}, SHELL_OUTPUT_CHARS, scratch) ?? content;
 		const view = ledger.viewForResult();
 		if (view) content = [...content, { type: "text", text: view }];
 		history.push({ role: "toolResult", toolName: s.tool, toolCallId: `w${i}`, content, isError: false });
 	});
 	request(REPORT_OUTPUT); // writes its REPORT and replies with the four handoff lines
 	totals.push(m.totals);
-	return `STATUS: PASS - ${role} done\nNEXT: none\nRISKS: none\nEVIDENCE: _evidence/task/REPORT.md\n${fill(`${role} findings`, 1_200)}`;
+	return `STATUS: PASS - ${role} done\nNEXT: none\nRISKS: none\nEVIDENCE: _evidence/task/REPORT.md\n${fill(`${role} findings`, HANDOFF_FINDINGS_CHARS)}`;
 }
 
 // The single agent: one context, plain Pi, every tool output kept. fresh: a new session (context) for each task.
@@ -139,15 +143,15 @@ function single(model, fresh) {
 // The harness: main on mainModel delegates each phase to a role (debugger, planner, backend-worker, test-engineer) through the production
 // main hook (older-result shortening and checkpoint folding). orient: extra reads each worker launch needs; economyX: call multiplier on
 // economy-tier roles. sameModel: every role on main's model, which separates the context effect from the model mix.
-function harness(mainModel, { orient = 1, economyX = 1, sameModel = false } = {}) {
+function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFAULT, sameModel = false } = {}) {
 	const workers = [], mainM = meter(mainModel, MAIN_SYSTEM + TOOL_SCHEMA_CHARS + SUBAGENT_SCHEMA_CHARS);
 	let hook;
-	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined);
+	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined);
 	const history = []; let t = 0, id = 0;
 	const mainRequest = (output) => { const view = hook({ messages: history })?.messages ?? history; mainM.request(view, output); };
 	const delegate = (role, steps, k) => {
 		mainRequest(PACKET_OUTPUT);
-		const packet = `Task ${k} for ${role}: ${fill(`packet ${k} ${role}`, 1_500)}\nChecks:\n- \`cargo test\``;
+		const packet = `Task ${k} for ${role}: ${fill(`packet ${k} ${role}`, PACKET_CHARS)}\nChecks:\n- \`cargo test\``;
 		const callId = `m${id++}`;
 		history.push({ role: "assistant", content: [{ type: "text", text: fill(`plan ${k}`, SAY_CHARS) }, { type: "toolCall", id: callId, name: "subagent", arguments: { agent: role, task: packet } }] });
 		const model = sameModel ? mainModel : roleModel(role);
@@ -197,9 +201,9 @@ try {
 		const pct = (a, b) => Math.round(1000 * (1 - b / a)) / 10;
 		process.stderr.write(`${model}: single one session $${one.cost} (${one.sent} tokens) | fresh per task $${fresh.cost} | harness same model $${same.cost} (${same.sent}) | harness role models $${mixed.cost} (${mixed.sent}): ${pct(fresh.cost, mixed.cost)}% below fresh single\n`);
 		// Break-even sweeps against the cheaper single-agent baseline (a fresh session per task).
-		for (const orient of [0, 1, 2, 4, 6, 8, 12]) rows.push({ main: model, sweep: "orient", value: orient, cost: sum(harness(model, { orient })).cost, singleFresh: fresh.cost });
-		for (const economyX of [1, 1.5, 2, 3]) rows.push({ main: model, sweep: "economyX", value: economyX, cost: sum(harness(model, { economyX })).cost, singleFresh: fresh.cost });
+		for (const orient of ORIENT_SWEEP) rows.push({ main: model, sweep: "orient", value: orient, cost: sum(harness(model, { orient })).cost, singleFresh: fresh.cost });
+		for (const economyX of ECONOMY_X_SWEEP) rows.push({ main: model, sweep: "economyX", value: economyX, cost: sum(harness(model, { economyX })).cost, singleFresh: fresh.cost });
 	}
 	console.log(JSON.stringify({ schema: 1, sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roles: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
-		prices: PRICES, assumptions: { TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: 1, economyXDefault: 1 }, baselines, sweeps: rows }, null, 2));
+		prices: PRICES, assumptions: { CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
 } finally { rmSync(scratch, { recursive: true, force: true }); }

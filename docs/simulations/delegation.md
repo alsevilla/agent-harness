@@ -3,7 +3,7 @@
 The README's [harness against a single agent](../../README.md#the-harness-against-a-single-agent) table. Results: [`delegation-results.json`](delegation-results.json), with the commit it ran on.
 
 ```sh
-npm run simulate:delegation > docs/simulations/delegation-results.json
+npm run --silent simulate:delegation > docs/simulations/delegation-results.json
 ```
 
 Offline, no Pi host, model or network; about ten seconds. [`scripts/simulate-delegation.mjs`](../../scripts/simulate-delegation.mjs) runs the same ten-task session four ways and prices every request.
