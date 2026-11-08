@@ -175,6 +175,21 @@ Where the saving comes from: delegation itself is not cheaper. With every role o
 
 The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context. With one extra read per worker launch (the default above), the harness saves 28% under Opus 5.5; it still saves at six (1%) and costs more from eight (11% more). Under Sonnet 5.5 the margin is thin: it saves 5% at one extra read and costs 3% more at two. How many more calls the Haiku roles need barely matters, since they are cheap: three times the reads and checks still saves 25% under Opus. Not modelled: whether each approach finishes the task correctly, which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 
+#### The same session with OpenAI models
+
+The same ten tasks and four configurations, with each OpenAI model as main/single agent. The mixed-model harness uses the OpenAI fallback models already in `agent/roles.json`: **Sol for implementation; Luna for debugging, planning and testing**. These are offline Pi request estimates at OpenAI Standard API prices, including the fixed output allowance and an idealized warm cache ([method and reproducible command](docs/simulations/delegation.md#openai-comparison), [results](docs/simulations/openai-delegation-results.json)). They are not live Codex runs or subscription costs.
+
+| Main / single-agent model | Single agent, one session | Single agent, fresh session per task | Harness, every role on main's model | Harness, OpenAI role models |
+| --- | --- | --- | --- | --- |
+| GPT-6 Astra | $87.65 | $16.69 | $23.62 | **$6.36: 61.9% less than the fresh single agent** |
+| GPT-6.1 Sol | $9.93 | $2.61 | $3.91 | **$2.61: 0.3% more than the fresh single agent** |
+| GPT-6.1 Terra | $4.97 | $1.30 | $1.96 | **$2.25: 72.8% more than the fresh single agent** |
+| GPT-6 Luna | $0.88 | $0.17 | $0.24 | **$1.93: 1,058.6% more than the fresh single agent** |
+
+Percentages use unrounded costs. Input totals are identical across these four model profiles: **47.30M tokens / peak 428k** for one continuous single agent, **7.79M / peak 82k** for fresh task sessions, and **8.88M / peak 62k** for either harness arm. Thus the harness sends **81.2% fewer tokens than one continuous session, but 14.0% more than fresh task sessions**, with 294 model requests instead of 211.
+
+Same-model delegation costs 41.5–50.2% more than fresh task sessions. The default model mix saves substantially with Astra, is near break-even with Sol, and costs more with Terra or Luna because implementation still runs on Sol. Mixed-model Luna also costs more than the continuous Luna baseline. In the orientation sweep, Astra still saves 45.8% at 12 extra reads per worker; Sol saves 9.3% at zero extra reads but costs 0.3% more at one and 8.2% more at two. Terra and Luna never beat fresh sessions in the tested orientation range. Tripling Luna-role calls leaves Astra 60.8% cheaper but puts Sol 7.1% above fresh sessions. Task success and differences in model capability are not modelled.
+
 ### Offline replay at OpenAI prices
 
 An independent offline replay exercises the current shaping functions with seven fixed workloads and four OpenAI pricing profiles ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Positive percentages mean savings. Costs cover input only, using Standard API rates with an idealized warm cache and 30-minute writes: not Codex subscription billing or total task cost.
