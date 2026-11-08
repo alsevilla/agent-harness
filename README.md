@@ -143,10 +143,10 @@ The real Pi CLI drives a scripted stand-in model that records every request Pi s
 
 | Scenario | Without shaping | With the harness | Saving |
 | --- | --- | --- | --- |
-| Long worker task: 30 tool calls over large files and logs | 2.81M tokens sent, peak request 164k, 15 of 31 requests over 100k | 1.44M sent, peak 79k, none over 100k | **49% fewer tokens**, peak halved. Cost: **73% lower (3.7x cheaper) on Claude Haiku 5.5**, which charges 5x for a request over 100k; 9% lower on models without that surcharge |
-| Worker re-reading the same files | 354k sent | 233k sent | **34% fewer tokens, 36% lower cost** |
-| Main session: 10 user turns of file reads and shell output | 1.37M sent, peak 85k | 864k sent, peak 61k | **37% fewer tokens, 21% lower cost** |
-| Ordinary worker task: few large or repeated outputs | 645k sent | 620k sent | 4% fewer tokens, 4% lower cost: shaping stays out of the way when there is little to save |
+| Long worker task: 30 tool calls over large files and logs | 2.81M tokens sent, peak request 164k, 15 of 31 requests over 100k | 1.43M sent, peak 79k, none over 100k | **49% fewer tokens**, peak halved. Cost: **73% lower (3.7x cheaper) on Claude Haiku 5.5**, which charges 5x for a request over 100k; 9% lower on models without that surcharge |
+| Worker re-reading the same files | 353k sent | 232k sent | **34% fewer tokens, 36% lower cost** |
+| Main session: 10 user turns of file reads and shell output | 1.37M sent, peak 84k | 862k sent, peak 61k | **37% fewer tokens, 21% lower cost** |
+| Ordinary worker task: few large or repeated outputs | 643k sent | 619k sent | 4% fewer tokens, 4% lower cost: shaping stays out of the way when there is little to save |
 
 **Cache-safe.** Shortening that rewrote the cached prefix every request would cost more than it saves, so every rule keeps the prefix stable: in all 232 recorded requests the system prompt and tool definitions stayed identical within each run, and older outputs are shortened in batches, so the cache is rewritten rarely. Masking has a price: on the long worker task the cache hit rate falls from 94% to 83%, which is why its saving at flat prices is 9% rather than 49%. That masking is also what keeps every request under Haiku's 100k surcharge.
 
