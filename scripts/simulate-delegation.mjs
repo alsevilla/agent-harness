@@ -71,7 +71,8 @@ function task(kind, n) {
 		read(f(0), "verify"), read(f(1), "verify"), read(f(2), "verify"), test(6_000, "verify"), test(6_000, "verify"), test(6_000, "verify")] };
 }
 const KINDS = ["fix", "bug", "feature", "fix", "bug", "feature", "fix", "bug", "feature", "fix"];
-// Explicit fixture labels, not inferred model capability: only the three multi-file feature implementations are complex.
+// Explicit fixture labels, not inferred model capability: only the three multi-file feature implementations are complex. Main picks
+// each implementation's tier from them at plan time (economy for the rest), for both providers.
 const IMPLEMENTATION_COMPLEXITY = ["non-complex", "non-complex", "complex", "non-complex", "non-complex", "complex", "non-complex", "non-complex", "complex", "non-complex"];
 const RETRY_COMPLEXITY = "non-complex"; // each scripted retry is two edits and one test, including the feature retry
 const implementationTier = (complexity) => complexity === "complex" ? "capable" : "economy";
@@ -188,9 +189,11 @@ function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFA
 		const packet = `Task ${k} for ${role}: ${fill(`packet ${k} ${role}`, PACKET_CHARS)}\nChecks:\n- \`cargo test\``;
 		const callId = `m${id++}`;
 		history.push({ role: "assistant", content: [{ type: "text", text: fill(`plan ${k}`, SAY_CHARS) }, { type: "toolCall", id: callId, name: "subagent", arguments: { agent: role, task: packet } }] });
-		const tier = OPENAI && role === "backend-worker" ? implementationTier(complexity) : roles[role].defaultModelTier;
+		// Plan-time tiers (references/routing.md, "Explicit Pi model tier"): main sets economy for a bounded, known-contract
+		// implementation and leaves complex work on capable; other roles run their defaults. The same rule for both providers.
+		const tier = role === "backend-worker" ? implementationTier(complexity) : roles[role].defaultModelTier;
 		const model = sameModel ? mainModel : roleModel(role, tier);
-		const economy = OPENAI ? !sameModel && model === roleModel("backend-worker", "economy") : tier === "economy";
+		const economy = !sameModel && tier === "economy";
 		// economyX: the economy model needs this many times the reads, searches and checks (each extra one a new, distinct output).
 		const looks = steps.filter((s) => s.tool !== "edit");
 		const extra = economy && economyX > 1 ? Array.from({ length: Math.round(looks.length * (economyX - 1)) }, (_, i) => ({ ...looks[i % looks.length], arg: `${looks[i % looks.length].arg}#again${i}` })) : [];
@@ -221,9 +224,10 @@ function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFA
 			history.push({ role: "assistant", content: [{ type: "text", text: fill(`reply ${k} again`, 600) }] });
 		}
 	});
-	if (OPENAI && !sameModel) {
-		assert.equal(workers.filter((w) => w.model === "gpt-6.1-sol").length, 3, "only complex feature implementation uses Sol");
-		assert.equal(workers.filter((w) => w.model === "gpt-6-luna").length, 18, "all other workers, including retries, use Luna");
+	if (!sameModel) {
+		const capable = roleModel("backend-worker", "capable");
+		assert.equal(workers.filter((w) => w.model === capable).length, 3, "only the three complex feature implementations run on capable");
+		assert.equal(workers.length, 21, "21 worker launches");
 	}
 	return [mainM.totals, ...workers];
 }
@@ -244,8 +248,8 @@ try {
 		for (const economyX of ECONOMY_X_SWEEP) rows.push({ main: model, sweep: "economyX", value: economyX, cost: sum(harness(model, { economyX })).cost, singleFresh: fresh.cost });
 	}
 	console.log(JSON.stringify({ schema: 1, provider: PROVIDER, cacheModel: OPENAI ? "idealized warm complete-message prefixes; no expiry or cross-context reuse" : "system and last-message breakpoints; 20-block lookback",
-		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), [OPENAI ? "roleDefaults" : "roles"]: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
-		...(OPENAI ? { implementationRouting: KINDS.map((kind, k) => ({ task: k + 1, kind, complexity: IMPLEMENTATION_COMPLEXITY[k], model: roleModel("backend-worker", implementationTier(IMPLEMENTATION_COMPLEXITY[k])),
-			...(FIX_ROUND.has(k) ? { retryComplexity: RETRY_COMPLEXITY, retryModel: roleModel("backend-worker", implementationTier(RETRY_COMPLEXITY)) } : {}) })) } : {}),
-		prices: PRICES, assumptions: { ...(OPENAI ? { IMPLEMENTATION_COMPLEXITY, RETRY_COMPLEXITY } : {}), CACHE_MIN_TOKENS, CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
+		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roleDefaults: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
+		...({ implementationRouting: KINDS.map((kind, k) => ({ task: k + 1, kind, complexity: IMPLEMENTATION_COMPLEXITY[k], model: roleModel("backend-worker", implementationTier(IMPLEMENTATION_COMPLEXITY[k])),
+			...(FIX_ROUND.has(k) ? { retryComplexity: RETRY_COMPLEXITY, retryModel: roleModel("backend-worker", implementationTier(RETRY_COMPLEXITY)) } : {}) })) }),
+		prices: PRICES, assumptions: { IMPLEMENTATION_COMPLEXITY, RETRY_COMPLEXITY, CACHE_MIN_TOKENS, CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
 } finally { rmSync(scratch, { recursive: true, force: true }); }

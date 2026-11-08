@@ -1,6 +1,6 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 63% less, and a ten-task session costs 28% less than one Claude Opus 5.5 agent working alone ([Token savings](#token-savings)).
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 63% less, and a ten-task session costs 44% less than one Claude Opus 5.5 agent working alone ([Token savings](#token-savings)).
 
 ## Table of contents
 
@@ -164,51 +164,40 @@ Shortening older results alone costs more than no shaping until about 480 reques
 
 ### The harness against a single agent
 
-The same ten-task session (four small fixes, three bug hunts, three features, two of them needing a second fix round) done by one model alone in plain Pi, and by the harness: main delegates each phase to a role in its own context, with the production shaping in every context and each role on its model from `agent/roles.json` (implementation on Claude Sonnet 5.5; debugging, planning and test runs on Claude Haiku 5.5) ([method](docs/simulations/delegation.md)). Main runs on the single agent's model. Anthropic list prices, the same cache model as above.
+The same ten-task session (four small fixes, three bug hunts, three features, two of them needing a second fix round), done by one model alone in plain Pi and by the harness ([method](docs/simulations/delegation.md)). In the harness, main runs on the single agent's model and delegates each step to a role in its own context, with the production shaping in every context. Main picks each implementation's tier when it plans, as the [routing rules](agent/skills/engineering-harness/references/routing.md) say: the three features go to the capable tier, the simple fixes and retries to the economy tier, and debugging, planning and test runs stay on their economy defaults. On Anthropic that is Claude Sonnet 5.5 and Claude Haiku 5.5; on OpenAI, the `roles.json` fallbacks GPT-6.1 Sol and GPT-6 Luna. List prices for each provider; the cache model is Anthropic's as above, or an idealized warm cache for OpenAI.
 
-| Main / single-agent model | Single agent, one session | Single agent, fresh session per task | Harness, every role on main's model | Harness, roles on their own models |
+| Main / single-agent model | One agent, one session | One agent, a new session per task | Harness | Harness against one agent with a new session per task |
 | --- | --- | --- | --- | --- |
-| Claude Opus 5.5 | $12.98, 47.3M tokens sent, peak 428k | $5.21, 7.8M sent, peak 82k | $7.83, 8.9M sent, peak 62k | **$3.74: 28% below the fresh single agent, 71% below one session** |
-| Claude Sonnet 5.5 | $11.18 | $3.34 | $4.72 | **$3.18: 5% below the fresh single agent, 72% below one session** |
+| Claude Opus 5.5 | $12.98 | $5.21 | $2.93 | **44% cheaper** |
+| Claude Sonnet 5.5 | $11.18 | $3.34 | $2.37 | **29% cheaper** |
+| GPT-6 Astra | $87.65 | $16.69 | $5.64 | **66% cheaper** |
+| GPT-6.1 Sol | $9.93 | $2.61 | $1.89 | **27% cheaper** |
+| GPT-6.1 Terra | $4.97 | $1.30 | $1.53 | 17% more expensive |
+| GPT-6 Luna | $0.88 | $0.17 | $1.21 | 7.3x the cost |
 
-Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 41-50% more than a single agent that starts a fresh session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: the bulk of the reading and editing runs on cheaper models in small contexts, and no context grows past 62k tokens. Against one agent kept in one long session, the more common habit, every harness row is cheaper.
+Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.9M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna.
 
-The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context. With one extra read per worker launch (the default above), the harness saves 28% under Opus 5.5; it still saves at six (1%) and costs more from eight (11% more). Under Sonnet 5.5 the margin is thin: it saves 5% at one extra read and costs 3% more at two. How many more calls the Haiku roles need barely matters, since they are cheap: three times the reads and checks still saves 25% under Opus. Not modelled: whether each approach finishes the task correctly, which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
+Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 41-50% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sol buys capability, not savings.
 
-#### The same session with OpenAI models
-
-The same ten tasks and four configurations, with each OpenAI model as main/single agent. The mixed-model harness selects the OpenAI tier by explicit fixture complexity: **Luna for non-complex implementation; Sol for complex implementation**. Here the four small fixes, three bounded bug fixes and both retry patches use Luna; the three multi-file feature implementations use Sol. Debugging, planning and testing also use Luna. Models come from the corresponding tiers in `agent/roles.json`. These are offline Pi request estimates at OpenAI Standard API prices, including the fixed output allowance and an idealized warm cache ([method and reproducible command](docs/simulations/delegation.md#openai-comparison), [results](docs/simulations/openai-delegation-results.json)). They are not live Codex runs or subscription costs.
-
-| Main / single-agent model | Single agent, one session | Single agent, fresh session per task | Harness, every role on main's model | Harness, OpenAI role models |
-| --- | --- | --- | --- | --- |
-| GPT-6 Astra | $87.65 | $16.69 | $23.62 | **$5.64: 66.2% less than the fresh single agent** |
-| GPT-6.1 Sol | $9.93 | $2.61 | $3.91 | **$1.89: 27.3% less than the fresh single agent** |
-| GPT-6.1 Terra | $4.97 | $1.30 | $1.96 | **$1.53: 17.5% more than the fresh single agent** |
-| GPT-6 Luna | $0.88 | $0.17 | $0.24 | **$1.21: 626.3% more than the fresh single agent** |
-
-Percentages use unrounded costs. Input totals are identical across these four model profiles: **47.30M tokens / peak 428k** for one continuous single agent, **7.79M / peak 82k** for fresh task sessions, and **8.88M / peak 62k** for either harness arm. Thus the harness sends **81.2% fewer tokens than one continuous session, but 14.0% more than fresh task sessions**, with 294 model requests instead of 211.
-
-Same-model delegation costs 41.5–50.2% more than fresh task sessions. With complexity-based routing, the mixed harness saves with Astra and Sol but still costs more with Terra and Luna: the three complex implementations use Sol, and main/worker coordination adds requests. Mixed-model Luna also costs more than the continuous Luna baseline. In the orientation sweep, Astra still saves 59.7% at 12 extra reads per worker; Sol saves 3.4% at eight but costs 14.5% more at twelve. Terra and Luna never beat fresh sessions in the tested orientation range. Tripling calls for all Luna workers, including non-complex implementation, still saves 64.9% with Astra and 19.0% with Sol. Complexity labels are explicit fixture assumptions; task success and differences in model capability are not modelled. These results replace the earlier simulation that incorrectly used Sol for every implementation.
+The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (17% and 60%); under Sonnet 5.5 and Sol it is cheaper up to eight (4% and 3%) and more expensive at twelve (13% and 15%). Three times the reads and checks on every economy-tier worker still leaves it cheaper: 39% under Opus, 22% under Sonnet, 65% under Astra, 19% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 
 ### Offline replay at OpenAI prices
 
-An independent offline replay exercises the current shaping functions with seven fixed workloads and four OpenAI pricing profiles ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Positive percentages mean savings. Costs cover input only, using Standard API rates with an idealized warm cache and 30-minute writes: not Codex subscription billing or total task cost.
-
-Totals below sum estimated input tokens across every request in each run, not just the final context. Both arms use the same scripted actions; “without” disables request shaping, not the entire orchestration system.
+An independent offline replay exercises the current shaping functions with seven fixed workloads and four OpenAI pricing profiles ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Both arms run the same scripted actions, and token counts are totals over every request of a run. Costs cover input only, using Standard API rates with an idealized warm cache and 30-minute writes: not Codex subscription billing or total task cost.
 
 | Scenario | Without shaping | With the harness | Saving |
 | --- | --- | --- | --- |
-| Long worker task: 30 tool calls over large files and logs | 3.86M tokens sent, peak request 238k | 1.48M sent, peak 84k | **61.6% fewer tokens**. Input cost: **25.1% lower on GPT-6.1 Sol / Terra**, 36.3% lower on GPT-6 Astra / Luna |
-| Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52.2% fewer tokens**. Input cost: **62.0% lower on GPT-6.1 Sol / Terra**, 59.0% lower on GPT-6 Astra / Luna |
+| Long worker task: 30 tool calls over large files and logs | 3.86M tokens sent, peak request 238k | 1.48M sent, peak 84k | **62% fewer tokens**. Input cost: **25% lower on GPT-6.1 Sol / Terra**, 36% lower on GPT-6 Astra / Luna |
+| Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52% fewer tokens**. Input cost: **62% lower on GPT-6.1 Sol / Terra**, 59% lower on GPT-6 Astra / Luna |
 | Ordinary worker task: small, unique reads | 565k tokens sent | 565k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
 | Main session: 10 user turns of subagent results | 646k tokens sent | 646k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
-| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37.1% fewer tokens**. Input cost: **10.8% lower on GPT-6.1 Sol / Terra**, 22.9% lower on GPT-6 Astra / Luna |
-| Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49.2% fewer tokens**. Input cost: **29.4% lower on GPT-6.1 Sol / Terra**, 39.0% lower on GPT-6 Astra / Luna |
-| Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **65.7% fewer tokens**. Input cost: **55.6% lower on GPT-6.1 Sol / Terra**, 62.6% lower on GPT-6 Astra / Luna |
+| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37% fewer tokens**. Input cost: **11% lower on GPT-6.1 Sol / Terra**, 23% lower on GPT-6 Astra / Luna |
+| Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49% fewer tokens**. Input cost: **29% lower on GPT-6.1 Sol / Terra**, 39% lower on GPT-6 Astra / Luna |
+| Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **66% fewer tokens**. Input cost: **56% lower on GPT-6.1 Sol / Terra**, 63% lower on GPT-6 Astra / Luna |
 
 Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%. All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x input/cache rates ([official pricing](https://developers.openai.com/api/docs/pricing)). The 480-request baseline crosses that boundary; its shaped counterpart does not.
 
-This replay found two small-task costs, now guarded: the ordinary worker cost 2.5-2.8% more and the short main run 12.5-22.5% more. Main now leaves its history unshortened below 25k estimated tokens, and a read-only worker defers the ledger's state view until it has read 80k characters (an edit, command or packet-required check shows it sooner); both fixtures now match their unshaped baseline. These are conservative heuristics, not a guarantee for every workload; the [before-and-after comparison](docs/simulations/openai-shaping.md#before-and-after) shows the longer-run trade-offs. The recorded Pi runs and long main sessions above give the same results with and without the guards.
+This replay found two small-task costs, now guarded: the ordinary worker cost 3% more and the short main run 13-23% more. Main now leaves its history unshortened below 25k estimated tokens, and a read-only worker defers the ledger's state view until it has read 80k characters (an edit, command or packet-required check shows it sooner); both fixtures now match their unshaped baseline. These are conservative heuristics, not a guarantee for every workload; the [before-and-after comparison](docs/simulations/openai-shaping.md#before-and-after) shows the longer-run trade-offs. The recorded Pi runs and long main sessions above give the same results with and without the guards.
 
 ### What these numbers are not
 
@@ -286,7 +275,7 @@ npm test
 
 Suites that need an installed Pi host are skipped, by name, when none is found; set `NATIVE_PROBE_HOST_MODULES` or install Pi to run them.
 
-After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main`, `npm run simulate:delegation` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
+After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main`, `npm run simulate:delegation`, `npm run simulate:delegation:openai` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
 
 ## Licenses
 

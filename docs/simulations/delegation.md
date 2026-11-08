@@ -17,7 +17,7 @@ Ten tasks in one user session: four small fixes (2 reads, a search, 2 edits, 2 t
 - **Single agent, one session:** one model in plain Pi does everything in one context, with every tool output kept. No native compaction triggers at these sizes on a 1M-context model.
 - **Single agent, fresh session per task:** the same, with a new session for each task (the second fix round stays in its task's session). The fairer baseline: it is how a careful user runs one agent.
 - **Harness, every role on main's model:** main reads at most two named files, writes a packet and delegates each phase to a role in its own context: a fix to `backend-worker`; a bug hunt to `debugger` then `backend-worker`; a feature to `planner`, `backend-worker`, then `test-engineer`; a second fix round to a new `backend-worker`. Main's requests go through the production main hook (older-result shortening and checkpoint folding at 50k); each worker's through the production worker shaping (execution ledger, duplicate-read notes, shell-output cap, threshold masking). Each worker also reads `orient` extra files to get its bearings, writes a report and hands main a four-line result with 1.2k characters of findings.
-- **Harness, roles on their own models:** the same, with each role on its default model from `agent/roles.json`: `backend-worker` on Claude Sonnet 5.5, `debugger`, `planner` and `test-engineer` on Claude Haiku 5.5. Main stays on the baseline's model.
+- **Harness, roles on their own models:** the same, with main choosing each implementation's tier at plan time, as [`routing.md`](../../agent/skills/engineering-harness/references/routing.md) ("Explicit Pi model tier") says: economy for a bounded, known-contract implementation, capable otherwise. The fixture labels the three multi-file feature implementations complex (capable) and the four small fixes, three bug-hunt fixes and both retries non-complex (economy); `debugger`, `planner` and `test-engineer` run their economy defaults. With Anthropic models that is 3 workers on Claude Sonnet 5.5 and 18 on Claude Haiku 5.5. Main stays on the baseline's model. The labels are fixture assumptions, recorded per task in the results; no role setting changes.
 
 The two harness rows separate the two effects: separate contexts alone (same model), then the model mix on top.
 
@@ -33,9 +33,9 @@ The two harness rows separate the two effects: separate contexts alone (same mod
 Two behaviours are settings, swept against the fresh-session single agent:
 
 - `orient`: extra files each worker launch reads to get its bearings, which the single agent already has in context (default 1). It decides whether delegation pays.
-- `economyX`: how many times the reads, searches and checks an economy-tier role (Claude Haiku 5.5) needs (default 1). It barely moves the cost, because those roles are cheap.
+- `economyX`: how many times the reads, searches and checks every economy-tier worker needs, implementation included (default 1). It moves the cost little, because those workers are cheap.
 
-Not modelled at all: whether a worker or a single agent finishes the task correctly, how a single agent's long context affects its mistakes, and main re-checking a result (the policy says accept on evidence, not by re-reading). The second fix round is the same in both arms. These are estimates of the token mechanics, not a measurement of cost per completed task: that needs the paid [benchmark procedure](../../agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository).
+Not modelled at all: whether a worker or a single agent finishes the task correctly (an economy-tier worker on a simple fix included), how a single agent's long context affects its mistakes, and main re-checking a result (the policy says accept on evidence, not by re-reading). The second fix round is the same in both arms. These are estimates of the token mechanics, not a measurement of cost per completed task: that needs the paid [benchmark procedure](../../agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository).
 
 ## OpenAI comparison
 
@@ -45,11 +45,7 @@ Run the same fixture and four configurations with Astra, Sol, Terra and Luna as 
 npm run --silent simulate:delegation:openai > docs/simulations/openai-delegation-results.json
 ```
 
-This invokes the same script with `--openai`, including both orientation and economy-call sweeps. Results: [`openai-delegation-results.json`](openai-delegation-results.json). OpenAI implementation selects the role tier by explicit fixture complexity: `backend-worker` economy maps to GPT-6 Luna; capable maps to GPT-6.1 Sol, using `fallbackModel` from `agent/roles.json`. Debugger, planner and test-engineer stay on Luna.
-
-The four small fixes and three bounded bug-fix implementations are labelled non-complex. The three multi-file feature implementations are labelled complex. Both retry patches (two edits and one test) are non-complex, including the feature retry. Thus each mixed-model run launches 18 Luna workers and 3 Sol workers. These labels are fixture assumptions, not measured capability or a claim that every feature is complex. JSON records every implementation task's complexity/model and its retry routing. `roleDefaults` records the repository defaults separately; those defaults are overridden by the implementation tier selection. No repository role settings are changed.
-
-The same-model control still puts every role on main's model. The `economyX` sweep now multiplies reads, searches and checks for every worker actually routed to Luna, including non-complex implementation and retries. The previous fixed-Sol implementation results are superseded by this correction ([previous results](https://github.com/alsevilla/agent-harness/blob/d730341/docs/simulations/openai-delegation-results.json)).
+This invokes the same script with `--openai`, including both sweeps. Results: [`openai-delegation-results.json`](openai-delegation-results.json). The routing is the same as above; each tier's OpenAI model is its `fallbackModel` in `agent/roles.json`: economy is GPT-6 Luna and capable GPT-6.1 Sol, so each mixed-model run launches 18 Luna workers and 3 Sol workers.
 
 The ten tasks, prompt sizes, outputs, retries and shaping functions are shared with the Claude run. Worker masking selects the production OpenAI policy. Pi prompt sizes are retained as controlled fixture assumptions, not measured Codex prompts. This estimates Pi harness requests at OpenAI API rates; it does not simulate Codex or Copilot request construction or subscription billing.
 
@@ -66,4 +62,4 @@ Above 272k input tokens, input/cache rates are multiplied by 2 and output by 1.5
 
 OpenAI uses the same idealized warm-cache assumption as the OpenAI shaping replay: every complete message prefix of at least 1,024 estimated tokens can be reused, with independent caches per context/model. No expiry, eviction, cross-context reuse, tokenizer-specific boundaries or routing misses are modelled. This is not the Claude 20-block cache model. See [OpenAI cache documentation](https://developers.openai.com/api/docs/guides/prompt-caching). Prices, prompt sizes and cache assumptions are emitted in JSON. The script checks cold-write/warm-read accounting at short and long sizes before running the fixture.
 
-Run twice to separate temporary files and compare with `cmp`; the outputs must be byte-identical at the same source commit. Success and relative model capability remain unmodelled. Report the costs as scripted-session estimates, not cost per successfully completed task.
+Both commands are deterministic: two runs at the same commit give byte-identical output (compare with `cmp`).
