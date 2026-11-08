@@ -47,7 +47,7 @@ const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;
 
 const roles = Object.fromEntries(JSON.parse(readFileSync(new URL("../agent/roles.json", import.meta.url), "utf8")).map((r) => [r.name, r]));
-const roleModel = (name) => { const r = roles[name]; const tier = r.modelTiers[r.defaultModelTier]; return (OPENAI ? tier.fallbackModel : tier.model).split("/").at(-1); };
+const roleModel = (name, modelTier = roles[name].defaultModelTier) => { const r = roles[name]; const tier = r.modelTiers[modelTier]; return (OPENAI ? tier.fallbackModel : tier.model).split("/").at(-1); };
 
 const fill = (tag, n) => { let s = ""; let i = 0; while (s.length < n) s += `${tag} ${i++}: the scheduler drains the queue at a fixed pace and records each send.\n`; return s.slice(0, n); };
 const tok = (s) => Math.ceil(s.length / CHARS_PER_TOKEN);
@@ -71,6 +71,10 @@ function task(kind, n) {
 		read(f(0), "verify"), read(f(1), "verify"), read(f(2), "verify"), test(6_000, "verify"), test(6_000, "verify"), test(6_000, "verify")] };
 }
 const KINDS = ["fix", "bug", "feature", "fix", "bug", "feature", "fix", "bug", "feature", "fix"];
+// Explicit fixture labels, not inferred model capability: only the three multi-file feature implementations are complex.
+const IMPLEMENTATION_COMPLEXITY = ["non-complex", "non-complex", "complex", "non-complex", "non-complex", "complex", "non-complex", "non-complex", "complex", "non-complex"];
+const RETRY_COMPLEXITY = "non-complex"; // each scripted retry is two edits and one test, including the feature retry
+const implementationTier = (complexity) => complexity === "complex" ? "capable" : "economy";
 const FIX_ROUND = new Set([2, 6]); // the third and seventh tasks fail once
 const fixRound = (n) => [edit((n * 5) % 40, "work"), edit((n * 5 + 1) % 40, "work"), test(6_000, "work")];
 
@@ -179,13 +183,14 @@ function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFA
 	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined);
 	const history = []; let t = 0, id = 0;
 	const mainRequest = (output) => { const view = hook({ messages: history })?.messages ?? history; mainM.request(view, output); };
-	const delegate = (role, steps, k) => {
+	const delegate = (role, steps, k, complexity = IMPLEMENTATION_COMPLEXITY[k]) => {
 		mainRequest(PACKET_OUTPUT);
 		const packet = `Task ${k} for ${role}: ${fill(`packet ${k} ${role}`, PACKET_CHARS)}\nChecks:\n- \`cargo test\``;
 		const callId = `m${id++}`;
 		history.push({ role: "assistant", content: [{ type: "text", text: fill(`plan ${k}`, SAY_CHARS) }, { type: "toolCall", id: callId, name: "subagent", arguments: { agent: role, task: packet } }] });
-		const model = sameModel ? mainModel : roleModel(role);
-		const economy = roles[role].defaultModelTier === "economy";
+		const tier = OPENAI && role === "backend-worker" ? implementationTier(complexity) : roles[role].defaultModelTier;
+		const model = sameModel ? mainModel : roleModel(role, tier);
+		const economy = OPENAI ? !sameModel && model === roleModel("backend-worker", "economy") : tier === "economy";
 		// economyX: the economy model needs this many times the reads, searches and checks (each extra one a new, distinct output).
 		const looks = steps.filter((s) => s.tool !== "edit");
 		const extra = economy && economyX > 1 ? Array.from({ length: Math.round(looks.length * (economyX - 1)) }, (_, i) => ({ ...looks[i % looks.length], arg: `${looks[i % looks.length].arg}#again${i}` })) : [];
@@ -211,11 +216,15 @@ function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFA
 		history.push({ role: "assistant", content: [{ type: "text", text: fill(`reply ${k}`, 600) }] });
 		if (FIX_ROUND.has(k)) {
 			history.push({ role: "user", content: `The check still fails: ${fill(`fail ${k}`, 400)}`, timestamp: ++t });
-			delegate("backend-worker", fixRound(k), k);
+			delegate("backend-worker", fixRound(k), k, RETRY_COMPLEXITY);
 			mainRequest(REPLY_OUTPUT);
 			history.push({ role: "assistant", content: [{ type: "text", text: fill(`reply ${k} again`, 600) }] });
 		}
 	});
+	if (OPENAI && !sameModel) {
+		assert.equal(workers.filter((w) => w.model === "gpt-6.1-sol").length, 3, "only complex feature implementation uses Sol");
+		assert.equal(workers.filter((w) => w.model === "gpt-6-luna").length, 18, "all other workers, including retries, use Luna");
+	}
 	return [mainM.totals, ...workers];
 }
 
@@ -235,6 +244,8 @@ try {
 		for (const economyX of ECONOMY_X_SWEEP) rows.push({ main: model, sweep: "economyX", value: economyX, cost: sum(harness(model, { economyX })).cost, singleFresh: fresh.cost });
 	}
 	console.log(JSON.stringify({ schema: 1, provider: PROVIDER, cacheModel: OPENAI ? "idealized warm complete-message prefixes; no expiry or cross-context reuse" : "system and last-message breakpoints; 20-block lookback",
-		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roles: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
-		prices: PRICES, assumptions: { CACHE_MIN_TOKENS, CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
+		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), [OPENAI ? "roleDefaults" : "roles"]: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
+		...(OPENAI ? { implementationRouting: KINDS.map((kind, k) => ({ task: k + 1, kind, complexity: IMPLEMENTATION_COMPLEXITY[k], model: roleModel("backend-worker", implementationTier(IMPLEMENTATION_COMPLEXITY[k])),
+			...(FIX_ROUND.has(k) ? { retryComplexity: RETRY_COMPLEXITY, retryModel: roleModel("backend-worker", implementationTier(RETRY_COMPLEXITY)) } : {}) })) } : {}),
+		prices: PRICES, assumptions: { ...(OPENAI ? { IMPLEMENTATION_COMPLEXITY, RETRY_COMPLEXITY } : {}), CACHE_MIN_TOKENS, CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
 } finally { rmSync(scratch, { recursive: true, force: true }); }
