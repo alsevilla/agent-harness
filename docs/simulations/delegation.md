@@ -36,3 +36,30 @@ Two behaviours are settings, swept against the fresh-session single agent:
 - `economyX`: how many times the reads, searches and checks an economy-tier role (Claude Haiku 5.5) needs (default 1). It barely moves the cost, because those roles are cheap.
 
 Not modelled at all: whether a worker or a single agent finishes the task correctly, how a single agent's long context affects its mistakes, and main re-checking a result (the policy says accept on evidence, not by re-reading). The second fix round is the same in both arms. These are estimates of the token mechanics, not a measurement of cost per completed task: that needs the paid [benchmark procedure](../../agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository).
+
+## OpenAI comparison
+
+Run the same fixture and four configurations with Astra, Sol, Terra and Luna as main:
+
+```sh
+npm run --silent simulate:delegation:openai > docs/simulations/openai-delegation-results.json
+```
+
+This invokes the same script with `--openai`, including both orientation and economy-call sweeps. Results: [`openai-delegation-results.json`](openai-delegation-results.json). The mixed-model arm reads each role's `fallbackModel` at its default tier from `agent/roles.json`: backend-worker uses GPT-6.1 Sol; debugger, planner and test-engineer use GPT-6 Luna. Terra is a main/single-agent and same-model control, not an invented role default. A Luna main therefore delegates implementation to the more expensive Sol. No repository role settings are changed.
+
+The ten tasks, prompt sizes, outputs, retries and shaping functions are shared with the Claude run. Worker masking selects the production OpenAI policy. Pi prompt sizes are retained as controlled fixture assumptions, not measured Codex prompts. This estimates Pi harness requests at OpenAI API rates; it does not simulate Codex or Copilot request construction or subscription billing.
+
+[Standard API prices](https://developers.openai.com/api/docs/pricing), checked 2026-11-08, in USD per million tokens:
+
+| Model | Input | Output | Cache read | 30-minute write |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-6 Astra | 10 | 50 | 1 | 12.50 |
+| GPT-6.1 Sol | 2 | 10 | 0.10 | 2.50 |
+| GPT-6.1 Terra | 1 | 5 | 0.05 | 1.25 |
+| GPT-6 Luna | 0.10 | 0.50 | 0.01 | 0.125 |
+
+Above 272k input tokens, input/cache rates are multiplied by 2 and output by 1.5 for the full request. Output costs include the fixed thinking/output allowance already described above. Tool execution fees are excluded.
+
+OpenAI uses the same idealized warm-cache assumption as the OpenAI shaping replay: every complete message prefix of at least 1,024 estimated tokens can be reused, with independent caches per context/model. No expiry, eviction, cross-context reuse, tokenizer-specific boundaries or routing misses are modelled. This is not the Claude 20-block cache model. See [OpenAI cache documentation](https://developers.openai.com/api/docs/guides/prompt-caching). Prices, prompt sizes and cache assumptions are emitted in JSON. The script checks cold-write/warm-read accounting at short and long sizes before running the fixture.
+
+Run twice to separate temporary files and compare with `cmp`; the outputs must be byte-identical at the same source commit. Success and relative model capability remain unmodelled. Report the costs as scripted-session estimates, not cost per successfully completed task.

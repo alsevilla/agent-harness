@@ -1,8 +1,9 @@
 // The harness against a single agent: the same ten-task session done by one model in plain Pi (one context, no shaping) and by the
 // harness (main delegates to role workers, each in its own context, with the production shaping in every context). Models come from
-// agent/roles.json; prices are first-party Anthropic list prices. What a scripted run cannot know (extra calls a worker needs to orient,
+// agent/roles.json (OpenAI uses fallbackModel with --openai); prices are first-party API list prices. What a scripted run cannot know (extra calls a worker needs to orient,
 // extra calls on the economy model) are settings, swept to find where delegation stops paying. Offline; no Pi host, model or network.
 // Run: npm run --silent simulate:delegation > docs/simulations/delegation-results.json
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -15,12 +16,22 @@ import { capShellOutput } from "../agent/extensions/subagent/output-cap.ts";
 
 // USD per million tokens, Anthropic first-party list prices (Claude API reference, 2026-10). Cache writes (5-minute) are 1.25x input.
 // Haiku 5.5's cache-read price is not listed there: 0.1x input is assumed. Haiku 5.5 charges 5x above 100k input tokens.
-const PRICES = {
+const OPENAI = process.argv.includes("--openai");
+const PROVIDER = OPENAI ? "openai" : "anthropic";
+// Standard API rates verified 2026-11-08; long requests multiply input/cache by 2 and output by 1.5.
+const PRICES = OPENAI ? {
+	"gpt-6-astra": { input: 10, output: 50, read: 1, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
+	"gpt-6.1-sol": { input: 2, output: 10, read: 0.1, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
+	"gpt-6.1-terra": { input: 1, output: 5, read: 0.05, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
+	"gpt-6-luna": { input: 0.1, output: 0.5, read: 0.01, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
+} : {
 	"claude-opus-5-5": { input: 4, output: 20, read: 0.2 },
 	"claude-sonnet-5-5": { input: 2, output: 10, read: 0.2 },
 	"claude-haiku-5-5": { input: 0.1, output: 0.5, read: 0.01, longFrom: 100_000, longX: 5 },
 };
 const WRITE_X = 1.25, CHARS_PER_TOKEN = 4, CACHE_LOOKBACK_BLOCKS = 20;
+const CACHE_MIN_TOKENS = 1_024;
+const MAIN_MODELS = OPENAI ? Object.keys(PRICES) : ["claude-opus-5-5", "claude-sonnet-5-5"];
 const ORIENT_DEFAULT = 1, ECONOMY_X_DEFAULT = 1;
 const MAIN_FOLD_TOKENS = 50_000, HANDOFF_WINDOW = 10, SHELL_OUTPUT_CHARS = 16_000;
 const PACKET_CHARS = 1_500, HANDOFF_FINDINGS_CHARS = 1_200;
@@ -36,7 +47,7 @@ const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;
 
 const roles = Object.fromEntries(JSON.parse(readFileSync(new URL("../agent/roles.json", import.meta.url), "utf8")).map((r) => [r.name, r]));
-const roleModel = (name) => { const r = roles[name]; return r.modelTiers[r.defaultModelTier].model.replace(/^anthropic\//, ""); };
+const roleModel = (name) => { const r = roles[name]; const tier = r.modelTiers[r.defaultModelTier]; return (OPENAI ? tier.fallbackModel : tier.model).split("/").at(-1); };
 
 const fill = (tag, n) => { let s = ""; let i = 0; while (s.length < n) s += `${tag} ${i++}: the scheduler drains the queue at a fixed pace and records each send.\n`; return s.slice(0, n); };
 const tok = (s) => Math.ceil(s.length / CHARS_PER_TOKEN);
@@ -65,6 +76,7 @@ const fixRound = (n) => [edit((n * 5) % 40, "work"), edit((n * 5 + 1) % 40, "wor
 
 // One context's request stream, priced under Anthropic-style caching: one breakpoint on the system block, one on the last message; a
 // request reads the longest earlier-written prefix ending within 20 blocks of its breakpoint and writes the rest.
+// OpenAI instead uses idealized warm complete-message prefixes, as in simulate-openai-shaping.mjs; no cache expiry or eviction.
 function meter(model, systemChars) {
 	const price = PRICES[model], entries = new Set(), system = tok("x".repeat(systemChars));
 	let cost = 0, sent = 0, peak = 0, requests = 0, sysCached = false;
@@ -74,16 +86,33 @@ function meter(model, systemChars) {
 			const keys = []; const h = createHash("sha256");
 			for (const m of messages) { h.update(JSON.stringify(m)); keys.push(h.copy().digest("hex")); }
 			let hit = -1;
-			for (let k = messages.length - 1; k >= Math.max(0, messages.length - 1 - CACHE_LOOKBACK_BLOCKS); k--) if (entries.has(keys[k])) { hit = k; break; }
+			for (let k = messages.length - 1; k >= Math.max(0, OPENAI ? 0 : messages.length - 1 - CACHE_LOOKBACK_BLOCKS); k--) if (entries.has(keys[k])) { hit = k; break; }
 			const read = (sysCached ? system : 0) + sizes.slice(0, hit + 1).reduce((a, b) => a + b, 0);
 			const write = (sysCached ? 0 : system) + sizes.slice(hit + 1).reduce((a, b) => a + b, 0);
 			const size = read + write, x = price.longFrom && size > price.longFrom ? price.longX : 1;
-			cost += (read * price.read + write * price.input * WRITE_X + output * price.output) * x / 1e6;
+			const outputX = x === 1 ? 1 : (price.longOutputX ?? x);
+			cost += ((read * price.read + write * price.input * WRITE_X) * x + output * price.output * outputX) / 1e6;
 			sent += size; peak = Math.max(peak, size); requests++; sysCached = true;
-			entries.add(keys[keys.length - 1]);
+			if (OPENAI) {
+				let prefix = system;
+				keys.forEach((key, i) => { prefix += sizes[i]; if (prefix >= CACHE_MIN_TOKENS) entries.add(key); });
+			} else entries.add(keys[keys.length - 1]);
 		},
 		get totals() { return { model, requests, sent, peak, cost }; },
 	};
+}
+
+// Known-prefix accounting check, including OpenAI long-request output pricing.
+if (OPENAI) {
+	for (const model of MAIN_MODELS) for (const systemChars of [8_000, 1_100_000]) {
+		const m = meter(model, systemChars), messages = [{ role: "user", content: "cache probe" }];
+		const size = tok("x".repeat(systemChars)) + tok(JSON.stringify(messages[0]));
+		m.request(messages, OUTPUT_PER_CALL); m.request(messages, OUTPUT_PER_CALL);
+		const p = PRICES[model], long = size > p.longFrom;
+		const expected = (size * (p.input * WRITE_X + p.read) * (long ? p.longX : 1)
+			+ 2 * OUTPUT_PER_CALL * p.output * (long ? p.longOutputX : 1)) / 1e6;
+		assert.ok(Math.abs(m.totals.cost - expected) < 1e-10);
+	}
 }
 
 let scratch;
@@ -91,11 +120,12 @@ let scratch;
 function runWorker(role, model, packet, steps, totals) {
 	const m = meter(model, PI_SYSTEM + CHILD_PROMPT[role] + TOOL_SCHEMA_CHARS);
 	const history = [{ role: "user", content: [{ type: "text", text: packet }], timestamp: 1 }];
-	const ledger = createExecutionLedger(), dedupe = createReadDedupe(), policy = workerMaskPolicy({ provider: "anthropic", id: model }, {});
+	const ledger = createExecutionLedger(), dedupe = createReadDedupe(), policy = workerMaskPolicy({ provider: PROVIDER, id: model }, {});
 	ledger.noteTask?.(packet);
 	let masked = false;
 	const request = (output) => {
 		const r = capWorkerContext(history, policy.from, policy.budget, tok("x".repeat(PI_SYSTEM + CHILD_PROMPT[role] + TOOL_SCHEMA_CHARS)), 1);
+		assert.notEqual(r.step, "over", "fixture requires native compaction, which is not modelled");
 		if (r.messages && !masked) { masked = true; dedupe.reset(); ledger.earlierCopiesGone(); }
 		m.request(r.messages ?? history, output);
 	};
@@ -194,16 +224,17 @@ const sum = (contexts) => ({ contexts: contexts.length, requests: contexts.reduc
 scratch = mkdtempSync(join(tmpdir(), "harness-delegation-"));
 try {
 	const baselines = {}, rows = [];
-	for (const model of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
+	for (const model of MAIN_MODELS) {
 		const one = sum(single(model, false)), fresh = sum(single(model, true));
 		const same = sum(harness(model, { sameModel: true })), mixed = sum(harness(model));
 		baselines[model] = { singleOneSession: one, singleFreshPerTask: fresh, harnessSameModel: same, harnessRoleModels: mixed };
 		const pct = (a, b) => Math.round(1000 * (1 - b / a)) / 10;
-		process.stderr.write(`${model}: single one session $${one.cost} (${one.sent} tokens) | fresh per task $${fresh.cost} | harness same model $${same.cost} (${same.sent}) | harness role models $${mixed.cost} (${mixed.sent}): ${pct(fresh.cost, mixed.cost)}% below fresh single\n`);
+		process.stderr.write(`${model}: single one session $${one.cost} (${one.sent} tokens) | fresh per task $${fresh.cost} | harness same model $${same.cost} (${same.sent}) | harness role models $${mixed.cost} (${mixed.sent}): ${Math.abs(pct(fresh.cost, mixed.cost))}% ${mixed.cost <= fresh.cost ? "below" : "above"} fresh single\n`);
 		// Break-even sweeps against the cheaper single-agent baseline (a fresh session per task).
 		for (const orient of ORIENT_SWEEP) rows.push({ main: model, sweep: "orient", value: orient, cost: sum(harness(model, { orient })).cost, singleFresh: fresh.cost });
 		for (const economyX of ECONOMY_X_SWEEP) rows.push({ main: model, sweep: "economyX", value: economyX, cost: sum(harness(model, { economyX })).cost, singleFresh: fresh.cost });
 	}
-	console.log(JSON.stringify({ schema: 1, sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roles: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
-		prices: PRICES, assumptions: { CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
+	console.log(JSON.stringify({ schema: 1, provider: PROVIDER, cacheModel: OPENAI ? "idealized warm complete-message prefixes; no expiry or cross-context reuse" : "system and last-message breakpoints; 20-block lookback",
+		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roles: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
+		prices: PRICES, assumptions: { CACHE_MIN_TOKENS, CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));
 } finally { rmSync(scratch, { recursive: true, force: true }); }
