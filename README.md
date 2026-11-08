@@ -177,18 +177,18 @@ The break-even is how much a worker has to re-read to get its bearings, which th
 
 #### The same session with OpenAI models
 
-The same ten tasks and four configurations, with each OpenAI model as main/single agent. The mixed-model harness uses the OpenAI fallback models already in `agent/roles.json`: **Sol for implementation; Luna for debugging, planning and testing**. These are offline Pi request estimates at OpenAI Standard API prices, including the fixed output allowance and an idealized warm cache ([method and reproducible command](docs/simulations/delegation.md#openai-comparison), [results](docs/simulations/openai-delegation-results.json)). They are not live Codex runs or subscription costs.
+The same ten tasks and four configurations, with each OpenAI model as main/single agent. The mixed-model harness selects the OpenAI tier by explicit fixture complexity: **Luna for non-complex implementation; Sol for complex implementation**. Here the four small fixes, three bounded bug fixes and both retry patches use Luna; the three multi-file feature implementations use Sol. Debugging, planning and testing also use Luna. Models come from the corresponding tiers in `agent/roles.json`. These are offline Pi request estimates at OpenAI Standard API prices, including the fixed output allowance and an idealized warm cache ([method and reproducible command](docs/simulations/delegation.md#openai-comparison), [results](docs/simulations/openai-delegation-results.json)). They are not live Codex runs or subscription costs.
 
 | Main / single-agent model | Single agent, one session | Single agent, fresh session per task | Harness, every role on main's model | Harness, OpenAI role models |
 | --- | --- | --- | --- | --- |
-| GPT-6 Astra | $87.65 | $16.69 | $23.62 | **$6.36: 61.9% less than the fresh single agent** |
-| GPT-6.1 Sol | $9.93 | $2.61 | $3.91 | **$2.61: 0.3% more than the fresh single agent** |
-| GPT-6.1 Terra | $4.97 | $1.30 | $1.96 | **$2.25: 72.8% more than the fresh single agent** |
-| GPT-6 Luna | $0.88 | $0.17 | $0.24 | **$1.93: 1,058.6% more than the fresh single agent** |
+| GPT-6 Astra | $87.65 | $16.69 | $23.62 | **$5.64: 66.2% less than the fresh single agent** |
+| GPT-6.1 Sol | $9.93 | $2.61 | $3.91 | **$1.89: 27.3% less than the fresh single agent** |
+| GPT-6.1 Terra | $4.97 | $1.30 | $1.96 | **$1.53: 17.5% more than the fresh single agent** |
+| GPT-6 Luna | $0.88 | $0.17 | $0.24 | **$1.21: 626.3% more than the fresh single agent** |
 
 Percentages use unrounded costs. Input totals are identical across these four model profiles: **47.30M tokens / peak 428k** for one continuous single agent, **7.79M / peak 82k** for fresh task sessions, and **8.88M / peak 62k** for either harness arm. Thus the harness sends **81.2% fewer tokens than one continuous session, but 14.0% more than fresh task sessions**, with 294 model requests instead of 211.
 
-Same-model delegation costs 41.5–50.2% more than fresh task sessions. The default model mix saves substantially with Astra, is near break-even with Sol, and costs more with Terra or Luna because implementation still runs on Sol. Mixed-model Luna also costs more than the continuous Luna baseline. In the orientation sweep, Astra still saves 45.8% at 12 extra reads per worker; Sol saves 9.3% at zero extra reads but costs 0.3% more at one and 8.2% more at two. Terra and Luna never beat fresh sessions in the tested orientation range. Tripling Luna-role calls leaves Astra 60.8% cheaper but puts Sol 7.1% above fresh sessions. Task success and differences in model capability are not modelled.
+Same-model delegation costs 41.5–50.2% more than fresh task sessions. With complexity-based routing, the mixed harness saves with Astra and Sol but still costs more with Terra and Luna: the three complex implementations use Sol, and main/worker coordination adds requests. Mixed-model Luna also costs more than the continuous Luna baseline. In the orientation sweep, Astra still saves 59.7% at 12 extra reads per worker; Sol saves 3.4% at eight but costs 14.5% more at twelve. Terra and Luna never beat fresh sessions in the tested orientation range. Tripling calls for all Luna workers, including non-complex implementation, still saves 64.9% with Astra and 19.0% with Sol. Complexity labels are explicit fixture assumptions; task success and differences in model capability are not modelled. These results replace the earlier simulation that incorrectly used Sol for every implementation.
 
 ### Offline replay at OpenAI prices
 
