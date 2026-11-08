@@ -239,7 +239,7 @@ Not exported by the package; install or load them yourself.
 
 ## Copilot CLI limits
 
-The plugin shares agents, skills and startup context with Pi. It is a preview with these limits (full matrix: [docs/copilot-acceptance.md](docs/copilot-acceptance.md)):
+The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.107 passed a native offline smoke check for plugin loading, startup/child hooks, named scout dispatch and dummy-secret denial; hosted inference was blocked by authentication. This is not a model-quality test. It remains a preview with these limits (full matrix and receipts: [docs/copilot-acceptance.md](docs/copilot-acceptance.md)):
 
 | Asset | Status |
 | --- | --- |
