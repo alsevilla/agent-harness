@@ -181,15 +181,15 @@ An independent offline replay exercises the current shaping functions with seven
 
 Totals below sum estimated input tokens across every request in each run, not just the final context. Both arms use the same scripted actions; “without” disables request shaping, not the entire orchestration system.
 
-| Scenario | Without harness shaping: input tokens | With harness shaping: input tokens | Token saving | Input-cost saving: Sol / Terra | Input-cost saving: Astra / Luna |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Long worker, 30 calls | 3,857,370 | 1,479,915 | 61.6% | 25.1% | 36.3% |
-| Repeated reads, 30 calls | 1,902,187 | 909,126 | 52.2% | 62.0% | 59.0% |
-| Ordinary worker, 30 calls | 565,257 | 565,257 | 0.0% | 0.0% | 0.0% |
-| Main, 10 user turns | 646,436 | 646,436 | 0.0% | 0.0% | 0.0% |
-| Main, 150 requests | 8,350,991 | 5,248,981 | 37.1% | 10.8% | 22.9% |
-| Main, 300 requests | 29,836,241 | 15,167,356 | 49.2% | 29.4% | 39.0% |
-| Main, 480 requests | 72,941,066 | 25,021,398 | 65.7% | 55.6% | 62.6% |
+| Scenario | Without shaping | With the harness | Saving |
+| --- | --- | --- | --- |
+| Long worker task: 30 tool calls over large files and logs | 3.86M tokens sent, peak request 238k | 1.48M sent, peak 84k | **61.6% fewer tokens**. Input cost: **25.1% lower on GPT-6.1 Sol / Terra**, 36.3% lower on GPT-6 Astra / Luna |
+| Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52.2% fewer tokens**. Input cost: **62.0% lower on GPT-6.1 Sol / Terra**, 59.0% lower on GPT-6 Astra / Luna |
+| Ordinary worker task: small, unique reads | 565k tokens sent | 565k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
+| Main session: 10 user turns of subagent results | 646k tokens sent | 646k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
+| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37.1% fewer tokens**. Input cost: **10.8% lower on GPT-6.1 Sol / Terra**, 22.9% lower on GPT-6 Astra / Luna |
+| Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49.2% fewer tokens**. Input cost: **29.4% lower on GPT-6.1 Sol / Terra**, 39.0% lower on GPT-6 Astra / Luna |
+| Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **65.7% fewer tokens**. Input cost: **55.6% lower on GPT-6.1 Sol / Terra**, 62.6% lower on GPT-6 Astra / Luna |
 
 Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%. All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x input/cache rates ([official pricing](https://developers.openai.com/api/docs/pricing)). The 480-request baseline crosses that boundary; its shaped counterpart does not.
 
