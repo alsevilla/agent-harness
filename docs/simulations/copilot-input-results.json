@@ -1,0 +1,122 @@
+{
+  "cli": "GitHub Copilot CLI 1.0.107.",
+  "configuredModel": "gpt-6.1-sol",
+  "modelInference": false,
+  "harnessCommit": "9c399fbe6ab8126c65daccb39616648b7d7318a4",
+  "method": "actual CLI, scripted local provider; input messages+tools characters/4; no cache/billing/quality estimate",
+  "scenarios": [
+    [
+      "small",
+      4,
+      4000
+    ],
+    [
+      "repeated",
+      12,
+      8000
+    ],
+    [
+      "large",
+      30,
+      20000
+    ]
+  ],
+  "results": [
+    {
+      "scenario": "small",
+      "arm": "plain",
+      "readCalls": 4,
+      "requests": 5,
+      "inputTokenEstimate": 91590,
+      "peakInputTokenEstimate": 20596
+    },
+    {
+      "scenario": "small",
+      "arm": "harness-one",
+      "readCalls": 6,
+      "requests": 9,
+      "inputTokenEstimate": 133245,
+      "peakInputTokenEstimate": 23808
+    },
+    {
+      "scenario": "small",
+      "arm": "plain-fresh-three",
+      "readCalls": 4,
+      "requests": 7,
+      "inputTokenEstimate": 117723,
+      "peakInputTokenEstimate": 18290
+    },
+    {
+      "scenario": "small",
+      "arm": "harness-three",
+      "readCalls": 6,
+      "requests": 13,
+      "inputTokenEstimate": 187740,
+      "peakInputTokenEstimate": 24194
+    },
+    {
+      "scenario": "repeated",
+      "arm": "plain",
+      "readCalls": 12,
+      "requests": 13,
+      "inputTokenEstimate": 382799,
+      "peakInputTokenEstimate": 42743
+    },
+    {
+      "scenario": "repeated",
+      "arm": "harness-one",
+      "readCalls": 14,
+      "requests": 17,
+      "inputTokenEstimate": 350827,
+      "peakInputTokenEstimate": 32856
+    },
+    {
+      "scenario": "repeated",
+      "arm": "plain-fresh-three",
+      "readCalls": 12,
+      "requests": 15,
+      "inputTokenEstimate": 307080,
+      "peakInputTokenEstimate": 24904
+    },
+    {
+      "scenario": "repeated",
+      "arm": "harness-three",
+      "readCalls": 14,
+      "requests": 21,
+      "inputTokenEstimate": 307895,
+      "peakInputTokenEstimate": 26466
+    },
+    {
+      "scenario": "large",
+      "arm": "plain",
+      "readCalls": 30,
+      "requests": 31,
+      "inputTokenEstimate": 3041155,
+      "peakInputTokenEstimate": 179810
+    },
+    {
+      "scenario": "large",
+      "arm": "harness-one",
+      "readCalls": 32,
+      "requests": 35,
+      "inputTokenEstimate": 2850472,
+      "peakInputTokenEstimate": 170014
+    },
+    {
+      "scenario": "large",
+      "arm": "plain-fresh-three",
+      "readCalls": 30,
+      "requests": 33,
+      "inputTokenEstimate": 1430745,
+      "peakInputTokenEstimate": 70590
+    },
+    {
+      "scenario": "large",
+      "arm": "harness-three",
+      "readCalls": 32,
+      "requests": 39,
+      "inputTokenEstimate": 1286221,
+      "peakInputTokenEstimate": 60794
+    }
+  ]
+}

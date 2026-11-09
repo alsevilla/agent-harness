@@ -135,7 +135,7 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 
 ## Token savings
 
-Four simulations measure what the harness saves. Three run the same work with the harness's request shaping and without it, so the difference is the shaping alone; the fourth compares the whole harness with one agent working alone. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
+Five experiments examine what the harness saves. Three compare the same work with and without Pi request shaping; the fourth compares the whole Pi harness with one agent working alone; the fifth records Copilot's native request sizes with a scripted local provider. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
 
 ### Recorded Pi runs
 
@@ -200,11 +200,25 @@ Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%
 
 This replay found two small-task costs, now guarded: the ordinary worker cost 3% more and the short main run 13-23% more. Main now leaves its history unshortened below 25k estimated tokens, and a read-only worker defers the ledger's state view until it has read 80k characters (an edit, command or packet-required check shows it sooner); both fixtures now match their unshaped baseline. These are conservative heuristics, not a guarantee for every workload; the [before-and-after comparison](docs/simulations/openai-shaping.md#before-and-after) shows the longer-run trade-offs. The recorded Pi runs and long main sessions above give the same results with and without the guards.
 
+### Copilot CLI request-size estimate
+
+The real Copilot CLI 1.0.107, using a scripted localhost provider, ran the same read-only fixtures with and without the plugin ([method and runnable script](docs/simulations/copilot-input.md), [results](docs/simulations/copilot-input-results.json)). **No model inference:** `gpt-6.1-sol` was the configured model ID only; Sol, Astra, Terra and Luna were not benchmarked. These are estimated input tokens across all requests (messages and tool schemas, characters / 4), not billed usage.
+
+| Workload | Plain session | Harness, one worker | Input-token change |
+| --- | --- | --- | --- |
+| Small: 4 file reads | 92k | 133k | **46% more** |
+| Repeated: 12 reads | 383k | 351k | **8% fewer** |
+| Large: 30 reads | 3.04M | 2.85M | **6% fewer** |
+
+With three workers, the large fixture uses 1.29M tokens: **58% fewer than one continuous plain session**, but only **10% fewer than three fresh plain sessions** (1.43M). Against three fresh sessions, the small fixture costs 60% more input tokens and repeated reads are effectively unchanged (0.3% more). All 12 configurations reproduced identical estimates across two runs. Copilot's native child contexts and tool schemas differ from main; Pi's request shaping does not run here. Cache billing, output/reasoning tokens and task success were not measured, so these figures are not a projection of Copilot billing savings.
+
 ### What these numbers are not
 
 Scripted runs and size estimates, not a billing benchmark of live models. A real model may choose different calls once it sees shortened output, and your tasks set the mix. `/subagent usage` shows your own cost per completed task and each role's cache hit share.
 
 ## Context and cost
+
+For Copilot, the [native request-size estimate](#copilot-cli-request-size-estimate) shows modest input-token savings on the read-heavy fixtures and increased input on small tasks; no billing savings are established.
 
 Request shaping below runs in Pi, including workers served through its OpenAI/Codex connector. It applies to Claude and OpenAI models; it does not establish equivalent behavior or savings in the standalone Codex app/CLI or Copilot CLI, which construct their own requests.
 
