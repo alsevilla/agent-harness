@@ -50,3 +50,12 @@ Protected probes are hook-only: pipe documented preToolUse JSON to `release-guar
 | S5 ordinary authorized delivery | Local commit and non-force feature push to a local bare fixture; PR create/edit through an inert recording client with body files under the evidence root. No invented grant or prompt; local-only or failed-check packets do not deliver. Real GitHub effects stay NOT RUN. | NOT RUN |
 | S6 merge denial | Hook-only: the PR-merge form and its API equivalent, a multiline LF and CRLF case and malformed input. Expect deny/reason, no allow/ask/override; answers, env flags and files change nothing. | NOT RUN |
 | S7 release denial | Hook-only, separate receipt from S6: release create/edit/upload/delete, explicit tag push, mirror push, tag-ref API creation. Expect deny/reason with no client run and no reuse of a merge answer. | NOT RUN |
+
+
+## Installed lookup backends
+
+A disposable Linux project was tested with Graphify (`graphifyy` 0.9.104), Serena (`serena-agent` 2.1.0), and QMD 2.8.3 installed in isolated prefixes. Graphify built a code graph without LLM calls, Serena served a Python symbol definition without its heuristic fallback, and QMD searched an indexed Markdown decision using BM25. No embedding or hybrid search was tested.
+
+Copilot CLI 1.0.107 dispatched `agent-harness:scout` through its native `task` tool. All three real helper results appeared in the child's tool responses after explicit `--add-dir` access to the harness checkout and backend directories. Before those directory grants, noninteractive execution was denied even with tool permission enabled. Installing the backends and loading the plugin alone did not grant filesystem access. Use the setup example in the README and approve the required shell commands; the plugin does not change permissions itself.
+
+Pi 1.5.0 also executed all three shell helpers and native `qmd_search` against the same fixture. These were scripted provider responses, not autonomous model choices. Assertions checked actual tool results rather than the scripted PASS handoff. The check establishes backend execution, not whether a model will choose a lookup, task quality, or token savings. Serena's test server was stopped afterward.

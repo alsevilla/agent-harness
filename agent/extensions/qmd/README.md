@@ -1,6 +1,8 @@
 # Plain QMD Pi extension
 
-index.ts registers qmd_search, qmd_get and qmd_status. config.json points to your installed Node/QMD CLI. The main session discovers this folder; code subagents load index.ts explicitly.
+index.ts registers qmd_search, qmd_get and qmd_status. Code subagents load it explicitly. Runtime discovery matches the QMD shell skill: `HARNESS_QMD_CLI`, then this extension's `config.json`, then `PI_CODING_AGENT_DIR/extensions/qmd/config.json` (default `~/.pi/agent`), then the global `npm install -g @tobilu/qmd`. A checkout-local config is optional. Discovery happens on the first lookup, so missing QMD does not prevent the extension from loading; that lookup returns an actionable error.
+
+For an isolated installation, set `HARNESS_QMD_CLI` to the absolute `@tobilu/qmd/dist/cli/qmd.js` path. Optional overrides are `HARNESS_QMD_NODE`, `HARNESS_QMD_INDEX` and `HARNESS_QMD_TIMEOUT_MS`. Build your collections separately; installation alone does not create an index.
 
 Search uses BM25 with three hits by default (maximum five), an optional collection scope, and no returned snippets. Get reads a selected document range (at most 100 lines) and shows a 10000-character preview. Status inspects existing collections. No LLM expansion, reranking, adaptive learning or index setup/update/embed tools are exposed. CLI arguments are passed without a shell.
 

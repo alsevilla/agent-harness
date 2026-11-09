@@ -83,6 +83,9 @@ copilot plugin install agent-harness@alsevilla
 
 To try a local checkout without installing it: `copilot --plugin-dir C:/path/to/agent-harness`. See [Copilot CLI limits](#copilot-cli-limits).
 
+Lookup helpers outside the working directory also need Copilot directory access. For example: `copilot --plugin-dir /path/to/agent-harness --add-dir /path/to/agent-harness --add-dir /path/to/lookup-backends`. Use your actual plugin and backend installation directories; add an external index directory if needed. `--plugin-dir` loads the plugin but does not grant access to its helper scripts. Approve the lookup shell commands interactively, or configure narrowly scoped tool permissions for a noninteractive run; `--add-dir` grants directory access, not tool approval. A permission denial means the lookup did not run. [Real-backend smoke check](docs/copilot-acceptance.md#installed-lookup-backends).
+
+
 ## Use it
 
 Describe the task to main as usual; it routes the work. Useful commands:
