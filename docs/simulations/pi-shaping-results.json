@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "sourceCommit": "a5267c787ee2767b21941e849827b9782fb9525b",
+  "sourceCommit": "e3c88bbdcd277ad09041f1a54c822ffdbef98742",
   "piVersion": "1.5.0",
   "cacheModel": "Anthropic-style: breakpoints on the system block and the last message, 20-block lookback; read 0.1x, write 1.25x of input; Haiku 5.5 5x above 100k; characters / 4",
   "results": [
@@ -10,26 +10,26 @@
       "off": {
         "requests": 31,
         "systemPromptStable": true,
-        "sent": 2809987,
-        "peak": 164179,
+        "sent": 2808439,
+        "peak": 164131,
         "over100k": 15,
-        "cacheRead": 2645759,
-        "cacheWrite": 164184,
+        "cacheRead": 2644277,
+        "cacheWrite": 164135,
         "hitPercent": 94,
-        "cost": 469806,
-        "haikuCost": 1590202
+        "cost": 469596,
+        "haikuCost": 1589698
       },
       "on": {
         "requests": 31,
         "systemPromptStable": true,
-        "sent": 1436407,
-        "peak": 79378,
+        "sent": 1434844,
+        "peak": 79327,
         "over100k": 0,
-        "cacheRead": 1189720,
-        "cacheWrite": 246673,
+        "cacheRead": 1188197,
+        "cacheWrite": 246623,
         "hitPercent": 83,
-        "cost": 427313,
-        "haikuCost": 427313
+        "cost": 427098,
+        "haikuCost": 427098
       },
       "tokenSavingPercent": 48.9,
       "costSavingPercent": 9,
@@ -41,30 +41,30 @@
       "off": {
         "requests": 26,
         "systemPromptStable": true,
-        "sent": 354036,
-        "peak": 27271,
+        "sent": 352853,
+        "peak": 27231,
         "over100k": 0,
-        "cacheRead": 326733,
-        "cacheWrite": 27272,
+        "cacheRead": 325570,
+        "cacheWrite": 27232,
         "hitPercent": 92,
-        "cost": 66763,
-        "haikuCost": 66763
+        "cost": 66597,
+        "haikuCost": 66597
       },
       "on": {
         "requests": 26,
         "systemPromptStable": true,
-        "sent": 232769,
-        "peak": 17079,
+        "sent": 231541,
+        "peak": 17036,
         "over100k": 0,
-        "cacheRead": 215659,
-        "cacheWrite": 17082,
+        "cacheRead": 214460,
+        "cacheWrite": 17039,
         "hitPercent": 93,
-        "cost": 42918,
-        "haikuCost": 42918
+        "cost": 42745,
+        "haikuCost": 42745
       },
-      "tokenSavingPercent": 34.3,
-      "costSavingPercent": 35.7,
-      "haikuCostSavingPercent": 35.7
+      "tokenSavingPercent": 34.4,
+      "costSavingPercent": 35.8,
+      "haikuCostSavingPercent": 35.8
     },
     {
       "scenario": "standard",
@@ -72,26 +72,26 @@
       "off": {
         "requests": 29,
         "systemPromptStable": true,
-        "sent": 644393,
-        "peak": 34512,
+        "sent": 643168,
+        "peak": 34472,
         "over100k": 0,
-        "cacheRead": 609768,
-        "cacheWrite": 34509,
+        "cacheRead": 608615,
+        "cacheWrite": 34473,
         "hitPercent": 95,
-        "cost": 104113,
-        "haikuCost": 104113
+        "cost": 103953,
+        "haikuCost": 103953
       },
       "on": {
         "requests": 29,
         "systemPromptStable": true,
-        "sent": 619858,
-        "peak": 33243,
+        "sent": 618630,
+        "peak": 33203,
         "over100k": 0,
-        "cacheRead": 586500,
-        "cacheWrite": 33240,
+        "cacheRead": 585372,
+        "cacheWrite": 33203,
         "hitPercent": 95,
-        "cost": 100200,
-        "haikuCost": 100200
+        "cost": 100041,
+        "haikuCost": 100041
       },
       "tokenSavingPercent": 3.8,
       "costSavingPercent": 3.8,
@@ -103,26 +103,26 @@
       "off": {
         "requests": 30,
         "systemPromptStable": true,
-        "sent": 1367995,
-        "peak": 84547,
+        "sent": 1366490,
+        "peak": 84498,
         "over100k": 0,
-        "cacheRead": 1283440,
-        "cacheWrite": 84551,
+        "cacheRead": 1281961,
+        "cacheWrite": 84500,
         "hitPercent": 94,
-        "cost": 234033,
-        "haikuCost": 234033
+        "cost": 233821,
+        "haikuCost": 233821
       },
       "on": {
         "requests": 30,
         "systemPromptStable": true,
-        "sent": 863879,
-        "peak": 60657,
+        "sent": 862361,
+        "peak": 60607,
         "over100k": 0,
-        "cacheRead": 778190,
-        "cacheWrite": 85684,
+        "cacheRead": 776711,
+        "cacheWrite": 85633,
         "hitPercent": 90,
-        "cost": 184924,
-        "haikuCost": 184924
+        "cost": 184712,
+        "haikuCost": 184712
       },
       "tokenSavingPercent": 36.9,
       "costSavingPercent": 21,
