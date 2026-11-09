@@ -257,7 +257,7 @@ The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.10
 
 | Asset | Status |
 | --- | --- |
-| Source release | v1.18.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
+| Source release | v1.18.1 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
 | Copilot CLI | Latest release only; no older version is supported |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated. Serena, Graphify and QMD work through their skills' shell commands |
 | Token and turn savings | Pi's request shaping (execution ledger, output cap, worker masking, duplicate-read notes, main checkpoints, cache health) is Pi-only: Copilot builds its own requests. Both Copilot hooks add the working rules that cut turns: the lookup order with the three helpers by path, calls batched in one turn, no retry of a repeated failure or guard refusal, and small diffs |
