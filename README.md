@@ -1,8 +1,8 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator classifies tasks, delegates scoped work, accepts results against reported evidence, and delivers through a trusted release role.
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 63% less, and a ten-task session costs 44% less with Claude Opus 5.5 as main, 66% less with GPT-6 Astra, and 27% less with GPT-6.1 Sol than one agent on the corresponding model working alone in fresh sessions per task ([Token savings](#token-savings)).
 
-Offline simulations show benefits that depend on workload and model choice: the ten-task Pi harness costs 44% less with Claude Opus 5.5 as main, 66% less with GPT-6 Astra, and 27% less with GPT-6.1 Sol than fresh single-agent task sessions on the corresponding model. These harness runs use cheaper workers for non-complex tasks; the same workload costs more with Terra or Luna as main. Copilot's separate read-heavy fixtures show 6–10% fewer estimated input tokens against the corresponding single-agent baselines, while small tasks use more. These are scripted estimates, not live billing or task-quality benchmarks ([Token savings](#token-savings)).
+These are offline Pi simulation estimates using cheaper workers for non-complex tasks, not live billing or task-quality benchmarks. Savings depend on workload and routing; the ten-task harness costs more with Terra or Luna as main. Copilot is measured separately.
 
 ## Table of contents
 
