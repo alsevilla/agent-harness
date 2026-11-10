@@ -254,11 +254,30 @@ Install the external backends separately; the harness provides their integration
 | [Graphify](agent/skills/graphify/SKILL.md) | Code relationships and project orientation | **uv:** `uv tool install graphifyy` | For Pi workers, copy the bundled `agent/skills/graphify/` folder into your Pi profile's `skills/graphify/`. Load the refresh extension below, then run `/refresh graph --init` in the primary checkout. Run `/refresh graph` to update it without dated backups. Workers can use the primary checkout's graph from worktrees; without a graph they skip this lookup. |
 | [QMD](agent/extensions/qmd/README.md) | Search prior notes, specs and decisions | **npm:** `npm install -g @tobilu/qmd` | Index your notes, for example `qmd collection add /path/to/notes --name notes`. Pi workers use native QMD tools; Copilot uses the bundled [shell skill](agent/skills/qmd/SKILL.md). Both discover a global install, profile config or `HARNESS_QMD_CLI` override. BM25 search needs no embeddings. |
 | [Ponytail](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md) | Coding guidance for Pi and Copilot CLI | **Pi:** `pi install npm:@dietrichgebert/ponytail`<br>**Copilot CLI:** `copilot plugin marketplace add DietrichGebert/ponytail`, then `copilot plugin install ponytail@ponytail` | Required for Pi code roles except `reviewer`. On Copilot, install its native plugin separately; see the [Copilot setup guide](https://github.com/DietrichGebert/ponytail/blob/main/INSTALL.md#github-copilot-cli). |
-| Skill catalogs | Backend, frontend, browser and Graphify guidance | Load the relevant folder under `agent/skills/` through Pi's `skills` settings | Load only the catalogs you need. The Graphify worker path is described above. |
-| [Defuddle](agent/skills/engineering-harness/references/runtime.md#public-web-content-optional-defuddle) | Read public web pages as Markdown | Install the external Defuddle skill using its own instructions | Use `defuddle parse <url> --md` when available. |
-| [Refresh extension](agent/extensions/refresh/README.md) | Explicit graph, QMD and Serena maintenance | Add `agent/extensions/refresh/index.ts` from this checkout to Pi's `extensions` settings, then reload | Provides `/refresh graph --init`, `/refresh graph`, `/refresh qmd` and `/refresh serena`. Install the relevant backend first. |
-| [Engineering environment](agent/extensions/engineering-environment/README.md) | Git identity setup | Follow the extension's setup guide | Configure your own Git identity. |
-| Connector / platform patches | [Claude connector](agent/patches/claude-subscription-connector/README.md) and [Betterwright on Windows](agent/patches/betterwright-windows/README.md) | Follow the applicable patch guide | Apply only when your installation needs the patch. |
+
+The items below are separate from the lookup tools above. **You do not need to install all of them.** Some are files already included in this repository; others are maintenance tools or fixes for specific older dependencies.
+
+| Item | When you need it | What to do |
+| --- | --- | --- |
+| Bundled guidance: [backend](agent/skills/backend/SKILL.md), [frontend](agent/skills/frontend/SKILL.md), [browser](agent/skills/browser/SKILL.md), [Graphify](agent/skills/graphify/SKILL.md) | You want to inspect or customize the instructions agents use. | **Already included; no npm or uv install.** Assigned roles read their module files from the installed harness. Copilot exposes the bundled skills through its plugin. For Pi Graphify workers, follow the profile-folder setup in the Graphify row above. |
+| [Defuddle CLI](https://github.com/kepano/defuddle#cli) | You want to extract readable text from a public web page. Works from either host's shell. | Install with `npm install -g defuddle`, then run `defuddle parse https://example.com --md`. This installs the CLI, not an agent skill. Automatic harness use additionally requires an installed Defuddle skill advertised by your host; otherwise the agent uses its normal fetch/search tools. See [harness guidance](agent/skills/engineering-harness/references/runtime.md#public-web-content-optional-defuddle). |
+| [Refresh extension](agent/extensions/refresh/README.md) — **Pi only** | You want Pi commands to build/update a Graphify graph, update QMD collections, or restart Serena. | Load `agent/extensions/refresh/index.ts` using the settings example below, then run `/reload`. Use `/refresh graph --init` for the first graph, `/refresh graph` for updates, `/refresh qmd` for indexed notes, or `/refresh serena` to restart Serena. Install each backend before using its command. These slash commands are not available in Copilot. |
+| [Git identity extension](agent/extensions/engineering-environment/README.md) — **Pi only** | You want Pi and its workers to use a specific commit author/committer. Skip it if your existing Git identity is correct. | Copy `agent/extensions/engineering-environment/config.example.json` to `config.json` in the same folder. Replace **all four example values** with your own name/email. Load its `index.ts` as shown below, then `/reload`. It sets process environment variables; it does not change global Git config. |
+| [Claude connector patch](agent/patches/claude-subscription-connector/README.md) — **Pi only** | You use `pi-claude-subscription-connector` and encounter the tool-list issue described in the patch guide. | This is a manual file replacement, not another extension to enable. Follow the backup/replacement steps in the guide. It was validated against connector **1.0.1**; compare newer versions before applying. Skip it if you do not have that issue. |
+| [Betterwright patch](agent/patches/betterwright-windows/README.md) — **Windows only** | You use Betterwright and its background processes open unwanted console windows. | Follow the source/launcher changes in the guide only if your installation matches the affected code. Tested with Betterwright **2.8.7**. Skip it on other platforms or when the issue is already fixed. |
+
+For the two optional Pi extensions, add only the entries you need to the existing `extensions` array in `~/.pi/agent/settings.json` (or your custom `PI_CODING_AGENT_DIR/settings.json`). Replace `/path/to/agent-harness` with your checkout's absolute path; on Windows, use a path such as `C:/src/agent-harness`. Keep your other settings and extension entries.
+
+```json
+{
+  "extensions": [
+    "/path/to/agent-harness/agent/extensions/refresh/index.ts",
+    "/path/to/agent-harness/agent/extensions/engineering-environment/index.ts"
+  ]
+}
+```
+
+Prepare the Git identity extension's `config.json` before loading it. If you only want `/refresh`, add only the first entry.
 
 Copilot also needs directory access and shell approval for external helpers; see [GitHub Copilot CLI](#github-copilot-cli).
 
