@@ -13,6 +13,7 @@
 		"simulate:main": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-main-sessions.mjs",
 		"simulate:delegation": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-delegation.mjs",
 		"simulate:delegation:openai": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-delegation.mjs --openai",
+		"simulate:claude": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-openai-shaping.mjs --anthropic",
 		"simulate:openai": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/simulate-openai-shaping.mjs"
 	},
 	"pi": {

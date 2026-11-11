@@ -105,3 +105,23 @@ baseline. Long-worker savings remain intact. Delaying main compression retains m
 tokens early in longer sessions: Astra/Luna lose up to 0.9 percentage points of input
 cost savings here, while Sol/Terra improve slightly. The guards do not guarantee
 zero overhead for every small task, nor establish live behavior or quality parity.
+
+## Claude prices
+
+```sh
+npm run simulate:claude > docs/simulations/claude-shaping-results.json
+```
+
+The same script with `--anthropic`: the same seven workloads, sizes and idealized warm cache, priced for Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Results: [`claude-shaping-results.json`](claude-shaping-results.json). Two things differ from the OpenAI run:
+
+- Worker masking uses the production Anthropic policy: from 90k tokens on Haiku 5.5 and from 200k on the others, so the long worker's shaped token count differs by model.
+- Prices are Anthropic first-party list prices per million input tokens, with 5-minute cache writes at 1.25x input in place of the ordinary input rate:
+
+| Model | Input | Cache read | 5-minute write |
+| --- | ---: | ---: | ---: |
+| Claude Fable 5.1 | 10 | 0.25 | 12.50 |
+| Claude Opus 5.5 | 4 | 0.20 | 5 |
+| Claude Sonnet 5.5 | 2 | 0.20 | 2.50 |
+| Claude Haiku 5.5 | 0.10 | 0.01 (assumed: not listed) | 0.125 |
+
+Haiku 5.5 requests above 100k input tokens cost 5x; the other three have no long-request rate. The idealized warm cache is more generous than Anthropic's real one (breakpoints with a 20-block lookback and a 5-minute lifetime), which the [recorded Pi runs](pi-shaping.md) model instead. One regression is reported as measured: on Fable 5.1 the 150-request main session costs 6.5% more with shaping, because its cache reads are 2.5% of its input price and each shortening rewrites part of the cache.

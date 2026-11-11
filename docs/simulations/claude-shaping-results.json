@@ -1,0 +1,996 @@
+{
+  "schema": 1,
+  "sourceCommit": "0fcd62517f007d8f348528c64057a5a8377395a2",
+  "sourceHashes": {
+    "scripts/simulate-openai-shaping.mjs": "e5754fee47739c72270764457f8cff348ad4a9055cdaa9db82327a35f2d67341",
+    "agent/extensions/subagent/handoff-window.ts": "caa2839a0adda757e79e8b3ed063c41927bafccd90f3f07184bdc3a3d8411049",
+    "agent/extensions/subagent/read-dedupe.ts": "fffdfce68964794c6cf9b0d90e7c2504c60f1edcf7d4298df652b6edb30319de",
+    "agent/extensions/subagent/execution-ledger.ts": "5dcdebcc2272ca9db309c1aac654c41ca397802705864f84a9fc0725b3b8c7a2",
+    "agent/extensions/subagent/output-cap.ts": "fb99246a70e8f9e1a5e7f4ca92a1204b74b02164ed34bf8f4e6aa99b932faa32"
+  },
+  "provider": "anthropic",
+  "pricingDate": "2026-10",
+  "pricingURL": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "models": [
+    {
+      "id": "claude-fable-5-1",
+      "input": 10,
+      "read": 0.25,
+      "write": 12.5
+    },
+    {
+      "id": "claude-opus-5-5",
+      "input": 4,
+      "read": 0.2,
+      "write": 5
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "input": 2,
+      "read": 0.2,
+      "write": 2.5
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "input": 0.1,
+      "read": 0.01,
+      "write": 0.125,
+      "longFrom": 100000,
+      "longX": 5
+    }
+  ],
+  "results": [
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0,
+        "over100k": 19
+      },
+      "on": {
+        "requests": 31,
+        "input": 2569293,
+        "read": 2417160,
+        "write": 152133,
+        "peak": 152133,
+        "last": 152133,
+        "over272k": 0,
+        "over100k": 12
+      },
+      "tokenSavingPercent": 33.39262243445664,
+      "inputCostUSD": {
+        "off": 3.8764860000000003,
+        "on": 2.5059524999999994
+      },
+      "inputCostSavingPercent": 35.35504836080927,
+      "noCacheInputCostUSD": {
+        "off": 38.573699999999995,
+        "on": 25.692930000000004
+      }
+    },
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0,
+        "over100k": 4
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 1.8309480000000002,
+        "on": 0.64655
+      },
+      "inputCostSavingPercent": 64.68769184051104,
+      "noCacheInputCostUSD": {
+        "off": 19.02187,
+        "on": 9.09126
+      }
+    },
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.44009175000000006,
+        "on": 0.44009175000000006
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 5.65257,
+        "on": 5.65257
+      }
+    },
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.5241232499999999,
+        "on": 0.5241232499999999
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 6.464360000000001,
+        "on": 6.464360000000001
+      }
+    },
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 3.3026537500000015,
+        "on": 3.517343250000001
+      },
+      "inputCostSavingPercent": -6.500514926822087,
+      "noCacheInputCostUSD": {
+        "off": 83.50991,
+        "on": 52.489810000000006
+      }
+    },
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0,
+        "over100k": 149
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 9.745681999999999,
+        "on": 8.410677000000007
+      },
+      "inputCostSavingPercent": 13.69842562070045,
+      "noCacheInputCostUSD": {
+        "off": 298.36241,
+        "on": 151.67355999999987
+      }
+    },
+    {
+      "model": "claude-fable-5-1",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34,
+        "over100k": 329
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 21.807954500000015,
+        "on": 13.866017249999995
+      },
+      "inputCostSavingPercent": 36.41761656280058,
+      "noCacheInputCostUSD": {
+        "off": 729.4106600000002,
+        "on": 250.21398
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0,
+        "over100k": 19
+      },
+      "on": {
+        "requests": 31,
+        "input": 2569293,
+        "read": 2417160,
+        "write": 152133,
+        "peak": 152133,
+        "last": 152133,
+        "over272k": 0,
+        "over100k": 12
+      },
+      "tokenSavingPercent": 33.39262243445664,
+      "inputCostUSD": {
+        "off": 1.9125587999999996,
+        "on": 1.244097
+      },
+      "inputCostSavingPercent": 34.95117640304704,
+      "noCacheInputCostUSD": {
+        "off": 15.429479999999998,
+        "on": 10.277172
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0,
+        "over100k": 4
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 0.9115334,
+        "on": 0.34611000000000003
+      },
+      "inputCostSavingPercent": 62.02991574417349,
+      "noCacheInputCostUSD": {
+        "off": 7.608748,
+        "on": 3.636504
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.23012339999999992,
+        "on": 0.23012339999999992
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 2.2610280000000005,
+        "on": 2.2610280000000005
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.27133359999999995,
+        "on": 0.27133359999999995
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 2.5857439999999996,
+        "on": 2.5857439999999996
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 2.146243000000001,
+        "on": 1.9138345999999997
+      },
+      "inputCostSavingPercent": 10.82861539909512,
+      "noCacheInputCostUSD": {
+        "off": 33.403964,
+        "on": 20.995924
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0,
+        "over100k": 149
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 6.863230600000003,
+        "on": 4.843301600000001
+      },
+      "inputCostSavingPercent": 29.43116904741626,
+      "noCacheInputCostUSD": {
+        "off": 119.344964,
+        "on": 60.669424
+      }
+    },
+    {
+      "model": "claude-opus-5-5",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34,
+        "over100k": 329
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 15.988123600000002,
+        "on": 7.986418799999999
+      },
+      "inputCostSavingPercent": 50.047804233887724,
+      "noCacheInputCostUSD": {
+        "off": 291.7642639999999,
+        "on": 100.085592
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0,
+        "over100k": 19
+      },
+      "on": {
+        "requests": 31,
+        "input": 2569293,
+        "read": 2417160,
+        "write": 152133,
+        "peak": 152133,
+        "last": 152133,
+        "over272k": 0,
+        "over100k": 12
+      },
+      "tokenSavingPercent": 33.39262243445664,
+      "inputCostUSD": {
+        "off": 1.3182438,
+        "on": 0.8637645
+      },
+      "inputCostSavingPercent": 34.476118909112266,
+      "noCacheInputCostUSD": {
+        "off": 7.714739999999999,
+        "on": 5.138586
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0,
+        "over100k": 4
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 0.6349209,
+        "on": 0.260545
+      },
+      "inputCostSavingPercent": 58.96417963245499,
+      "noCacheInputCostUSD": {
+        "off": 3.804374,
+        "on": 1.818252
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.16914839999999995,
+        "on": 0.16914839999999995
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 1.1305140000000002,
+        "on": 1.1305140000000002
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.19735110000000003,
+        "on": 0.19735110000000003
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 1.2928719999999998,
+        "on": 1.2928719999999998
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 1.898303,
+        "on": 1.4638146000000003
+      },
+      "inputCostSavingPercent": 22.888253350492505,
+      "noCacheInputCostUSD": {
+        "off": 16.701982,
+        "on": 10.497962
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0,
+        "over100k": 149
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 6.396573100000002,
+        "on": 3.9006815999999995
+      },
+      "inputCostSavingPercent": 39.019197638810724,
+      "noCacheInputCostUSD": {
+        "off": 59.672482,
+        "on": 30.334712
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34,
+        "over100k": 329
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 15.259003600000003,
+        "on": 6.433221299999998
+      },
+      "inputCostSavingPercent": 57.839833657290725,
+      "noCacheInputCostUSD": {
+        "off": 145.88213199999996,
+        "on": 50.042796
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "long-worker",
+      "off": {
+        "requests": 31,
+        "input": 3857370,
+        "read": 3619644,
+        "write": 237726,
+        "peak": 237726,
+        "last": 237726,
+        "over272k": 0,
+        "over100k": 19
+      },
+      "on": {
+        "requests": 31,
+        "input": 1569598,
+        "read": 1323667,
+        "write": 245931,
+        "peak": 93059,
+        "last": 37969,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 59.30911475953824,
+      "inputCostUSD": {
+        "off": 0.26097244999999997,
+        "on": 0.043978044999999986
+      },
+      "inputCostSavingPercent": 83.14839554903209,
+      "noCacheInputCostUSD": {
+        "off": 1.6744686,
+        "on": 0.15695979999999998
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "repeated-reads",
+      "off": {
+        "requests": 31,
+        "input": 1902187,
+        "read": 1791542,
+        "write": 110645,
+        "peak": 110645,
+        "last": 110645,
+        "over272k": 0,
+        "over100k": 4
+      },
+      "on": {
+        "requests": 31,
+        "input": 909126,
+        "read": 874900,
+        "write": 34226,
+        "peak": 34226,
+        "last": 34226,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 52.206276249390825,
+      "inputCostUSD": {
+        "off": 0.054706005,
+        "on": 0.013027249999999999
+      },
+      "inputCostSavingPercent": 76.18680069948446,
+      "noCacheInputCostUSD": {
+        "off": 0.3593651,
+        "on": 0.0909126
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "ordinary-worker",
+      "off": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 565257,
+        "read": 540867,
+        "write": 24390,
+        "peak": 24390,
+        "last": 24390,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.008457419999999998,
+        "on": 0.008457419999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 0.056525700000000026,
+        "on": 0.056525700000000026
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "main-10-turns",
+      "off": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 31,
+        "input": 646436,
+        "read": 616843,
+        "write": 29593,
+        "peak": 29593,
+        "last": 29593,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 0,
+      "inputCostUSD": {
+        "off": 0.009867554999999998,
+        "on": 0.009867554999999998
+      },
+      "inputCostSavingPercent": 0,
+      "noCacheInputCostUSD": {
+        "off": 0.0646436,
+        "on": 0.0646436
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "main-150",
+      "off": {
+        "requests": 150,
+        "input": 8350991,
+        "read": 8251815,
+        "write": 99176,
+        "peak": 99176,
+        "last": 99176,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "on": {
+        "requests": 150,
+        "input": 5248981,
+        "read": 5068973,
+        "write": 180008,
+        "peak": 51343,
+        "last": 51343,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 37.14541184393565,
+      "inputCostUSD": {
+        "off": 0.09491515,
+        "on": 0.07319073
+      },
+      "inputCostSavingPercent": 22.888253350492526,
+      "noCacheInputCostUSD": {
+        "off": 0.8350991000000006,
+        "on": 0.5248981000000001
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "main-300",
+      "off": {
+        "requests": 300,
+        "input": 29836241,
+        "read": 29649578,
+        "write": 186663,
+        "peak": 186663,
+        "last": 186663,
+        "over272k": 0,
+        "over100k": 149
+      },
+      "on": {
+        "requests": 300,
+        "input": 15167356,
+        "read": 14790308,
+        "write": 377048,
+        "peak": 83931,
+        "last": 83931,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 49.164655158805026,
+      "inputCostUSD": {
+        "off": 1.2152001350000001,
+        "on": 0.19503408
+      },
+      "inputCostSavingPercent": 83.95045602920379,
+      "noCacheInputCostUSD": {
+        "off": 11.537801300000005,
+        "on": 1.516735599999999
+      }
+    },
+    {
+      "model": "claude-haiku-5-5",
+      "scenario": "main-480",
+      "off": {
+        "requests": 480,
+        "input": 72941066,
+        "read": 72649418,
+        "write": 291648,
+        "peak": 291648,
+        "last": 291648,
+        "over272k": 34,
+        "over100k": 329
+      },
+      "on": {
+        "requests": 480,
+        "input": 25021398,
+        "read": 24400119,
+        "write": 621279,
+        "peak": 85520,
+        "last": 73559,
+        "over272k": 0,
+        "over100k": 0
+      },
+      "tokenSavingPercent": 65.69641853054355,
+      "inputCostUSD": {
+        "off": 3.43080776,
+        "on": 0.32166106499999997
+      },
+      "inputCostSavingPercent": 90.62433434043533,
+      "noCacheInputCostUSD": {
+        "off": 33.0902138,
+        "on": 2.502139800000003
+      }
+    }
+  ]
+}
