@@ -213,6 +213,7 @@ interface Job {
   id: string; generation: number; state: "running" | "completed" | "failed" | "aborted";
   completionNotice: "not-sent" | "sending" | "accepted" | "uncertain";
   controller: AbortController; workerIds: string[]; nodes: Map<string, string>; result?: any; pendingSteers: string[]; paused?: boolean; waiting?: string;
+  resultRead?: boolean; // main read the retained result: an uncertain notice no longer needs a state-card line
 }
 export class BackgroundWorkers {
   jobs = new Map<string, Job>();
@@ -448,7 +449,7 @@ export class BackgroundWorkers {
     } catch { /* Session can close while its decision notice is delivered. */ }
   }
   list() {
-    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, completionNotice: j.completionNotice, paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
+    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, completionNotice: j.completionNotice, ...(j.completionNotice === "uncertain" ? {resultRead: !!j.resultRead} : {}), paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
       const r = this.monitor.store.records.get(id);
       return {id, node: j.nodes.get(id), name: r?.name, model: r?.reportedModel ?? r?.model, modelSource: r?.reportedModel ? "observed" : "requested", requestedModel: r?.model, observedModels: r?.observed ?? [], servedReported: servedReported(r?.observed), ...(r?.modelTier !== undefined ? { modelTier: r.modelTier } : {}), ...(r?.modelSlot !== undefined ? { modelSlot: r.modelSlot } : {}), state: r?.state ?? "history expired", activity: r?.activity};
     })}));
@@ -468,6 +469,7 @@ export class BackgroundWorkers {
     if (!job) throw new Error(`Result unavailable for ${shown}: not retained by this Pi runtime (never started here, evicted beyond the latest 64 finished jobs, cleared by new/resume/fork/reload, or from another runtime epoch).${noOutcome}`);
     target = id;
     if (!job.result) return {content: [{type: "text", text: `Job ${target} is still running. Continue other work; completion will arrive automatically.`}]};
+    job.resultRead = true;
     const full = expandRetainedResult(job.result); // explicit recovery is lossless and never bounded
     return full === null ? job.result : {...job.result, content: [{type: "text", text: full}]};
   }

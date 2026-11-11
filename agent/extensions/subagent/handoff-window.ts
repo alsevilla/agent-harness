@@ -337,14 +337,17 @@ export function shortenContext<T extends Message>(messages: readonly T[], window
 // Runtime state card: while jobs run or worker decisions wait, each main request ends with one hidden line naming them, so a compacted
 // conversation still knows what is in flight and never re-launches it. Appended at the very end, so the cached prefix is untouched.
 export const STATE_CARD_TYPE = "subagent-state";
-export interface StateJob { jobId: string; state: string; paused?: boolean; workers?: { name?: string }[] }
+export interface StateJob { jobId: string; state: string; paused?: boolean; workers?: { name?: string }[]; completionNotice?: string; resultRead?: boolean }
 export function stateCard(jobs: readonly StateJob[], epoch: string, openDecisions: number, stopped: readonly StoppedJob[] = []): string | undefined {
 	const running = jobs.filter((j) => j.state === "running");
-	if (!running.length && !openDecisions && !stopped.length) return undefined;
+	// A finished job whose completion notice may not have reached main: named until main reads its result, like a stopped job.
+	const unnoticed = jobs.filter((j) => j.state !== "running" && j.completionNotice === "uncertain" && !j.resultRead);
+	if (!running.length && !openDecisions && !stopped.length && !unnoticed.length) return undefined;
 	const list = running.slice(0, 8).map((j) => `${j.jobId}@${epoch} (${[...new Set((j.workers ?? []).map((w) => w.name).filter(Boolean))].join(", ") || "starting"}${j.paused ? ", paused" : ""})`);
 	const parts = [running.length ? `running: ${list.join("; ")}${running.length > 8 ? `; +${running.length - 8} more` : ""}` : "no running jobs"];
 	if (openDecisions) parts.push(`${openDecisions} worker decision${openDecisions === 1 ? "" : "s"} waiting (subagent_control decisions)`);
 	if (stopped.length) parts.push(stoppedJobsCardPart([...stopped]));
+	if (unnoticed.length) parts.push(`finished, but the completion notice may not have arrived: ${unnoticed.slice(0, 8).map((j) => `${j.jobId}@${epoch}`).join(", ")}${unnoticed.length > 8 ? `; +${unnoticed.length - 8} more` : ""} (read each with subagent_control result; do not rerun)`);
 	return `[runtime state, not user text] ${parts.join("; ")}. Completions arrive automatically; do not re-launch running work.`;
 }
 

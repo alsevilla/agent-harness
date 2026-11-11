@@ -10,6 +10,7 @@ import test, { after, before, beforeEach } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BackgroundWorkers } from "../background.ts";
 import { NOTICE_MIN } from "../compact-handoff.ts";
+import { stateCard } from "../handoff-window.ts";
 import { hostModules } from "./host-modules.ts";
 
 const indexUrl = new URL("../index.ts", import.meta.url).href;
@@ -889,7 +890,13 @@ test("completion delivery: pending SDK acceptance and uncertain errors stay sepa
 		const row = runtime.list()[0];
 		assert.equal(row.state, "completed");
 		assert.equal(row.completionNotice, mode === "accepted" ? "accepted" : "uncertain");
+		// An uncertain notice is named in main's state line until main reads the result; an accepted one never is.
+		const card = () => stateCard(runtime.list(), EPOCH_A, 0);
+		if (mode === "accepted") assert.equal(card(), undefined);
+		else assert.match(card()!, new RegExp(`finished, but the completion notice may not have arrived: ${job.id}@${EPOCH_A} \\(read each with subagent_control result; do not rerun\\)`));
 		assert.equal(runtime.result(`${job.id}@${EPOCH_A}`), result);
+		assert.equal(card(), undefined, "reading the result clears the line");
+		if (mode !== "accepted") assert.equal(runtime.list()[0].resultRead, true);
 		assert.equal(runs, 1);
 		assert.equal(sends, 1);
 		assert.ok(!JSON.stringify(row).includes(sentinel));

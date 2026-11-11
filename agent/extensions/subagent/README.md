@@ -27,7 +27,7 @@ DAG mode is exclusive with single, parallel and chain: an empty `dag` array coun
 | `accepted` | Pi accepted the notification; this does not prove main read it. |
 | `uncertain` | The send threw or rejected, possibly after queueing the notification. |
 
-An uncertain notification does not turn a successful task into a failed task, or authorize a retry. Retrieve the retained result through `subagent_control` `action: "result"` with the job ID (prefer the `bg-N@epoch` target in an available notice). Do not rerun the task merely because its notification was uncertain. Existing retention and session-reset limits still apply; this state is in memory, not a durable delivery receipt. Raw host delivery errors are not included in the listing.
+An uncertain notification does not turn a successful task into a failed task, or authorize a retry. Retrieve the retained result through `subagent_control` `action: "result"` with the job ID (prefer the `bg-N@epoch` target in an available notice). Do not rerun the task merely because its notification was uncertain. Existing retention and session-reset limits still apply; this state is in memory, not a durable delivery receipt. Raw host delivery errors are not included in the listing. So that main learns of such a job without listing, its request's hidden state line names each finished job whose notice is `uncertain` until main reads that job's result; the row then carries `resultRead: true`.
 
 ### Optional Pi task model tiers
 
