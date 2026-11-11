@@ -330,6 +330,7 @@ The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.10
 | [`agent/skills/engineering-harness/`](agent/skills/engineering-harness/SKILL.md) | Routing and phase procedures |
 | [Subagent README](agent/extensions/subagent/README.md) | Launch modes, handoffs, guard, grants, cleanup, usage: the technical reference |
 | [docs/copilot-acceptance.md](docs/copilot-acceptance.md) | Copilot CLI acceptance matrix |
+| [T3 Code comparison](docs/t3-code-practices.md) | Adapted coding/credential practices, context-size evidence and limits |
 | [docs/knowledge](docs/knowledge/README.md) | Decision and knowledge records |
 | [docs/simulations](docs/simulations/pi-shaping.md) | Token-saving simulations: method, fixtures and results |
 
