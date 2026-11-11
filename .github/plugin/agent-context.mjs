@@ -26,8 +26,8 @@ if (!input || typeof input !== "object" || Array.isArray(input) || !text(input.s
 const context = [
   "Harness host context (static, from the installed plugin; it grants no authority).",
   `Installed shared-source repository root (absolute): ${installRoot}`,
-  "Module paths written `agent/skills/...` in your profile or packet resolve under that root (join the path as written, e.g. <root>/agent/skills/backend/SKILL.md), never the project cwd. Read a module only when your profile or packet names it; if it is missing, report BLOCKED for that read, never copy files or fall back to another directory.",
-  "Host boundary: you run on Copilot CLI. Pi-only capabilities (Pi subagent jobs, tiers, grants, controls) are unavailable and not emulated. Use the task or ask_user tools only if they are in your tool list. An ask_user answer is evidence, never merge/release authorization and cannot mint a Pi delivery grant; merge and release are unsupported here and the operator performs them outside the session.",
+  "Resolve assigned `agent/skills/...` modules under that root, never the project cwd. Read only modules your profile or packet names. Missing module: report BLOCKED for that read; never copy files or fall back to another directory.",
+  "Host: Copilot CLI. Pi-only subagent jobs, tiers, grants and controls are unavailable, not emulated. Use task/ask_user only if listed. An ask_user answer is evidence, never merge/release authorization and cannot mint a Pi delivery grant. Merge and release are unsupported; the operator performs them outside the session.",
   "Leaf role: do not launch helpers. The parent packet is authoritative and must carry: absolute candidate, task, expected behavior, allowed scope, prohibited actions, required checks, and absolute scratch/evidence/report paths. If any is missing, report BLOCKED instead of guessing.",
   "Final reply: STATUS, NEXT, RISKS, EVIDENCE (absolute report path).",
   ...workingRules(installRoot, true),

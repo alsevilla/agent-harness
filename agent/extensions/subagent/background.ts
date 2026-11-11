@@ -211,7 +211,9 @@ function usageBody(scope: UsageScope): string {
 
 interface Job {
   id: string; generation: number; state: "running" | "completed" | "failed" | "aborted";
+  completionNotice: "not-sent" | "sending" | "accepted" | "uncertain";
   controller: AbortController; workerIds: string[]; nodes: Map<string, string>; result?: any; pendingSteers: string[]; paused?: boolean; waiting?: string;
+  resultRead?: boolean; // main read the retained result: an uncertain notice no longer needs a state-card line
 }
 export class BackgroundWorkers {
   jobs = new Map<string, Job>();
@@ -283,7 +285,7 @@ export class BackgroundWorkers {
     if (!limit.ok) throw new Error(limit.error);
     if ([...this.jobs.values()].filter(j => j.state === "running").length >= 16) throw new Error("16 background jobs are already active; finish or stop a job first");
     const id = `bg-${++this.sequence}`;
-    const job: Job = {id, generation: this.generation, state: "running", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: []};
+    const job: Job = {id, generation: this.generation, state: "running", completionNotice: "not-sent", controller: new AbortController(), workerIds: [], nodes: new Map(), pendingSteers: []};
     this.jobs.set(id, job);
     void (async () => {
       try {
@@ -310,8 +312,12 @@ export class BackgroundWorkers {
       }
       try {
         const retained = this.jobs.get(id) === job; // a snapshot at emission, not a promise: a queued message may be read after later eviction or reset
+        job.completionNotice = "sending";
         await this.pi.sendMessage({customType: "subagent-completion", content: formatCompletionNotice({job: id, state: job.state, workers: job.workerIds, target: retained ? `${id}@${this.epoch}` : null, text: output}, limit.value), display: false, details: {jobId: id, state: job.state}}, {triggerTurn: true, deliverAs: "followUp"});
-      } catch { /* Session can close while its completion is being delivered. */ }
+        job.completionNotice = "accepted"; // SDK acceptance is not proof that main read the notice.
+      } catch {
+        job.completionNotice = "uncertain"; // The host may have queued it before throwing; never replay automatically or expose the raw error.
+      }
     })();
     return job;
   }
@@ -443,7 +449,7 @@ export class BackgroundWorkers {
     } catch { /* Session can close while its decision notice is delivered. */ }
   }
   list() {
-    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
+    return [...this.jobs.values()].map(j => ({jobId: j.id, state: j.state, completionNotice: j.completionNotice, ...(j.completionNotice === "uncertain" ? {resultRead: !!j.resultRead} : {}), paused: !!j.paused, waiting: j.waiting, workers: j.workerIds.map(id => {
       const r = this.monitor.store.records.get(id);
       return {id, node: j.nodes.get(id), name: r?.name, model: r?.reportedModel ?? r?.model, modelSource: r?.reportedModel ? "observed" : "requested", requestedModel: r?.model, observedModels: r?.observed ?? [], servedReported: servedReported(r?.observed), ...(r?.modelTier !== undefined ? { modelTier: r.modelTier } : {}), ...(r?.modelSlot !== undefined ? { modelSlot: r.modelSlot } : {}), state: r?.state ?? "history expired", activity: r?.activity};
     })}));
@@ -463,6 +469,7 @@ export class BackgroundWorkers {
     if (!job) throw new Error(`Result unavailable for ${shown}: not retained by this Pi runtime (never started here, evicted beyond the latest 64 finished jobs, cleared by new/resume/fork/reload, or from another runtime epoch).${noOutcome}`);
     target = id;
     if (!job.result) return {content: [{type: "text", text: `Job ${target} is still running. Continue other work; completion will arrive automatically.`}]};
+    job.resultRead = true;
     const full = expandRetainedResult(job.result); // explicit recovery is lossless and never bounded
     return full === null ? job.result : {...job.result, content: [{type: "text", text: full}]};
   }
