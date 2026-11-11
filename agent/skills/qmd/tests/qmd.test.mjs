@@ -55,3 +55,17 @@ test("the Pi extension's config.json is used when HARNESS_QMD_CLI is unset", () 
 	const q = resolveQmd({}, { configs: [cfg], npmRoot: "" });
 	assert.deepEqual([q.cli, q.index, q.timeoutMs, q.node], [fake, "notes", 9000, process.execPath], "a missing nodePath falls back to this Node");
 });
+
+test("a global QMD install works without any extension config", () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmd-global-"));
+	try {
+		const cli = path.join(root, "@tobilu", "qmd", "dist", "cli", "qmd.js");
+		fs.mkdirSync(path.dirname(cli), { recursive: true });
+		fs.writeFileSync(cli, "");
+		const q = resolveQmd({}, { configs: [], npmRoot: root });
+		assert.equal(q.cli, cli);
+		assert.equal(q.source, "npm root -g");
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});

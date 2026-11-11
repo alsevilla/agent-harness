@@ -394,14 +394,15 @@ let nextOut: { stdout: string[]; code: number; stderr?: string } = { stdout: [],
   });
   return child;
 };
-async function loadProducer(activeTools: () => string[]) {
+async function loadProducer(activeTools: () => string[], configured = true) {
   const dir = mkdtempSync(path.join(probeTmp, "qmd-wiring-"));
   copyFileSync(path.join(QMD_DIR, "spill.ts"), path.join(dir, "spill.ts"));
-  const source = readFileSync(path.join(QMD_DIR, "index.ts"), "utf8").replace('from "node:child_process"', 'from "./fake-child.mjs"');
+  const source = readFileSync(path.join(QMD_DIR, "index.ts"), "utf8").replace('from "node:child_process"', 'from "./fake-child.mjs"')
+    .replace('../../skills/qmd/scripts/qmd.mjs', pathToFileURL(path.resolve(QMD_DIR, '../../skills/qmd/scripts/qmd.mjs')).href);
   assert.ok(source.includes("./fake-child.mjs"));
   writeFileSync(path.join(dir, "index.ts"), source);
   writeFileSync(path.join(dir, "fake-child.mjs"), "export const spawn = (...a) => globalThis.__qmdFakeSpawn(...a);\n");
-  writeFileSync(path.join(dir, "config.json"), JSON.stringify({ nodePath: process.execPath, cliPath: path.join(dir, "spill.ts"), timeoutMs: 5000 }));
+  if (configured) writeFileSync(path.join(dir, "config.json"), JSON.stringify({ nodePath: process.execPath, cliPath: path.join(dir, "spill.ts"), timeoutMs: 5000 }));
   const types = path.join(dir, "node_modules", "typebox");
   mkdirSync(types, { recursive: true });
   writeFileSync(path.join(types, "package.json"), '{"name":"typebox","type":"module","main":"index.js"}');
@@ -558,4 +559,41 @@ test("notice bound: exact cap boundary, complete notice on one side and truthful
   assert.equal(late.out.saved, undefined);
   assert.equal(late.fs.files.size, 1, "created file is preserved, not cleaned up");
   assert.doesNotMatch(late.out.text, /saved file:|bash:/);
+});
+
+
+test("wiring: absent adjacent config uses the profile config and preserves its named index", async () => {
+  const profile = mkdtempSync(path.join(probeTmp, "qmd-profile-"));
+  const configDir = path.join(profile, "extensions", "qmd");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ nodePath: process.execPath, cliPath: path.join(QMD_DIR, "spill.ts"), indexName: "decisions" }));
+  const before = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = profile;
+  try {
+    const tools = await loadProducer(both, false);
+    nextOut = { stdout: ["[]"], code: 0 };
+    await run(tools.qmd_search, { query: "queue" });
+    assert.deepEqual(spawns.at(-1)!.args.slice(1, 3), ["--index", "decisions"]);
+  } finally {
+    if (before === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = before;
+  }
+});
+
+test("wiring: missing configured CLI does not break registration and fails only the lookup", async () => {
+  const before = process.env.HARNESS_QMD_CLI;
+  process.env.HARNESS_QMD_CLI = path.join(probeTmp, "absent-qmd.js");
+  try {
+    const tools = await loadProducer(both, false);
+    assert.deepEqual(Object.keys(tools).sort(), ["qmd_get", "qmd_search", "qmd_status"]);
+    await assert.rejects(run(tools.qmd_status, {}), /HARNESS_QMD_CLI does not name a file/);
+    // A missing QMD is not remembered: once it is installed, the next lookup in the same session finds it.
+    writeFileSync(process.env.HARNESS_QMD_CLI, "");
+    nextOut = { stdout: ["ok"], code: 0 };
+    await run(tools.qmd_status, {});
+    assert.equal(spawns.at(-1)!.args[0], process.env.HARNESS_QMD_CLI);
+  } finally {
+    if (before === undefined) delete process.env.HARNESS_QMD_CLI;
+    else process.env.HARNESS_QMD_CLI = before;
+  }
 });

@@ -26,7 +26,7 @@ export function resolveQmd(env = process.env, opts = {}) {
 		if (!isFile(env.HARNESS_QMD_CLI)) return { missing: `HARNESS_QMD_CLI does not name a file: ${env.HARNESS_QMD_CLI}` };
 		return { node: env.HARNESS_QMD_NODE || process.execPath, cli: env.HARNESS_QMD_CLI, index: env.HARNESS_QMD_INDEX || "index", timeoutMs: timeoutMs ?? 15_000, source: "HARNESS_QMD_CLI" };
 	}
-	const configs = opts.configs ?? [path.join(repoRoot, "agent", "extensions", "qmd", "config.json"), path.join(opts.agentDir ?? agentDir, "extensions", "qmd", "config.json")];
+	const configs = opts.configs ?? [opts.localConfig ?? path.join(repoRoot, "agent", "extensions", "qmd", "config.json"), path.join(opts.agentDir ?? env.PI_CODING_AGENT_DIR ?? agentDir, "extensions", "qmd", "config.json")];
 	for (const file of configs) {
 		const c = readJson(file);
 		if (c && typeof c.cliPath === "string" && isFile(c.cliPath)) {

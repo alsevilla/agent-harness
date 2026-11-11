@@ -1,0 +1,95 @@
+{
+  "cli": "GitHub Copilot CLI 1.0.108.",
+  "candidate": "a4af021ed183f9c41f590b9aa3dfa22c65830fb2",
+  "method": "Native CLI with scripted localhost provider; no model inference",
+  "scenarios": {
+    "S1": {
+      "status": "PASS native offline",
+      "evidence": "backend-worker read installed backend/SKILL.md; child root injected; fixture unchanged"
+    },
+    "S2": {
+      "status": "PASS native offline",
+      "evidence": "debugger RED, terminal handoff, backend-worker bounded edit, GREEN; only calc.py changed"
+    },
+    "S3": {
+      "status": "PASS native offline TUI",
+      "noninteractive_ask_user_advertised": false,
+      "cases": [
+        {
+          "mode": "choice",
+          "status": "PASS native offline TUI",
+          "response": "User responded: Alpha",
+          "requests": 2,
+          "dependent_mutations": 0
+        },
+        {
+          "mode": "freeform",
+          "status": "PASS native offline TUI",
+          "response": "User responded: Exact fixture text 42",
+          "requests": 2,
+          "dependent_mutations": 0
+        },
+        {
+          "mode": "cancel",
+          "status": "PASS native offline TUI",
+          "response": "User cancelled the request.",
+          "requests": 2,
+          "dependent_mutations": 0
+        },
+        {
+          "mode": "missing",
+          "status": "PASS native offline TUI",
+          "response": "User accepted but provided no values.",
+          "requests": 2,
+          "dependent_mutations": 0
+        }
+      ],
+      "limit": "Cancel/empty return to the provider; autonomous model compliance and timeout encoding untested"
+    },
+    "S4": {
+      "status": "PASS native offline",
+      "evidence": "scout read fixture; recursive content manifests unchanged; not filesystem isolation"
+    },
+    "S5": {
+      "status": "PARTIAL: native local delivery passed",
+      "evidence": "local commit and feature push; inert PR create/edit recorded exact body",
+      "not_tested": "model compliance with failed-check/local-only packets; real GitHub effects"
+    },
+    "S6": {
+      "status": "PASS hook-only",
+      "cases": 9,
+      "evidence": "deny + reason; no shell/client execution"
+    },
+    "S7": {
+      "status": "PASS hook-only",
+      "cases": 14,
+      "evidence": "deny + reason; no shell/client execution"
+    }
+  },
+  "date": "2026-11-10",
+  "compatibility_tests": {
+    "passed": 79,
+    "skipped": 1,
+    "failed": 0
+  },
+  "raw_evidence_sha256": {
+    "S1/issued.json": "5c62d5a6dac12fe1dab4a4b6a8651e210391bebc093592c685e9713c032bd0d3",
+    "S1/manifests.json": "074e74df08a439980902fb864ad6d7e3726a27e4a3f119ecaf5c41e9053a193a",
+    "S1/requests.json": "2edcc92496075c4fb279bb8e0dadc9d8229c4b8a8e18ec3542d72155dc9a240f",
+    "S2/issued.json": "84906669ff8dfee65286eaaedf327775bf38a12511702241d236bab162229d6e",
+    "S2/manifests.json": "99cd62ab13b34dae49582d7e4e998240bfca0cb6dc7918f73c49ad40b740fcac",
+    "S2/requests.json": "19447dc8376cf58ad71cdfcd32fb40c33ff848b091f3a5859758b90ae54cfc8b",
+    "S4/issued.json": "0d9db690fcfb02f032aca4b2b4ed5abb174417b99e6a78c4849abc9d24d764e0",
+    "S4/manifests.json": "4f5f9dfaf9741849e95f6cfdca00d21e341cbb081deb3add6e6b8bf37c700d95",
+    "S4/requests.json": "6f875a1552b4dc3c437f48fdf828a4f0c566c568ec167db3039521cca52e344b",
+    "S5/issued.json": "1fc75e927b2ae39f99b987fabd3f9af1f5cd1dfe9c1abd348d2d394c81af21cb",
+    "S5/manifests.json": "382a49bb4323145a7f98cbde8789c11ecda1be137b2d280aaab5b4ffaf0bbc10",
+    "S5/requests.json": "4ab848a093fca3c860b6526b1804c54e385034c3b099c0cb129a7cf170d0f0e8",
+    "S6-hook.json": "d7230e9e123d22d059c27195d65bec82e6ac30ef0dabeb64284bbc9c6e1616f5",
+    "S7-hook.json": "0e7407ace4e9414a210f494277e19b0ee302f50b4f4c1004fae8a099c4332c70"
+  },
+  "probe_sha256": {
+    "scripts/probe-copilot-acceptance.py": "8383bc78e69ea94c09b7dbcc79a5b0db43be49a62d756514ea7ccc1e751d756b",
+    "scripts/probe-copilot-questions.py": "268f65671873f7903303028851a71c919491a54d12e8a84ae954cfc32a5bcdb0"
+  }
+}
