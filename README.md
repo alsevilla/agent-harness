@@ -1,6 +1,6 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 63% less, and a ten-task session costs 44% less with Claude Opus 5.5 as main, 66% less with GPT-6 Astra, and 27% less with GPT-6.1 Sol than one agent on the corresponding model working alone in fresh sessions per task ([Token savings](#token-savings)).
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 63% less, and a ten-task session costs 58% less with Claude Fable 5.1 as main, 44% less with Claude Opus 5.5, 66% less with GPT-6 Astra, and 27% less with GPT-6.1 Sol than one agent on the corresponding model working alone in fresh sessions per task ([Token savings](#token-savings)).
 
 These are offline Pi simulation estimates using cheaper workers for non-complex tasks, not live billing or task-quality benchmarks. Savings depend on workload and routing; the ten-task harness costs more with Terra or Luna as main. Copilot is measured separately.
 
@@ -140,7 +140,7 @@ Details, limits and every check: [subagent README](agent/extensions/subagent/REA
 
 ## Token savings
 
-Five experiments examine what the harness saves. Three compare the same work with and without Pi request shaping; the fourth compares the whole Pi harness with one agent working alone; the fifth records Copilot's native request sizes with a scripted local provider. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
+Six experiments examine what the harness saves. Four compare the same work with and without Pi request shaping (recorded Pi runs, long main sessions, and an offline replay at Claude and at OpenAI prices); the fifth compares the whole Pi harness with one agent working alone; the sixth records Copilot's native request sizes with a scripted local provider. Scripts, fixtures, cache models and full results are in [`docs/simulations/`](docs/simulations/), and each one reruns with a single command.
 
 ### Recorded Pi runs
 
