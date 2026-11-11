@@ -114,3 +114,12 @@ test('dated backup folders in graphify-out are counted with their size; other fo
   assert.deepEqual(datedBackups(temp),{count:2,names:['2026-11-06','2026-11-07'],bytes:150});
  }finally{rmSync(temp,{recursive:true,force:true})}
 });
+test('/refresh qmd finds QMD like the extension does: a missing CLI is reported, not a missing adjacent config.json',async()=>{
+ const saved=process.env.HARNESS_QMD_CLI;process.env.HARNESS_QMD_CLI=join(tmpdir(),'pi-refresh-absent-qmd.js');
+ try {
+  let handler:any;const notices:any[]=[];
+  refresh({registerCommand:(_name:any,options:any)=>handler=options.handler,sendMessage:()=>{}} as any);
+  await handler('qmd',{cwd:process.cwd(),ui:{notify:(...args:any[])=>notices.push(args)}});
+  assert.match(notices.at(-1)[0],/HARNESS_QMD_CLI does not name a file/);assert.equal(notices.at(-1)[1],'error');
+ } finally { if(saved===undefined)delete process.env.HARNESS_QMD_CLI;else process.env.HARNESS_QMD_CLI=saved; }
+});

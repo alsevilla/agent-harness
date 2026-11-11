@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { assertNoHooks, parseRequest, runBounded, Singleton } from './core.ts';
 import { stopServer } from '../../skills/serena/scripts/serena.mjs';
+import { resolveQmd } from '../../skills/qmd/scripts/qmd.mjs';
 
 // keepLink: run the path as given. A virtualenv's python (uv tools on Linux and macOS) is a symlink to the base interpreter; resolving it
 // would run outside the environment, where the installed module is missing.
@@ -88,9 +89,11 @@ export default function refresh(pi:ExtensionAPI) {
       if(backups.count)output+=`\n${backups.count} dated backup folder(s) in graphify-out (${backups.names.join(', ')}; ${backups.bytes<1048576?`${Math.ceil(backups.bytes/1024)} KB`:`${Math.ceil(backups.bytes/1048576)} MB`}) are copies Graphify made before earlier overwrites. /refresh graph makes none; delete them if you do not need them.`;
       if(request.init&&!gitIgnores(root,'graphify-out'))output+='\ngraphify-out is not ignored by Git here; add it to .gitignore so the graph is not committed.';
      }else {
-      const qmd=JSON.parse(readFileSync(join(folder,'..','qmd','config.json'),'utf8'));
-      const node=file(qmd.nodePath,'QMD Node'); const cli=file(qmd.cliPath,'QMD CLI');
-      const name=qmd.indexName??'index';if(!/^[\w-]+$/.test(name))throw Error('QMD indexName must be a simple named global index.');
+      // The same discovery as the QMD extension and shell skill: HARNESS_QMD_CLI, the extension or profile config.json, then the global install.
+      const qmd=resolveQmd(process.env,{localConfig:join(folder,'..','qmd','config.json')});
+      if(qmd.missing)throw Error(qmd.missing);
+      const node=file(qmd.node,'QMD Node'); const cli=file(qmd.cli,'QMD CLI');
+      const name=qmd.index;if(!/^[\w-]+$/.test(name))throw Error('QMD indexName must be a simple named global index.');
       const home=process.env.HOME||process.env.USERPROFILE||homedir();
       const configDir=process.env.QMD_CONFIG_DIR||(process.env.XDG_CONFIG_HOME?join(process.env.XDG_CONFIG_HOME,'qmd'):join(home,'.config','qmd'));
       const yamlPath=file(resolve(configDir,`${name}.yml`),'Named QMD configuration');

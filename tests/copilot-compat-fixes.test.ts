@@ -237,9 +237,12 @@ test("guard uses curl's last request-method value across separate, attached and 
   }
 });
 
-test("operator checklist has all seven scenarios, all live NOT RUN, with hook-only or inert-client protected probes", () => {
+test("operator checklist has all seven scenarios with a recorded offline or hook-only status, hosted-model runs NOT RUN, with hook-only or inert-client protected probes", () => {
   const acc = read("docs", "copilot-acceptance.md");
-  for (let n = 1; n <= 7; n++) expect(acc).toMatch(new RegExp(`\\bS${n}\\b[^\\n]*NOT RUN`));
+  // S1-S5 ran against the native CLI with a scripted provider, S6-S7 against the hook alone; no row claims a hosted-model or live GitHub pass.
+  for (let n = 1; n <= 5; n++) expect(acc).toMatch(new RegExp(`\\| S${n}\\b[^\\n]*\\| (PASS|PARTIAL)[^|\\n]*native offline[^|\\n]*\\||\\| S${n}\\b[^\\n]*\\| NOT RUN`));
+  for (let n = 6; n <= 7; n++) expect(acc).toMatch(new RegExp(`\\| S${n}\\b[^\\n]*\\| (PASS hook-only|NOT RUN)`));
+  expect(acc).toMatch(/hosted-model[^|\n]*NOT RUN/);
   expect(acc).toMatch(/hook-only/i);
   expect(acc).toMatch(/inert[^.]*(client|stub)[^.]*(no credentials|no network|without credentials)/i);
   expect(acc).toMatch(/never[^.]*(authenticated|real)[^.]*protected/i);

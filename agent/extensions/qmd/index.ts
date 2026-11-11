@@ -1,17 +1,22 @@
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { capQmdOutput } from "./spill.ts";
+import { fileURLToPath } from "node:url";
+import { resolveQmd } from "../../skills/qmd/scripts/qmd.mjs";
 
-type Config = { nodePath: string; cliPath: string; timeoutMs: number; indexName?: string };
 export default function plainQmd(pi: ExtensionAPI) {
-  const config = JSON.parse(readFileSync(new URL("./config.json", import.meta.url), "utf8")) as Config;
+  let found: ReturnType<typeof resolveQmd> | undefined;
   async function run(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
-    if (!existsSync(config.nodePath) || !existsSync(config.cliPath)) throw new Error("QMD runtime missing; check extensions/qmd/config.json.");
+    // Resolved on the first lookup and kept; a missing QMD is looked for again on the next lookup, so installing it mid-session works.
+    const config = found ?? resolveQmd(process.env, { localConfig: fileURLToPath(new URL("./config.json", import.meta.url)) });
+    if (config.missing) throw new Error(config.missing);
+    found = config;
+    if (!existsSync(config.node) || !existsSync(config.cli)) throw new Error("QMD runtime missing; check HARNESS_QMD_CLI or extensions/qmd/config.json.");
     return new Promise((resolve, reject) => {
       // An explicit named index bypasses QMD's cwd-dependent .qmd config discovery.
-      const child = spawn(config.nodePath, [config.cliPath, "--index", config.indexName ?? "index", ...args], { cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], signal });
+      const child = spawn(config.node, [config.cli, "--index", config.index, ...args], { cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], signal });
       let stdout = "", stderr = "";
       const timer = setTimeout(() => { child.kill(); reject(new Error("QMD request timed out.")); }, config.timeoutMs);
       child.stdout.on("data", chunk => {
