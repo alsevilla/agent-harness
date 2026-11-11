@@ -173,6 +173,7 @@ The same ten-task session (four small fixes, three bug hunts, three features, tw
 
 | Main / single-agent model | One agent, one session | One agent, a new session per task | Harness | Harness against one agent with a new session per task |
 | --- | --- | --- | --- | --- |
+| Claude Fable 5.1 | $20.73 | $11.20 | $4.69 | **58% cheaper** |
 | Claude Opus 5.5 | $12.98 | $5.21 | $2.93 | **44% cheaper** |
 | Claude Sonnet 5.5 | $11.18 | $3.34 | $2.37 | **29% cheaper** |
 | Claude Haiku 5.5 | $2.64 | $0.17 | $1.52 | 9.1x the cost |
@@ -183,9 +184,25 @@ The same ten-task session (four small fixes, three bug hunts, three features, tw
 
 Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.9M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna (Haiku's long session pays its 5x price above 100k tokens).
 
-Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 41-50% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
+Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 41-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
 
-The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (17% and 60%); under Sonnet 5.5 and Sol it is cheaper up to eight (4% and 3%) and more expensive at twelve (13% and 15%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 39% under Opus, 22% under Sonnet, 65% under Astra, 19% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
+The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 17% and 60%); under Sonnet 5.5 and Sol it is cheaper up to eight (4% and 3%) and more expensive at twelve (13% and 15%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 56% under Fable, 39% under Opus, 22% under Sonnet, 65% under Astra, 19% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
+
+### Offline replay at Claude prices
+
+An offline replay runs the current shaping functions over seven fixed workloads and prices them for four Claude models ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md#claude-prices)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Both arms run the same scripted actions, and token counts are totals over every request of a run. Costs cover input only, at Anthropic list prices with an idealized warm cache and 5-minute writes: not subscription billing or total task cost.
+
+| Scenario | Without shaping | With the harness | Saving |
+| --- | --- | --- | --- |
+| Long worker task: 30 tool calls over large files and logs | 3.86M tokens sent, peak request 238k | Fable, Opus, Sonnet: 2.57M sent, peak 152k. Haiku: 1.57M sent, peak 93k | Fable, Opus, Sonnet: **33% fewer tokens, input cost 35% lower**. Haiku: **59% fewer tokens, input cost 83% lower** |
+| Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52% fewer tokens**. Input cost: 65% lower on Fable 5.1, 62% on Opus 5.5, 59% on Sonnet 5.5, 76% on Haiku 5.5 |
+| Ordinary worker task: small, unique reads | 565k tokens sent | 565k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
+| Main session: 10 user turns of subagent results | 646k tokens sent | 646k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
+| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37% fewer tokens**. Input cost: 11% lower on Opus 5.5, 23% lower on Sonnet 5.5 and Haiku 5.5, **7% higher on Fable 5.1** |
+| Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49% fewer tokens**. Input cost: 14% lower on Fable 5.1, 29% on Opus 5.5, 39% on Sonnet 5.5, 84% on Haiku 5.5 |
+| Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **66% fewer tokens**. Input cost: 36% lower on Fable 5.1, 50% on Opus 5.5, 58% on Sonnet 5.5, 91% on Haiku 5.5 |
+
+Prices per million input tokens: Fable 5.1 $10 (cache read $0.25), Opus 5.5 $4 ($0.20), Sonnet 5.5 $2 ($0.20), Haiku 5.5 $0.10 ($0.01, assumed), with cache writes at 1.25x input. Two things explain the spread. Haiku 5.5 charges 5x for a request over 100k tokens, so workers on it are masked from 90k and its long sessions gain most from staying small; the other three have no such surcharge, so their workers are masked only from 200k. And the cheaper a model's cache reads are against its writes, the less shortening pays, because each shortening rewrites part of the cache: Fable 5.1 reads at 2.5% of its input price, so a 150-request main session costs 7% more with shaping there, and the saving appears in longer sessions.
 
 ### Offline replay at OpenAI prices
 
@@ -326,7 +343,7 @@ npm test
 
 Suites that need an installed Pi host are skipped, by name, when none is found; set `NATIVE_PROBE_HOST_MODULES` or install Pi to run them.
 
-After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main`, `npm run simulate:delegation`, `npm run simulate:delegation:openai` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
+After a change to request shaping, rerun the [token-saving simulations](docs/simulations/pi-shaping.md) and update the README's [Token savings](#token-savings) tables: `npm run simulate:pi` (needs Pi, like the host suites), `npm run simulate:main`, `npm run simulate:delegation`, `npm run simulate:delegation:openai`, `npm run simulate:claude` and `npm run simulate:openai`, each written to its results file in `docs/simulations/`.
 
 ## Licenses
 

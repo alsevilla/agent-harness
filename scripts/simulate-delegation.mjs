@@ -25,6 +25,7 @@ const PRICES = OPENAI ? {
 	"gpt-6.1-terra": { input: 1, output: 5, read: 0.05, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
 	"gpt-6-luna": { input: 0.1, output: 0.5, read: 0.01, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
 } : {
+	"claude-fable-5-1": { input: 10, output: 50, read: 0.25 },
 	"claude-opus-5-5": { input: 4, output: 20, read: 0.2 },
 	"claude-sonnet-5-5": { input: 2, output: 10, read: 0.2 },
 	"claude-haiku-5-5": { input: 0.1, output: 0.5, read: 0.01, longFrom: 100_000, longX: 5 },

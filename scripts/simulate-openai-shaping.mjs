@@ -11,13 +11,24 @@ import { createReadDedupe } from '../agent/extensions/subagent/read-dedupe.ts';
 import { createExecutionLedger } from '../agent/extensions/subagent/execution-ledger.ts';
 import { capShellOutput } from '../agent/extensions/subagent/output-cap.ts';
 
-// Standard API USD per million tokens, verified 2026-11-07. 30-minute writes replace
-// the ordinary input rate for written tokens; they are not an additional input charge.
-const models = [
-  { id: 'gpt-6.1-sol', input: 2, read: 0.10, write: 2.50 },
-  { id: 'gpt-6.1-terra', input: 1, read: 0.05, write: 1.25 },
-  { id: 'gpt-6-astra', input: 10, read: 1, write: 12.50 },
-  { id: 'gpt-6-luna', input: 0.10, read: 0.01, write: 0.125 },
+// --anthropic: the same replay with Claude pricing profiles and the Anthropic worker-masking policy
+// (npm run simulate:claude > docs/simulations/claude-shaping-results.json).
+const ANTHROPIC = process.argv.includes('--anthropic');
+const PROVIDER = ANTHROPIC ? 'anthropic' : 'openai';
+// USD per million tokens. Written tokens pay the cache-write rate in place of the ordinary input rate.
+// OpenAI: Standard API, verified 2026-11-07, 30-minute writes; requests above 272k input tokens pay 2x.
+// Anthropic: first-party list prices (Claude API reference, 2026-10), 5-minute writes at 1.25x input; Haiku 5.5 pays 5x
+// above 100k input tokens, and its cache-read price is not listed: 0.1x input is assumed.
+const models = ANTHROPIC ? [
+  { id: 'claude-fable-5-1', input: 10, read: 0.25, write: 12.50 },
+  { id: 'claude-opus-5-5', input: 4, read: 0.20, write: 5 },
+  { id: 'claude-sonnet-5-5', input: 2, read: 0.20, write: 2.50 },
+  { id: 'claude-haiku-5-5', input: 0.10, read: 0.01, write: 0.125, longFrom: 100_000, longX: 5 },
+] : [
+  { id: 'gpt-6.1-sol', input: 2, read: 0.10, write: 2.50, longFrom: 272_000, longX: 2 },
+  { id: 'gpt-6.1-terra', input: 1, read: 0.05, write: 1.25, longFrom: 272_000, longX: 2 },
+  { id: 'gpt-6-astra', input: 10, read: 1, write: 12.50, longFrom: 272_000, longX: 2 },
+  { id: 'gpt-6-luna', input: 0.10, read: 0.01, write: 0.125, longFrom: 272_000, longX: 2 },
 ];
 const text = value => [{ type: 'text', text: value }];
 const fill = (label, size) => (label + '\n').repeat(Math.ceil(size / (label.length + 1))).slice(0, size);
@@ -67,7 +78,7 @@ function meter() {
 function replay(scenario, shaped, model) {
   const history = [], m = meter(), dedupe = createReadDedupe(), ledger = createExecutionLedger();
   const fold = createMainFold(50_000);
-  const policy = workerMaskPolicy({ provider: 'openai', id: model.id }, {});
+  const policy = workerMaskPolicy({ provider: PROVIDER, id: model.id }, {});
   let masked = false;
   function request() {
     let view = history;
@@ -133,8 +144,9 @@ try {
   for (const model of models) for (const scenario of scenarios) {
     const off = replay(scenario, false, model), on = replay(scenario, true, model);
     assert.equal(off.requests, on.requests);
-    const cost = run => run.trace.reduce((sum, row) => sum + (row.read * model.read + row.write * model.write) * (row.input > 272_000 ? 2 : 1) / 1e6, 0);
-    const noCacheCost = run => run.trace.reduce((sum, row) => sum + row.input * model.input * (row.input > 272_000 ? 2 : 1) / 1e6, 0);
+    const long = row => (model.longFrom && row.input > model.longFrom ? model.longX : 1);
+    const cost = run => run.trace.reduce((sum, row) => sum + (row.read * model.read + row.write * model.write) * long(row) / 1e6, 0);
+    const noCacheCost = run => run.trace.reduce((sum, row) => sum + row.input * model.input * long(row) / 1e6, 0);
     results.push({ model: model.id, scenario: scenario.name, off, on,
       tokenSavingPercent: 100 * (1 - on.input / off.input),
       inputCostUSD: { off: cost(off), on: cost(on) },
@@ -143,10 +155,11 @@ try {
   }
   for (const result of results) for (const arm of ['off', 'on']) {
     result[arm].over272k = result[arm].trace.filter(row => row.input > 272_000).length;
+    result[arm].over100k = result[arm].trace.filter(row => row.input > 100_000).length;
     if (!process.argv.includes('--trace')) delete result[arm].trace;
   }
   const sourceHashes = Object.fromEntries(['scripts/simulate-openai-shaping.mjs', ...['handoff-window', 'read-dedupe', 'execution-ledger', 'output-cap'].map(name => `agent/extensions/subagent/${name}.ts`)]
     .map(file => [file, hash(readFileSync(new URL('../' + file, import.meta.url)))]));
   console.log(JSON.stringify({ schema: 1, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHashes,
-    pricingDate: '2026-11-07', pricingURL: 'https://developers.openai.com/api/docs/pricing', models, results }, null, 2));
+    provider: PROVIDER, ...(ANTHROPIC ? { pricingDate: '2026-10', pricingURL: 'https://platform.claude.com/docs/en/about-claude/pricing' } : { pricingDate: '2026-11-07', pricingURL: 'https://developers.openai.com/api/docs/pricing' }), models, results }, null, 2));
 } finally { rmSync(scratch, { recursive: true, force: true }); }

@@ -2,7 +2,7 @@
   "schema": 1,
   "provider": "anthropic",
   "cacheModel": "system and last-message breakpoints; 20-block lookback",
-  "sourceCommit": "e3c88bbdcd277ad09041f1a54c822ffdbef98742",
+  "sourceCommit": "0fcd62517f007d8f348528c64057a5a8377395a2",
   "roleDefaults": {
     "backend-worker": "claude-sonnet-5-5",
     "debugger": "claude-haiku-5-5",
@@ -76,6 +76,11 @@
     }
   ],
   "prices": {
+    "claude-fable-5-1": {
+      "input": 10,
+      "output": 50,
+      "read": 0.25
+    },
     "claude-opus-5-5": {
       "input": 4,
       "output": 20,
@@ -151,6 +156,50 @@
     "economyXDefault": 1
   },
   "baselines": {
+    "claude-fable-5-1": {
+      "singleOneSession": {
+        "contexts": 1,
+        "requests": 211,
+        "sent": 47301282,
+        "peak": 427713,
+        "cost": 20.7273,
+        "byModel": {
+          "claude-fable-5-1": 20.7273
+        }
+      },
+      "singleFreshPerTask": {
+        "contexts": 10,
+        "requests": 211,
+        "sent": 7786053,
+        "peak": 82148,
+        "cost": 11.1959,
+        "byModel": {
+          "claude-fable-5-1": 11.1959
+        }
+      },
+      "harnessSameModel": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 17.5418,
+        "byModel": {
+          "claude-fable-5-1": 17.5418
+        }
+      },
+      "harnessRoleModels": {
+        "contexts": 22,
+        "requests": 294,
+        "sent": 8875435,
+        "peak": 61578,
+        "cost": 4.6857,
+        "byModel": {
+          "claude-fable-5-1": 3.2061,
+          "claude-sonnet-5-5": 1.356,
+          "claude-haiku-5-5": 0.1236
+        }
+      }
+    },
     "claude-opus-5-5": {
       "singleOneSession": {
         "contexts": 1,
@@ -283,6 +332,83 @@
     }
   },
   "sweeps": [
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 0,
+      "cost": 4.5388,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 1,
+      "cost": 4.6857,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 2,
+      "cost": 4.8054,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 4,
+      "cost": 5.009,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 6,
+      "cost": 5.2753,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 8,
+      "cost": 5.5117,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "orient",
+      "value": 12,
+      "cost": 6.0972,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "economyX",
+      "value": 1,
+      "cost": 4.6857,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "economyX",
+      "value": 1.5,
+      "cost": 4.7452,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "economyX",
+      "value": 2,
+      "cost": 4.7948,
+      "singleFresh": 11.1959
+    },
+    {
+      "main": "claude-fable-5-1",
+      "sweep": "economyX",
+      "value": 3,
+      "cost": 4.9174,
+      "singleFresh": 11.1959
+    },
     {
       "main": "claude-opus-5-5",
       "sweep": "orient",

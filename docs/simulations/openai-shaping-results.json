@@ -1,13 +1,14 @@
 {
   "schema": 1,
-  "sourceCommit": "e3c88bbdcd277ad09041f1a54c822ffdbef98742",
+  "sourceCommit": "0fcd62517f007d8f348528c64057a5a8377395a2",
   "sourceHashes": {
-    "scripts/simulate-openai-shaping.mjs": "3b073c73e1b2cc363204d090c2bd845a44ff98261843c80f424a358a1c1ca03e",
+    "scripts/simulate-openai-shaping.mjs": "e5754fee47739c72270764457f8cff348ad4a9055cdaa9db82327a35f2d67341",
     "agent/extensions/subagent/handoff-window.ts": "caa2839a0adda757e79e8b3ed063c41927bafccd90f3f07184bdc3a3d8411049",
     "agent/extensions/subagent/read-dedupe.ts": "fffdfce68964794c6cf9b0d90e7c2504c60f1edcf7d4298df652b6edb30319de",
     "agent/extensions/subagent/execution-ledger.ts": "5dcdebcc2272ca9db309c1aac654c41ca397802705864f84a9fc0725b3b8c7a2",
     "agent/extensions/subagent/output-cap.ts": "fb99246a70e8f9e1a5e7f4ca92a1204b74b02164ed34bf8f4e6aa99b932faa32"
   },
+  "provider": "openai",
   "pricingDate": "2026-11-07",
   "pricingURL": "https://developers.openai.com/api/docs/pricing",
   "models": [
@@ -15,25 +16,33 @@
       "id": "gpt-6.1-sol",
       "input": 2,
       "read": 0.1,
-      "write": 2.5
+      "write": 2.5,
+      "longFrom": 272000,
+      "longX": 2
     },
     {
       "id": "gpt-6.1-terra",
       "input": 1,
       "read": 0.05,
-      "write": 1.25
+      "write": 1.25,
+      "longFrom": 272000,
+      "longX": 2
     },
     {
       "id": "gpt-6-astra",
       "input": 10,
       "read": 1,
-      "write": 12.5
+      "write": 12.5,
+      "longFrom": 272000,
+      "longX": 2
     },
     {
       "id": "gpt-6-luna",
       "input": 0.1,
       "read": 0.01,
-      "write": 0.125
+      "write": 0.125,
+      "longFrom": 272000,
+      "longX": 2
     }
   ],
   "results": [
@@ -47,7 +56,8 @@
         "write": 237726,
         "peak": 237726,
         "last": 237726,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 19
       },
       "on": {
         "requests": 31,
@@ -56,7 +66,8 @@
         "write": 236681,
         "peak": 83809,
         "last": 37969,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 61.63409265898786,
       "inputCostUSD": {
@@ -79,7 +90,8 @@
         "write": 110645,
         "peak": 110645,
         "last": 110645,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 4
       },
       "on": {
         "requests": 31,
@@ -88,7 +100,8 @@
         "write": 34226,
         "peak": 34226,
         "last": 34226,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 52.206276249390825,
       "inputCostUSD": {
@@ -111,7 +124,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -120,7 +134,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -143,7 +158,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -152,7 +168,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -175,7 +192,8 @@
         "write": 99176,
         "peak": 99176,
         "last": 99176,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 150,
@@ -184,7 +202,8 @@
         "write": 180008,
         "peak": 51343,
         "last": 51343,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 37.14541184393565,
       "inputCostUSD": {
@@ -207,7 +226,8 @@
         "write": 186663,
         "peak": 186663,
         "last": 186663,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 149
       },
       "on": {
         "requests": 300,
@@ -216,7 +236,8 @@
         "write": 377048,
         "peak": 83931,
         "last": 83931,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 49.164655158805026,
       "inputCostUSD": {
@@ -239,7 +260,8 @@
         "write": 291648,
         "peak": 291648,
         "last": 291648,
-        "over272k": 34
+        "over272k": 34,
+        "over100k": 329
       },
       "on": {
         "requests": 480,
@@ -248,7 +270,8 @@
         "write": 621279,
         "peak": 85520,
         "last": 73559,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 65.69641853054355,
       "inputCostUSD": {
@@ -271,7 +294,8 @@
         "write": 237726,
         "peak": 237726,
         "last": 237726,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 19
       },
       "on": {
         "requests": 31,
@@ -280,7 +304,8 @@
         "write": 236681,
         "peak": 83809,
         "last": 37969,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 61.63409265898786,
       "inputCostUSD": {
@@ -303,7 +328,8 @@
         "write": 110645,
         "peak": 110645,
         "last": 110645,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 4
       },
       "on": {
         "requests": 31,
@@ -312,7 +338,8 @@
         "write": 34226,
         "peak": 34226,
         "last": 34226,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 52.206276249390825,
       "inputCostUSD": {
@@ -335,7 +362,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -344,7 +372,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -367,7 +396,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -376,7 +406,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -399,7 +430,8 @@
         "write": 99176,
         "peak": 99176,
         "last": 99176,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 150,
@@ -408,7 +440,8 @@
         "write": 180008,
         "peak": 51343,
         "last": 51343,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 37.14541184393565,
       "inputCostUSD": {
@@ -431,7 +464,8 @@
         "write": 186663,
         "peak": 186663,
         "last": 186663,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 149
       },
       "on": {
         "requests": 300,
@@ -440,7 +474,8 @@
         "write": 377048,
         "peak": 83931,
         "last": 83931,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 49.164655158805026,
       "inputCostUSD": {
@@ -463,7 +498,8 @@
         "write": 291648,
         "peak": 291648,
         "last": 291648,
-        "over272k": 34
+        "over272k": 34,
+        "over100k": 329
       },
       "on": {
         "requests": 480,
@@ -472,7 +508,8 @@
         "write": 621279,
         "peak": 85520,
         "last": 73559,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 65.69641853054355,
       "inputCostUSD": {
@@ -495,7 +532,8 @@
         "write": 237726,
         "peak": 237726,
         "last": 237726,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 19
       },
       "on": {
         "requests": 31,
@@ -504,7 +542,8 @@
         "write": 236681,
         "peak": 83809,
         "last": 37969,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 61.63409265898786,
       "inputCostUSD": {
@@ -527,7 +566,8 @@
         "write": 110645,
         "peak": 110645,
         "last": 110645,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 4
       },
       "on": {
         "requests": 31,
@@ -536,7 +576,8 @@
         "write": 34226,
         "peak": 34226,
         "last": 34226,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 52.206276249390825,
       "inputCostUSD": {
@@ -559,7 +600,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -568,7 +610,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -591,7 +634,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -600,7 +644,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -623,7 +668,8 @@
         "write": 99176,
         "peak": 99176,
         "last": 99176,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 150,
@@ -632,7 +678,8 @@
         "write": 180008,
         "peak": 51343,
         "last": 51343,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 37.14541184393565,
       "inputCostUSD": {
@@ -655,7 +702,8 @@
         "write": 186663,
         "peak": 186663,
         "last": 186663,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 149
       },
       "on": {
         "requests": 300,
@@ -664,7 +712,8 @@
         "write": 377048,
         "peak": 83931,
         "last": 83931,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 49.164655158805026,
       "inputCostUSD": {
@@ -687,7 +736,8 @@
         "write": 291648,
         "peak": 291648,
         "last": 291648,
-        "over272k": 34
+        "over272k": 34,
+        "over100k": 329
       },
       "on": {
         "requests": 480,
@@ -696,7 +746,8 @@
         "write": 621279,
         "peak": 85520,
         "last": 73559,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 65.69641853054355,
       "inputCostUSD": {
@@ -719,7 +770,8 @@
         "write": 237726,
         "peak": 237726,
         "last": 237726,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 19
       },
       "on": {
         "requests": 31,
@@ -728,7 +780,8 @@
         "write": 236681,
         "peak": 83809,
         "last": 37969,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 61.63409265898786,
       "inputCostUSD": {
@@ -751,7 +804,8 @@
         "write": 110645,
         "peak": 110645,
         "last": 110645,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 4
       },
       "on": {
         "requests": 31,
@@ -760,7 +814,8 @@
         "write": 34226,
         "peak": 34226,
         "last": 34226,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 52.206276249390825,
       "inputCostUSD": {
@@ -783,7 +838,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -792,7 +848,8 @@
         "write": 24390,
         "peak": 24390,
         "last": 24390,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -815,7 +872,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 31,
@@ -824,7 +882,8 @@
         "write": 29593,
         "peak": 29593,
         "last": 29593,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 0,
       "inputCostUSD": {
@@ -847,7 +906,8 @@
         "write": 99176,
         "peak": 99176,
         "last": 99176,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "on": {
         "requests": 150,
@@ -856,7 +916,8 @@
         "write": 180008,
         "peak": 51343,
         "last": 51343,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 37.14541184393565,
       "inputCostUSD": {
@@ -879,7 +940,8 @@
         "write": 186663,
         "peak": 186663,
         "last": 186663,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 149
       },
       "on": {
         "requests": 300,
@@ -888,7 +950,8 @@
         "write": 377048,
         "peak": 83931,
         "last": 83931,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 49.164655158805026,
       "inputCostUSD": {
@@ -911,7 +974,8 @@
         "write": 291648,
         "peak": 291648,
         "last": 291648,
-        "over272k": 34
+        "over272k": 34,
+        "over100k": 329
       },
       "on": {
         "requests": 480,
@@ -920,7 +984,8 @@
         "write": 621279,
         "peak": 85520,
         "last": 73559,
-        "over272k": 0
+        "over272k": 0,
+        "over100k": 0
       },
       "tokenSavingPercent": 65.69641853054355,
       "inputCostUSD": {

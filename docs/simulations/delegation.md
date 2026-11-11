@@ -25,7 +25,7 @@ The two harness rows separate the two effects: separate contexts alone (same mod
 
 - System prompts, measured: Pi's own 7.3k characters (recorded runs); main's 14.1k with the subagent extension (recorded) plus `agent/AGENTS.md`; each role's assembled child prompt (14.3-18.8k, from `scripts/measure-child-prompt.mjs`) on top of Pi's. Tool definitions are not in the recordings: 6k characters are assumed for every context, plus 4k for main's subagent tools.
 - Per model call: 300 characters of assistant text kept in the history and 350 output tokens billed (text and thinking, the same in every arm); 900 output tokens for main's packet, 500 for a worker's report, 300 for a reply to the user.
-- Prices, USD per million tokens (Anthropic first-party list prices): Claude Opus 5.5 $4 input, $20 output, $0.20 cache read; Claude Sonnet 5.5 $2, $10, $0.20; Claude Haiku 5.5 $0.10, $0.50 and 5x above 100k input tokens. Cache writes (5-minute) are 1.25x input. Haiku's cache-read price is not listed: 0.1x input is assumed.
+- Prices, USD per million tokens (Anthropic first-party list prices): Claude Fable 5.1 $10 input, $50 output, $0.25 cache read; Claude Opus 5.5 $4 input, $20 output, $0.20 cache read; Claude Sonnet 5.5 $2, $10, $0.20; Claude Haiku 5.5 $0.10, $0.50 and 5x above 100k input tokens. Cache writes (5-minute) are 1.25x input. Haiku's cache-read price is not listed: 0.1x input is assumed.
 - Cache model: one breakpoint on the system block and one on the last message; a request reads the longest earlier-written prefix ending within 20 blocks of its breakpoint and writes the rest. Each context, and each model, has its own cache. Sizes are characters / 4.
 
 ## What a scripted run cannot know

@@ -8,7 +8,9 @@ import { OUTPUT_LOG_RETENTION_MS, pruneWorkerOutput } from "../output-cap.ts";
 
 const oldName = "0123456789abcdef.log";
 const recentName = "fedcba9876543210.log";
-const now = Date.now();
+// Whole seconds: utimes takes seconds, so a millisecond timestamp can be stored a fraction earlier than asked and the file at exactly
+// the retention boundary would then count as expired (an intermittent failure).
+const now = Math.floor(Date.now() / 1000) * 1000;
 function log(root: string, owner: string, name = oldName, age = OUTPUT_LOG_RETENTION_MS + 1_000) {
 	const dir = path.join(root, owner);
 	fs.mkdirSync(dir, { recursive: true });
