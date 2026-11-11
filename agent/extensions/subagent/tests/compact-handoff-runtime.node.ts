@@ -860,3 +860,64 @@ test("noticeLimit: a valid value survives the validator unchanged and applies to
 		assert.notEqual(foreground.isError, true, `${modeName}: a foreground run without noticeLimit is unchanged`);
 	}
 });
+
+test("completion delivery: pending SDK acceptance and uncertain errors stay separate from task outcome; no replay or error leak", async () => {
+	for (const mode of ["accepted", "sync-throw", "async-reject"] as const) {
+		const entered = deferred();
+		const gate = deferred();
+		let sends = 0, runs = 0;
+		const sentinel = "secret diagnostic SENTINEL_DO_NOT_EXPOSE";
+		const pi = { on() {}, sendMessage(message: any) {
+			assert.equal(message.customType, "subagent-completion");
+			sends++;
+			entered.resolve(undefined);
+			if (mode === "sync-throw") throw new Error(sentinel);
+			return gate.promise.then(() => { if (mode === "async-reject") throw new Error(sentinel); });
+		} };
+		const runtime = new BackgroundWorkers(pi as never, monitor as never, undefined, EPOCH_A);
+		const result = okResult("STATUS: PASS\nEVIDENCE: fixture");
+		const job = runtime.start(async () => { runs++; return result; });
+		assert.equal(runtime.list()[0].completionNotice, "not-sent");
+		await entered.promise;
+		if (mode !== "sync-throw") {
+			assert.equal(runtime.list()[0].completionNotice, "sending");
+			gate.resolve(undefined);
+			// Wait on the same settlement as the host send, then its awaiting runtime continuation.
+			await gate.promise;
+			await Promise.resolve();
+		}
+		const row = runtime.list()[0];
+		assert.equal(row.state, "completed");
+		assert.equal(row.completionNotice, mode === "accepted" ? "accepted" : "uncertain");
+		assert.equal(runtime.result(`${job.id}@${EPOCH_A}`), result);
+		assert.equal(runs, 1);
+		assert.equal(sends, 1);
+		assert.ok(!JSON.stringify(row).includes(sentinel));
+		runtime.reset();
+		assert.deepEqual(runtime.list(), []);
+	}
+});
+
+test("completion delivery: a late host rejection after reset cannot restore an old job or affect its successor", async () => {
+	const entered = deferred(), gate = deferred();
+	let sends = 0;
+	const pi = { on() {}, sendMessage() {
+		sends++;
+		if (sends === 1) { entered.resolve(undefined); return gate.promise.then(() => { throw new Error("late rejection"); }); }
+		return Promise.resolve();
+	} };
+	const runtime = new BackgroundWorkers(pi as never, monitor as never, undefined, EPOCH_A);
+	const old = runtime.start(async () => okResult("old"));
+	await entered.promise;
+	assert.equal(old.completionNotice, "sending");
+	runtime.reset();
+	const current = runtime.start(async () => okResult("new"));
+	gate.resolve(undefined);
+	await gate.promise;
+	await Promise.resolve();
+	assert.equal(old.completionNotice, "uncertain");
+	assert.deepEqual(runtime.list().map(row => [row.jobId, row.completionNotice]), [[current.id, "accepted"]]);
+	assert.throws(() => runtime.result(`${old.id}@${EPOCH_A}`), /unavailable/i);
+	assert.equal(sends, 2);
+	runtime.reset();
+});

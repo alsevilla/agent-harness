@@ -16,6 +16,19 @@ The orchestrator calls `subagent` with one of these shapes:
 
 DAG mode is exclusive with single, parallel and chain: an empty `dag` array counts as present, and any ambiguous, missing or invalid mode returns `isError` before any launch. In DAG mode, any top-level key that is not one of the tool's own parameters (for example a typo such as `agnet`) also returns `isError` before any launch. Node IDs start with a letter and use letters, digits, `_` or `-` (max 32), must be unique, and `dependsOn` must name existing nodes (no self, duplicate, missing or cyclic edges). Every `agent` must be a discovered role. A node is accepted only when it is not a failed result (exit 0, terminal `stop`, no error or abort). Each direct parent's full final text, with any `ERROR:`/`STDERR:` lines, is appended to a child's task under `--- Report from parent node "<id>" (agent: <agent>) ---`, concatenated literally. Failed, errored, `length`-stopped or blocked nodes block their descendants (`BLOCKED by <ids>`); independent branches continue. At most four nodes run at a time, each through the same workspace claim, provider check and declared fallback as a single run. The graph result is `isError` if any node is not accepted, and results are listed by node ID with status and cause. Abort or cancel launches no new nodes, drains running children before the job settles, and reports completed nodes honestly; nothing is rerun. Pause holds the whole job, including nodes not yet launched. `readOnly` is a trusted caller declaration, not an OS sandbox. DAG state is process-local to the session's job list: it is not persisted and not shared across Pi processes. Adaptive concurrency, duplicate coalescing and persistent graphs are not implemented (roadmap V3.2/V3.3 not done). Foreground DAG runs show no live per-node progress. A DAG result is evidence for the orchestrator, not an approval; core and manual review still apply.
 
+### Completion notification state
+
+`subagent_control` with `action: "list"` (or `/subagent list`) reports `completionNotice` separately from the job's execution `state`:
+
+| Value | Meaning |
+| --- | --- |
+| `not-sent` | No completion notification has been attempted yet. |
+| `sending` | The host send call has not settled. |
+| `accepted` | Pi accepted the notification; this does not prove main read it. |
+| `uncertain` | The send threw or rejected, possibly after queueing the notification. |
+
+An uncertain notification does not turn a successful task into a failed task, or authorize a retry. Retrieve the retained result through `subagent_control` `action: "result"` with the job ID (prefer the `bg-N@epoch` target in an available notice). Do not rerun the task merely because its notification was uncertain. Existing retention and session-reset limits still apply; this state is in memory, not a durable delivery receipt. Raw host delivery errors are not included in the listing.
+
 ### Optional Pi task model tiers
 
 Pi callers may set `modelTier` to `"economy"` or `"capable"` for a single task, or on each item in a `tasks` (parallel), `chain`, or `dag` batch. For single mode it is a top-level parameter; for batches it belongs to each item/node. These four forms work with the default background job (`background: true`) and with `background: false` foreground execution. Omit the field to run the role's `defaultModelTier` with that tier's own model, fallback and thinking. A root-level tier is not accepted for batch modes.
