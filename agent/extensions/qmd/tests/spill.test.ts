@@ -587,6 +587,11 @@ test("wiring: missing configured CLI does not break registration and fails only 
     const tools = await loadProducer(both, false);
     assert.deepEqual(Object.keys(tools).sort(), ["qmd_get", "qmd_search", "qmd_status"]);
     await assert.rejects(run(tools.qmd_status, {}), /HARNESS_QMD_CLI does not name a file/);
+    // A missing QMD is not remembered: once it is installed, the next lookup in the same session finds it.
+    writeFileSync(process.env.HARNESS_QMD_CLI, "");
+    nextOut = { stdout: ["ok"], code: 0 };
+    await run(tools.qmd_status, {});
+    assert.equal(spawns.at(-1)!.args[0], process.env.HARNESS_QMD_CLI);
   } finally {
     if (before === undefined) delete process.env.HARNESS_QMD_CLI;
     else process.env.HARNESS_QMD_CLI = before;

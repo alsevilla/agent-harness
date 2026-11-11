@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url";
 import { resolveQmd } from "../../skills/qmd/scripts/qmd.mjs";
 
 export default function plainQmd(pi: ExtensionAPI) {
-  let config: ReturnType<typeof resolveQmd>;
+  let found: ReturnType<typeof resolveQmd> | undefined;
   async function run(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
-    config ??= resolveQmd(process.env, { localConfig: fileURLToPath(new URL("./config.json", import.meta.url)) });
+    // Resolved on the first lookup and kept; a missing QMD is looked for again on the next lookup, so installing it mid-session works.
+    const config = found ?? resolveQmd(process.env, { localConfig: fileURLToPath(new URL("./config.json", import.meta.url)) });
     if (config.missing) throw new Error(config.missing);
+    found = config;
     if (!existsSync(config.node) || !existsSync(config.cli)) throw new Error("QMD runtime missing; check HARNESS_QMD_CLI or extensions/qmd/config.json.");
     return new Promise((resolve, reject) => {
       // An explicit named index bypasses QMD's cwd-dependent .qmd config discovery.
