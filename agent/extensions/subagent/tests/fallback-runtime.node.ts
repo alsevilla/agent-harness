@@ -473,6 +473,24 @@ test("two-pass oracle: an explicit modelSlot fallback runs once, on the fallback
 	assert.equal(result.passes, undefined);
 });
 
+test("every launch writes a durable trace of its tool calls and guard results under the agent directory", async () => {
+	const fx = setupRoots();
+	writeRole(fx.userAgents, "traced", { model: PRIMARY });
+	spawnPlan = () => ({ events: [
+		{ type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "echo x > DATABASE-DESIGN.md" } },
+		{ type: "tool_execution_end", toolCallId: "t1", toolName: "bash", isError: true, result: { content: [{ type: "text", text: "Blocked by harness safety guard [READ_ONLY_ROLE] op ab: redirects output into the candidate checkout" }] } },
+		assistant("stop", "STATUS: PASS"),
+	], exitCode: 0 });
+	const result = await run(fx.nested, discover(fx.nested), "traced") as RunResult & { traceLog?: string };
+	assert.ok(result.traceLog && result.traceLog.startsWith(path.join(fx.userDir, "run-state", "worker-traces")), String(result.traceLog));
+	const entries = fs.readFileSync(result.traceLog!, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+	assert.deepEqual(entries.map((e) => e.type), ["worker", "call", "result", "end"]);
+	assert.deepEqual([entries[0].role, entries[0].model], ["traced", PRIMARY]);
+	assert.equal(entries[1].args.command, "echo x > DATABASE-DESIGN.md");
+	assert.equal(entries[2].guard, "READ_ONLY_ROLE");
+	assert.equal(entries[3].exitCode, 0);
+});
+
 test("modelSlot fallback keeps the Anthropic subscription guard requirement", async () => {
 	const fx = setupRoots();
 	await assert.rejects(run(fx.nested, slotted(["anthropic/claude-haiku-5-5"]), "slot-role"), /subscription guard missing/);

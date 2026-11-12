@@ -97,6 +97,7 @@ Describe the task to main as usual; it routes the work. Useful commands:
 | `/subagent` | Live worker inspector (also `Alt+I`) |
 | `/subagent changes [#n or role]` | The files a worker changed, their git state, and the commands that would undo them (shown, never run) |
 | `/subagent trace [#n or role]` | One worker's tool calls as plain text to paste for a cost review: target, output size, repeats, whole reads of large files, errors, and the outputs carried longest (no argument lists the workers) |
+| Saved worker traces | Every worker's launch, tool calls (with arguments), results and guard refusals, kept 14 days in `run-state/worker-traces/` under your Pi agent directory, one JSON-lines file per worker, and named in the result as `traceLog`. Use it to establish what a worker ran after a reload. `PI_SUBAGENT_TRACE_LOG=0` turns it off ([details](agent/extensions/subagent/README.md#saved-worker-traces)) |
 | `/subagent list`, `steer #N <message>`, `pause bg-N`, `resume bg-N`, `stop #N`, `result bg-N` | Control running or finished workers without a model call |
 | `/subagent usage` | Usage per role, cost per completed task and main's context size |
 | `/subagent fold` | Fold main's earlier turns into a checkpoint at your next message, whatever the size (main also folds by itself from 50k tokens when idle; see [Main checkpoints](#context-and-cost)) |

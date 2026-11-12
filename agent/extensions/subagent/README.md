@@ -29,6 +29,19 @@ DAG mode is exclusive with single, parallel and chain: an empty `dag` array coun
 
 An uncertain notification does not turn a successful task into a failed task, or authorize a retry. Retrieve the retained result through `subagent_control` `action: "result"` with the job ID (prefer the `bg-N@epoch` target in an available notice). Do not rerun the task merely because its notification was uncertain. Existing retention and session-reset limits still apply; this state is in memory, not a durable delivery receipt. Raw host delivery errors are not included in the listing. So that main learns of such a job without listing, its request's hidden state line names each finished job whose notice is `uncertain` until main reads that job's result; the row then carries `resultRead: true`.
 
+### Saved worker traces
+
+Workers run with `--no-session`, and background results are kept in memory, so after a reload or a new session nothing would show which commands a worker ran or which the guard refused. The parent therefore writes one JSON-lines file per worker process to `<Pi agent directory>/run-state/worker-traces/<time>-<role>-<worker>.jsonl` (`worker-trace.ts`):
+
+| Line `type` | Holds |
+| --- | --- |
+| `worker` | Role, model, launch folder, read-only root (when the role is read-only), job, worker id, the task's first 4,000 characters |
+| `call` | Tool name and arguments; each string argument is cut at 4,000 characters |
+| `result` | Error flag, output length, the guard rule when the guard refused the call (`guard: "READ_ONLY_ROLE"`), and the first 400 characters of an error |
+| `end` | Exit code and stop reason |
+
+The result names its file as `traceLog`. Files older than 14 days are removed when a worker starts; `PI_SUBAGENT_TRACE_LOG=0` turns the trace off. Writing is best effort: a failure never affects the worker. The files stay on this machine, beside Pi's session files, and hold the arguments as the worker sent them, unredacted. To find which worker wrote a file, search the folder for its name, for example `Select-String -Path "$HOME\.pi\agent\run-state\worker-traces\*.jsonl" -SimpleMatch "DATABASE-DESIGN.md"` (PowerShell) or `grep -l DATABASE-DESIGN.md ~/.pi/agent/run-state/worker-traces/*.jsonl`.
+
 ### Two-pass oracle
 
 `oracle`, the exceptional escalation, runs two passes on every launch, in any mode (single, parallel, chain, DAG, foreground or background):
