@@ -38,6 +38,8 @@ test("all supported role tiers resolve exact same-tier pairs without mutating co
   }
   for (const source of ["user", "project"] as const) assert.throws(() => resolveModelTier(agent("backend-worker", source), "economy"), /canonical package roles/);
   assert.throws(() => resolveModelTier(agent("unknown"), "economy"), /not supported/);
+  // The refusal lists what the role does configure, so main can pick a supported tier.
+  assert.throws(() => resolveModelTier({ ...tiered("scout"), modelTiers: { economy: { model: "fixture/e", fallbackModel: ["fixture/f"], thinking: "low" } } } as unknown as AgentConfig, "capable"), /modelTier "capable" is not supported for role "scout"; it configures: economy$/);
 });
 
 const tiered = (name: string, source: AgentConfig["source"] = "package"): AgentConfig => ({

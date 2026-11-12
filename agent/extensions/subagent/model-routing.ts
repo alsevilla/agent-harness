@@ -19,7 +19,7 @@ export function resolveModelTier(agent: AgentConfig, requested?: ModelTier, slot
 	const tier = requested ?? agent.defaultModelTier;
 	if (tier === undefined) return { ...agent, fallbackModel: agent.fallbackModel?.slice(), tools: agent.tools?.slice() };
 	const models = agent.modelTiers?.[tier];
-	if (!models) throw new Error(requested === undefined ? `defaultModelTier \"${tier}\" is not configured for role \"${agent.name}\"` : `modelTier \"${tier}\" is not supported for role \"${agent.name}\"`);
+	if (!models) throw new Error(requested === undefined ? `defaultModelTier \"${tier}\" is not configured for role \"${agent.name}\"` : `modelTier \"${tier}\" is not supported for role \"${agent.name}\"; it configures: ${Object.keys(agent.modelTiers ?? {}).join(", ") || "none"}`);
 	const thinking = "thinking" in models ? models.thinking : agent.thinking;
 	if (slot === undefined) return { ...agent, model: models.model, fallbackModel: [...models.fallbackModel], tools: agent.tools?.slice(), thinking, modelTier: tier };
 	const [fallback] = getFallbackSequence(models.model, models.fallbackModel);
