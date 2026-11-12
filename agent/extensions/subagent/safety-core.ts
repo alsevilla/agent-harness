@@ -2253,6 +2253,7 @@ export function redactedEnvRead(toolName: string, input: Record<string, unknown>
 // redirections, file-writing commands, in-place editors, mutating git and package-manager subcommands, and edit/write tools. Writes
 // outside the candidate (the packet's _evidence/_scratch REPORT and artifact paths) stay allowed. Never grantable: the owning worker writes.
 export const CHILD_READONLY_ENV = "PI_SAFETY_READONLY";
+const RO_GIT_READS: Record<string, string[]> = { worktree: ["list"], submodule: ["status", "summary"], notes: ["list", "show"] };
 const RO_GIT = new Set(["add", "commit", "checkout", "switch", "restore", "reset", "apply", "am", "cherry-pick", "merge", "rebase", "revert", "rm", "mv", "clean", "push", "pull", "init", "clone", "worktree", "submodule", "notes", "update-index", "update-ref", "gc", "prune"]);
 const RO_PKG = new Set(["install", "i", "add", "remove", "rm", "uninstall", "un", "update", "up", "upgrade", "ci", "link", "unlink", "dedupe", "prune", "init", "version", "pkg"]);
 const RO_DEST_LAST = new Set(["cp", "copy", "copy-item", "install", "rsync"]);
@@ -2506,7 +2507,9 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 		if (name === "pwsh" || name === "powershell") { const at = lower.findIndex((a) => a === "-c" || a === "-command"); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args.slice(at + 1).join(" "), cwd, root, depth + 1); if (inner) return inner; } continue; }
 		if (name === "git") {
 			const sub = positionals[0]?.toLowerCase() ?? "";
-			if (RO_GIT.has(sub)) return `git ${sub} changes the repository`;
+			// Listing subcommands of otherwise mutating groups only read (field report: a planner's `git worktree list` was refused).
+			const reads = RO_GIT_READS[sub]?.includes(positionals[1]?.toLowerCase() ?? "");
+			if (RO_GIT.has(sub) && !reads) return `git ${sub} changes the repository`;
 			if (sub === "stash" && !["list", "show"].includes(positionals[1]?.toLowerCase() ?? "")) return "git stash changes the working tree";
 			if ((sub === "branch" || sub === "tag") && (positionals.length > 1 || lower.some((a) => /^-(d|D|m|M|c|C|f|a|s|u)$/.test(a) || a === "--delete" || a === "--move" || a === "--force"))) return `git ${sub} changes refs`;
 			continue;
