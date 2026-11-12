@@ -53,14 +53,27 @@ const CREDENTIAL_TEXT = /(token|password|secret|api[_-]?key|authorization)\s*[=:
 const CREDENTIAL_ASSIGN = /(token|password|secret|api[_-]?key|authorization)\s*[=:]\s*/gi;
 const ALWAYS_CREDENTIAL = /_authtoken|\bBearer\s+\S+|\b(sk-|ghp_|github_pat_|xox[bp]-|AKIA[0-9A-Z]{16})|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
 const RUNTIME_VALUE = /^(\[[A-Za-z_][\w.]*\]::|\$\(|\$[A-Za-z_{]|\(|-join\b|(Get-Random|New-Guid|ConvertTo-SecureString|openssl\s+rand|uuidgen|node\s+-e)\b)/i;
-/** True when the text embeds a credential literal (not one computed at runtime), so it must not be shown in an approval or stored in a grant. */
-export function literalCredential(text: string): boolean {
-	if (ALWAYS_CREDENTIAL.test(text)) return true;
+// Field report (op 5b724340ad2aa44d): an identity-checked cleanup of a test backend was refused as credential-like and the worker could
+// find no credential in it. The refusal now names the part that matched (never the value), and a credential word followed by no value,
+// a wildcard or a closing bracket or quote (a match pattern such as -like '*token=*', or a "Token:" label) is not a literal credential.
+const NO_VALUE = /^($|[*)\]};|,]|["'](\s|$|[*)\]};|,]))/;
+/** What makes the text carry a credential literal (not one computed at runtime), named without the value; undefined when it carries none. */
+export function credentialFinding(text: string): string | undefined {
+	const always = ALWAYS_CREDENTIAL.exec(text);
+	if (always) {
+		const hit = always[0];
+		const what = always[1] ? `a known key prefix (${always[1].startsWith("AKIA") ? "AKIA" : always[1]})` : /^_authtoken/i.test(hit) ? "an _authToken setting" : /^Bearer/i.test(hit) ? "a Bearer token" : "a private key block";
+		return `${what} at character ${always.index + 1}`;
+	}
 	for (const m of text.matchAll(CREDENTIAL_ASSIGN)) {
 		const rest = text.slice((m.index ?? 0) + m[0].length);
-		if (!RUNTIME_VALUE.test(rest)) return true;
+		if (!RUNTIME_VALUE.test(rest) && !NO_VALUE.test(rest)) return `"${m[1].toLowerCase()}${m[0].trim().slice(-1)}" followed by a literal value at character ${(m.index ?? 0) + 1}`;
 	}
-	return false;
+	return undefined;
+}
+/** True when the text embeds a credential literal (not one computed at runtime), so it must not be shown in an approval or stored in a grant. */
+export function literalCredential(text: string): boolean {
+	return credentialFinding(text) !== undefined;
 }
 
 type Token = { text: string; op: boolean };
@@ -615,7 +628,8 @@ const UNSAFE_DISPLAY = /[\p{Cf}\p{Zl}\p{Zp}\u0000-\u0008\u000b-\u001f\u007f-\u00
 function assertDisplayable(text: string): void {
 	if (text.length > MAX_OP_CHARS) throw new RangeError(`operation text exceeds ${MAX_OP_CHARS} characters`);
 	if (UNSAFE_DISPLAY.test(text)) throw new RangeError("invisible, bidi, line-separator or control characters are not authorizable");
-	if (literalCredential(text)) throw new RangeError("credential-like literal text is not authorizable: generate the value when the command runs (for example $env:NAME = [guid]::NewGuid().ToString()) or have the operator run it out-of-band");
+	const finding = credentialFinding(text);
+	if (finding) throw new RangeError(`credential-like literal text is not authorizable (${finding}): generate the value when the command runs (for example $env:NAME = [guid]::NewGuid().ToString()) or have the operator run it out-of-band`);
 }
 
 function validateOp(op: GuardOp): void {
@@ -2644,9 +2658,9 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
 	}
 	const advice = decision.rules.map((r) => RULE_ADVICE[r]).filter(Boolean);
-	const credential = decision.grantable && decision.op.kind === "shell" && literalCredential(decision.op.command);
+	const credential = decision.grantable && decision.op.kind === "shell" ? credentialFinding(decision.op.command) : undefined;
 	const how = credential
-		? "not approvable as written: the command text carries a credential-like literal, which an approval cannot show or store; generate the value when the command runs (for example $env:NAME = [guid]::NewGuid().ToString()) and request approval for that text, or have the operator run it directly"
+		? `not approvable as written: the command text carries a credential-like literal (${credential}), which an approval cannot show or store; generate the value when the command runs (for example $env:NAME = [guid]::NewGuid().ToString()) and request approval for that text, or have the operator run it directly`
 		: !decision.grantable
 		? "not grantable: no approval unblocks this for an agent; the operator can run it directly"
 		: scope === "main"

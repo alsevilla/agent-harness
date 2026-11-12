@@ -248,7 +248,7 @@ test("user permission rules: allow only what an operator could approve; deny blo
 // Field report (op c058ffddb7a0f93c): an approved isolated preview (backend 127.0.0.1:9091, frontend localhost:5173, scratch SQLite,
 // disposable admin password) could not start: Remove-Item Env:... was DESTRUCTIVE_FS, and the approval then refused the command as
 // credential-like although the password was generated at runtime. The first block message also pointed at that refused route.
-import { authorizableOp, blockReason, classifyShell, decideToolCall, literalCredential } from "../safety-core.ts";
+import { authorizableOp, blockReason, classifyShell, credentialFinding, decideToolCall, literalCredential } from "../safety-core.ts";
 test("isolated preview: Env: cleanup is not a filesystem delete; runtime-generated credentials are approvable; literal ones are not, consistently", () => {
 	for (const env of ["Remove-Item Env:RFID_CAPTURE -ErrorAction SilentlyContinue", "Remove-Item -Path Env:\\SMS_WORKER", "ri env:PREVIEW_ADMIN_PASSWORD", "Remove-Item Variable:pw"]) {
 		assert.deepEqual(classifyShell(env).rules, [], env);
@@ -268,11 +268,30 @@ test("isolated preview: Env: cleanup is not a filesystem delete; runtime-generat
 	assert.match(blockReason(decision, "main", false), /grantable: the operator can approve this exact operation with request_authorization/);
 
 	const literalCmd = runtime.replace("[guid]::NewGuid().ToString()", '"hunter2"');
-	assert.throws(() => authorizableOp("shell", literalCmd, "/tmp", agentDir), /credential-like literal text is not authorizable: generate the value when the command runs/);
+	assert.throws(() => authorizableOp("shell", literalCmd, "/tmp", agentDir), /credential-like literal text is not authorizable \("password=" followed by a literal value at character \d+\): generate the value when the command runs/);
 	const refused = blockReason(decideToolCall("powershell", { command: literalCmd }, "/tmp", agentDir) as any, "main", false);
-	assert.match(refused, /not approvable as written: the command text carries a credential-like literal, which an approval cannot show or store; generate the value when the command runs/, "the first refusal names the real route");
+	assert.match(refused, /not approvable as written: the command text carries a credential-like literal \("password=" followed by a literal value at character \d+\), which an approval cannot show or store; generate the value when the command runs/, "the first refusal names the real route");
 	assert.doesNotMatch(refused, /hunter2/, "never echoed");
 	assert.doesNotMatch(refused, /approve this exact operation with request_authorization/);
+});
+
+// Field report (op 5b724340ad2aa44d): an identity-checked cleanup of test backend PID 2508 was refused as credential-like and the worker
+// found no credential in it. A credential word with no value after it (a match pattern, a label) is not a literal, and the refusal
+// names the part that matched without echoing the value.
+test("credential-like refusals name the matching part; match patterns and labels are not literals", () => {
+	for (const ok of [
+		"$p = Get-CimInstance Win32_Process -Filter 'ProcessId = 2508'; if ($p.CommandLine -like '*--sms-token=*') { Stop-Process -Id 2508 -Force }",
+		'Write-Output "Token:"; Stop-Process -Id 2508',
+		"Get-Process | Where-Object { $_.Name -match 'secret:' }",
+	]) assert.equal(credentialFinding(ok), undefined, ok);
+	assert.equal(credentialFinding('$env:ADMIN_PASSWORD = "hunter2"'), '"password=" followed by a literal value at character 12');
+	assert.equal(credentialFinding("export KEY=sk-live123"), "a known key prefix (sk-) at character 12");
+	assert.equal(credentialFinding("curl -H 'Authorization: Bearer abc'"), "a Bearer token at character 25");
+	const cmd = 'Stop-Process -Id 2508; $env:SMS_TOKEN = "abc123"';
+	const refused = blockReason(decideToolCall("powershell", { command: cmd }, "/tmp", agentDir) as any, "main", false);
+	assert.match(refused, /credential-like literal \("token=" followed by a literal value at character 33\)/);
+	assert.doesNotMatch(refused, /abc123/, "never echoed");
+	assert.throws(() => authorizableOp("shell", cmd, "/tmp", agentDir), /not authorizable \("token=" followed by a literal value at character 33\)/);
 });
 
 // Release notes need the previous release: gh release list and view are read-only and pass; every other gh release command stays gated.
