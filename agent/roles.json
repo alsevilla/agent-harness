@@ -288,8 +288,8 @@
         "thinking": "medium"
       },
       "capable": {
-        "model": "openai-codex/gpt-6.1-sol",
-        "fallbackModel": "anthropic/claude-sonnet-5-5",
+        "model": "anthropic/claude-sonnet-5-5",
+        "fallbackModel": "openai-codex/gpt-6.1-sol",
         "thinking": "medium"
       }
     },
