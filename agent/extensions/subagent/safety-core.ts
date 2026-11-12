@@ -2165,12 +2165,13 @@ export function redactedEnvRead(toolName: string, input: Record<string, unknown>
 export const CHILD_READONLY_ENV = "PI_SAFETY_READONLY";
 const RO_GIT = new Set(["add", "commit", "checkout", "switch", "restore", "reset", "apply", "am", "cherry-pick", "merge", "rebase", "revert", "rm", "mv", "clean", "push", "pull", "init", "clone", "worktree", "submodule", "notes", "update-index", "update-ref", "gc", "prune"]);
 const RO_PKG = new Set(["install", "i", "add", "remove", "rm", "uninstall", "un", "update", "up", "upgrade", "ci", "link", "unlink", "dedupe", "prune", "init", "version", "pkg"]);
-const RO_DEST_LAST = new Set(["cp", "copy", "copy-item", "mv", "move", "move-item", "install", "rsync"]);
-const RO_DEST_ALL = new Set(["tee", "touch", "truncate", "mkdir", "md"]);
+const RO_DEST_LAST = new Set(["cp", "copy", "copy-item", "install", "rsync"]);
+// A move or rename changes its source as well as its destination: every path is checked (moving a file out of the candidate removes it).
+const RO_DEST_ALL = new Set(["tee", "touch", "truncate", "mkdir", "md", "mv", "move", "move-item", "mi", "rename-item", "ren", "rni"]);
 // PowerShell writers take named parameters: only the path parameters (or the first positional) name the file. Field report: treating
 // every argument as a target made -Value script text, -ItemType Directory and -Encoding utf8 look like paths inside the candidate, so
 // a read-only worker could not write its Betterwright script to the packet's sibling _scratch folder.
-const PS_WRITERS = new Set(["set-content", "add-content", "out-file", "new-item", "ni", "sc", "ac"]);
+const PS_WRITERS = new Set(["set-content", "add-content", "out-file", "new-item", "ni", "sc", "ac", "tee-object", "export-csv", "epcsv", "export-clixml"]);
 const PS_PATH_PARAMS = ["path", "filepath", "literalpath", "pspath"];
 const PS_VALUE_PARAMS = ["value", "inputobject", "encoding", "itemtype", "type", "stream", "width", "delimiter", "credential", "filter", "include", "exclude", "name"];
 const PS_SWITCHES = ["force", "append", "noclobber", "nonewline", "passthru", "whatif", "confirm", "asbytestream", "raw"];
@@ -2303,6 +2304,93 @@ export function withoutFileBodies(text: string): string {
 	}
 	return out.join("\n");
 }
+// Field report: a read-only database-specialist's report appeared inside the checkout while planner and test-engineer writes there were
+// refused. Writes that name no shell redirect or listed command went unchecked: .NET file methods in PowerShell, inline interpreter code
+// (python -c, python - <<EOF, node -e) and dd of=. Their path arguments are now checked like any other target; a path that is not a
+// plain string literal cannot be resolved here and is refused. Code run from a script file (python _scratch/x.py) is not inspected.
+/** The top-level arguments of a call whose "(" is at open, up to its matching ")". */
+function callArgs(text: string, open: number): string[] {
+	const args: string[] = [];
+	let depth = 0, quote = "", cur = "";
+	for (let i = open + 1; i < text.length; i++) {
+		const c = text[i];
+		if (quote) { cur += c; if (c === "\\" && quote !== "'") { cur += text[++i] ?? ""; continue; } if (c === quote) quote = ""; continue; }
+		if (c === "'" || c === '"' || c === "`") { quote = c; cur += c; continue; }
+		if (c === "(" || c === "[" || c === "{") depth++;
+		if (c === ")" || c === "]" || c === "}") { if (depth === 0) { if (cur.trim()) args.push(cur.trim()); return args; } depth--; }
+		if (c === "," && depth === 0) { args.push(cur.trim()); cur = ""; continue; }
+		cur += c;
+	}
+	if (cur.trim()) args.push(cur.trim());
+	return args;
+}
+/** A plain string literal's text, or "" when the argument is anything else (a variable, an expression, an interpolating string). */
+function literalArg(arg: string | undefined): string {
+	const m = /^(?:[rRbBuU]{0,2})(['"`])([\s\S]*)\1$/.exec((arg ?? "").trim());
+	if (!m || (m[1] === "`" && m[2].includes("${")) || (m[1] === '"' && /\$\w|\$\(/.test(m[2]))) return "";
+	return m[2];
+}
+// .NET file and directory methods that create, change, move or delete: the path arguments they write (Copy/Move/Replace: both paths).
+const DOTNET_WRITE = /\[(?:System\.)?IO\.(File|Directory)\]::(Write\w*|Append\w*|Create\w*|Copy|Move|Replace|Delete|Open|OpenWrite|SetAttributes|Encrypt|Decrypt)\s*\(/gi;
+const DOTNET_STREAM = /(?:New-Object\s+(?:-TypeName\s+)?|\[)(?:System\.)?IO\.(?:StreamWriter|FileStream)\]?(?:::new)?\s*\(/gi;
+function dotnetTargets(text: string): string[] {
+	const targets: string[] = [];
+	for (const m of text.matchAll(DOTNET_WRITE)) {
+		const args = callArgs(text, m.index! + m[0].length - 1);
+		const n = /^(copy|move|replace)$/i.test(m[2]) ? 2 : 1;
+		for (let k = 0; k < n; k++) targets.push(literalArg(args[k]));
+	}
+	for (const m of text.matchAll(DOTNET_STREAM)) targets.push(literalArg(callArgs(text, m.index! + m[0].length - 1)[0]));
+	return targets;
+}
+// Inline interpreter code: file writes, moves and deletes, with the arguments that name paths.
+const CODE_WRITES: { re: RegExp; paths: number; mode?: boolean }[] = [
+	{ re: /\bopen\s*\(/g, paths: 1, mode: true }, // Python open(path, "w"); Perl/Ruby open with a write mode
+	{ re: /\bPath\s*\(/g, paths: 1 }, // pathlib: checked only when a write method follows (below)
+	{ re: /\b(?:shutil\.(?:copy\w*|move|rmtree)|os\.(?:rename|replace))\s*\(/g, paths: 2 },
+	{ re: /\bos\.(?:remove|unlink|rmdir|mkdir|makedirs|truncate)\s*\(/g, paths: 1 },
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:writeFile|appendFile|createWriteStream|truncate|unlink|rm|rmdir|mkdir)(?:Sync)?\s*\(/g, paths: 1 },
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:copyFile|cp|rename|link|symlink)(?:Sync)?\s*\(/g, paths: 2 },
+	{ re: /\bFile\.(?:write|open|delete|rename|binwrite)\s*\(/g, paths: 1 }, // Ruby
+];
+const PATHLIB_WRITE = /^\s*\)\s*\.\s*(?:write_text|write_bytes|touch|unlink|rename|replace|mkdir|rmdir|open\s*\([^)]*['"][wax+])/;
+function codeTargets(code: string): string[] {
+	const targets: string[] = [];
+	for (const { re, paths, mode } of CODE_WRITES) for (const m of code.matchAll(re)) {
+		const open = m.index! + m[0].length - 1;
+		const args = callArgs(code, open);
+		if (/Path\s*\($/.test(m[0])) {
+			let close = open, depth = 0; // the matching ")" of Path(...), then the method called on it
+			for (; close < code.length; close++) { if (code[close] === "(") depth++; else if (code[close] === ")" && --depth === 0) break; }
+			if (!PATHLIB_WRITE.test(code.slice(close))) continue;
+		}
+		if (mode) {
+			const m2 = args.slice(1).map((a) => a.replace(/^mode\s*=\s*/, ""));
+			const perlMode = /^['"]\s*(?:\+?>|>>|\+<)/.test(args[1] ?? "") || /^['"]\s*(?:\+?>|>>)/.test(args[0] ?? "");
+			if (!perlMode && !m2.some((a) => /^(?:[rRbBuU]{0,2})(['"])[^'"]*[wax+][^'"]*\1$/.test(a))) continue; // reads stay allowed
+			if (/^['"]\s*(?:\+?>|>>)/.test(args[0] ?? "")) { targets.push(literalArg(args[0]).replace(/^\s*\+?>{1,2}\s*/, "")); continue; } // Perl 2-arg open(">file")
+			if (perlMode) { targets.push(literalArg(args[2])); continue; }
+		}
+		for (let k = 0; k < paths; k++) targets.push(literalArg(args[k]));
+	}
+	return targets;
+}
+// Names only, to inspect the code they would run; this file never launches an interpreter.
+const INTERPRETERS = { has: (name: string) => /^(?:python3?|py|node|nodejs|perl|ruby|deno|bun)$/.test(name) };
+const CODE_FLAGS = new Set(["-c", "-e", "-p", "--eval", "--print", "-E"]);
+/** Code bodies an interpreter runs from a heredoc (python3 - <<'EOF' ... EOF); read before the bodies are dropped as data. */
+function interpreterHeredocs(text: string): string[] {
+	const bodies: string[] = [];
+	const lines = text.split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) for (const m of lines[i].matchAll(HEREDOC)) {
+		const reader = lines[i].slice(0, m.index).split(/[;&|]+/).pop() ?? "";
+		if (!INTERPRETERS.has(commandName(reader.trim().split(/\s+/)[0] ?? ""))) continue;
+		let j = i + 1;
+		while (j < lines.length && (m[1] ? lines[j].replace(/^\t+/, "") : lines[j]) !== m[3]) j++;
+		bodies.push(lines.slice(i + 1, j).join("\n"));
+	}
+	return bodies;
+}
 function readOnlyShell(text: string, cwd: string, root: string, depth = 0): string | undefined {
 	if (depth > 3) return "command nesting is too deep to check";
 	for (const raw of splitSegments(text)) {
@@ -2315,6 +2403,9 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 		const lower = args.map((a) => a.toLowerCase());
 		const positionals = args.filter((a) => !a.startsWith("-"));
 		if (RO_SHELLS.has(name)) { const at = lower.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a)); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args[at + 1], cwd, root, depth + 1); if (inner) return inner; } continue; }
+		if (name === "cmd") { const at = lower.findIndex((a) => a === "/c" || a === "/k"); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args.slice(at + 1).join(" "), cwd, root, depth + 1); if (inner) return inner; } continue; }
+		if (INTERPRETERS.has(name)) { const at = args.findIndex((a) => CODE_FLAGS.has(a)); if (at >= 0 && args[at + 1] !== undefined) for (const t of codeTargets(args[at + 1])) { const why = roTarget(`${name} inline code writes`, t, cwd, root); if (why) return why; } }
+		if (name === "dd") for (const a of args) if (/^of=/i.test(a)) { const why = roTarget("dd writes", a.slice(3), cwd, root); if (why) return why; }
 		if (name === "pwsh" || name === "powershell") { const at = lower.findIndex((a) => a === "-c" || a === "-command"); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args.slice(at + 1).join(" "), cwd, root, depth + 1); if (inner) return inner; } continue; }
 		if (name === "git") {
 			const sub = positionals[0]?.toLowerCase() ?? "";
@@ -2334,6 +2425,13 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 	}
 	return undefined;
 }
+/** Where a candidate's artifact folders sit by the harness convention: <x>/worktrees/<repo> for a task checkout <x>/worktrees/<repo>/<task>,
+ * else <parent>/worktrees/<checkout name> beside a primary checkout. A hint for the refusal; the packet's own paths are authoritative. */
+export function artifactGroupHint(root: string): string {
+	const r = protectedRoot(root);
+	const parent = path.posix.dirname(r);
+	return path.posix.basename(path.posix.dirname(parent)) === "worktrees" ? parent : `${parent}/worktrees/${path.posix.basename(r)}`;
+}
 /** Why a read-only worker's tool call would change its candidate checkout, or undefined when it does not. */
 export function readOnlyViolation(toolName: string, input: Record<string, unknown>, cwd: string, root: string): string | undefined {
 	if (toolName === "edit" || toolName === "write") {
@@ -2341,7 +2439,12 @@ export function readOnlyViolation(toolName: string, input: Record<string, unknow
 		return insideRoot(p, cwd, root) ? `${toolName} changes a file in the candidate checkout` : undefined;
 	}
 	if (toolName !== "bash" && toolName !== "powershell") return undefined;
-	return readOnlyShell(withLiteralVariables(withoutDataBodies(String(input?.command ?? ""))), cwd, root);
+	const command = withLiteralVariables(String(input?.command ?? ""));
+	for (const code of interpreterHeredocs(command)) for (const t of codeTargets(code)) { const why = roTarget("interpreter code writes", t, cwd, root); if (why) return why; }
+	const shell = withoutDataBodies(command);
+	// Scanned over the whole command: segment splitting treats "(" as a subshell and would cut a .NET call apart.
+	for (const t of dotnetTargets(shell)) { const why = roTarget(".NET file method writes", t, cwd, root); if (why) return why; }
+	return readOnlyShell(shell, cwd, root);
 }
 
 // Field report: a read-only debugger's PowerShell `$R='C:\...\_scratch\sms-test\r1-compile-debug'` followed by
@@ -2459,7 +2562,7 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 		const why = readOnlyViolation(toolName, input, cwd, guard.readOnlyRoot);
 		if (why) {
 			const digest = createHash("sha256").update(`${toolName}\0${JSON.stringify(input ?? {})}`).digest("hex").slice(0, 16);
-			return { block: true, reason: `Blocked by harness safety guard [READ_ONLY_ROLE] op ${digest}: ${why}; not grantable: this role is read-only for its candidate, so write REPORT and evidence files to the packet's _evidence or _scratch paths and return code or config changes to main for the owning worker.` };
+			return { block: true, reason: `Blocked by harness safety guard [READ_ONLY_ROLE] op ${digest}: ${why}; not grantable: this role is read-only for its candidate, so write REPORT and evidence files to the packet's _evidence or _scratch paths (for this candidate: ${artifactGroupHint(guard.readOnlyRoot)}/_evidence/<task>/ or _scratch/<task>/) and return code or config changes to main for the owning worker.` };
 		}
 	}
 	if ((toolName === "bash" || toolName === "powershell") && typeof input?.command === "string") {

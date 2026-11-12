@@ -73,6 +73,9 @@ Use `oracle` only when:
 - two reasonable fix attempts failed and root cause remains disputed.
 Never use Oracle as routine second opinion.
 
+## Model families
+A checker on the same model family as the work it checks tends to share its blind spots. The shipped roles keep them apart: implementation workers run Claude first, `reviewer` and `test-engineer` run GPT first on both tiers, and Oracle's two passes use one of each. An explicit `modelSlot: "fallback"` on a checker moves it onto the workers' family, so use it for availability, not for review. On Pi, one Oracle launch runs two passes, GPT-6.1 Sol then Claude Opus 5.5 reviewing Sol's report, so it costs two full runs; its result is the second pass's answer.
+
 ## Release / SHIP / LEARN
 Use `release-engineer` when the task actually enters SHIP or LEARN.
 

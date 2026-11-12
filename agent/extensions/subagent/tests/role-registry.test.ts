@@ -221,7 +221,7 @@ test("written tier scenarios resolve through the real package registry to the co
     assert.equal(omitted.modelTier, "capable");
     assert.equal(omitted.model, committedTier("database-worker", "capable").model);
     assert.deepEqual(omitted.fallbackModel, [committedTier("database-worker", "capable").fallbackModel].flat());
-    assert.equal(omitted.thinking, "low");
+    assert.equal(omitted.thinking, committedTier("database-worker", "capable").thinking);
     // Roles without a configured capable tier are refused for capable: the selection is unresolved, not economy.
     for (const name of ["scout"]) assert.throws(() => resolveModelTier(role(name), "capable"), /not supported/, name);
     // The resolver refuses any tier the role does not configure, including unsupported names.
@@ -356,10 +356,29 @@ test("database-worker uses implementation-worker metadata and database ownership
   const role = roles.find((r: { name: string }) => r.name === "database-worker");
   assert.ok(role);
   const tier = role.modelTiers[role.defaultModelTier];
-  assert.deepEqual({ defaultModelTier: role.defaultModelTier, model: tier.model, fallbackModel: tier.fallbackModel, thinking: tier.thinking, tools: role.tools }, { defaultModelTier: "capable", model: "openai-codex/gpt-6.1-sol", fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" });
+  assert.deepEqual({ defaultModelTier: role.defaultModelTier, model: tier.model, fallbackModel: tier.fallbackModel, thinking: tier.thinking, tools: role.tools }, { defaultModelTier: "capable", model: "anthropic/claude-sonnet-5-5", fallbackModel: "openai-codex/gpt-6.1-sol", thinking: "medium", tools: "read, grep, find, ls, bash, powershell, edit" });
   const text = fs.readFileSync(new URL("../../../agents/database-worker.md", import.meta.url), "utf8");
   assert.match(text, /schema.*migrations.*transactions/is);
   assert.match(text, /database-specialist/i);
+});
+
+// A checker on the same model family as the work it checks tends to share its blind spots. Implementation workers run Claude first;
+// the roles that check their work (reviewer, test-engineer) run GPT first on every tier, with the other family as fallback, and
+// oracle's two passes use one model of each family.
+test("checkers run on the other model family from the implementation workers they check", () => {
+  const family = (model: string) => model.split("/")[0] === "anthropic" ? "claude" : "gpt";
+  const workers = ["backend-worker", "frontend-worker", "general-worker", "platform-worker", "database-worker"];
+  for (const tier of ["economy", "capable"] as const) {
+    const built = new Set(workers.map((name) => family(roles.find((r: { name: string }) => r.name === name).modelTiers[tier].model)));
+    assert.equal(built.size, 1, `${tier}: implementation workers share one family`);
+    for (const checker of ["reviewer", "test-engineer"]) {
+      const cfg = roles.find((r: { name: string }) => r.name === checker).modelTiers[tier];
+      assert.ok(!built.has(family(cfg.model)), `${checker}.${tier}: primary is the other family`);
+      assert.ok(built.has(family(cfg.fallbackModel)), `${checker}.${tier}: fallback keeps the checker available on the workers' family`);
+    }
+  }
+  const oracle = roles.find((r: { name: string }) => r.name === "oracle").modelTiers.capable;
+  assert.notEqual(family(oracle.model), family(oracle.fallbackModel), "oracle's two passes use one model of each family");
 });
 
 test("implementation workers are backend, frontend, general and platform with registry-defined defaults", () => {

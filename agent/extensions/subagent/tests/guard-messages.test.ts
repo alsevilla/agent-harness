@@ -377,3 +377,55 @@ test("commit refusals name the condition that failed: folder, branch, detached H
 		assert.match(why(commit), /HEAD is not on a branch \(detached\)/);
 	} finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
+
+// Field report (harness-block-triage): planner and test-engineer writes inside the checkout were refused, but a database-specialist's
+// report appeared there. Writes that use no redirect or listed command were not checked: .NET file methods, Tee-Object and Export-Csv,
+// Rename-Item, cmd /c, inline interpreter code, dd of=, and a move whose source is in the checkout. Each is refused into the checkout and
+// still allowed into the sibling evidence folder; reads stay allowed.
+test("read-only roles: every write form is refused inside the checkout and allowed into the sibling evidence folder", () => {
+	const repo = "D:/work/RFID/RFIDAttendance-Rust";
+	const ev = "D:/work/RFID/worktrees/RFIDAttendance-Rust/_evidence/triage";
+	const check = (tool: string, command: string) => readOnlyViolation(tool, { command }, repo, repo);
+	const forms: [string, (target: string) => string][] = [
+		["powershell", (t) => `[IO.File]::WriteAllText("${t}", "report")`],
+		["powershell", (t) => `$text = 'r'; [System.IO.File]::WriteAllLines('${t}', @($text))`],
+		["powershell", (t) => `[System.IO.File]::AppendAllText("${t}", "x")`],
+		["powershell", (t) => `$w = New-Object System.IO.StreamWriter("${t}"); $w.Close()`],
+		["powershell", (t) => `"x" | Tee-Object -FilePath "${t}"`],
+		["powershell", (t) => `$rows | Export-Csv "${t}"`],
+		["powershell", (t) => `cmd /c "echo x > ${t}"`],
+		["powershell", (t) => `python -c "open('${t}','w').write('x')"`],
+		["bash", (t) => `python3 - <<'EOF'\nimport json\njson.dump({}, open('${t}', 'w'))\nEOF`],
+		["bash", (t) => `python3 -c "from pathlib import Path; Path('${t}').write_text('x')"`],
+		["bash", (t) => `node -e "require('fs').writeFileSync('${t}', 'x')"`],
+		["bash", (t) => `node - <<'EOF'\nconst fs = require('fs');\nfs.appendFileSync("${t}", "x");\nEOF`],
+		["bash", (t) => `dd if=/dev/zero of=${t} count=1`],
+	];
+	for (const [tool, form] of forms) {
+		assert.match(check(tool, form("REPORT.md")) ?? "", /into the candidate checkout/, `${tool}: ${form("REPORT.md")}`);
+		assert.match(check(tool, form(`${repo}/docs/REPORT.md`)) ?? "", /into the candidate checkout/, `${tool} absolute: ${form("")}`);
+		assert.equal(check(tool, form(`${ev}/REPORT.md`)), undefined, `${tool} evidence: ${form(`${ev}/REPORT.md`)}`);
+	}
+	// A move or rename changes its source too.
+	assert.match(check("bash", `mv src/db.rs ${ev}/db.rs`) ?? "", /into the candidate checkout/);
+	assert.match(check("powershell", `Move-Item src/db.rs ${ev}/db.rs`) ?? "", /into the candidate checkout/);
+	assert.match(check("powershell", "Rename-Item notes.md REPORT.md") ?? "", /into the candidate checkout/);
+	assert.equal(check("bash", `mv ${ev}/a.md ${ev}/b.md`), undefined);
+	// A path the guard cannot resolve is refused, not assumed safe.
+	assert.match(check("bash", `python3 -c "p = 'x'; open(p, 'w')"`) ?? "", /cannot resolve|no target/);
+	// Reads, and a script file written as data, stay allowed (code run from a script file is not inspected).
+	for (const [tool, command] of [
+		["powershell", `python -c "print(open('src/db.rs').read())"`],
+		["bash", `node -e "console.log(require('fs').readFileSync('Cargo.toml', 'utf8'))"`],
+		["powershell", `[IO.File]::ReadAllText("src/db.rs")`],
+		["bash", `python3 - <<'EOF'\nfrom pathlib import Path\nprint(Path('src/db.rs').read_text())\nEOF`],
+		["bash", `cat > ${ev}/check.py <<'EOF'\nopen('out.txt', 'w').write('x')\nEOF`],
+	] as const) assert.equal(check(tool, command), undefined, command);
+});
+
+test("a READ_ONLY_ROLE refusal names the candidate's artifact folder by the worktrees convention", () => {
+	const ro = (root: string) => ({ ...child, readOnlyRoot: root });
+	const refuse = (root: string) => (guardToolCall(ro(root), "bash", { command: "echo x > REPORT.md" }, root) as { reason: string }).reason;
+	assert.match(refuse("D:/work/RFID/RFIDAttendance-Rust"), /for this candidate: D:\/work\/RFID\/worktrees\/RFIDAttendance-Rust\/_evidence\/<task>\/ or _scratch\/<task>\//);
+	assert.match(refuse("D:/work/RFID/worktrees/RFIDAttendance-Rust/sms-pacing"), /for this candidate: D:\/work\/RFID\/worktrees\/RFIDAttendance-Rust\/_evidence\/<task>\//);
+});

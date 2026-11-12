@@ -19,12 +19,36 @@ export function resolveModelTier(agent: AgentConfig, requested?: ModelTier, slot
 	const tier = requested ?? agent.defaultModelTier;
 	if (tier === undefined) return { ...agent, fallbackModel: agent.fallbackModel?.slice(), tools: agent.tools?.slice() };
 	const models = agent.modelTiers?.[tier];
-	if (!models) throw new Error(requested === undefined ? `defaultModelTier \"${tier}\" is not configured for role \"${agent.name}\"` : `modelTier \"${tier}\" is not supported for role \"${agent.name}\"`);
+	if (!models) throw new Error(requested === undefined ? `defaultModelTier \"${tier}\" is not configured for role \"${agent.name}\"` : `modelTier \"${tier}\" is not supported for role \"${agent.name}\"; it configures: ${Object.keys(agent.modelTiers ?? {}).join(", ") || "none"}`);
 	const thinking = "thinking" in models ? models.thinking : agent.thinking;
 	if (slot === undefined) return { ...agent, model: models.model, fallbackModel: [...models.fallbackModel], tools: agent.tools?.slice(), thinking, modelTier: tier };
 	const [fallback] = getFallbackSequence(models.model, models.fallbackModel);
 	if (fallback === undefined) throw new Error(`modelSlot "fallback" has no usable fallback in the ${tier} tier of role "${agent.name}"`);
 	return { ...agent, model: fallback, fallbackModel: [], tools: agent.tools?.slice(), thinking, modelTier: tier, modelSlot: slot };
+}
+
+// Two-pass roles: the first pass runs as configured; when it completes, a second, independent pass runs on the tier's first fallback
+// with the first pass's report, and its answer is the result. Oracle only: it is the exceptional escalation, where the best answer
+// is worth a second model's full review. An explicit modelSlot "fallback" asks for one run on the fallback and stays single-pass.
+export const TWO_PASS_ROLES: ReadonlySet<string> = new Set(["oracle"]);
+
+/** The model for the second pass, or undefined when this launch is single-pass. firstRequested: the model the first pass finally ran on. */
+export function secondPassModel(agent: SelectedAgent, firstRequested: string | undefined): string | undefined {
+	if (!TWO_PASS_ROLES.has(agent.name) || agent.source !== "package" || agent.modelSlot !== undefined) return undefined;
+	const [second] = getFallbackSequence(agent.model, agent.fallbackModel);
+	// The first pass already ran on that model (its primary was unavailable): a second pass would repeat the same model.
+	return second === undefined || second === firstRequested ? undefined : second;
+}
+
+/** The second pass's task: the original packet, how to review, and the first pass's final report. */
+export function secondPassTask(task: string, firstModel: string, firstReport: string): string {
+	return `${task}
+
+## Second pass
+You are the second, independent pass on this task. A first pass on another model (${firstModel}) has answered it; its final report is below. Do not take it on trust. Work the question again from the evidence in the candidate: verify or refute each of its claims, correct what it got wrong, and add what it missed. Your reply is the final answer: give it in the required handoff format and state where and why you differ from the first pass. Write your REPORT to the packet's report path; it replaces the first pass's.
+
+--- First pass report (${firstModel}) ---
+${firstReport}`;
 }
 
 // Model IDs are catalog identifiers: trimmed, otherwise passed through verbatim (no aliasing).

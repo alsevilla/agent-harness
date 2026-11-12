@@ -265,14 +265,14 @@ check("modelSlot refusals happen before any spawn: schema, runtime, root batch, 
 		["null slot", slotted({ modelSlot: null })],
 		["unsupported slot", slotted({ modelSlot: "primary" })],
 		["user role", { agent: "writer", task: "t", modelTier: "capable", modelSlot: "fallback" }],
-		["no usable fallback (oracle)", { agent: "oracle", task: "t", modelTier: "capable", modelSlot: "fallback" }],
 		["unconfigured tier (scout capable)", { agent: "scout", task: "t", modelTier: "capable", modelSlot: "fallback" }],
 		["root slot on tasks", { tasks: [{ agent: "backend-worker", task: "t" }], modelSlot: "fallback" }],
 		["root slot on chain", { chain: [{ agent: "backend-worker", task: "t", modelTier: "capable" }], modelSlot: "fallback" }],
 		["root slot on dag", { dag: [{ id: "a", agent: "backend-worker", task: "t", modelTier: "capable" }], modelSlot: "fallback" }],
 		["tasks entry without tier", { tasks: [{ agent: "backend-worker", task: "t", modelSlot: "fallback" }] }],
 		["chain later entry null", { chain: [{ agent: "backend-worker", task: "t" }, slotted({ modelSlot: null })] }],
-		["dag entry no fallback", { dag: [{ id: "a", agent: "oracle", task: "t", modelTier: "capable", modelSlot: "fallback" }] }],
+		// No shipped role lacks a fallback (oracle has one since the 2026-11-12 preset update); the no-usable-fallback refusal is
+		// covered against a fixture role in model-routing.test.ts.
 	];
 	for (const backgroundMode of [false, true]) for (const [label, args] of refused) {
 		const result = await tool.execute("slot-refusal", { background: backgroundMode, agentScope: "both", ...args }, undefined, undefined, ctx);
