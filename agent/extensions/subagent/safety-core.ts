@@ -431,8 +431,63 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 		if (tokens.length && (WRITE_CMDS.has(commandName(words[0] ?? "")) || raw.includes(">")) && tokens.some((t) => isConfigToken(t.text))) add(out, "CONFIG_WRITE");
 	}
 	if (allTokens.some((t) => isSecretBasename(basenameOf(t)))) add(out, "SECRET");
+	if (/\.Kill\s*\(/i.test(text)) add(out, "PROC_KILL"); // System.Diagnostics.Process.Kill(), which names no kill command
 	if (/\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|;&\n]*\|\s*(sh|bash|zsh|dash|iex|invoke-expression|pwsh|powershell|cmd)\b/i.test(text)) add(out, "CURL_SHELL");
 	if (/\b(iex|invoke-expression)\b.*\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i.test(text)) add(out, "CURL_SHELL");
+}
+
+// Field report (sms-live-test): a read-only test-engineer's hardware smoke test started the backend from its _evidence folder, waited,
+// then stopped it, and the stop was refused as PROC_KILL although it ended only the process the same command had started. A stop is now
+// allowed when every process it targets is owned by the command: held in a variable assigned exactly once, from Start-Process -PassThru
+// (PowerShell) or $! after a background launch (Bash), or a Bash job spec (%1). Stopping by name, by a literal PID or through any other
+// variable stays PROC_KILL.
+function ownedProcessVars(text: string): Set<string> {
+	const owned = new Set<string>();
+	if (VAR_CHANGERS.test(text)) return owned;
+	const count = (re: RegExp) => [...text.matchAll(re)].length;
+	for (const m of text.matchAll(/\$([A-Za-z_]\w*)\s*=\s*Start-Process\b[^;\n|]*?\s-PassThru\b/gi)) {
+		if (count(new RegExp(`\\$${m[1]}\\s*=(?!=)`, "gi")) === 1) owned.add(m[1].toLowerCase());
+	}
+	for (const m of text.matchAll(/(?:^|[\s;&])([A-Za-z_]\w*)=\$!(?=$|[\s;&])/g)) {
+		if (count(new RegExp(`(?:^|[\\s;&|(])${m[1]}=`, "g")) === 1) owned.add(m[1].toLowerCase());
+	}
+	return owned;
+}
+// $p, "$p", ${p}, $p.Id, "$p.Id" or $($p.Id)
+const OWNED_REF = /^(?:"?\$\{?([A-Za-z_]\w*)\}?(?:\.Id)?"?|\$\(\$([A-Za-z_]\w*)\.Id\))$/i;
+/** Whether every process stop in the command targets a process the command itself started. */
+function killsOnlyOwned(command: string): boolean {
+	// "$p | Stop-Process" names its target before the pipe; rewrite it as the -InputObject form so the segment carries the target.
+	const text = command.replace(/\$([A-Za-z_]\w*)\s*\|\s*Stop-Process\b/gi, (_m, v: string) => `Stop-Process -InputObject $${v}`);
+	const owned = ownedProcessVars(text);
+	const isOwned = (arg: string) => { const m = OWNED_REF.exec(arg); return !!m && owned.has((m[1] ?? m[2]).toLowerCase()); };
+	for (const m of text.matchAll(/(\S*)\.Kill\s*\(/gi)) if (!isOwned(m[1])) return false;
+	let stops = 0;
+	for (const raw of splitSegments(text)) {
+		const words = argvOf(tokenize(raw));
+		const name = commandName(words[0] ?? "");
+		if (!PROC_CMDS.has(name)) continue;
+		stops++;
+		if (name !== "kill" && name !== "stop-process") return false; // pkill, killall, taskkill: by name or image, never owned
+		const args = words.slice(1);
+		const targets: string[] = [];
+		for (let i = 0; i < args.length; i++) {
+			const a = args[i];
+			if (name === "kill") {
+				if (/^-(?:\d+|[A-Z]+)$/i.test(a)) continue; // -9, -TERM, -SIGKILL
+				if (/^-[sn]$/i.test(a)) { i++; continue; }
+				targets.push(a);
+				continue;
+			}
+			if (/^-(?:force|passthru|whatif|confirm)$/i.test(a)) continue;
+			if (/^-(?:erroraction|ea|warningaction|wa)$/i.test(a)) { i++; continue; }
+			if (/^-(?:id|inputobject)$/i.test(a)) { if (args[i + 1] !== undefined) targets.push(args[++i]); continue; }
+			if (a.startsWith("-")) return false; // -Name and anything unknown
+			targets.push(a);
+		}
+		if (!targets.length || !targets.every((t) => isOwned(t) || (name === "kill" && /^%(?:\d+|%|\+|-)$/.test(t)))) return false;
+	}
+	return stops > 0 || /\.Kill\s*\(/i.test(text);
 }
 
 // Git Bash argv collapses each backslash pair before the shell parses it (a run of n reaches the shell as ceil(n/2)): classify raw and collapsed text, a conservative union. Grant text stays raw (decideToolCall).
@@ -442,6 +497,7 @@ export function classifyShell(command: string, gateCommits = false): ShellClassi
 	const text = withoutFileBodies(String(command ?? ""));
 	const out = new Set<RiskRule>();
 	classifyVariants(text, out);
+	if (out.has("PROC_KILL") && killsOnlyOwned(text)) out.delete("PROC_KILL");
 	// Commits are gated only in the trusted release-engineer child; elsewhere git commit stays unclassified as before.
 	if (!gateCommits) out.delete("GIT_COMMIT");
 	const rules = [...out];
@@ -2337,26 +2393,33 @@ function dotnetTargets(text: string): string[] {
 	const targets: string[] = [];
 	for (const m of text.matchAll(DOTNET_WRITE)) {
 		const args = callArgs(text, m.index! + m[0].length - 1);
-		const n = /^(copy|move|replace)$/i.test(m[2]) ? 2 : 1;
-		for (let k = 0; k < n; k++) targets.push(literalArg(args[k]));
+		// Copy(source, dest) writes only dest; Move and Replace(source, dest, backup) change every path they name.
+		const writes = /^copy$/i.test(m[2]) ? [1] : /^move$/i.test(m[2]) ? [0, 1] : /^replace$/i.test(m[2]) ? [0, 1, 2] : [0];
+		for (const k of writes) if (!/^\$?null$/i.test(args[k]?.trim() ?? "") && !(k === 2 && args[k] === undefined)) targets.push(literalArg(args[k]));
 	}
 	for (const m of text.matchAll(DOTNET_STREAM)) targets.push(literalArg(callArgs(text, m.index! + m[0].length - 1)[0]));
 	return targets;
 }
 // Inline interpreter code: file writes, moves and deletes, with the arguments that name paths.
-const CODE_WRITES: { re: RegExp; paths: number; mode?: boolean }[] = [
-	{ re: /\bopen\s*\(/g, paths: 1, mode: true }, // Python open(path, "w"); Perl/Ruby open with a write mode
-	{ re: /\bPath\s*\(/g, paths: 1 }, // pathlib: checked only when a write method follows (below)
-	{ re: /\b(?:shutil\.(?:copy\w*|move|rmtree)|os\.(?:rename|replace))\s*\(/g, paths: 2 },
-	{ re: /\bos\.(?:remove|unlink|rmdir|mkdir|makedirs|truncate)\s*\(/g, paths: 1 },
-	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:writeFile|appendFile|createWriteStream|truncate|unlink|rm|rmdir|mkdir)(?:Sync)?\s*\(/g, paths: 1 },
-	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:copyFile|cp|rename|link|symlink)(?:Sync)?\s*\(/g, paths: 2 },
-	{ re: /\bFile\.(?:write|open|delete|rename|binwrite)\s*\(/g, paths: 1 }, // Ruby
+// Inline interpreter code: file writes, moves and deletes, with the arguments each one writes. A copy writes only its destination: its
+// source is read (field report: copying the built backend executable from the checkout to the _evidence folder was refused as a write
+// into the checkout). A move or rename changes both paths.
+const CODE_WRITES: { re: RegExp; writes: number[]; mode?: boolean }[] = [
+	{ re: /\bopen\s*\(/g, writes: [0], mode: true }, // Python open(path, "w"); Perl/Ruby open with a write mode
+	{ re: /\bPath\s*\(/g, writes: [0] }, // pathlib: checked only when a write method follows (below)
+	{ re: /\bshutil\.(?:copy\w*)\s*\(/g, writes: [1] }, // copy, copy2, copyfile, copytree(src, dst)
+	{ re: /\b(?:shutil\.move|os\.(?:rename|renames|replace))\s*\(/g, writes: [0, 1] },
+	{ re: /\b(?:shutil\.rmtree|os\.(?:remove|unlink|rmdir|removedirs|mkdir|makedirs|truncate))\s*\(/g, writes: [0] },
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:writeFile|appendFile|createWriteStream|truncate|unlink|rm|rmdir|mkdir)(?:Sync)?\s*\(/g, writes: [0] },
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:copyFile|cp|link|symlink)(?:Sync)?\s*\(/g, writes: [1] }, // (source or target, new path)
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?rename(?:Sync)?\s*\(/g, writes: [0, 1] },
+	{ re: /\bFile\.(?:write|binwrite|delete|unlink)\s*\(/g, writes: [0] }, // Ruby
+	{ re: /\bFile\.rename\s*\(/g, writes: [0, 1] }, // Ruby; Ruby File.open is covered by the open rule and its mode
 ];
 const PATHLIB_WRITE = /^\s*\)\s*\.\s*(?:write_text|write_bytes|touch|unlink|rename|replace|mkdir|rmdir|open\s*\([^)]*['"][wax+])/;
 function codeTargets(code: string): string[] {
 	const targets: string[] = [];
-	for (const { re, paths, mode } of CODE_WRITES) for (const m of code.matchAll(re)) {
+	for (const { re, writes, mode } of CODE_WRITES) for (const m of code.matchAll(re)) {
 		const open = m.index! + m[0].length - 1;
 		const args = callArgs(code, open);
 		if (/Path\s*\($/.test(m[0])) {
@@ -2371,7 +2434,7 @@ function codeTargets(code: string): string[] {
 			if (/^['"]\s*(?:\+?>|>>)/.test(args[0] ?? "")) { targets.push(literalArg(args[0]).replace(/^\s*\+?>{1,2}\s*/, "")); continue; } // Perl 2-arg open(">file")
 			if (perlMode) { targets.push(literalArg(args[2])); continue; }
 		}
-		for (let k = 0; k < paths; k++) targets.push(literalArg(args[k]));
+		for (const k of writes) targets.push(literalArg(args[k]));
 	}
 	return targets;
 }

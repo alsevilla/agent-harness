@@ -429,3 +429,42 @@ test("a READ_ONLY_ROLE refusal names the candidate's artifact folder by the work
 	assert.match(refuse("D:/work/RFID/RFIDAttendance-Rust"), /for this candidate: D:\/work\/RFID\/worktrees\/RFIDAttendance-Rust\/_evidence\/<task>\/ or _scratch\/<task>\//);
 	assert.match(refuse("D:/work/RFID/worktrees/RFIDAttendance-Rust/sms-pacing"), /for this candidate: D:\/work\/RFID\/worktrees\/RFIDAttendance-Rust\/_evidence\/<task>\//);
 });
+
+// Field report (sms-live-test): a read-only test-engineer copying the built backend executable from the checkout to its _evidence folder
+// was refused as "interpreter code writes into the candidate checkout": the copy's source was checked as a write target. A copy writes
+// only its destination; a move or rename changes both paths.
+test("read-only roles: copying out of the checkout is allowed, copying into it is refused, in every copy form", () => {
+	const repo = "D:/work/RFID/RFIDAttendance-Rust";
+	const ev = "D:/work/RFID/worktrees/RFIDAttendance-Rust/_evidence/sms-live-test";
+	const exe = "backend/target/debug/rfid-attendance.exe";
+	const check = (tool: string, command: string) => readOnlyViolation(tool, { command }, repo, repo);
+	const copies: [string, (src: string, dst: string) => string][] = [
+		["bash", (a, b) => `python3 - <<'EOF'\nimport shutil\nshutil.copy2(r"${a}", r"${b}")\nEOF`],
+		["powershell", (a, b) => `python -c "import shutil; shutil.copy('${a}', '${b}')"`],
+		["bash", (a, b) => `python3 - <<'EOF'\nimport shutil\nshutil.copytree("${a}", "${b}")\nEOF`],
+		["bash", (a, b) => `node -e "require('fs').copyFileSync('${a}', '${b}')"`],
+		["bash", (a, b) => `node - <<'EOF'\nconst fs = require("fs");\nfs.cpSync("${a}", "${b}");\nEOF`],
+		["powershell", (a, b) => `[IO.File]::Copy("${a}", "${b}", $true)`],
+		["powershell", (a, b) => `Copy-Item "${a}" "${b}"`],
+		["bash", (a, b) => `cp "${a}" "${b}"`],
+	];
+	for (const [tool, form] of copies) {
+		assert.equal(check(tool, form(exe, `${ev}/rfid-attendance.exe`)), undefined, `out of the checkout: ${form(exe, `${ev}/rfid-attendance.exe`)}`);
+		assert.match(check(tool, form(`${ev}/rfid-attendance.exe`, exe)) ?? "", /into the candidate checkout/, `into the checkout: ${form(`${ev}/x`, exe)}`);
+	}
+	// Moves and renames change their source, so moving out of the checkout stays refused.
+	for (const [tool, command] of [
+		["bash", `python3 -c "import shutil; shutil.move('${exe}', '${ev}/x.exe')"`],
+		["bash", `node -e "require('fs').renameSync('${exe}', '${ev}/x.exe')"`],
+		["powershell", `[IO.File]::Move("${exe}", "${ev}/x.exe")`],
+	] as const) assert.match(check(tool, command) ?? "", /into the candidate checkout/, command);
+	// One-argument deletes name their own target; Ruby File.open is a write only with a write mode; Replace's null backup is no target.
+	assert.equal(check("bash", `python3 -c "import shutil; shutil.rmtree('${ev}/run1')"`), undefined);
+	assert.match(check("bash", `python3 -c "import shutil; shutil.rmtree('backend/target')"`) ?? "", /into the candidate checkout/);
+	assert.equal(check("bash", `ruby -e "puts File.open('Cargo.toml').read"`), undefined);
+	assert.match(check("bash", `ruby -e "File.open('NOTES.md', 'w') { |f| f.write('x') }"`) ?? "", /into the candidate checkout/);
+	assert.equal(check("powershell", `[IO.File]::Replace("${ev}/new.db", "${ev}/scratch.db", $null)`), undefined);
+	assert.match(check("powershell", `[IO.File]::Replace("${ev}/new.db", "backend/data.db", $null)`) ?? "", /into the candidate checkout/);
+	// The copied executable then runs from the evidence folder against a scratch database: nothing there writes into the checkout.
+	assert.equal(check("powershell", `& "${ev}/rfid-attendance.exe" --database "${ev}/scratch.db"`), undefined);
+});
