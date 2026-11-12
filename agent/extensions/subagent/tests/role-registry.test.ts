@@ -221,7 +221,7 @@ test("written tier scenarios resolve through the real package registry to the co
     assert.equal(omitted.modelTier, "capable");
     assert.equal(omitted.model, committedTier("database-worker", "capable").model);
     assert.deepEqual(omitted.fallbackModel, [committedTier("database-worker", "capable").fallbackModel].flat());
-    assert.equal(omitted.thinking, "low");
+    assert.equal(omitted.thinking, committedTier("database-worker", "capable").thinking);
     // Roles without a configured capable tier are refused for capable: the selection is unresolved, not economy.
     for (const name of ["scout"]) assert.throws(() => resolveModelTier(role(name), "capable"), /not supported/, name);
     // The resolver refuses any tier the role does not configure, including unsupported names.
@@ -356,7 +356,7 @@ test("database-worker uses implementation-worker metadata and database ownership
   const role = roles.find((r: { name: string }) => r.name === "database-worker");
   assert.ok(role);
   const tier = role.modelTiers[role.defaultModelTier];
-  assert.deepEqual({ defaultModelTier: role.defaultModelTier, model: tier.model, fallbackModel: tier.fallbackModel, thinking: tier.thinking, tools: role.tools }, { defaultModelTier: "capable", model: "openai-codex/gpt-6.1-sol", fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "low", tools: "read, grep, find, ls, bash, powershell, edit" });
+  assert.deepEqual({ defaultModelTier: role.defaultModelTier, model: tier.model, fallbackModel: tier.fallbackModel, thinking: tier.thinking, tools: role.tools }, { defaultModelTier: "capable", model: "openai-codex/gpt-6.1-sol", fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "medium", tools: "read, grep, find, ls, bash, powershell, edit" });
   const text = fs.readFileSync(new URL("../../../agents/database-worker.md", import.meta.url), "utf8");
   assert.match(text, /schema.*migrations.*transactions/is);
   assert.match(text, /database-specialist/i);

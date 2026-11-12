@@ -215,7 +215,7 @@ test("model requirement is the verbatim declared-default-tier source for every r
     const src = r.modelTiers[r.defaultModelTier];
     expect(compat.modelRequirement(r)).toEqual({ role: r.name, tier: r.defaultModelTier, model: src.model, fallbackModel: src.fallbackModel, thinking: src.thinking });
   }
-  expect(compat.modelRequirement(real("oracle"))).toEqual({ role: "oracle", tier: "capable", model: "anthropic/claude-opus-5-5", fallbackModel: "", thinking: "high" });
+  expect(compat.modelRequirement(real("oracle"))).toEqual({ role: "oracle", tier: "capable", model: "openai-codex/gpt-6.1-sol", fallbackModel: "anthropic/claude-sonnet-5-5", thinking: "high" });
   expect(compat.modelRequirement(real("scout")).tier).toBe("economy");
 });
 
