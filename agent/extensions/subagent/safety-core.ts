@@ -2337,26 +2337,33 @@ function dotnetTargets(text: string): string[] {
 	const targets: string[] = [];
 	for (const m of text.matchAll(DOTNET_WRITE)) {
 		const args = callArgs(text, m.index! + m[0].length - 1);
-		const n = /^(copy|move|replace)$/i.test(m[2]) ? 2 : 1;
-		for (let k = 0; k < n; k++) targets.push(literalArg(args[k]));
+		// Copy(source, dest) writes only dest; Move and Replace(source, dest, backup) change every path they name.
+		const writes = /^copy$/i.test(m[2]) ? [1] : /^move$/i.test(m[2]) ? [0, 1] : /^replace$/i.test(m[2]) ? [0, 1, 2] : [0];
+		for (const k of writes) if (!/^\$?null$/i.test(args[k]?.trim() ?? "") && !(k === 2 && args[k] === undefined)) targets.push(literalArg(args[k]));
 	}
 	for (const m of text.matchAll(DOTNET_STREAM)) targets.push(literalArg(callArgs(text, m.index! + m[0].length - 1)[0]));
 	return targets;
 }
 // Inline interpreter code: file writes, moves and deletes, with the arguments that name paths.
-const CODE_WRITES: { re: RegExp; paths: number; mode?: boolean }[] = [
-	{ re: /\bopen\s*\(/g, paths: 1, mode: true }, // Python open(path, "w"); Perl/Ruby open with a write mode
-	{ re: /\bPath\s*\(/g, paths: 1 }, // pathlib: checked only when a write method follows (below)
-	{ re: /\b(?:shutil\.(?:copy\w*|move|rmtree)|os\.(?:rename|replace))\s*\(/g, paths: 2 },
-	{ re: /\bos\.(?:remove|unlink|rmdir|mkdir|makedirs|truncate)\s*\(/g, paths: 1 },
-	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:writeFile|appendFile|createWriteStream|truncate|unlink|rm|rmdir|mkdir)(?:Sync)?\s*\(/g, paths: 1 },
-	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:copyFile|cp|rename|link|symlink)(?:Sync)?\s*\(/g, paths: 2 },
-	{ re: /\bFile\.(?:write|open|delete|rename|binwrite)\s*\(/g, paths: 1 }, // Ruby
+// Inline interpreter code: file writes, moves and deletes, with the arguments each one writes. A copy writes only its destination: its
+// source is read (field report: copying the built backend executable from the checkout to the _evidence folder was refused as a write
+// into the checkout). A move or rename changes both paths.
+const CODE_WRITES: { re: RegExp; writes: number[]; mode?: boolean }[] = [
+	{ re: /\bopen\s*\(/g, writes: [0], mode: true }, // Python open(path, "w"); Perl/Ruby open with a write mode
+	{ re: /\bPath\s*\(/g, writes: [0] }, // pathlib: checked only when a write method follows (below)
+	{ re: /\bshutil\.(?:copy\w*)\s*\(/g, writes: [1] }, // copy, copy2, copyfile, copytree(src, dst)
+	{ re: /\b(?:shutil\.move|os\.(?:rename|renames|replace))\s*\(/g, writes: [0, 1] },
+	{ re: /\b(?:shutil\.rmtree|os\.(?:remove|unlink|rmdir|removedirs|mkdir|makedirs|truncate))\s*\(/g, writes: [0] },
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:writeFile|appendFile|createWriteStream|truncate|unlink|rm|rmdir|mkdir)(?:Sync)?\s*\(/g, writes: [0] },
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?(?:copyFile|cp|link|symlink)(?:Sync)?\s*\(/g, writes: [1] }, // (source or target, new path)
+	{ re: /\b(?:fs(?:\.promises)?\.|fsp\.)?rename(?:Sync)?\s*\(/g, writes: [0, 1] },
+	{ re: /\bFile\.(?:write|binwrite|delete|unlink)\s*\(/g, writes: [0] }, // Ruby
+	{ re: /\bFile\.rename\s*\(/g, writes: [0, 1] }, // Ruby; Ruby File.open is covered by the open rule and its mode
 ];
 const PATHLIB_WRITE = /^\s*\)\s*\.\s*(?:write_text|write_bytes|touch|unlink|rename|replace|mkdir|rmdir|open\s*\([^)]*['"][wax+])/;
 function codeTargets(code: string): string[] {
 	const targets: string[] = [];
-	for (const { re, paths, mode } of CODE_WRITES) for (const m of code.matchAll(re)) {
+	for (const { re, writes, mode } of CODE_WRITES) for (const m of code.matchAll(re)) {
 		const open = m.index! + m[0].length - 1;
 		const args = callArgs(code, open);
 		if (/Path\s*\($/.test(m[0])) {
@@ -2371,7 +2378,7 @@ function codeTargets(code: string): string[] {
 			if (/^['"]\s*(?:\+?>|>>)/.test(args[0] ?? "")) { targets.push(literalArg(args[0]).replace(/^\s*\+?>{1,2}\s*/, "")); continue; } // Perl 2-arg open(">file")
 			if (perlMode) { targets.push(literalArg(args[2])); continue; }
 		}
-		for (let k = 0; k < paths; k++) targets.push(literalArg(args[k]));
+		for (const k of writes) targets.push(literalArg(args[k]));
 	}
 	return targets;
 }
