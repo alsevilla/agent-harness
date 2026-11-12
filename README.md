@@ -119,7 +119,7 @@ The native package exposes these 21 generic roles:
 | Escalation | `oracle` |
 | Delivery | `release-engineer` |
 
-Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json`; its prompt uses the same five sections (Knows/loads, Before starting, Workflow, Where to look, Common failures). User roles in your Pi agent directory and project roles in `.pi/agents/` override bundled ones (package < user < project).
+On Pi, `oracle` runs two passes on every launch: GPT-6.1 Sol answers, then Claude Opus 5.5 reviews that answer independently and gives the final one ([how](agent/extensions/subagent/README.md#two-pass-oracle)). Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json`; its prompt uses the same five sections (Knows/loads, Before starting, Workflow, Where to look, Common failures). User roles in your Pi agent directory and project roles in `.pi/agents/` override bundled ones (package < user < project).
 
 ## Safety and delivery
 

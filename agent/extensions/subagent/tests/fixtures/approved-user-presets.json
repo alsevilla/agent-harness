@@ -2,7 +2,7 @@
   "schema": "approved-user-presets/v1",
   "purpose": "Independent oracle for the user-approved preset update to agent/roles.json (supersedes the tier-only-baseline default tuples ONLY for the listed delta; tier-only-baseline.json stays immutable). Generated from the approved snapshot, never from the candidate file.",
   "approvedSnapshotSha256": "5e236e57ad816d2c01806510d511cff10a7542b6502b6937e778e32abfb68ef7",
-  "approvedBy": "user request to include their edited ~/.pi/agent/roles.json; architecture-specialist default confirmed economy by the user; 2026-11-05: user approved reviewer (and the additive planner) thinking high -> medium on every tier, from the token-efficiency research (effort is the largest cost dial); models, fallbacks and tools unchanged; 2026-11-12: user approved oracle on GPT-6.1 Sol with Claude Sonnet 5.5 as fallback (models limited to Sonnet 5.5, GPT-6.1 Sol, Haiku 5.5 and GPT-6 Luna), database-worker and platform-worker thinking low -> medium on every tier, and security-specialist medium -> high on every tier.",
+  "approvedBy": "user request to include their edited ~/.pi/agent/roles.json; architecture-specialist default confirmed economy by the user; 2026-11-05: user approved reviewer (and the additive planner) thinking high -> medium on every tier, from the token-efficiency research (effort is the largest cost dial); models, fallbacks and tools unchanged; 2026-11-12: user approved oracle on GPT-6.1 Sol with Claude Opus 5.5 as fallback and as its second pass (other roles limited to Sonnet 5.5, GPT-6.1 Sol, Haiku 5.5 and GPT-6 Luna), database-worker and platform-worker thinking low -> medium on every tier, and security-specialist medium -> high on every tier.",
   "changedFromBaseline": [
     "api-specialist.default",
     "api-specialist.economy",
@@ -256,7 +256,7 @@
         "capable": {
           "model": "openai-codex/gpt-6.1-sol",
           "fallbackModel": [
-            "anthropic/claude-sonnet-5-5"
+            "anthropic/claude-opus-5-5"
           ],
           "thinking": "high"
         }

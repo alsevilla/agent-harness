@@ -27,6 +27,30 @@ export function resolveModelTier(agent: AgentConfig, requested?: ModelTier, slot
 	return { ...agent, model: fallback, fallbackModel: [], tools: agent.tools?.slice(), thinking, modelTier: tier, modelSlot: slot };
 }
 
+// Two-pass roles: the first pass runs as configured; when it completes, a second, independent pass runs on the tier's first fallback
+// with the first pass's report, and its answer is the result. Oracle only: it is the exceptional escalation, where the best answer
+// is worth a second model's full review. An explicit modelSlot "fallback" asks for one run on the fallback and stays single-pass.
+export const TWO_PASS_ROLES: ReadonlySet<string> = new Set(["oracle"]);
+
+/** The model for the second pass, or undefined when this launch is single-pass. firstRequested: the model the first pass finally ran on. */
+export function secondPassModel(agent: SelectedAgent, firstRequested: string | undefined): string | undefined {
+	if (!TWO_PASS_ROLES.has(agent.name) || agent.source !== "package" || agent.modelSlot !== undefined) return undefined;
+	const [second] = getFallbackSequence(agent.model, agent.fallbackModel);
+	// The first pass already ran on that model (its primary was unavailable): a second pass would repeat the same model.
+	return second === undefined || second === firstRequested ? undefined : second;
+}
+
+/** The second pass's task: the original packet, how to review, and the first pass's final report. */
+export function secondPassTask(task: string, firstModel: string, firstReport: string): string {
+	return `${task}
+
+## Second pass
+You are the second, independent pass on this task. A first pass on another model (${firstModel}) has answered it; its final report is below. Do not take it on trust. Work the question again from the evidence in the candidate: verify or refute each of its claims, correct what it got wrong, and add what it missed. Your reply is the final answer: give it in the required handoff format and state where and why you differ from the first pass. Write your REPORT to the packet's report path; it replaces the first pass's.
+
+--- First pass report (${firstModel}) ---
+${firstReport}`;
+}
+
 // Model IDs are catalog identifiers: trimmed, otherwise passed through verbatim (no aliasing).
 export function parseFallbackModels(value: string | undefined): string[] {
 	return [...new Set((value ?? "").split("||").map((model) => model.trim()).filter(Boolean))];

@@ -71,7 +71,7 @@ Use `oracle` only when:
 - credible high-impact disagreement remains after normal review;
 - data-loss/security/correctness risk is severe and unresolved;
 - two reasonable fix attempts failed and root cause remains disputed.
-Never use Oracle as routine second opinion.
+Never use Oracle as routine second opinion. On Pi, one Oracle launch runs two passes, GPT-6.1 Sol then Claude Opus 5.5 reviewing Sol's report, so it costs two full runs; its result is the second pass's answer.
 
 ## Release / SHIP / LEARN
 Use `release-engineer` when the task actually enters SHIP or LEARN.

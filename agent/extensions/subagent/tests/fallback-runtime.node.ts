@@ -77,6 +77,7 @@ let runSingleAgent: (...args: unknown[]) => Promise<RunResult>;
 // Usage ledger helpers from the production background module (same module instance index.ts imports).
 let bg: any;
 let attempts: string[] = [];
+let tasks: string[] = []; // the prompt each child received, in launch order
 let spawnPlan: (model: string) => SpawnPlan = () => success();
 // Launch state per declared model; the default launches everything (provider cooldown entry stub).
 let launchPlan: (model: string) => { state: string; replayable?: boolean } = () => ({ state: "launch" });
@@ -86,9 +87,10 @@ let guardPlan: (model: string, message?: string) => boolean = () => false;
 (globalThis as { __piGuardRefusal?: (model: string, message?: string) => boolean }).__piGuardRefusal = (model, message) => guardPlan(model, message);
 
 // Records every child launch in order; the model is the value following --model.
-(globalThis as { __piSubagentFakeSpawn?: (args: string[]) => SpawnPlan }).__piSubagentFakeSpawn = (args) => {
+(globalThis as { __piSubagentFakeSpawn?: (args: string[], task?: string) => SpawnPlan }).__piSubagentFakeSpawn = (args, task) => {
 	const model = args[args.indexOf("--model") + 1];
 	attempts.push(model);
+	tasks.push(task ?? "");
 	return spawnPlan(model);
 };
 
@@ -122,6 +124,7 @@ before(async () => {
 
 beforeEach(() => {
 	attempts = [];
+	tasks = [];
 	spawnPlan = () => success();
 	launchPlan = () => ({ state: "launch" });
 	guardPlan = () => false;
@@ -402,6 +405,72 @@ test("modelSlot fallback: a cooling, blocked or guard-refused fallback never spa
 	spawnPlan = () => ({ events: [assistant("error", "", "provider cooldown cooling")], exitCode: 1 });
 	await run(fx.nested, slotted(), "slot-role");
 	assert.deepEqual(attempts, [LUNA]);
+});
+
+// ---- Two-pass oracle: a completed first pass is reviewed by a second, independent pass on the tier's first fallback ----------------
+
+// OpenAI-only models here (Sol first, Luna second) so no Anthropic subscription guard is needed; the shipped oracle uses Opus second.
+function oracleRole(slot?: "fallback"): AgentConfig[] {
+	const role = { ...slotRole([LUNA]), name: "oracle", filePath: "oracle.md" } as unknown as AgentConfig;
+	return [resolveModelTier(role, slot ? "capable" : undefined, slot)] as unknown as AgentConfig[];
+}
+const said = (text: string, tokens?: Usage): SpawnPlan => ({ events: [assistant("stop", text, undefined, tokens)], exitCode: 0 });
+
+test("two-pass oracle: the second pass runs on the fallback with the first pass's report, and its answer is the result", async () => {
+	const fx = setupRoots();
+	spawnPlan = (model) => (model === PRIMARY ? said("FIRST: use a queue", usage(2, 3, 5, 0.25)) : said("FINAL: use a queue with backpressure", usage(4, 6, 10, 0.5)));
+	const result = await run(fx.nested, oracleRole(), "oracle") as RunResult & { passes?: unknown; messages: { content: { text?: string }[] }[] };
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	// The child prompt wraps the task as "Task: <task>"; the second pass carries the same packet plus the review section.
+	assert.equal(tasks[0], "Task: task");
+	assert.match(tasks[1], /^Task: task\n\n## Second pass\n/);
+	assert.match(tasks[1], new RegExp(`--- First pass report \\(${PRIMARY.replace(/[.]/g, "\\.")}\\) ---\nFIRST: use a queue$`));
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.model, LUNA);
+	assert.match(JSON.stringify(result.messages), /FINAL: use a queue with backpressure/);
+	assert.deepEqual(result.passes, [{ pass: 1, requestedModel: PRIMARY, model: PRIMARY, status: "completed" }, { pass: 2, requestedModel: LUNA, model: LUNA, status: "completed" }]);
+	assert.deepEqual(result.usage, { input: 6, output: 9, cacheRead: 0, cacheWrite: 0, cost: 0.75, contextTokens: 10, turns: 2 });
+});
+
+test("two-pass oracle: a failed first pass is returned as it is, with no second pass", async () => {
+	const fx = setupRoots();
+	spawnPlan = () => ({ events: [assistant("error", "", "tool crashed after edits")], exitCode: 1 });
+	const result = await run(fx.nested, oracleRole(), "oracle") as RunResult & { passes?: unknown };
+	assert.equal(attempts[0], PRIMARY);
+	assert.ok(!attempts.slice(1).length || attempts.every((m, i) => i === 0 || m === LUNA), "only the availability fallback may follow");
+	assert.equal(result.exitCode, 1);
+	assert.equal(result.passes, undefined);
+});
+
+test("two-pass oracle: when the first pass already fell back to the second model, it does not run again", async () => {
+	const fx = setupRoots();
+	spawnPlan = (model) => (model === PRIMARY ? unavailable() : said("ANSWER on the fallback"));
+	const result = await run(fx.nested, oracleRole(), "oracle") as RunResult & { passes?: unknown };
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.model, LUNA);
+	assert.equal(result.passes, undefined);
+});
+
+test("two-pass oracle: a second pass that cannot finish leaves the first pass's answer, with a note", async () => {
+	const fx = setupRoots();
+	spawnPlan = (model) => (model === PRIMARY ? said("FIRST: keep the lock", usage(2, 3, 5, 0.25)) : unavailable("503 unavailable", usage(1, 0, 1, 0.125)));
+	const result = await run(fx.nested, oracleRole(), "oracle") as RunResult & { passes?: unknown; messages: unknown[] };
+	assert.deepEqual(attempts, [PRIMARY, LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.model, PRIMARY);
+	assert.match(JSON.stringify(result.messages), /FIRST: keep the lock/);
+	assert.match(result.stderr, new RegExp(`^Second pass on ${LUNA.replace(/[.]/g, "\\.")} did not complete; this is the first pass's answer`));
+	assert.deepEqual(result.passes, [{ pass: 1, requestedModel: PRIMARY, model: PRIMARY, status: "completed" }, { pass: 2, requestedModel: LUNA, model: LUNA, status: "failed" }]);
+	assert.equal(result.usage.cost, 0.375, "both passes are charged");
+});
+
+test("two-pass oracle: an explicit modelSlot fallback runs once, on the fallback", async () => {
+	const fx = setupRoots();
+	const result = await run(fx.nested, oracleRole("fallback"), "oracle") as RunResult & { passes?: unknown };
+	assert.deepEqual(attempts, [LUNA]);
+	assert.equal(result.exitCode, 0);
+	assert.equal(result.passes, undefined);
 });
 
 test("modelSlot fallback keeps the Anthropic subscription guard requirement", async () => {

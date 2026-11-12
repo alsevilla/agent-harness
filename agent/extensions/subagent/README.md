@@ -29,6 +29,21 @@ DAG mode is exclusive with single, parallel and chain: an empty `dag` array coun
 
 An uncertain notification does not turn a successful task into a failed task, or authorize a retry. Retrieve the retained result through `subagent_control` `action: "result"` with the job ID (prefer the `bg-N@epoch` target in an available notice). Do not rerun the task merely because its notification was uncertain. Existing retention and session-reset limits still apply; this state is in memory, not a durable delivery receipt. Raw host delivery errors are not included in the listing. So that main learns of such a job without listing, its request's hidden state line names each finished job whose notice is `uncertain` until main reads that job's result; the row then carries `resultRead: true`.
 
+### Two-pass oracle
+
+`oracle`, the exceptional escalation, runs two passes on every launch, in any mode (single, parallel, chain, DAG, foreground or background):
+
+1. The first pass runs on its capable tier as usual: GPT-6.1 Sol, falling back to Claude Opus 5.5 only if Sol is unavailable.
+2. When the first pass completes, a second, independent pass runs on the tier's first fallback (Claude Opus 5.5) in the same workspace lease. Its task is the original packet, an instruction to re-work the question from the evidence, and the first pass's final report. It verifies or refutes each claim, corrects and adds, states where and why it differs, and writes the final REPORT.
+
+The result is the second pass's answer, with both passes' usage added and a `passes` list giving each pass's requested and reported model and status. Exceptions:
+- A failed or stopped first pass is returned as it is; nothing is replayed.
+- If the first pass already ran on Opus (Sol was unavailable), no second pass runs.
+- If the second pass cannot finish, the first pass's answer is returned with a note saying so; both passes are charged.
+- An explicit `modelTier: "capable", modelSlot: "fallback"` runs once, on Opus.
+
+Two passes cost two full runs. Copilot CLI does not read `roles.json` and runs `oracle` once on its own selected model.
+
 ### Optional Pi task model tiers
 
 Pi callers may set `modelTier` to `"economy"` or `"capable"` for a single task, or on each item in a `tasks` (parallel), `chain`, or `dag` batch. For single mode it is a top-level parameter; for batches it belongs to each item/node. These four forms work with the default background job (`background: true`) and with `background: false` foreground execution. Omit the field to run the role's `defaultModelTier` with that tier's own model, fallback and thinking. A root-level tier is not accepted for batch modes.

@@ -34,7 +34,7 @@ import {
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, packageRoot } from "./agents.ts";
 import { attemptOf, identityOf, observeAssistant, observedId, type AttemptProvenance, type ObservedModel } from "./provenance.ts";
-import { getFallbackSequence, nextFallbackModel, resolveModelTier, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
+import { getFallbackSequence, nextFallbackModel, resolveModelTier, secondPassModel, secondPassTask, type ModelSlot, type ModelTier, type SelectedAgent } from "./model-routing.ts";
 import { registerMainPolicy } from "./main-policy.ts";
 import { registerHandoffWindow, requestMainFold, stateCard } from "./handoff-window.ts";
 import { STOPPED_JOBS_DIR } from "./stopped-jobs.ts";
@@ -92,6 +92,7 @@ interface SingleResult {
 	requestedModel?: string; // this attempt's --model argument, never evidence of what ran
 	observed?: ObservedModel[]; // distinct identities this attempt's assistant messages reported, in first-seen order
 	attempts?: AttemptProvenance[]; // only after an availability fallback: every launched attempt, earliest first
+	passes?: { pass: 1 | 2; requestedModel?: string; model?: string; status: "completed" | "failed" }[]; // two-pass roles only (secondPassModel)
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
@@ -257,7 +258,23 @@ async function runSingleAgentJob(
 	}
 	setWaiting(undefined);
 	try {
-		return await runAgentAttempt(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, lease, grantWindow, undefined, undefined, logical);
+		const first = await runAgentAttempt(defaultCwd, dispatchDefaults, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, lease, grantWindow, undefined, undefined, logical);
+		// A second pass reviews a completed first pass only: a failed or stopped first pass is returned as it is, never replayed.
+		const second = isFailedResult(first) || signal?.aborted ? undefined : secondPassModel(agent, first.requestedModel);
+		if (!second) return first;
+		const firstModel = first.model ?? first.requestedModel ?? "(inherited)";
+		const pass = (n: 1 | 2, r: SingleResult) => ({ pass: n, requestedModel: r.requestedModel, model: r.model, status: isFailedResult(r) ? "failed" as const : "completed" as const });
+		const result = await runAgentAttempt(defaultCwd, dispatchDefaults, agents, agentName, secondPassTask(task, firstModel, getFinalOutput(first.messages)), cwd, step, signal, onUpdate, makeDetails, lease, grantWindow, second, [], logical);
+		for (const key of ["input", "output", "cacheRead", "cacheWrite", "cost", "turns"] as const) result.usage[key] += first.usage[key];
+		if (isFailedResult(result)) {
+			// The first pass's answer stands when the review could not finish; the note says so.
+			first.passes = [pass(1, first), pass(2, result)];
+			first.usage = result.usage;
+			first.stderr = `Second pass on ${second} did not complete; this is the first pass's answer (${firstModel}). ${getResultOutput(result)}\n${first.stderr}`;
+			return first;
+		}
+		result.passes = [pass(1, first), pass(2, result)];
+		return result;
 	} finally {
 		releaseWorkspace(lease);
 	}

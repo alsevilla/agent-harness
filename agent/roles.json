@@ -124,7 +124,7 @@
     "modelTiers": {
       "capable": {
         "model": "openai-codex/gpt-6.1-sol",
-        "fallbackModel": "anthropic/claude-sonnet-5-5",
+        "fallbackModel": "anthropic/claude-opus-5-5",
         "thinking": "high"
       }
     },
