@@ -431,8 +431,63 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 		if (tokens.length && (WRITE_CMDS.has(commandName(words[0] ?? "")) || raw.includes(">")) && tokens.some((t) => isConfigToken(t.text))) add(out, "CONFIG_WRITE");
 	}
 	if (allTokens.some((t) => isSecretBasename(basenameOf(t)))) add(out, "SECRET");
+	if (/\.Kill\s*\(/i.test(text)) add(out, "PROC_KILL"); // System.Diagnostics.Process.Kill(), which names no kill command
 	if (/\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|;&\n]*\|\s*(sh|bash|zsh|dash|iex|invoke-expression|pwsh|powershell|cmd)\b/i.test(text)) add(out, "CURL_SHELL");
 	if (/\b(iex|invoke-expression)\b.*\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i.test(text)) add(out, "CURL_SHELL");
+}
+
+// Field report (sms-live-test): a read-only test-engineer's hardware smoke test started the backend from its _evidence folder, waited,
+// then stopped it, and the stop was refused as PROC_KILL although it ended only the process the same command had started. A stop is now
+// allowed when every process it targets is owned by the command: held in a variable assigned exactly once, from Start-Process -PassThru
+// (PowerShell) or $! after a background launch (Bash), or a Bash job spec (%1). Stopping by name, by a literal PID or through any other
+// variable stays PROC_KILL.
+function ownedProcessVars(text: string): Set<string> {
+	const owned = new Set<string>();
+	if (VAR_CHANGERS.test(text)) return owned;
+	const count = (re: RegExp) => [...text.matchAll(re)].length;
+	for (const m of text.matchAll(/\$([A-Za-z_]\w*)\s*=\s*Start-Process\b[^;\n|]*?\s-PassThru\b/gi)) {
+		if (count(new RegExp(`\\$${m[1]}\\s*=(?!=)`, "gi")) === 1) owned.add(m[1].toLowerCase());
+	}
+	for (const m of text.matchAll(/(?:^|[\s;&])([A-Za-z_]\w*)=\$!(?=$|[\s;&])/g)) {
+		if (count(new RegExp(`(?:^|[\\s;&|(])${m[1]}=`, "g")) === 1) owned.add(m[1].toLowerCase());
+	}
+	return owned;
+}
+// $p, "$p", ${p}, $p.Id, "$p.Id" or $($p.Id)
+const OWNED_REF = /^(?:"?\$\{?([A-Za-z_]\w*)\}?(?:\.Id)?"?|\$\(\$([A-Za-z_]\w*)\.Id\))$/i;
+/** Whether every process stop in the command targets a process the command itself started. */
+function killsOnlyOwned(command: string): boolean {
+	// "$p | Stop-Process" names its target before the pipe; rewrite it as the -InputObject form so the segment carries the target.
+	const text = command.replace(/\$([A-Za-z_]\w*)\s*\|\s*Stop-Process\b/gi, (_m, v: string) => `Stop-Process -InputObject $${v}`);
+	const owned = ownedProcessVars(text);
+	const isOwned = (arg: string) => { const m = OWNED_REF.exec(arg); return !!m && owned.has((m[1] ?? m[2]).toLowerCase()); };
+	for (const m of text.matchAll(/(\S*)\.Kill\s*\(/gi)) if (!isOwned(m[1])) return false;
+	let stops = 0;
+	for (const raw of splitSegments(text)) {
+		const words = argvOf(tokenize(raw));
+		const name = commandName(words[0] ?? "");
+		if (!PROC_CMDS.has(name)) continue;
+		stops++;
+		if (name !== "kill" && name !== "stop-process") return false; // pkill, killall, taskkill: by name or image, never owned
+		const args = words.slice(1);
+		const targets: string[] = [];
+		for (let i = 0; i < args.length; i++) {
+			const a = args[i];
+			if (name === "kill") {
+				if (/^-(?:\d+|[A-Z]+)$/i.test(a)) continue; // -9, -TERM, -SIGKILL
+				if (/^-[sn]$/i.test(a)) { i++; continue; }
+				targets.push(a);
+				continue;
+			}
+			if (/^-(?:force|passthru|whatif|confirm)$/i.test(a)) continue;
+			if (/^-(?:erroraction|ea|warningaction|wa)$/i.test(a)) { i++; continue; }
+			if (/^-(?:id|inputobject)$/i.test(a)) { if (args[i + 1] !== undefined) targets.push(args[++i]); continue; }
+			if (a.startsWith("-")) return false; // -Name and anything unknown
+			targets.push(a);
+		}
+		if (!targets.length || !targets.every((t) => isOwned(t) || (name === "kill" && /^%(?:\d+|%|\+|-)$/.test(t)))) return false;
+	}
+	return stops > 0 || /\.Kill\s*\(/i.test(text);
 }
 
 // Git Bash argv collapses each backslash pair before the shell parses it (a run of n reaches the shell as ceil(n/2)): classify raw and collapsed text, a conservative union. Grant text stays raw (decideToolCall).
@@ -442,6 +497,7 @@ export function classifyShell(command: string, gateCommits = false): ShellClassi
 	const text = withoutFileBodies(String(command ?? ""));
 	const out = new Set<RiskRule>();
 	classifyVariants(text, out);
+	if (out.has("PROC_KILL") && killsOnlyOwned(text)) out.delete("PROC_KILL");
 	// Commits are gated only in the trusted release-engineer child; elsewhere git commit stays unclassified as before.
 	if (!gateCommits) out.delete("GIT_COMMIT");
 	const rules = [...out];
