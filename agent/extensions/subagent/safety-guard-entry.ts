@@ -1,7 +1,7 @@
 // Stage 1 child-only guard. Loaded after pause-gate and decision-relay in every child (main never loads it).
 // Reads PI_SAFETY_GRANTS once and removes it from the process environment before any tool can run; an invalid envelope blocks all tool calls.
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CHILD_GRANT_ENV, CHILD_GRANT_NOTE_ENV, CHILD_READONLY_ENV, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
+import { CHILD_GRANT_ENV, CHILD_GRANT_NOTE_ENV, CHILD_READONLY_ENV, GRANT_USED_PREFIX, createGrantStore, guardToolCall, loadChildCleanup, loadChildDelivery, loadChildGate, loadChildGrants, loadChildLeases, loadChildPushTarget } from "./safety-core.ts";
 import { createReadDedupe } from "./read-dedupe.ts";
 import { createExecutionLedger } from "./execution-ledger.ts";
 import { createAutoFormat, loadFormatConfig } from "./auto-format.ts";
@@ -36,9 +36,18 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		invalid = "Blocked by harness safety guard: invalid child grant envelope; all tool calls refused.";
 	}
 	const reads = new Set<string>(); // files this worker has read in this run (read before edit)
+	let announced = 0; // single-use approvals already reported to main as used
 	pi.on("tool_call", (event, ctx) => {
 		if (invalid) return { block: true, reason: invalid };
-		return guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot, reads, grantNote }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
+		const verdict = guardToolCall({ scope: "child", store, agentDir: getAgentDir(), gateCommits, pushTarget, readOnlyRoot, reads, grantNote }, event.toolName, event.input as Record<string, unknown>, ctx.cwd);
+		// Tell main which approval this call used, before the tool runs, so main takes back only the unused ones when this worker exits.
+		// If it cannot be reported, the call is refused instead: the tool does not run, so main taking the approval back is correct.
+		const spent = store.spentIds?.() ?? [];
+		for (; announced < spent.length; announced++) {
+			try { ctx.ui.notify(GRANT_USED_PREFIX + spent[announced], "info"); }
+			catch { announced = spent.length; return { block: true, reason: "Blocked by harness safety guard: the approval for this call could not be reported to main, so it was not used; ask main to launch the worker again." }; }
+		}
+		return verdict;
 	});
 	// Workers only: a repeated read that returns unchanged text becomes a one-line note (read-dedupe.ts).
 	const dedupe = createReadDedupe();

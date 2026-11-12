@@ -48,7 +48,7 @@ import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRela
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
 import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV } from "./safety-core.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV, GRANT_USED_PREFIX } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -396,6 +396,7 @@ async function runAgentAttempt(
     }
 
 	const ownerId = randomUUID();
+	const grantsUsed = new Set<string>(); // single-use approvals this worker reported using (GRANT_USED_PREFIX)
 	let claimedCleanup: string | undefined;
 	let cleanExit = false;
 	let controlDir: string | undefined;
@@ -450,6 +451,7 @@ async function runAgentAttempt(
 		// Ownership is recorded before the spawn and ended only after the process closed (finally): any gap reads as active, never idle.
 		owners.begin({ workerId: ownerId, role: agent.source === "user" || agent.source === "package" ? agentName : `untrusted:${agentName}`, cwd: canonicalCwd(cwd ?? defaultCwd), jobId: dispatchDefaults.jobId });
 		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
+		if (guard.claimed.length) safetyGrants.lend?.(ownerId, guard.claimed);
 		args.push("--extension", guard.entry);
 		// Read-only role (no edit/write tool) or a readOnly launch: its guard refuses changes to the candidate checkout, shell included.
 		const readOnlyRoot = lease?.access === "read" || (agent.tools !== undefined && !agent.tools.some((t) => t === "edit" || t === "write")) ? canonicalCwd(cwd ?? defaultCwd) : undefined;
@@ -501,6 +503,7 @@ async function runAgentAttempt(
 				}
 
 				client?.event(event);
+                if (event.type === "extension_ui_request" && event.method === "notify" && typeof event.message === "string" && event.message.startsWith(GRANT_USED_PREFIX)) { grantsUsed.add(event.message.slice(GRANT_USED_PREFIX.length).trim()); return; }
                 const relayed = Boolean(client && worker && dispatchDefaults.jobId && event.type === "extension_ui_request");
                 if (relayed && event.method === "notify" && typeof event.message === "string" && event.message.startsWith(DECISION_RECORD_PREFIX)) dispatchDefaults.runtime?.announceDecision(dispatchDefaults.jobId!, worker!.id, cwd ?? defaultCwd, event.message);
                 // Only the exact dialog of an announced request is held; every other dialog keeps the auto-cancel below.
@@ -638,6 +641,8 @@ async function runAgentAttempt(
         if (worker) dispatchDefaults.monitor?.store.finish(worker.id, signal?.aborted ? "aborted" : "failed", String(error));
         throw error;
     } finally {
+        // Approvals this worker took at launch but did not use go back to main for the next launch (GrantStore.returnLent).
+        safetyGrants.returnLent?.(ownerId, grantsUsed);
         owners.end(ownerId);
         if (claimedCleanup) { owners.closeClaimed(claimedCleanup, cleanExit); cleanupJobs.delete(claimedCleanup); }
         release?.(); parentSignal?.removeEventListener("abort", parentAbort);

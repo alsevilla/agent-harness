@@ -88,8 +88,8 @@ test("read-only role: writes into the candidate are refused (not grantable); rea
 	const evidence = slash(path.join(root, "ro", "worktrees", "app", "_evidence", "t"));
 	const ro = { scope: "child" as const, store: createGrantStore(), agentDir, readOnlyRoot: candidate };
 	const call = (command: string) => guardToolCall(ro, "bash", { command }, candidate) as { block: boolean; reason: string } | undefined;
-	for (const ok of ["git status", "git diff --stat", "npm test", "npm test 2>&1", `npm test > "${evidence}/test.log"`, `cat > "${evidence}/REPORT.md"`, "sed -n 1,5p a.ts", "git stash list"]) assert.equal(call(ok), undefined, ok);
-	for (const bad of ["npm test > out.log", "git commit -m x", "git checkout -- a.ts", "sed -i s/a/b/ a.ts", "cp a.ts b.ts", "echo x | tee a.ts", "npm install x", 'bash -c "echo x > a.ts"', "mkdir tmp"]) {
+	for (const ok of ["git status", "git diff --stat", "npm test", "npm test 2>&1", `npm test > "${evidence}/test.log"`, `cat > "${evidence}/REPORT.md"`, "sed -n 1,5p a.ts", "git stash list", "git worktree list", "git worktree list --porcelain", "git submodule status", "git notes show"]) assert.equal(call(ok), undefined, ok);
+	for (const bad of ["npm test > out.log", "git commit -m x", "git checkout -- a.ts", "sed -i s/a/b/ a.ts", "cp a.ts b.ts", "echo x | tee a.ts", "npm install x", 'bash -c "echo x > a.ts"', "mkdir tmp", "git worktree add ../x", "git worktree remove ../x", "git worktree prune", "git submodule update", "git notes add -m x"]) {
 		const r = call(bad);
 		assert.ok(r?.block, bad);
 		assert.match(r!.reason, /^Blocked by harness safety guard \[READ_ONLY_ROLE\] op [0-9a-f]{16}: .*; not grantable: this role is read-only/, bad);
