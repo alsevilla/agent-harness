@@ -641,6 +641,12 @@ export interface GrantStore {
 	claim(role: string, candidate: string): GrantRecord[];
 	/** Why a launch of this role in this folder receives no grant although live ones exist: another folder, or another role here. */
 	claimHint?(role: string, candidate: string): string | undefined;
+	/** Ids of single-use grants this store consumed, in order (the child reports them to main). */
+	spentIds?(): string[];
+	/** Main: records a worker took at launch, held until that worker exits. */
+	lend?(holder: string, records: GrantRecord[]): void;
+	/** Main: a worker exited; its taken grants it did not use (and that have not expired) return to the store. Returns how many. */
+	returnLent?(holder: string, used: ReadonlySet<string>): number;
 	importRecords(records: GrantRecord[]): void;
 	revokeAll(includeLeases?: boolean): void;
 	size(): number;
@@ -681,7 +687,11 @@ export type GrantMiss = "other-text" | "other-folder" | "used";
 export function createGrantStore(now: () => number = () => Date.now()): GrantStore {
 	let records: GrantRecord[] = [];
 	// Keys of single-use grants already consumed, kept until the grant would have expired, only to explain a repeat block.
-	let spent: { main: boolean; key: string; expiresAt: number }[] = [];
+	let spent: { id: string; main: boolean; key: string; expiresAt: number }[] = [];
+	// Field report (sms-live-retry): a worker takes every approval for its role and folder when it starts. One that exited without using
+	// it (refused for shell syntax first) kept it, so the replacement worker launched with none and was refused as PROC_KILL. Main now
+	// lends taken approvals to the worker and takes back, when it exits, every one it did not use.
+	let lent: { holder: string; record: GrantRecord }[] = [];
 	let leases: PushLease[] = [];
 	let delivery: DeliveryGrant[] = [];
 	let cleanup: CleanupGrant[] = [];
@@ -765,8 +775,24 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			const index = records.findIndex((r) => (scope === "main" ? r.role === null : r.role !== null) && foldPath(r.candidate) === foldPath(candidate) && keyOf(r.op) === keyOf(op) && r.expiresAt > t);
 			if (index < 0) return false;
 			const [used] = records.splice(index, 1);
-			spent.push({ main: used.role === null, key: keyOf(used.op), expiresAt: used.expiresAt });
+			spent.push({ id: used.id, main: used.role === null, key: keyOf(used.op), expiresAt: used.expiresAt });
 			return true;
+		},
+		spentIds() {
+			return spent.map((s) => s.id);
+		},
+		lend(holder, taken) {
+			for (const record of taken) lent.push({ holder, record });
+		},
+		returnLent(holder, used) {
+			const t = live();
+			const mine = lent.filter((l) => l.holder === holder);
+			lent = lent.filter((l) => l.holder !== holder);
+			const back = mine.map((l) => l.record).filter((r) => !used.has(r.id) && r.expiresAt > t && !records.some((x) => x.id === r.id));
+			records.push(...back);
+			// Used ones are remembered until they would have expired, only to tell the next launch why it received nothing.
+			for (const { record } of mine) if (used.has(record.id)) spent.push({ id: record.id, main: false, key: `${record.role}\0${foldPath(record.candidate)}\0${keyOf(record.op)}`, expiresAt: record.expiresAt });
+			return back.length;
 		},
 		grantMiss(scope, candidate, op) {
 			live();
@@ -786,6 +812,9 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		},
 		claimHint(role, candidate) {
 			const t = live();
+			const held = lent.find((l) => l.record.role === role && foldPath(l.record.candidate) === foldPath(candidate) && l.record.expiresAt > t);
+			if (held) return `main's approval for ${role} in this folder is held by another ${role} worker that is still running; it returns to main if that worker exits without using it, so stop or wait for that worker and launch again`;
+			if (!records.some((r) => r.role === role && foldPath(r.candidate) === foldPath(candidate)) && spent.some((s) => s.key.startsWith(`${role}\0${foldPath(candidate)}\0`))) return `an earlier ${role} worker in this folder used main's approval; approvals are single use, so ask for a new approval and launch again`;
 			const liveRecords = records.filter((r) => r.expiresAt > t);
 			const elsewhere = liveRecords.find((r) => r.role === role && foldPath(r.candidate) !== foldPath(candidate));
 			if (elsewhere) return `main holds an approval for ${role} in folder ${elsewhere.candidate}, but this worker was launched in ${candidate}; launch it in that folder or ask for an approval with cwd set to this one`;
@@ -1938,9 +1967,13 @@ export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
+/** A worker's guard announces each single-use approval it used, so main can take back the unused ones when the worker exits. */
+export const GRANT_USED_PREFIX = "pi-worker-grant-used ";
+
 export interface ChildGuardLaunch {
 	entry: string;
 	grantCount: number;
+	claimed: GrantRecord[]; // the single-use grants this launch took (main lends them, see GrantStore.lend)
 	leaseCount: number;
 	deliveryCount: number;
 	cleanupCount: number; // 1 only for the launch that actually claimed the cleanup scope
@@ -1986,13 +2019,14 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	if (mayClaim) window.claimed = claimed.length;
 	// Field report: a worker refused for an approved command could not tell why; the launch now carries the reason it received none.
 	const grantNote = claimed.length ? undefined : !mayClaim && (window.claimed ?? 0) > 0
-		? "this is a retry or fallback attempt of the job, and its single-use approvals went to the first attempt; ask main to request the approval again and relaunch"
+		? "this is a retry or fallback attempt of the job, and its single-use approvals went to the first attempt; an approval it did not use returns to main when it exits, so ask main to launch again (or request the approval again if it was used)"
 		: mayClaim ? store.claimHint?.(role, canonicalCwd(candidate)) : undefined;
 	const cleanup = mayClaim && cleanupId !== undefined ? [store.claimCleanup(cleanupId)].filter((c): c is CleanupGrant => c !== undefined) : [];
 	const value = claimed.length || leases.length || delivery.length || cleanup.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget, cleanup) : undefined;
 	return {
 		entry: guardFile,
 		grantCount: claimed.length,
+		claimed,
 		leaseCount: leases.length,
 		deliveryCount: delivery.length,
 		cleanupCount: cleanup.length,
