@@ -359,6 +359,9 @@ test("pending discovery is a cheap runtime-metadata projection: 4 merge grants, 
 	const nonMerge = C.createGrantStore();
 	nonMerge.addDeliveryGrant({ role: "release-engineer", candidate: tasks[0].dir, pushUrl: GH_URL, repo: "acme/widgets", branch: tasks[0].branch, base: "main", action: "release", pr: 12, sha: tasks[0].head, version: "v1.2.3" });
 	assert.deepEqual(C.cleanupPending(nonMerge, owners, () => false), [], "only merge grants are pending (a release grant is not)");
+	// Field report: after a successful squash merge nothing was cleaned, because the notice only said main "may" clean up.
+	assert.match(text, /Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report/);
+	assert.match(text, /RETAINED entries stay; name each one and its reason in the completion report/);
 	assert.equal(C.formatCleanupPending([]), "");
 	// Unchanged safety: discovery grants nothing. The explicit mint still needs and verifies the live merged PR.
 	assert.equal(mint(tasks[0]).res.ok, true, "positive control: the explicit mint verifies live and succeeds");
