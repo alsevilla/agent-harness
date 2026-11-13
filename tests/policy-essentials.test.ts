@@ -56,15 +56,14 @@ test("release-engineer cleanup never forces a worktree removal in routine mode",
 	assert.match(text, /(?:without|no)\s+`?--force`?/);
 });
 
-// Field report: a project that keeps local notes in a repo-root /local-knowledge/ (outside docs/, which QMD indexes) got LEARN BLOCKED
-// on docs/knowledge/local/, and the post-merge cleanup then kept _scratch and _evidence.
-test("LEARN saves to the local store the project documents, and the merge approval names the artifact directory", () => {
-	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md"]) {
+// Lessons live in one place: one file per lesson in docs/knowledge/, committed with the task's PR (the general/harness scopes and
+// the ignored local and private stores were retired as convoluted). A project may name another folder in its AGENTS.md.
+test("LEARN saves one file per lesson in docs/knowledge, committed with the PR, and the merge approval names the artifact directory", () => {
+	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md", "agent/agents/release-engineer.md"]) {
 		const text = flat(read(file));
-		assert.ok(text.includes("the git-ignored local-notes folder the project documents"), file);
-		assert.ok(text.includes("only when the project names none, `docs/knowledge/local/`"), file);
-		assert.ok(text.includes("`git check-ignore` confirms the existing ignore rule covers it, create exactly that folder"), file);
-		assert.ok(text.includes("never edit `.gitignore`"), file);
+		assert.ok(text.includes("one small focused Markdown file per lesson at `docs/knowledge/<descriptive-slug>.md` in the candidate"), file);
+		assert.ok(text.includes("A project whose `AGENTS.md` names another knowledge folder uses that folder instead"), file);
+		assert.doesNotMatch(text, /LOCAL-ONLY|knowledge\/local|check-ignore|general\/|knowledge-harness/, file);
 	}
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("a merge approved without one cleans nothing"));
 });

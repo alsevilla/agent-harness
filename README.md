@@ -104,7 +104,7 @@ Describe the task to main as usual; it routes the work. Useful commands:
 | `/subagent roles` | Edit one role's default model, fallbacks and thinking level |
 | `/subagent create` | Preview and create a project-local role (operator only) |
 | `/authorization`, `/revoke-authorization` | Show or withdraw session approvals |
-| `/learn <packet>` | Save one verified lesson to the ignored local knowledge store |
+| `/learn <packet>` | Save one verified lesson as a file in `docs/knowledge/`, committed with the task's PR |
 
 The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/review`, `/plan` and the domain guides) are optional files you load yourself; they are not exported by the package.
 

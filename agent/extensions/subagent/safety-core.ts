@@ -1876,13 +1876,24 @@ function prepareArtifactCleanup(r: Record<string, unknown>, deps: CleanupDeps, l
 // Field report: cleanup deletes the task's checkout and its _evidence and _scratch folders, the only place a lesson's evidence lives,
 // and nothing made main settle the LEARN checkpoint first. The request now carries it: NO LESSON, or the saved record, which must
 // exist outside everything the cleanup deletes. The runtime cannot judge whether a lesson existed; it only refuses an unsettled one.
-function knowledgeWhy(knowledge: unknown, checkout: string | undefined): string | undefined {
+// A saved record is one file in docs/knowledge/, committed with the task's PR: inside the task checkout it is durable only when the
+// approved PR head contains it (the cleanup then proves that head merged); anywhere else it must exist on disk.
+function knowledgeWhy(knowledge: unknown, checkout: string | undefined, primary: string, headSha: unknown): string | undefined {
 	const need = "cleanup needs the LEARN checkpoint in knowledge: the exact text NO LESSON, or the absolute path of the saved knowledge record; settle LEARN first (a BLOCKED checkpoint keeps the folders)";
 	if (typeof knowledge !== "string" || !knowledge.trim()) return need;
 	if (knowledge === "NO LESSON") return undefined;
 	if (!path.isAbsolute(knowledge) || !/\.md$/i.test(knowledge)) return need;
 	const record = normPath(slashed(knowledge));
-	if (/\/_(evidence|scratch)(\/|$)/.test(record) || (checkout !== undefined && (record + "/").startsWith(normPath(slashed(checkout)) + "/"))) return "the knowledge record lies inside a folder this cleanup deletes; save it outside the checkout, _evidence and _scratch first";
+	if (/\/_(evidence|scratch)(\/|$)/.test(record)) return "the knowledge record lies inside a folder this cleanup deletes; save it in docs/knowledge/ and commit it with the PR";
+	for (const root of [checkout, primary]) {
+		if (root === undefined || !record.startsWith(normPath(slashed(root)) + "/")) continue;
+		const rel = slashed(knowledge).slice(slashed(root).length + 1);
+		let committed = false;
+		try { committed = typeof headSha === "string" && BARE_SHA.test(headSha) && gitExit(root, ["cat-file", "-e", `${headSha}:${rel}`]) === 0; } catch { committed = false; }
+		if (committed) return undefined;
+		if (root === checkout) return "the knowledge record lies inside the checkout this cleanup deletes and is not committed in the PR head; commit it with the PR (docs/knowledge/) first";
+		break;
+	}
 	try { const st = fs.lstatSync(knowledge); if (!st.isFile() || st.size < 1) return "the knowledge record is not a non-empty regular file"; } catch { return "the knowledge record does not exist; SAVED needs the written record and its readback before cleanup"; }
 	return undefined;
 }
@@ -1892,7 +1903,7 @@ export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true;
 	const live = deps.live ?? defaultDeliveryLive(livePushUrl);
 	try {
 		const r = (request && typeof request === "object" && !Array.isArray(request) ? request : {}) as Record<string, unknown>;
-		const unsaved = knowledgeWhy(r.knowledge, typeof r.checkout === "string" ? r.checkout : undefined);
+		const unsaved = knowledgeWhy(r.knowledge, typeof r.checkout === "string" ? r.checkout : undefined, deps.primary, r.headSha);
 		if (unsaved) return refuse(unsaved);
 		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() === ARTIFACT_REQUEST_KEYS) return prepareArtifactCleanup(r, deps, live);
 		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout (worktree task) or task (plain-branch task), plus branch, base, pr, headSha, mergeCommit and quiescent, and knowledge");
@@ -2037,7 +2048,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit, quiescent: true and knowledge, only after its own quiescence check and after the LEARN checkpoint is settled (knowledge = the exact text NO LESSON, or the absolute path of the record saved outside every target; the folders hold the task's evidence, so decide before they are deleted, and with a BLOCKED checkpoint keep them); the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit, quiescent: true and knowledge, only after its own quiescence check and after the LEARN checkpoint is settled (knowledge = the exact text NO LESSON, or the absolute path of the saved record: the docs/knowledge file committed with the PR, never one under _evidence or _scratch; the folders hold the task's evidence, so decide before they are deleted, and with a BLOCKED checkpoint keep them); the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
 /** A worker's guard announces each single-use approval it used, so main can take back the unused ones when the worker exits. */
@@ -2584,7 +2595,14 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 			const reads = RO_GIT_READS[sub]?.includes(positionals[1]?.toLowerCase() ?? "");
 			if (RO_GIT.has(sub) && !reads) return `git ${sub} changes the repository`;
 			if (sub === "stash" && !["list", "show"].includes(positionals[1]?.toLowerCase() ?? "")) return "git stash changes the working tree";
-			if ((sub === "branch" || sub === "tag") && (positionals.length > 1 || lower.some((a) => /^-(d|D|m|M|c|C|f|a|s|u)$/.test(a) || a === "--delete" || a === "--move" || a === "--force"))) return `git ${sub} changes refs`;
+			// Field report: a read-only scout's branch listing was refused. Listing forms pass (-a, -r, -v, --list <pattern>, --show-current,
+			// --contains, --merged and peers); a changing flag, or a name without a listing flag (which creates the ref), is refused.
+			if (sub === "branch" || sub === "tag") {
+				const rest = args.slice(lower.indexOf(sub) + 1);
+				const changes = rest.some((a) => (sub === "branch" ? /^-[a-zA-Z]*[dDmMcCfut]/ : /^-[a-zA-Z]*[dasufmFe]/).test(a) || /^--(delete|move|copy|force|set-upstream|set-upstream-to|unset-upstream|edit-description|track|no-track|create-reflog|annotate|sign|local-user|message|file|edit|cleanup)(=|$)/.test(a));
+				const lists = rest.some((a) => (sub === "branch" ? /^-[arvl]+$/ : /^-(l|n\d*|v)$/).test(a) || /^--(list|show-current|all|remotes|verbose|contains|no-contains|merged|no-merged|points-at|sort|format|column|verify)(=|$)/.test(a));
+				if (changes || (rest.some((a) => !a.startsWith("-")) && !lists)) return `git ${sub} changes refs`;
+			}
 			continue;
 		}
 		if (["npm", "pnpm", "yarn", "bun", "pip", "pip3", "cargo", "dotnet", "go"].includes(name) && RO_PKG.has(positionals[0]?.toLowerCase() ?? "")) return `${name} ${positionals[0]} changes dependencies`;
