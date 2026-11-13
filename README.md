@@ -186,6 +186,34 @@ The same ten-task session (four small fixes, three bug hunts, three features, tw
 
 Rerun on 2026-11-13 for v1.20.1 with refreshed worker-prompt sizes, including this project's four saved lesson titles. Lesson-body reads and their effect on agent behavior are not modeled. Both delegation comparisons reproduced identical results across two runs; the larger prompts slightly increase estimated costs without changing the main savings conclusion.
 
+The same results per task (each session total divided by its ten tasks; a small fix costs less than this average and a feature more):
+
+| Main / single-agent model | One agent, one session | One agent, a new session per task | Harness |
+| --- | --- | --- | --- |
+| Claude Fable 5.1 | $2.07 | $1.12 | **$0.47** |
+| Claude Opus 5.5 | $1.30 | $0.52 | **$0.29** |
+| Claude Sonnet 5.5 | $1.12 | $0.33 | **$0.24** |
+| Claude Haiku 5.5 | $0.26 | $0.02 | $0.15 |
+| GPT-6 Astra | $8.76 | $1.67 | **$0.56** |
+| GPT-6.1 Sol | $0.99 | $0.26 | **$0.19** |
+| GPT-6.1 Terra | $0.50 | $0.13 | $0.15 |
+| GPT-6 Luna | $0.09 | $0.02 | $0.12 |
+
+Where the harness cost goes, for the whole session:
+
+| Main model | Main | Complex implementation (capable tier) | Economy-tier workers |
+| --- | --- | --- | --- |
+| Claude Fable 5.1 | $3.21 (68%) | $1.36 (29%) | $0.12 (3%) |
+| Claude Opus 5.5 | $1.45 (49%) | $1.36 (46%) | $0.12 (4%) |
+| Claude Sonnet 5.5 | $0.90 (38%) | $1.36 (57%) | $0.12 (5%) |
+| Claude Haiku 5.5 | $0.04 (3%) | $1.36 (89%) | $0.12 (8%) |
+| GPT-6 Astra | $4.47 (79%) | $1.05 (19%) | $0.12 (2%) |
+| GPT-6.1 Sol | $0.73 (38%) | $1.05 (55%) | $0.12 (7%) |
+| GPT-6.1 Terra | $0.36 (24%) | $1.05 (68%) | $0.12 (8%) |
+| GPT-6 Luna | $0.04 (4%) | $1.05 (86%) | $0.12 (10%) |
+
+The economy-tier workers cost almost nothing. The bill is main reading results and writing packets on its own model, plus the three features on the capable tier, which cost the same whatever main is. A cheaper main, or a new main session between unrelated tasks, is what lowers it. Real sessions run above these figures: only 350 output tokens are counted per model call, so most thinking output is not priced, and reviewer, oracle and delivery runs are not part of the ten tasks.
+
 Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.9M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna (Haiku's long session pays its 5x price above 100k tokens).
 
 Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 42-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
@@ -202,7 +230,7 @@ An offline replay runs the current shaping functions over seven fixed workloads 
 | Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52% fewer tokens**. Input cost: 65% lower on Fable 5.1, 62% on Opus 5.5, 59% on Sonnet 5.5, 76% on Haiku 5.5 |
 | Ordinary worker task: small, unique reads | 565k tokens sent | 565k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
 | Main session: 10 user turns of subagent results | 646k tokens sent | 646k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
-| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37% fewer tokens**. Input cost: 11% lower on Opus 5.5, 23% lower on Sonnet 5.5 and Haiku 5.5, **7% higher on Fable 5.1** |
+| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37% fewer tokens**. Input cost: 11% lower on Opus 5.5, 23% lower on Sonnet 5.5 and Haiku 5.5, 7% higher on Fable 5.1 |
 | Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49% fewer tokens**. Input cost: 14% lower on Fable 5.1, 29% on Opus 5.5, 39% on Sonnet 5.5, 84% on Haiku 5.5 |
 | Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **66% fewer tokens**. Input cost: 36% lower on Fable 5.1, 50% on Opus 5.5, 58% on Sonnet 5.5, 91% on Haiku 5.5 |
 
@@ -210,19 +238,19 @@ Prices per million input tokens: Fable 5.1 $10 (cache read $0.25), Opus 5.5 $4 (
 
 ### Offline replay at OpenAI prices
 
-An independent offline replay exercises the current shaping functions with seven fixed workloads and four OpenAI pricing profiles ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Both arms run the same scripted actions, and token counts are totals over every request of a run. Costs cover input only, using Standard API rates with an idealized warm cache and 30-minute writes: not Codex subscription billing or total task cost.
+The same offline replay, priced for four OpenAI models ([script, workloads, cache assumptions and results](docs/simulations/openai-shaping.md)). It does not run live models or the Pi CLI, and its fixtures differ from the recorded Pi runs above. Both arms run the same scripted actions, and token counts are totals over every request of a run. Costs cover input only, at OpenAI Standard API list prices with an idealized warm cache and 30-minute writes: not subscription billing or total task cost.
 
 | Scenario | Without shaping | With the harness | Saving |
 | --- | --- | --- | --- |
-| Long worker task: 30 tool calls over large files and logs | 3.86M tokens sent, peak request 238k | 1.48M sent, peak 84k | **62% fewer tokens**. Input cost: **25% lower on GPT-6.1 Sol / Terra**, 36% lower on GPT-6 Astra / Luna |
-| Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52% fewer tokens**. Input cost: **62% lower on GPT-6.1 Sol / Terra**, 59% lower on GPT-6 Astra / Luna |
+| Long worker task: 30 tool calls over large files and logs | 3.86M tokens sent, peak request 238k | 1.48M sent, peak 84k | **62% fewer tokens**. Input cost: 25% lower on GPT-6.1 Sol / Terra, 36% lower on GPT-6 Astra / Luna |
+| Worker re-reading the same files | 1.90M tokens sent | 909k sent | **52% fewer tokens**. Input cost: 62% lower on GPT-6.1 Sol / Terra, 59% lower on GPT-6 Astra / Luna |
 | Ordinary worker task: small, unique reads | 565k tokens sent | 565k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
 | Main session: 10 user turns of subagent results | 646k tokens sent | 646k sent | No change in tokens or input cost: the small-task guards avoid added overhead |
-| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37% fewer tokens**. Input cost: **11% lower on GPT-6.1 Sol / Terra**, 23% lower on GPT-6 Astra / Luna |
-| Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49% fewer tokens**. Input cost: **29% lower on GPT-6.1 Sol / Terra**, 39% lower on GPT-6 Astra / Luna |
-| Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **66% fewer tokens**. Input cost: **56% lower on GPT-6.1 Sol / Terra**, 63% lower on GPT-6 Astra / Luna |
+| Main session: 150 requests | 8.35M tokens sent | 5.25M sent | **37% fewer tokens**. Input cost: 11% lower on GPT-6.1 Sol / Terra, 23% lower on GPT-6 Astra / Luna |
+| Main session: 300 requests | 29.84M tokens sent | 15.17M sent | **49% fewer tokens**. Input cost: 29% lower on GPT-6.1 Sol / Terra, 39% lower on GPT-6 Astra / Luna |
+| Main session: 480 requests | 72.94M tokens sent | 25.02M sent | **66% fewer tokens**. Input cost: 56% lower on GPT-6.1 Sol / Terra, 63% lower on GPT-6 Astra / Luna |
 
-Sol and Terra price cached reads at 5% of ordinary input; Astra and Luna use 10%. All four price 30-minute writes at 1.25x; requests above 272k input tokens use 2x input/cache rates ([official pricing](https://developers.openai.com/api/docs/pricing)). The 480-request baseline crosses that boundary; its shaped counterpart does not.
+Prices per million input tokens: Astra $10 (cache read $1), Sol $2 ($0.10), Terra $1 ($0.05), Luna $0.10 ($0.01), with 30-minute cache writes at 1.25x input ([official pricing](https://developers.openai.com/api/docs/pricing)). Two things explain the spread. Requests above 272k input tokens pay 2x input and cache rates: the 480-request baseline crosses that boundary and its shaped counterpart does not. And Sol and Terra read the cache at 5% of their input price against 10% for Astra and Luna, so shortening, which rewrites part of the cache, pays less on them in the long runs. All four models have their workers masked from 80k tokens.
 
 This replay found two small-task costs, now guarded: the ordinary worker cost 3% more and the short main run 13-23% more. Main now leaves its history unshortened below 25k estimated tokens, and a read-only worker defers the ledger's state view until it has read 80k characters (an edit, command or packet-required check shows it sooner); both fixtures now match their unshaped baseline. These are conservative heuristics, not a guarantee for every workload; the [before-and-after comparison](docs/simulations/openai-shaping.md#before-and-after) shows the longer-run trade-offs. The recorded Pi runs and long main sessions above give the same results with and without the guards.
 
@@ -232,7 +260,7 @@ The real Copilot CLI 1.0.108, using a scripted localhost provider, ran the same 
 
 | Workload | Plain session | Harness, one worker | Input-token change |
 | --- | --- | --- | --- |
-| Small: 4 file reads | 92k | 134k | **45% more** |
+| Small: 4 file reads | 92k | 134k | 45% more |
 | Repeated: 12 reads | 385k | 352k | **9% fewer** |
 | Large: 30 reads | 3.05M | 2.85M | **6% fewer** |
 
