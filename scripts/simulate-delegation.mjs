@@ -19,12 +19,13 @@ import { capShellOutput } from "../agent/extensions/subagent/output-cap.ts";
 const OPENAI = process.argv.includes("--openai");
 const PROVIDER = OPENAI ? "openai" : "anthropic";
 // Standard API rates verified 2026-11-08; long requests multiply input/cache by 2 and output by 1.5.
-const PRICES = OPENAI ? {
+// One table for both families: since the roles were split by model family (reviewer and test-engineer run on GPT first, the rest on
+// Claude first), a Claude-main session also sends requests to GPT models, so each request is priced and cached by its own model.
+const PRICES = {
 	"gpt-6-astra": { input: 10, output: 50, read: 1, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
 	"gpt-6.1-sol": { input: 2, output: 10, read: 0.1, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
 	"gpt-6.1-terra": { input: 1, output: 5, read: 0.05, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
 	"gpt-6-luna": { input: 0.1, output: 0.5, read: 0.01, longFrom: 272_000, longX: 2, longOutputX: 1.5 },
-} : {
 	"claude-fable-5-1": { input: 10, output: 50, read: 0.25 },
 	"claude-opus-5-5": { input: 4, output: 20, read: 0.2 },
 	"claude-sonnet-5-5": { input: 2, output: 10, read: 0.2 },
@@ -32,7 +33,8 @@ const PRICES = OPENAI ? {
 };
 const WRITE_X = 1.25, CHARS_PER_TOKEN = 4, CACHE_LOOKBACK_BLOCKS = 20;
 const CACHE_MIN_TOKENS = 1_024;
-const MAIN_MODELS = Object.keys(PRICES);
+const isOpenAI = (model) => model.startsWith("gpt-");
+const MAIN_MODELS = Object.keys(PRICES).filter((model) => isOpenAI(model) === OPENAI);
 const ORIENT_DEFAULT = 1, ECONOMY_X_DEFAULT = 1;
 const MAIN_FOLD_TOKENS = 50_000, HANDOFF_WINDOW = 10, SHELL_OUTPUT_CHARS = 16_000;
 const PACKET_CHARS = 1_500, HANDOFF_FINDINGS_CHARS = 1_200;
@@ -42,13 +44,19 @@ const ORIENT_SWEEP = [0, 1, 2, 4, 6, 8, 12], ECONOMY_X_SWEEP = [1, 1.5, 2, 3];
 // agent/AGENTS.md, and each role's assembled child prompt (scripts/measure-child-prompt.mjs), on top of Pi's. Tool definitions are not in
 // the recordings: TOOL_SCHEMA_CHARS is assumed for every context, plus SUBAGENT_SCHEMA_CHARS for main's subagent tools.
 const PI_SYSTEM = 7_271, MAIN_SYSTEM = 14_084 + readFileSync(new URL("../agent/AGENTS.md", import.meta.url), "utf8").length;
-const CHILD_PROMPT = { "backend-worker": 18_809, debugger: 15_674, planner: 14_298, "test-engineer": 17_463 };
+// Re-measured 2026-11-13 on v1.20.1 with measure-child-prompt.mjs, live/profile-checkout shape:
+// includes this repository's four saved lesson titles; lesson-body reads are not modeled.
+const CHILD_PROMPT = { "backend-worker": 19_838, debugger: 16_703, planner: 15_327, "test-engineer": 18_492 };
 const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 // Per model call: assistant text kept in the history, and output tokens billed (text plus thinking, the same in every arm).
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;
 
 const roles = Object.fromEntries(JSON.parse(readFileSync(new URL("../agent/roles.json", import.meta.url), "utf8")).map((r) => [r.name, r]));
-const roleModel = (name, modelTier = roles[name].defaultModelTier) => { const r = roles[name]; const tier = r.modelTiers[modelTier]; return (OPENAI ? tier.fallbackModel : tier.model).split("/").at(-1); };
+const roleModel = (name, modelTier = roles[name].defaultModelTier) => { const r = roles[name]; const tier = r.modelTiers[modelTier]; 
+	// Default: the production primary of each role (mixed families). --openai: every role on its GPT entry, for an OpenAI-only setup.
+	const pick = OPENAI ? [tier.model, tier.fallbackModel].find((m) => m && isOpenAI(m.split("/").at(-1))) ?? tier.model : tier.model;
+	return pick.split("/").at(-1);
+};
 
 const fill = (tag, n) => { let s = ""; let i = 0; while (s.length < n) s += `${tag} ${i++}: the scheduler drains the queue at a fixed pace and records each send.\n`; return s.slice(0, n); };
 const tok = (s) => Math.ceil(s.length / CHARS_PER_TOKEN);
@@ -92,14 +100,14 @@ function meter(model, systemChars) {
 			const keys = []; const h = createHash("sha256");
 			for (const m of messages) { h.update(JSON.stringify(m)); keys.push(h.copy().digest("hex")); }
 			let hit = -1;
-			for (let k = messages.length - 1; k >= Math.max(0, OPENAI ? 0 : messages.length - 1 - CACHE_LOOKBACK_BLOCKS); k--) if (entries.has(keys[k])) { hit = k; break; }
+			for (let k = messages.length - 1; k >= Math.max(0, isOpenAI(model) ? 0 : messages.length - 1 - CACHE_LOOKBACK_BLOCKS); k--) if (entries.has(keys[k])) { hit = k; break; }
 			const read = (sysCached ? system : 0) + sizes.slice(0, hit + 1).reduce((a, b) => a + b, 0);
 			const write = (sysCached ? 0 : system) + sizes.slice(hit + 1).reduce((a, b) => a + b, 0);
 			const size = read + write, x = price.longFrom && size > price.longFrom ? price.longX : 1;
 			const outputX = x === 1 ? 1 : (price.longOutputX ?? x);
 			cost += ((read * price.read + write * price.input * WRITE_X) * x + output * price.output * outputX) / 1e6;
 			sent += size; peak = Math.max(peak, size); requests++; sysCached = true;
-			if (OPENAI) {
+			if (isOpenAI(model)) {
 				let prefix = system;
 				keys.forEach((key, i) => { prefix += sizes[i]; if (prefix >= CACHE_MIN_TOKENS) entries.add(key); });
 			} else entries.add(keys[keys.length - 1]);
@@ -126,7 +134,7 @@ let scratch;
 function runWorker(role, model, packet, steps, totals) {
 	const m = meter(model, PI_SYSTEM + CHILD_PROMPT[role] + TOOL_SCHEMA_CHARS);
 	const history = [{ role: "user", content: [{ type: "text", text: packet }], timestamp: 1 }];
-	const ledger = createExecutionLedger(), dedupe = createReadDedupe(), policy = workerMaskPolicy({ provider: PROVIDER, id: model }, {});
+	const ledger = createExecutionLedger(), dedupe = createReadDedupe(), policy = workerMaskPolicy({ provider: isOpenAI(model) ? "openai" : "anthropic", id: model }, {});
 	ledger.noteTask?.(packet);
 	let masked = false;
 	const request = (output) => {

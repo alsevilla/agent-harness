@@ -2,7 +2,7 @@
 Use only when isolation is already justified: parallel writers on separate candidates, uncommitted user work in the primary checkout, a live process (server, live database, path-bound tooling) that depends on the primary checkout, or main must stay on the base branch while a background candidate runs. Otherwise the candidate is a feature branch in the primary checkout, created or switched to before launch, and no worktree cleanup follows. Main owns placement and disposition.
 
 Before mutation, confirm primary repository, accepted base, candidate, ownership
-and active workers. Preserve user work and reuse a suitable existing checkout.
+and active workers. Start from a fresh base: before a task's branch is created or an existing branch is reused, fetch the base (`git fetch origin <base>`) and check the branch's PR state (`gh pr view <branch> --json state`). A branch whose PR is merged is finished: add no commits to it. Create the new task's branch from the freshly fetched base (`git switch -c <new-branch> origin/<base>`). Judge merged from the PR state, not from ancestry: a squash merge leaves the old commits outside the base. Commits on the old branch that the merged PR does not contain are carried over (cherry-pick onto the new branch), never discarded, and uncommitted changes are user work: stop and ask. Preserve user work and reuse a suitable existing checkout.
 
 ### Placement
 Resolve the primary checkout from Git's common directory. Unless the user/project
