@@ -44,7 +44,9 @@ const ORIENT_SWEEP = [0, 1, 2, 4, 6, 8, 12], ECONOMY_X_SWEEP = [1, 1.5, 2, 3];
 // agent/AGENTS.md, and each role's assembled child prompt (scripts/measure-child-prompt.mjs), on top of Pi's. Tool definitions are not in
 // the recordings: TOOL_SCHEMA_CHARS is assumed for every context, plus SUBAGENT_SCHEMA_CHARS for main's subagent tools.
 const PI_SYSTEM = 7_271, MAIN_SYSTEM = 14_084 + readFileSync(new URL("../agent/AGENTS.md", import.meta.url), "utf8").length;
-const CHILD_PROMPT = { "backend-worker": 18_809, debugger: 15_674, planner: 14_298, "test-engineer": 17_463 };
+// Re-measured 2026-11-13 on v1.20.1 with measure-child-prompt.mjs, live/profile-checkout shape:
+// includes this repository's four saved lesson titles; lesson-body reads are not modeled.
+const CHILD_PROMPT = { "backend-worker": 19_838, debugger: 16_703, planner: 15_327, "test-engineer": 18_492 };
 const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 // Per model call: assistant text kept in the history, and output tokens billed (text plus thinking, the same in every arm).
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;

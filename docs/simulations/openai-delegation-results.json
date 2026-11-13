@@ -4,7 +4,7 @@
   "cacheModel": "idealized warm complete-message prefixes; no expiry or cross-context reuse",
   "pricingDate": "2026-11-08",
   "pricingURL": "https://developers.openai.com/api/docs/pricing",
-  "sourceCommit": "475da0fe1367ece3bf0c8b91034ed6e35bdf5bc3",
+  "sourceCommit": "1c871c252aa766492a91915a53138dcbba501d12",
   "roleDefaults": {
     "backend-worker": "gpt-6.1-sol",
     "debugger": "gpt-6-luna",
@@ -154,10 +154,10 @@
     "PI_SYSTEM": 7271,
     "MAIN_SYSTEM": 20580,
     "CHILD_PROMPT": {
-      "backend-worker": 18809,
-      "debugger": 15674,
-      "planner": 14298,
-      "test-engineer": 17463
+      "backend-worker": 19838,
+      "debugger": 16703,
+      "planner": 15327,
+      "test-engineer": 18492
     },
     "MAIN_FOLD_TOKENS": 50000,
     "HANDOFF_WINDOW": 10,
@@ -214,23 +214,23 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 23.6184,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 23.7427,
         "byModel": {
-          "gpt-6-astra": 23.6184
+          "gpt-6-astra": 23.7427
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 5.6424,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 5.6472,
         "byModel": {
           "gpt-6-astra": 4.4749,
-          "gpt-6.1-sol": 1.0438,
-          "gpt-6-luna": 0.1236
+          "gpt-6.1-sol": 1.0477,
+          "gpt-6-luna": 0.1246
         }
       }
     },
@@ -258,22 +258,22 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 3.9135,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 3.9327,
         "byModel": {
-          "gpt-6.1-sol": 3.9135
+          "gpt-6.1-sol": 3.9327
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 1.8933,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 1.8981,
         "byModel": {
-          "gpt-6.1-sol": 1.7696,
-          "gpt-6-luna": 0.1236
+          "gpt-6.1-sol": 1.7735,
+          "gpt-6-luna": 0.1246
         }
       }
     },
@@ -301,23 +301,23 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 1.9567,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 1.9663,
         "byModel": {
-          "gpt-6.1-terra": 1.9567
+          "gpt-6.1-terra": 1.9663
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 1.5304,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 1.5352,
         "byModel": {
-          "gpt-6.1-sol": 1.0438,
+          "gpt-6.1-sol": 1.0477,
           "gpt-6.1-terra": 0.3629,
-          "gpt-6-luna": 0.1236
+          "gpt-6-luna": 0.1246
         }
       }
     },
@@ -345,22 +345,22 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 0.2362,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 0.2374,
         "byModel": {
-          "gpt-6-luna": 0.2362
+          "gpt-6-luna": 0.2374
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8875435,
-        "peak": 61578,
-        "cost": 1.2122,
+        "sent": 8937514,
+        "peak": 61836,
+        "cost": 1.2171,
         "byModel": {
-          "gpt-6.1-sol": 1.0438,
-          "gpt-6-luna": 0.1684
+          "gpt-6.1-sol": 1.0477,
+          "gpt-6-luna": 0.1693
         }
       }
     }
@@ -370,308 +370,308 @@
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 0,
-      "cost": 5.5351,
+      "cost": 5.5398,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 1,
-      "cost": 5.6424,
+      "cost": 5.6472,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 2,
-      "cost": 5.7303,
+      "cost": 5.7352,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 4,
-      "cost": 5.8813,
+      "cost": 5.8865,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 6,
-      "cost": 6.0805,
+      "cost": 6.0859,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 8,
-      "cost": 6.2651,
+      "cost": 6.2564,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 12,
-      "cost": 6.7331,
+      "cost": 6.7392,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 1,
-      "cost": 5.6424,
+      "cost": 5.6472,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 5.7052,
+      "cost": 5.7102,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 2,
-      "cost": 5.7485,
+      "cost": 5.7536,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 3,
-      "cost": 5.8599,
+      "cost": 5.8653,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 0,
-      "cost": 1.786,
+      "cost": 1.7907,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 1,
-      "cost": 1.8933,
+      "cost": 1.8981,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 2,
-      "cost": 1.9811,
+      "cost": 1.9861,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 4,
-      "cost": 2.1322,
+      "cost": 2.1374,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 6,
-      "cost": 2.3314,
+      "cost": 2.3368,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 8,
-      "cost": 2.516,
+      "cost": 2.5073,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 12,
-      "cost": 2.9839,
+      "cost": 2.9901,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 1,
-      "cost": 1.8933,
+      "cost": 1.8981,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 1.9561,
+      "cost": 1.961,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 2,
-      "cost": 1.9994,
+      "cost": 2.0045,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 3,
-      "cost": 2.1108,
+      "cost": 2.1161,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 0,
-      "cost": 1.4231,
+      "cost": 1.4278,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 1,
-      "cost": 1.5304,
+      "cost": 1.5352,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 2,
-      "cost": 1.6182,
+      "cost": 1.6232,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 4,
-      "cost": 1.7693,
+      "cost": 1.7745,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 6,
-      "cost": 1.9685,
+      "cost": 1.9739,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 8,
-      "cost": 2.153,
+      "cost": 2.1444,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 12,
-      "cost": 2.621,
+      "cost": 2.6272,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "economyX",
       "value": 1,
-      "cost": 1.5304,
+      "cost": 1.5352,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 1.5932,
+      "cost": 1.5981,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "economyX",
       "value": 2,
-      "cost": 1.6365,
+      "cost": 1.6416,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6.1-terra",
       "sweep": "economyX",
       "value": 3,
-      "cost": 1.7478,
+      "cost": 1.7532,
       "singleFresh": 1.3028
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 0,
-      "cost": 1.1049,
+      "cost": 1.1096,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 1,
-      "cost": 1.2122,
+      "cost": 1.2171,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 2,
-      "cost": 1.3001,
+      "cost": 1.305,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 4,
-      "cost": 1.4511,
+      "cost": 1.4563,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 6,
-      "cost": 1.6503,
+      "cost": 1.6558,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 8,
-      "cost": 1.8349,
+      "cost": 1.8262,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "orient",
       "value": 12,
-      "cost": 2.3029,
+      "cost": 2.3091,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "economyX",
       "value": 1,
-      "cost": 1.2122,
+      "cost": 1.2171,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 1.275,
+      "cost": 1.28,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "economyX",
       "value": 2,
-      "cost": 1.3183,
+      "cost": 1.3234,
       "singleFresh": 0.1669
     },
     {
       "main": "gpt-6-luna",
       "sweep": "economyX",
       "value": 3,
-      "cost": 1.4297,
+      "cost": 1.4351,
       "singleFresh": 0.1669
     }
   ]

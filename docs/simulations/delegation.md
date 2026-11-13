@@ -17,16 +17,16 @@ Ten tasks in one user session: four small fixes (2 reads, a search, 2 edits, 2 t
 - **Single agent, one session:** one model in plain Pi does everything in one context, with every tool output kept. No native compaction triggers at these sizes on a 1M-context model.
 - **Single agent, fresh session per task:** the same, with a new session for each task (the second fix round stays in its task's session). The fairer baseline: it is how a careful user runs one agent.
 - **Harness, every role on main's model:** main reads at most two named files, writes a packet and delegates each phase to a role in its own context: a fix to `backend-worker`; a bug hunt to `debugger` then `backend-worker`; a feature to `planner`, `backend-worker`, then `test-engineer`; a second fix round to a new `backend-worker`. Main's requests go through the production main hook (older-result shortening and checkpoint folding at 50k); each worker's through the production worker shaping (execution ledger, duplicate-read notes, shell-output cap, threshold masking). Each worker also reads `orient` extra files to get its bearings, writes a report and hands main a four-line result with 1.2k characters of findings.
-- **Harness, roles on their own models:** the same, with main choosing each implementation's tier at plan time, as [`routing.md`](../../agent/skills/engineering-harness/references/routing.md) ("Explicit Pi model tier") says: economy for a bounded, known-contract implementation, capable otherwise. The fixture labels the three multi-file feature implementations complex (capable) and the four small fixes, three bug-hunt fixes and both retries non-complex (economy); `debugger`, `planner` and `test-engineer` run their economy defaults. With Anthropic models that is 3 workers on Claude Sonnet 5.5 and 18 on Claude Haiku 5.5. Main stays on the baseline's model. The labels are fixture assumptions, recorded per task in the results; no role setting changes.
+- **Harness, roles on their own models:** the same, with main choosing each implementation's tier at plan time, as [`routing.md`](../../agent/skills/engineering-harness/references/routing.md) ("Explicit Pi model tier") says: economy for a bounded, known-contract implementation, capable otherwise. The fixture labels the three multi-file feature implementations complex (capable) and the four small fixes, three bug-hunt fixes and both retries non-complex (economy); `debugger`, `planner` and `test-engineer` run their economy defaults. With the configured primary models that is 3 workers on Claude Sonnet 5.5, 15 on Claude Haiku 5.5 and 3 verification workers on GPT-6 Luna. Main stays on the baseline's model. The labels are fixture assumptions, recorded per task in the results; no role setting changes.
 
 The two harness rows separate the two effects: separate contexts alone (same model), then the model mix on top.
 
 ## Sizes and prices
 
-- System prompts, measured: Pi's own 7.3k characters (recorded runs); main's 14.1k with the subagent extension (recorded) plus `agent/AGENTS.md`; each role's assembled child prompt (14.3-18.8k, from `scripts/measure-child-prompt.mjs`) on top of Pi's. Tool definitions are not in the recordings: 6k characters are assumed for every context, plus 4k for main's subagent tools.
+- System prompts, measured: Pi's own 7.3k characters (recorded runs); main's 14.1k with the subagent extension (recorded) plus `agent/AGENTS.md`; each role's assembled child prompt (15.3-19.8k characters, re-measured with `scripts/measure-child-prompt.mjs` on 2026-11-13) on top of Pi's. Tool definitions are not in the recordings: 6k characters are assumed for every context, plus 4k for main's subagent tools.
 - Per model call: 300 characters of assistant text kept in the history and 350 output tokens billed (text and thinking, the same in every arm); 900 output tokens for main's packet, 500 for a worker's report, 300 for a reply to the user.
 - Prices, USD per million tokens (Anthropic first-party list prices): Claude Fable 5.1 $10 input, $50 output, $0.25 cache read; Claude Opus 5.5 $4 input, $20 output, $0.20 cache read; Claude Sonnet 5.5 $2, $10, $0.20; Claude Haiku 5.5 $0.10, $0.50 and 5x above 100k input tokens. Cache writes (5-minute) are 1.25x input. Haiku's cache-read price is not listed: 0.1x input is assumed.
-- Cache model: one breakpoint on the system block and one on the last message; a request reads the longest earlier-written prefix ending within 20 blocks of its breakpoint and writes the rest. Each context, and each model, has its own cache. Sizes are characters / 4.
+- Cache model is selected per serving model, including mixed-family runs. Claude uses one breakpoint on the system block and one on the last message; a request reads the longest earlier-written prefix ending within 20 blocks of its breakpoint and writes the rest. Each context, and each model, has its own cache. GPT requests use the idealized warm-prefix cache described below. Sizes are characters / 4.
 
 ## What a scripted run cannot know
 
@@ -45,7 +45,7 @@ Run the same fixture and four configurations with Astra, Sol, Terra and Luna as 
 npm run --silent simulate:delegation:openai > docs/simulations/openai-delegation-results.json
 ```
 
-This invokes the same script with `--openai`, including both sweeps. Results: [`openai-delegation-results.json`](openai-delegation-results.json). The routing is the same as above; each tier's OpenAI model is its `fallbackModel` in `agent/roles.json`: economy is GPT-6 Luna and capable GPT-6.1 Sol, so each mixed-model run launches 18 Luna workers and 3 Sol workers.
+This invokes the same script with `--openai`, including both sweeps. Results: [`openai-delegation-results.json`](openai-delegation-results.json). The routing is the same as above; each tier's OpenAI model is selected from its primary or fallback slot in `agent/roles.json`: economy is GPT-6 Luna and capable GPT-6.1 Sol, so each mixed-model run launches 18 Luna workers and 3 Sol workers.
 
 The ten tasks, prompt sizes, outputs, retries and shaping functions are shared with the Claude run. Worker masking selects the production OpenAI policy. Pi prompt sizes are retained as controlled fixture assumptions, not measured Codex prompts. This estimates Pi harness requests at OpenAI API rates; it does not simulate Codex or Copilot request construction or subscription billing.
 
@@ -63,3 +63,18 @@ Above 272k input tokens, input/cache rates are multiplied by 2 and output by 1.5
 OpenAI uses the same idealized warm-cache assumption as the OpenAI shaping replay: every complete message prefix of at least 1,024 estimated tokens can be reused, with independent caches per context/model. No expiry, eviction, cross-context reuse, tokenizer-specific boundaries or routing misses are modelled. This is not the Claude 20-block cache model. See [OpenAI cache documentation](https://developers.openai.com/api/docs/guides/prompt-caching). Prices, prompt sizes and cache assumptions are emitted in JSON. The script checks cold-write/warm-read accounting at short and long sizes before running the fixture.
 
 Both commands are deterministic: two runs at the same commit give byte-identical output (compare with `cmp`).
+
+## v1.20.1 rerun (2026-11-13)
+
+Worker sizes were measured from the production prompt assembler at commit `1ab7049` using the `live` / `profile-checkout` rows. The checkout was `/workspace/agent-harness`, with this project's four saved lesson titles and the controlled integration profile supplied by the measurement script. Path lengths and a different project's lesson index will change these sizes.
+
+| Worker | Previous characters | Refreshed characters |
+| --- | ---: | ---: |
+| backend-worker | 18,809 | 19,838 |
+| debugger | 15,674 | 16,703 |
+| planner | 14,298 | 15,327 |
+| test-engineer | 17,463 | 18,492 |
+
+Reproduce the measurement with `NATIVE_PROBE_HOST_MODULES=<installed Pi node_modules> node scripts/measure-child-prompt.mjs --label current --out /absolute/scratch/path`, then use the relevant rows for `CHILD_PROMPT`. These remain named, fixed fixture constants. The Pi prompt, tool-schema sizes, per-call output and pricing/cache assumptions are unchanged. The simulation includes lesson titles in startup text, but does not simulate reading lesson bodies or whether those lessons improve decisions.
+
+The two delegation configurations were each run twice and their full parsed JSON outputs matched. Cache accounting and masking use each serving model's family. Savings remain workload-dependent: the same-model delegation control and cheaper main models can cost more. None of these runs measures task success or cost per successfully completed task.
