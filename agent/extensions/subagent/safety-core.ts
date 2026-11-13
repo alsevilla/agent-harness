@@ -1674,12 +1674,12 @@ const MAX_CLEANUP_GRANTS = 4;
 const CLEANUP_WALK_MAX = 20_000;
 const TASK_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const CLEANUP_KEYS = "base,branch,candidate,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role";
-const CLEANUP_REQUEST_KEYS = "base,branch,checkout,headSha,mergeCommit,pr,quiescent";
+const CLEANUP_REQUEST_KEYS = "base,branch,checkout,headSha,knowledge,mergeCommit,pr,quiescent";
 const PR_CLEANUP_FIELDS = "number,state,baseRefName,headRefName,headRefOid,isCrossRepository,mergeCommit";
 export interface CleanupGrant { id: string; role: string; candidate: string; primary: string; pushUrl: string; repo: string; branch: string; base: string; pr: number; headSha: string; mergeCommit: string; issuedAt: number; task?: string; group?: string }
 // Plain-branch variant: candidate = primary, plus the task and its artifact group (<primary-parent>/worktrees/<repo>); it covers only the two artifact folders.
 const ARTIFACT_GRANT_KEYS = "base,branch,candidate,group,headSha,id,issuedAt,mergeCommit,pr,primary,pushUrl,repo,role,task";
-const ARTIFACT_REQUEST_KEYS = "base,branch,headSha,mergeCommit,pr,quiescent,task";
+const ARTIFACT_REQUEST_KEYS = "base,branch,headSha,knowledge,mergeCommit,pr,quiescent,task";
 
 const slashed = (p: string) => p.replace(/\\/g, "/");
 
@@ -1873,13 +1873,29 @@ function prepareArtifactCleanup(r: Record<string, unknown>, deps: CleanupDeps, l
 	return { ok: true, grant };
 }
 
+// Field report: cleanup deletes the task's checkout and its _evidence and _scratch folders, the only place a lesson's evidence lives,
+// and nothing made main settle the LEARN checkpoint first. The request now carries it: NO LESSON, or the saved record, which must
+// exist outside everything the cleanup deletes. The runtime cannot judge whether a lesson existed; it only refuses an unsettled one.
+function knowledgeWhy(knowledge: unknown, checkout: string | undefined): string | undefined {
+	const need = "cleanup needs the LEARN checkpoint in knowledge: the exact text NO LESSON, or the absolute path of the saved knowledge record; settle LEARN first (a BLOCKED checkpoint keeps the folders)";
+	if (typeof knowledge !== "string" || !knowledge.trim()) return need;
+	if (knowledge === "NO LESSON") return undefined;
+	if (!path.isAbsolute(knowledge) || !/\.md$/i.test(knowledge)) return need;
+	const record = normPath(slashed(knowledge));
+	if (/\/_(evidence|scratch)(\/|$)/.test(record) || (checkout !== undefined && (record + "/").startsWith(normPath(slashed(checkout)) + "/"))) return "the knowledge record lies inside a folder this cleanup deletes; save it outside the checkout, _evidence and _scratch first";
+	try { const st = fs.lstatSync(knowledge); if (!st.isFile() || st.size < 1) return "the knowledge record is not a non-empty regular file"; } catch { return "the knowledge record does not exist; SAVED needs the written record and its readback before cleanup"; }
+	return undefined;
+}
+
 export function prepareCleanup(request: unknown, deps: CleanupDeps): { ok: true; grant: CleanupGrant } | { ok: false; reason: string } {
 	const refuse = (reason: string) => ({ ok: false as const, reason });
 	const live = deps.live ?? defaultDeliveryLive(livePushUrl);
 	try {
 		const r = (request && typeof request === "object" && !Array.isArray(request) ? request : {}) as Record<string, unknown>;
+		const unsaved = knowledgeWhy(r.knowledge, typeof r.checkout === "string" ? r.checkout : undefined);
+		if (unsaved) return refuse(unsaved);
 		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() === ARTIFACT_REQUEST_KEYS) return prepareArtifactCleanup(r, deps, live);
-		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout (worktree task) or task (plain-branch task), plus branch, base, pr, headSha, mergeCommit and quiescent");
+		if (Object.keys(r).filter((k) => r[k] !== undefined).sort().join() !== CLEANUP_REQUEST_KEYS) return refuse("cleanup needs exactly checkout (worktree task) or task (plain-branch task), plus branch, base, pr, headSha, mergeCommit and quiescent, and knowledge");
 		if (r.quiescent !== true) return refuse("main must declare the checkout quiescent (quiescent: true)");
 		if (typeof r.checkout !== "string" || !cleanupPlacement(r.checkout, slashed(canonicalCwd(deps.primary)))) return refuse("checkout is not exactly worktrees/<repo>/<task> of the launch primary");
 		const candidate = slashed(canonicalCwd(r.checkout));
@@ -2021,7 +2037,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit, quiescent: true and knowledge, only after its own quiescence check and after the LEARN checkpoint is settled (knowledge = the exact text NO LESSON, or the absolute path of the record saved outside every target; the folders hold the task's evidence, so decide before they are deleted, and with a BLOCKED checkpoint keep them); the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
 /** A worker's guard announces each single-use approval it used, so main can take back the unused ones when the worker exits. */

@@ -167,7 +167,7 @@ async function readySession() {
 	// Main's explicit live PR query at the cleanup step supplies mergeCommit (the fake gh answers; the primary is main's own launch folder). Mint and guard verify both independently.
 	const queried = JSON.parse(String(cpDefault.execFileSync("gh", ["pr", "view", String(entry.request.pr), "--repo", "example-owner/example-repo", "--json", "state,mergeCommit"], { encoding: "utf8" })));
 	assert.equal(queried.state, "MERGED");
-	const request = { ...entry.request, mergeCommit: queried.mergeCommit.oid, quiescent: true };
+	const request = { ...entry.request, mergeCommit: queried.mergeCommit.oid, quiescent: true, knowledge: "NO LESSON" };
 	return { host, t, entry, request, launchCwd: PRIMARY, launch: (extra: Record<string, unknown> = {}) => host.tools.get("subagent")!.execute("clean", { agent: "release-engineer", task: "cleanup", cwd: PRIMARY, cleanup: request, ...extra }, undefined, undefined, ctx) };
 }
 const writerInTarget = (host: ReturnType<typeof fakeHost>, dir: string) => host.tools.get("subagent")!.execute("w", { agent: "general-worker", task: "write", cwd: dir, background: false }, undefined, undefined, ctx).then((r: any) => ({ refused: r.isError === true || /cleanup is pending/.test(text(r)), text: text(r) }), (error: Error) => ({ refused: /cleanup is pending/.test(error.message), text: error.message }));

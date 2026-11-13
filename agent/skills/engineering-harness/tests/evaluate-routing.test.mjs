@@ -783,7 +783,7 @@ describe("NativeCallValidationTests", () => {
 		}
 	});
 
-	const CLEANUP = { checkout: "C:/p/worktrees/pi/t", branch: "feat/t", base: "main", pr: 12, headSha: "a".repeat(40), mergeCommit: "b".repeat(40), quiescent: true };
+	const CLEANUP = { checkout: "C:/p/worktrees/pi/t", branch: "feat/t", base: "main", pr: 12, headSha: "a".repeat(40), mergeCommit: "b".repeat(40), quiescent: true, knowledge: "NO LESSON" };
 	const cleanupCall = (extra = {}) => ({ agent: "release-engineer", task: "t", cwd: "C:/p/pi", cleanup: { ...CLEANUP }, ...extra });
 
 	it("cleanup_accepted_only_in_the_shape_and_launch_the_runtime_mints", () => {
@@ -794,7 +794,7 @@ describe("NativeCallValidationTests", () => {
 	it("cleanup_refused_for_wrong_shape_mode_role_or_companions", () => {
 		const { quiescent: _q, ...noQuiescent } = CLEANUP;
 		const badShapes = [
-			["null", null], ["list", []], ["empty", {}], ["missing quiescent", noQuiescent],
+			["null", null], ["list", []], ["empty", {}], ["missing quiescent", noQuiescent], ["missing knowledge", (({ knowledge: _k, ...rest }) => rest)(CLEANUP)], ["blank knowledge", { ...CLEANUP, knowledge: " " }],
 			["extra key", { ...CLEANUP, force: true }], ["quiescent false", { ...CLEANUP, quiescent: false }], ["quiescent string", { ...CLEANUP, quiescent: "true" }],
 			["blank checkout", { ...CLEANUP, checkout: " " }], ["pr string", { ...CLEANUP, pr: "12" }], ["pr bool", { ...CLEANUP, pr: true }],
 			["pr zero", { ...CLEANUP, pr: 0 }], ["pr float", { ...CLEANUP, pr: 1.5 }], ["short sha", { ...CLEANUP, headSha: "abc" }],
@@ -1404,7 +1404,7 @@ describe("CliTests", () => {
 describe("NodeRuntimeDifferenceTests", () => {
 	const fx = loadFixture();
 	const ids = idsOf(fx);
-	const cleanupText = (pr) => `[{"agent":"release-engineer","task":"t","cwd":"C:/p/pi","cleanup":{"checkout":"c","branch":"b","base":"main","pr":${pr},"headSha":"${"a".repeat(40)}","mergeCommit":"${"b".repeat(40)}","quiescent":true}}]`;
+	const cleanupText = (pr) => `[{"agent":"release-engineer","task":"t","cwd":"C:/p/pi","cleanup":{"checkout":"c","branch":"b","base":"main","pr":${pr},"headSha":"${"a".repeat(40)}","mergeCommit":"${"b".repeat(40)}","quiescent":true,"knowledge":"NO LESSON"}}]`;
 
 	it("json_float_tokens_stay_distinct_from_integers_in_text", () => {
 		// Python tells 1.0 (float) from 1 (int); JS numbers do not, so the strict JSON reader tags float tokens.

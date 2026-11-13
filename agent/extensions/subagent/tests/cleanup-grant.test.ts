@@ -59,7 +59,7 @@ const clock = { value: T0 };
 function live(v: unknown) {
 	return { env: () => env.value, pushUrl: (c: string, b: string) => C.livePushUrl(c, b), ghJson: () => { if (v === "throw") throw new Error("gh down"); return v; }, tagStatus: () => 2, now: () => clock.value };
 }
-const request = (t: Task, over: Record<string, unknown> = {}) => ({ checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE, quiescent: true, ...over });
+const request = (t: Task, over: Record<string, unknown> = {}) => ({ checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE, quiescent: true, knowledge: "NO LESSON", ...over });
 function terminalOwners(t: Task, role = "release-engineer") {
 	const owners = new S.OwnerTracker();
 	owners.begin({ workerId: "w1", role, cwd: t.dir, jobId: "bg-1" });
@@ -531,6 +531,27 @@ test("F1 actual Git (positive control): with no monitor the exact allowed form g
 	assert.ok(!fs.existsSync(s.t.dir), "the disposable checkout was removed");
 });
 
+// Cleanup deletes the checkout and the task's _evidence and _scratch folders, where a lesson's evidence lives: the request must carry
+// the settled LEARN checkpoint, and a saved record must exist outside everything the cleanup deletes.
+test("knowledge gate: cleanup is refused until LEARN is settled as NO LESSON or a saved record outside every deletion target", () => {
+	const t = makeTask();
+	const need = /cleanup needs the LEARN checkpoint in knowledge: the exact text NO LESSON, or the absolute path of the saved knowledge record/;
+	for (const knowledge of [undefined, "", " ", true, "no lesson", "BLOCKED", "SAVED", "notes/lesson.md", `${PRIMARY}/lesson.txt`]) assert.match((mint(t, { req: { knowledge } }).res as any).reason ?? "", need, String(knowledge));
+	const inside = /the knowledge record lies inside a folder this cleanup deletes/;
+	fs.writeFileSync(`${t.dir}/lesson.md`, "x");
+	assert.match((mint(t, { req: { knowledge: `${t.dir}/lesson.md` } }).res as any).reason, inside, "inside the checkout");
+	fs.rmSync(`${t.dir}/lesson.md`);
+	for (const kind of ["_evidence", "_scratch"]) assert.match((mint(t, { req: { knowledge: `${WT}/${kind}/x/lesson.md` } }).res as any).reason, inside, kind);
+	const store = slash(path.join(root, "local-knowledge"));
+	fs.mkdirSync(store, { recursive: true });
+	assert.match((mint(t, { req: { knowledge: `${store}/missing.md` } }).res as any).reason, /the knowledge record does not exist/);
+	fs.writeFileSync(`${store}/empty.md`, "");
+	assert.match((mint(t, { req: { knowledge: `${store}/empty.md` } }).res as any).reason, /not a non-empty regular file/);
+	fs.writeFileSync(`${store}/lesson.md`, "# Lesson\n");
+	assert.equal(mint(t, { req: { knowledge: `${store}/lesson.md` } }).res.ok, true, "a saved record outside the targets");
+	assert.equal(mint(makeTask()).res.ok, true, "NO LESSON");
+});
+
 // Field report: after a merge the task checkout was always retained, because any build or test run leaves ignored output.
 test("ignored build output: whole ignored target/ and node_modules/ folders do not retain the checkout; mint and guard allow and Git removes it", () => {
 	const fill = (dir: string) => {
@@ -773,7 +794,7 @@ function plainTask(withDir = true) {
 	const store = C.createGrantStore(() => clock.value);
 	store.addDeliveryGrant({ role: "release-engineer", candidate: PRIMARY, pushUrl: GH_URL, repo: "acme/widgets", branch, base: "main", action: "merge", pr: 12, sha: head, bound: { head, ref: `refs/heads/${branch}`, fingerprint: "a".repeat(64), exclude: [] }, ...(withDir ? { artifactDir: evidence } : {}) });
 	const pr = { number: 12, state: "MERGED", baseRefName: "main", headRefName: branch, headRefOid: head, isCrossRepository: false, mergeCommit: { oid: MERGE } };
-	const request = (over: Record<string, unknown> = {}) => ({ task, branch, base: "main", pr: 12, headSha: head, mergeCommit: MERGE, quiescent: true, ...over });
+	const request = (over: Record<string, unknown> = {}) => ({ task, branch, base: "main", pr: 12, headSha: head, mergeCommit: MERGE, quiescent: true, knowledge: "NO LESSON", ...over });
 	const prepare = (o: { req?: Record<string, unknown>; view?: unknown; owners?: any; mainCwd?: string } = {}) =>
 		C.prepareCleanup(request(o.req), { store, owners: o.owners ?? new S.OwnerTracker(), live: live(o.view ?? pr), primary: PRIMARY, mainCwd: o.mainCwd ?? PRIMARY, jobRunning: () => false });
 	return { task, branch, head, evidence, scratch, store, pr, prepare };
