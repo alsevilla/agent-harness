@@ -13,6 +13,12 @@ Within the existing lookup order, start from the supplied path or symbol and the
 smallest plausible subsystem. For text-search fallback, locate filenames first when
 the location is unknown, then read matching ranges; narrow a truncated query rather
 than requesting a larger dump. Follow the relevant caller, contract and nearby tests.
+For each lookup, name the question the result must answer. Prefer a symbol body or
+matching range with its path and line numbers; expand to imports, callers and tests
+when the contract depends on them. A truncated result is incomplete evidence.
+Graphify and QMD locate candidates; confirm their claims against current source.
+Expand to a whole file only when the question needs it; a narrow view must still
+include the dependencies needed to reason about the change.
 Use history only to resolve a specific question about intent or past behavior.
 Stop when the worker has the entry point, affected callers, reusable pattern and
 relevant checks; name remaining unknowns instead of expanding into unrelated code.
