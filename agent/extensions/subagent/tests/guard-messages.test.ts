@@ -248,7 +248,7 @@ test("user permission rules: allow only what an operator could approve; deny blo
 // Field report (op c058ffddb7a0f93c): an approved isolated preview (backend 127.0.0.1:9091, frontend localhost:5173, scratch SQLite,
 // disposable admin password) could not start: Remove-Item Env:... was DESTRUCTIVE_FS, and the approval then refused the command as
 // credential-like although the password was generated at runtime. The first block message also pointed at that refused route.
-import { authorizableOp, blockReason, classifyShell, credentialFinding, decideToolCall, literalCredential } from "../safety-core.ts";
+import { authorizableOp, blockReason, classifyShell, credentialFinding, decideToolCall, deliveryFormWhy, literalCredential, parseDeliveryCommand } from "../safety-core.ts";
 test("isolated preview: Env: cleanup is not a filesystem delete; runtime-generated credentials are approvable; literal ones are not, consistently", () => {
 	for (const env of ["Remove-Item Env:RFID_CAPTURE -ErrorAction SilentlyContinue", "Remove-Item -Path Env:\\SMS_WORKER", "ri env:PREVIEW_ADMIN_PASSWORD", "Remove-Item Variable:pw"]) {
 		assert.deepEqual(classifyShell(env).rules, [], env);
@@ -292,6 +292,34 @@ test("credential-like refusals name the matching part; match patterns and labels
 	assert.match(refused, /credential-like literal \("token=" followed by a literal value at character 33\)/);
 	assert.doesNotMatch(refused, /abc123/, "never echoed");
 	assert.throws(() => authorizableOp("shell", cmd, "/tmp", agentDir), /not authorizable \("token=" followed by a literal value at character 33\)/);
+});
+
+// Field report: an approved squash merge with --subject "fix(db): Schedule backups" was refused as a missing approval. The colon is
+// accepted in subjects, titles and inline text, and a delivery command in a form the guard does not accept names what is wrong.
+test("delivery commands: a conventional-commit colon is accepted; an unaccepted form names the argument, not a missing approval", () => {
+	const merge = `gh pr merge 12 --repo o/r --squash --match-head-commit ${"a".repeat(40)}`;
+	const ok = parseDeliveryCommand(`${merge} --subject "fix(db): Schedule backups"`);
+	assert.equal(ok?.kind === "merge" && ok.subject, "fix(db): Schedule backups");
+	assert.equal(deliveryFormWhy(`${merge} --subject "fix(db): Schedule backups"`), undefined);
+	assert.equal(parseDeliveryCommand('gh pr create --repo o/r --base master --head feat/x --title "feat(ui): Add page" --body "Why: faster"')?.kind, "create");
+	for (const [command, why] of [
+		[`${merge} --subject "fix; x"`, /the --subject value contains an unsupported character \(";", character 4 of the value\); allowed: ASCII letters, digits, space and \. , : _ \/ # \( \) \+ -/],
+		[`${merge} --subject fix`, /the --subject value must be in double quotes/],
+		[`${merge} --subject "${"x".repeat(130)}"`, /the --subject value must be 1 to 120 characters \(it has 130\)/],
+		[`${merge} --subject "rotate token: abc123"`, /the --subject value contains credential-like text/],
+		[`${merge} --admin`, /option --admin is not supported here; supported: --repo, --squash, --match-head-commit, --subject, --body, --body-file/],
+		["gh pr merge 12 --squash", /gh pr merge needs --repo, --squash and --match-head-commit/],
+		["gh pr merge 12  --squash", /one line of printable ASCII with single spaces/],
+	] as [string, RegExp][]) {
+		assert.match(deliveryFormWhy(command) ?? "", why, command);
+		const reason = blockReason(decideToolCall("bash", { command }, "/tmp", agentDir) as any, "child", true);
+		assert.match(reason, /^Blocked by harness safety guard \[GIT_PUBLISH\] op [0-9a-f]{16}: gh pr; not an accepted command form: /, command);
+		assert.match(reason, /this is not a missing approval, and an approval already given for this merge or release still applies\.$/, command);
+		assert.doesNotMatch(reason, /abc123|grantable/, command);
+	}
+	// An accepted form without an approval, and other gh commands, keep the approval message.
+	assert.equal(deliveryFormWhy("gh pr close 3"), undefined);
+	assert.match(blockReason(decideToolCall("bash", { command: merge }, "/tmp", agentDir) as any, "child", true), /grantable/);
 });
 
 // Release notes need the previous release: gh release list and view are read-only and pass; every other gh release command stays gated.

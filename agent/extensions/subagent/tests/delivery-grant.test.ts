@@ -146,7 +146,7 @@ test("delivery constants: no TTL constant (session-scoped) and the approved acce
 	for (const [command, kind] of accepted) assert.equal(C.parseDeliveryCommand(command)?.kind, kind, command);
 	const rejected = [
 		`gh pr create --repo acme/widgets --base main --head feat/x --title Unquoted --body "x"`,
-		`gh pr create --repo acme/widgets --base main --head feat/x --title 'Colon: title' --body "x"`,
+		`gh pr create --repo acme/widgets --base main --head feat/x --title 'Semi; title' --body "x"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "Caf\u00e9" --body "x"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file "D:\\work\\x.md"`,
 		`gh pr create --repo acme/widgets --base main --head feat/x --title "T" --body-file -`,
