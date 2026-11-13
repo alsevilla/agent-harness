@@ -2,12 +2,12 @@
   "schema": 1,
   "provider": "anthropic",
   "cacheModel": "system and last-message breakpoints; 20-block lookback",
-  "sourceCommit": "0fcd62517f007d8f348528c64057a5a8377395a2",
+  "sourceCommit": "475da0fe1367ece3bf0c8b91034ed6e35bdf5bc3",
   "roleDefaults": {
     "backend-worker": "claude-sonnet-5-5",
     "debugger": "claude-haiku-5-5",
     "planner": "claude-haiku-5-5",
-    "test-engineer": "claude-haiku-5-5"
+    "test-engineer": "gpt-6-luna"
   },
   "implementationRouting": [
     {
@@ -76,6 +76,38 @@
     }
   ],
   "prices": {
+    "gpt-6-astra": {
+      "input": 10,
+      "output": 50,
+      "read": 1,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
+    "gpt-6.1-sol": {
+      "input": 2,
+      "output": 10,
+      "read": 0.1,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
+    "gpt-6.1-terra": {
+      "input": 1,
+      "output": 5,
+      "read": 0.05,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "read": 0.01,
+      "longFrom": 272000,
+      "longX": 2,
+      "longOutputX": 1.5
+    },
     "claude-fable-5-1": {
       "input": 10,
       "output": 50,
@@ -194,9 +226,10 @@
         "peak": 61578,
         "cost": 4.6857,
         "byModel": {
+          "gpt-6-luna": 0.0183,
           "claude-fable-5-1": 3.2061,
           "claude-sonnet-5-5": 1.356,
-          "claude-haiku-5-5": 0.1236
+          "claude-haiku-5-5": 0.1053
         }
       }
     },
@@ -238,9 +271,10 @@
         "peak": 61578,
         "cost": 2.9312,
         "byModel": {
+          "gpt-6-luna": 0.0183,
           "claude-opus-5-5": 1.4516,
           "claude-sonnet-5-5": 1.356,
-          "claude-haiku-5-5": 0.1236
+          "claude-haiku-5-5": 0.1053
         }
       }
     },
@@ -282,8 +316,9 @@
         "peak": 61578,
         "cost": 2.3746,
         "byModel": {
+          "gpt-6-luna": 0.0183,
           "claude-sonnet-5-5": 2.251,
-          "claude-haiku-5-5": 0.1236
+          "claude-haiku-5-5": 0.1053
         }
       }
     },
@@ -325,8 +360,9 @@
         "peak": 61578,
         "cost": 1.5244,
         "byModel": {
+          "gpt-6-luna": 0.0183,
           "claude-sonnet-5-5": 1.356,
-          "claude-haiku-5-5": 0.1684
+          "claude-haiku-5-5": 0.1501
         }
       }
     }

@@ -4,7 +4,7 @@
   "cacheModel": "idealized warm complete-message prefixes; no expiry or cross-context reuse",
   "pricingDate": "2026-11-08",
   "pricingURL": "https://developers.openai.com/api/docs/pricing",
-  "sourceCommit": "e3c88bbdcd277ad09041f1a54c822ffdbef98742",
+  "sourceCommit": "475da0fe1367ece3bf0c8b91034ed6e35bdf5bc3",
   "roleDefaults": {
     "backend-worker": "gpt-6.1-sol",
     "debugger": "gpt-6-luna",
@@ -109,6 +109,28 @@
       "longFrom": 272000,
       "longX": 2,
       "longOutputX": 1.5
+    },
+    "claude-fable-5-1": {
+      "input": 10,
+      "output": 50,
+      "read": 0.25
+    },
+    "claude-opus-5-5": {
+      "input": 4,
+      "output": 20,
+      "read": 0.2
+    },
+    "claude-sonnet-5-5": {
+      "input": 2,
+      "output": 10,
+      "read": 0.2
+    },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "read": 0.01,
+      "longFrom": 100000,
+      "longX": 5
     }
   },
   "assumptions": {
