@@ -1194,7 +1194,11 @@ const GH_TIMEOUT_MS = 15_000;
 const DELIVERY_FILE_MAX = 65_536;
 const PLACEMENT = /^(?:[A-Za-z]:)?\/(?:.+\/)?worktrees\/[^/]+\/_(?:scratch|evidence)\/[^/]+(?:\/.+)?$/;
 const PATH_ARG = /^(?:[A-Za-z]:)?\/[A-Za-z0-9 _.,+()#\/-]+$/;
-const TEXT_ARG = /^[A-Za-z0-9 .,_\/#()+-]+$/;
+// Field report: an approved squash merge with --subject "fix(db): Schedule backups" was refused as if no approval existed. The colon
+// (conventional commit subjects; the commit -m text already allows it) is accepted, and a command that is not an accepted form now
+// says which argument is wrong (deliveryFormWhy) instead of asking for another approval.
+const TEXT_ARG = /^[A-Za-z0-9 .,:_\/#()+-]+$/;
+const TEXT_ALLOWED = "ASCII letters, digits, space and . , : _ / # ( ) + -";
 const BARE_REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 const BARE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/;
 const BARE_NUM = /^[1-9][0-9]{0,8}$/;
@@ -1436,6 +1440,22 @@ function textValue(tok: Tok, max: number): string | undefined {
 	return tok.text;
 }
 
+// Why a value is refused, named without echoing it (it may carry a credential): the flag, the rule and at most one offending character.
+function valueWhy(flag: string, kind: Exclude<ArgKind, "none">, tok: Tok): string {
+	switch (kind) {
+		case "repo": return `the ${flag} value must be an unquoted OWNER/REPO`;
+		case "branch": return `the ${flag} value must be an unquoted branch name`;
+		case "sha": return `the ${flag} value must be an unquoted full 40-character lowercase commit SHA`;
+		case "path": return `the ${flag} value must be a double-quoted absolute forward-slash path (at most 240 characters; letters, digits, space and _ . , + ( ) # / -)`;
+	}
+	const max = TEXT_LIMIT[kind];
+	if (tok.quoted === "") return `the ${flag} value must be in double quotes`;
+	if (tok.text.length < 1 || tok.text.length > max) return `the ${flag} value must be 1 to ${max} characters (it has ${tok.text.length})`;
+	const at = Array.from(tok.text).findIndex((ch) => !TEXT_ARG.test(ch));
+	if (at >= 0) return `the ${flag} value contains an unsupported character (${JSON.stringify(tok.text[at])}, character ${at + 1} of the value); allowed: ${TEXT_ALLOWED}`;
+	return `the ${flag} value contains credential-like text (a word such as token, password or secret followed by = or :); reword it`;
+}
+
 function argValue(kind: Exclude<ArgKind, "none">, tok: Tok): string | undefined {
 	switch (kind) {
 		case "repo": return tok.quoted === "" && BARE_REPO.test(tok.text) ? tok.text : undefined;
@@ -1447,11 +1467,13 @@ function argValue(kind: Exclude<ArgKind, "none">, tok: Tok): string | undefined 
 }
 
 // Each flag at most once, only flags in spec, values typed by kind; order is free.
-function readOptions(tokens: Tok[], spec: Record<string, ArgKind>): Record<string, string | true> | undefined {
+function readOptions(tokens: Tok[], spec: Record<string, ArgKind>, why?: { text?: string }): Record<string, string | true> | undefined {
 	const out: Record<string, string | true> = {};
+	const fail = (text: string) => { if (why) why.text = text; return undefined; };
 	for (let i = 0; i < tokens.length; i++) {
 		const flag = tokens[i];
-		if (flag.quoted !== "" || !Object.hasOwn(spec, flag.text) || Object.hasOwn(out, flag.text)) return undefined;
+		if (flag.quoted !== "" || !Object.hasOwn(spec, flag.text)) return fail(`${flag.quoted === "" && /^--?[a-z][a-z-]{0,30}$/.test(flag.text) ? `option ${flag.text}` : `argument ${i + 1} after the command`} is not supported here; supported: ${Object.keys(spec).join(", ")}`);
+		if (Object.hasOwn(out, flag.text)) return fail(`option ${flag.text} is given more than once`);
 		const kind = spec[flag.text];
 		if (kind === "none") {
 			out[flag.text] = true;
@@ -1459,7 +1481,7 @@ function readOptions(tokens: Tok[], spec: Record<string, ArgKind>): Record<strin
 		}
 		const value = tokens[++i];
 		const parsed = value ? argValue(kind, value) : undefined;
-		if (parsed === undefined) return undefined;
+		if (parsed === undefined) return fail(value ? valueWhy(flag.text, kind, value) : `option ${flag.text} needs a value`);
 		out[flag.text] = parsed;
 	}
 	return out;
@@ -1472,45 +1494,54 @@ export type DeliveryCommand =
 	| { kind: "release"; tag: string; repo: string; target: string; title: string; notes?: string; notesFile?: string; generate: boolean; latest: boolean };
 
 // Exactly the five approved gh forms (PR create/edit/merge, release create); anything else, including compounds, returns undefined.
-export function parseDeliveryCommand(command: string): DeliveryCommand | undefined {
+export function parseDeliveryCommand(command: string, why?: { text?: string }): DeliveryCommand | undefined {
 	const t = tokenizeDelivery(command);
 	if (!t) return undefined;
+	const fail = (text: string) => { if (why) why.text = text; return undefined; };
 	const w = (i: number) => (t[i] && t[i].quoted === "" ? t[i].text : undefined);
 	const s = (o: Record<string, string | true>, k: string) => (typeof o[k] === "string" ? (o[k] as string) : undefined);
 	if (w(0) !== "gh") return undefined;
 	if (w(1) === "pr" && w(2) === "create") {
-		const o = readOptions(t.slice(3), { "--repo": "repo", "--base": "branch", "--head": "branch", "--title": "title", "--body": "body", "--body-file": "path" });
+		const o = readOptions(t.slice(3), { "--repo": "repo", "--base": "branch", "--head": "branch", "--title": "title", "--body": "body", "--body-file": "path" }, why);
 		if (!o) return undefined;
 		const repo = s(o, "--repo"), base = s(o, "--base"), head = s(o, "--head"), title = s(o, "--title"), body = s(o, "--body"), bodyFile = s(o, "--body-file");
-		if (!repo || !base || !head || !title || (body === undefined) === (bodyFile === undefined)) return undefined;
+		if (!repo || !base || !head || !title || (body === undefined) === (bodyFile === undefined)) return fail("gh pr create needs --repo, --base, --head, --title and exactly one of --body and --body-file");
 		return { kind: "create", repo, base, head, title, body, bodyFile };
 	}
 	if (w(1) === "pr" && (w(2) === "edit" || w(2) === "merge")) {
 		const num = w(3);
-		if (!num || !BARE_NUM.test(num)) return undefined;
+		if (!num || !BARE_NUM.test(num)) return fail(`gh pr ${w(2)} needs the PR number right after it`);
 		if (w(2) === "edit") {
-			const o = readOptions(t.slice(4), { "--repo": "repo", "--title": "title", "--body": "body", "--body-file": "path" });
+			const o = readOptions(t.slice(4), { "--repo": "repo", "--title": "title", "--body": "body", "--body-file": "path" }, why);
 			if (!o) return undefined;
 			const repo = s(o, "--repo"), title = s(o, "--title"), body = s(o, "--body"), bodyFile = s(o, "--body-file");
-			if (!repo || (title === undefined && body === undefined && bodyFile === undefined) || (body !== undefined && bodyFile !== undefined)) return undefined;
+			if (!repo || (title === undefined && body === undefined && bodyFile === undefined) || (body !== undefined && bodyFile !== undefined)) return fail("gh pr edit needs --repo and --title or one of --body and --body-file");
 			return { kind: "edit", pr: Number(num), repo, title, body, bodyFile };
 		}
-		const o = readOptions(t.slice(4), { "--repo": "repo", "--squash": "none", "--match-head-commit": "sha", "--subject": "subject", "--body": "body", "--body-file": "path" });
+		const o = readOptions(t.slice(4), { "--repo": "repo", "--squash": "none", "--match-head-commit": "sha", "--subject": "subject", "--body": "body", "--body-file": "path" }, why);
 		if (!o) return undefined;
 		const repo = s(o, "--repo"), sha = s(o, "--match-head-commit"), subject = s(o, "--subject"), body = s(o, "--body"), bodyFile = s(o, "--body-file");
-		if (!repo || !sha || o["--squash"] !== true || (body !== undefined && bodyFile !== undefined)) return undefined;
+		if (!repo || !sha || o["--squash"] !== true || (body !== undefined && bodyFile !== undefined)) return fail("gh pr merge needs --repo, --squash and --match-head-commit, and at most one of --body and --body-file");
 		return { kind: "merge", pr: Number(num), repo, sha, subject, body, bodyFile };
 	}
 	if (w(1) === "release" && w(2) === "create") {
 		const tag = w(3);
-		if (!tag || !BARE_VERSION.test(tag)) return undefined;
-		const o = readOptions(t.slice(4), { "--repo": "repo", "--target": "sha", "--title": "title", "--notes": "body", "--notes-file": "path", "--generate-notes": "none", "--latest": "none" });
+		if (!tag || !BARE_VERSION.test(tag)) return fail("gh release create needs the version tag (1.2.3 or v1.2.3) right after it");
+		const o = readOptions(t.slice(4), { "--repo": "repo", "--target": "sha", "--title": "title", "--notes": "body", "--notes-file": "path", "--generate-notes": "none", "--latest": "none" }, why);
 		if (!o) return undefined;
 		const repo = s(o, "--repo"), target = s(o, "--target"), title = s(o, "--title"), notes = s(o, "--notes"), notesFile = s(o, "--notes-file"), generate = o["--generate-notes"] === true;
-		if (!repo || !target || !title || [notes !== undefined, notesFile !== undefined, generate].filter(Boolean).length !== 1) return undefined;
+		if (!repo || !target || !title || [notes !== undefined, notesFile !== undefined, generate].filter(Boolean).length !== 1) return fail("gh release create needs --repo, --target, --title and exactly one of --notes, --notes-file and --generate-notes");
 		return { kind: "release", tag, repo, target, title, notes, notesFile, generate, latest: o["--latest"] === true };
 	}
 	return undefined;
+}
+
+/** For a gh PR create/edit/merge or release create that is not an accepted form: what is wrong with it. Undefined for an accepted form or any other command. */
+export function deliveryFormWhy(command: string): string | undefined {
+	if (!/^gh (pr (create|edit|merge)|release create)( |$)/.test(command)) return undefined;
+	const why: { text?: string } = {};
+	if (parseDeliveryCommand(command, why) !== undefined) return undefined;
+	return why.text ?? "it must be one line of printable ASCII with single spaces between arguments and no chained commands, pipes or redirections";
 }
 
 function prView(pr: number, repo: string, live: DeliveryLive): Record<string, unknown> | undefined {
@@ -1719,7 +1750,14 @@ function primaryOf(candidate: string): string | undefined {
 	return path.basename(dir).toLowerCase() === ".git" ? slashed(path.dirname(dir)) : undefined;
 }
 
-function walkCheckout(root: string): string | undefined {
+// Field report: after a merge the task checkout was always retained, because any build or test run leaves ignored output and all
+// ignored content was kept. A folder with one of these names is regenerable output when Git itself reports that whole folder as
+// ignored; it is then removed with the checkout. Any other ignored content (.env files, local databases, logs) still retains it.
+const BUILD_DIRS = new Set(["target", "node_modules", "dist", "build", "out", "bin", "obj", "coverage", ".serena", "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".next", ".turbo", ".cache", ".gradle"]);
+
+// With `skipped`, a real directory named like build output is recorded (relative, forward slashes) and not entered; the caller must
+// then prove Git ignores each one as a whole. Without it every entry is walked.
+function walkCheckout(root: string, skipped?: string[]): string | undefined {
 	let seen = 0;
 	const stack = [root];
 	while (stack.length) {
@@ -1730,7 +1768,8 @@ function walkCheckout(root: string): string | undefined {
 			const full = path.join(dir, e.name);
 			if (e.isSymbolicLink()) return "checkout contains a link";
 			if (e.name === ".git" || (dir === root && e.name === ".gitmodules")) return "checkout contains a nested repository or submodule";
-			if (e.isDirectory()) stack.push(full);
+			if (e.isDirectory() && skipped && BUILD_DIRS.has(e.name)) skipped.push(path.relative(root, full).replace(/\\/g, "/"));
+			else if (e.isDirectory()) stack.push(full);
 			else if (!e.isFile() || fs.lstatSync(full).nlink !== 1) return "checkout contains a hard link or special file";
 		}
 	}
@@ -1779,12 +1818,16 @@ export function verifyCleanup(g: CleanupGrant, live: DeliveryLive = defaultDeliv
 		if (entries.some((e) => e !== self[0] && overlaps(e.path, candidate) && normPath(e.path) !== normPath(primary))) return "nested or overlapping registered checkout";
 		// Hardened local proof, shared with delivery fingerprints: refuses candidate-controlled programs (filters), hidden/skipped/sparse index states, gitlinks and linked directories BEFORE any Git command reads the working tree. fsmonitor is disabled inside the helper.
 		try { checkoutPreflight(candidate); } catch { return "checkout state is not provable (filters, hidden or sparse index entries, submodules or links)"; }
-		const walked = walkCheckout(candidate);
+		const buildDirs: string[] = [];
+		const walked = walkCheckout(candidate, buildDirs);
 		if (walked) return walked;
 		let status: string[];
 		try { status = hardenedGit(candidate, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--ignore-submodules=none"]).toString("utf8").split(" ").filter(Boolean); } catch { return "git status could not be read"; }
-		if (status.some((line) => line.startsWith("!!"))) return "ignored content is retained: unknown ignored data is never assumed disposable";
-		if (status.length) return "tracked or untracked changes are present";
+		// The only ignored content allowed is whole build-output folders, and every folder the walk skipped must be one of them.
+		const ignored = status.filter((line) => line.startsWith("!! ")).map((line) => line.slice(3));
+		if (ignored.some((entry) => !entry.endsWith("/") || !buildDirs.includes(entry.slice(0, -1)))) return "ignored content is retained: only whole ignored build-output folders (target, node_modules, dist and similar) are assumed disposable";
+		if (buildDirs.some((dir) => !ignored.includes(`${dir}/`))) return "a folder named like build output is not ignored by Git as a whole, so its content was not verified";
+		if (status.length > ignored.length) return "tracked or untracked changes are present";
 		return undefined;
 	} catch {
 		return "live state could not be read";
@@ -1978,7 +2021,7 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). For a PENDING_UNVERIFIED checkout main may, at an explicit cleanup step, query the PR live for mergeCommit and the primary checkout, then launch ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit plus quiescent: true, only after its own quiescence check; the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
 }
 
 /** A worker's guard announces each single-use approval it used, so main can take back the unused ones when the worker exits. */
@@ -2657,6 +2700,9 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		if (parseNormalCommit(decision.op.command) !== undefined) return commitWhy ? `${head}git commit; not automatic here: ${commitWhy}.` : `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
 		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
 	}
+	// A delivery command in a form the guard does not accept is a command error, not a missing approval.
+	const form = decision.op.kind === "shell" && decision.rules.length === 1 && decision.rules[0] === "GIT_PUBLISH" ? deliveryFormWhy(decision.op.command) : undefined;
+	if (form) return `${head}${programOf(decision.op)}; not an accepted command form: ${form}. Correct the command and run it again; this is not a missing approval, and an approval already given for this merge or release still applies.`;
 	const advice = decision.rules.map((r) => RULE_ADVICE[r]).filter(Boolean);
 	const credential = decision.grantable && decision.op.kind === "shell" ? credentialFinding(decision.op.command) : undefined;
 	const how = credential
