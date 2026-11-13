@@ -260,7 +260,7 @@ function mintGrant(t: { dir: string; branch: string; head: string }) {
 	owners.end("w1");
 	const live = { env: () => ({}), pushUrl: (c: string, b: string) => livePushUrl(c, b), ghJson: () => JSON.parse(viewOf(t)), tagStatus: () => 2 };
 	const store = createGrantStore();
-	const res = prepareCleanup({ checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true }, { store, owners, live, primary: CPRIMARY, mainCwd: CPROJ, jobRunning: () => false });
+	const res = prepareCleanup({ checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true, knowledge: "NO LESSON" }, { store, owners, live, primary: CPRIMARY, mainCwd: CPROJ, jobRunning: () => false });
 	assert.equal(res.ok, true, JSON.stringify(res));
 	return { store, grant: (res as any).grant };
 }
@@ -346,11 +346,11 @@ test("real main session: cleanup refusals fail closed before any launch and a me
 	const t = cleanupTask();
 	const { dir, repoDir } = boundRepo();
 	const req = mergeReq(repoDir, "q1", { cwd: repoDir });
-	const ask = (agent: string, extra: Record<string, unknown>, id: string): SdkStep => ({ tool: "subagent", id, args: { agent, task: "cleanup", background: false, cwd: CPRIMARY, cleanup: { checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true }, ...extra } });
+	const ask = (agent: string, extra: Record<string, unknown>, id: string): SdkStep => ({ tool: "subagent", id, args: { agent, task: "cleanup", background: false, cwd: CPRIMARY, cleanup: { checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true, knowledge: "NO LESSON" }, ...extra } });
 	const s = await openMain([
 		req,
 		{ tool: "subagent_control", args: { action: "list" }, id: "q2" },
-		{ tool: "subagent", id: "q3", args: { chain: [{ agent: "release-engineer", task: "x", cwd: CPRIMARY }], background: false, cleanup: { checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true } } },
+		{ tool: "subagent", id: "q3", args: { chain: [{ agent: "release-engineer", task: "x", cwd: CPRIMARY }], background: false, cleanup: { checkout: t.dir, branch: t.branch, base: "main", pr: 12, headSha: t.head, mergeCommit: MERGE_C, quiescent: true, knowledge: "NO LESSON" } } },
 		ask("general-worker", {}, "q4"),
 		ask("release-engineer", {}, "q5"),
 		ask("release-engineer", { cwd: t.dir }, "q6"),
