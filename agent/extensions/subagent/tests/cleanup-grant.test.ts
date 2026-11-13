@@ -33,7 +33,7 @@ const PRIMARY = `${PROJ}/pi`;
 fs.mkdirSync(PRIMARY, { recursive: true });
 git(PRIMARY, "init", "-q", "-b", "main");
 fs.writeFileSync(`${PRIMARY}/a.txt`, "a\n");
-fs.writeFileSync(`${PRIMARY}/.gitignore`, "ignored/\n");
+fs.writeFileSync(`${PRIMARY}/.gitignore`, "ignored/\ntarget/\nnode_modules/\n*.log\n");
 git(PRIMARY, "add", "-A");
 git(PRIMARY, "commit", "-q", "-m", "init");
 git(PRIMARY, "remote", "add", "origin", GH_URL);
@@ -143,6 +143,8 @@ test("live gates at guard time: every dirty, unmerged, ignored, active-registrat
 		{ name: "untracked file", mutate: (t) => { fs.writeFileSync(`${t.dir}/u.txt`, "u\n"); } },
 		{ name: "ignored directory (unknown ignored data is retained)", mutate: (t) => { fs.mkdirSync(`${t.dir}/ignored`); fs.writeFileSync(`${t.dir}/ignored/x.db`, "x"); } },
 		{ name: "ignored sidecar-like file", mutate: (t) => { fs.mkdirSync(`${t.dir}/ignored`); fs.writeFileSync(`${t.dir}/ignored/data.db-wal`, "x"); } },
+		{ name: "ignored file beside ignored build output", mutate: (t) => { fs.mkdirSync(`${t.dir}/target`); fs.writeFileSync(`${t.dir}/target/app`, "x"); fs.writeFileSync(`${t.dir}/run.log`, "x"); } },
+		{ name: "folder named like build output that Git does not ignore", mutate: (t) => { fs.mkdirSync(`${t.dir}/dist`); fs.writeFileSync(`${t.dir}/dist/user.db`, "x"); } },
 		{ name: "HEAD moved by a new commit", mutate: (t) => { fs.writeFileSync(`${t.dir}/c.txt`, "c\n"); git(t.dir, "add", "c.txt"); git(t.dir, "commit", "-q", "-m", "more"); } },
 		{ name: "detached HEAD", mutate: (t) => { git(t.dir, "checkout", "-q", "--detach"); } },
 		{ name: "locked registration", mutate: (t) => { git(PRIMARY, "worktree", "lock", t.dir); return () => git(PRIMARY, "worktree", "unlock", t.dir); } },
@@ -527,6 +529,27 @@ test("F1 actual Git (positive control): with no monitor the exact allowed form g
 	const r = execAllowed(s.t);
 	assert.equal(r.status, 0, r.stderr);
 	assert.ok(!fs.existsSync(s.t.dir), "the disposable checkout was removed");
+});
+
+// Field report: after a merge the task checkout was always retained, because any build or test run leaves ignored output.
+test("ignored build output: whole ignored target/ and node_modules/ folders do not retain the checkout; mint and guard allow and Git removes it", () => {
+	const fill = (dir: string) => {
+		fs.mkdirSync(`${dir}/target/debug`, { recursive: true });
+		fs.writeFileSync(`${dir}/target/debug/app`, "bin");
+		fs.linkSync(`${dir}/target/debug/app`, `${dir}/target/debug/app-hl`); // cargo hard-links its outputs: not walked inside build output
+		fs.mkdirSync(`${dir}/sub/node_modules/pkg`, { recursive: true });
+		fs.writeFileSync(`${dir}/sub/node_modules/pkg/index.js`, "x");
+	};
+	const t = makeTask();
+	fill(t.dir);
+	const minted = mint(t);
+	assert.equal(minted.res.ok, true, "mint accepts a checkout whose only extra content is ignored build output");
+	const s = setup();
+	fill(s.t.dir);
+	assert.equal(run(guardOf(s.child, live(view(s.t))), REMOVE(s.t.dir)), undefined, "guard allows");
+	const r = execAllowed(s.t);
+	assert.equal(r.status, 0, r.stderr);
+	assert.ok(!fs.existsSync(s.t.dir), "the checkout and its build output were removed");
 });
 
 const CORE_INCLUDE = (body: string) => { const f = path.join(root, `inc-${++n}.cfg`); fs.writeFileSync(f, body); git(PRIMARY, "config", "--add", "include.path", slash(f)); };

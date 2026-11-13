@@ -1750,7 +1750,14 @@ function primaryOf(candidate: string): string | undefined {
 	return path.basename(dir).toLowerCase() === ".git" ? slashed(path.dirname(dir)) : undefined;
 }
 
-function walkCheckout(root: string): string | undefined {
+// Field report: after a merge the task checkout was always retained, because any build or test run leaves ignored output and all
+// ignored content was kept. A folder with one of these names is regenerable output when Git itself reports that whole folder as
+// ignored; it is then removed with the checkout. Any other ignored content (.env files, local databases, logs) still retains it.
+const BUILD_DIRS = new Set(["target", "node_modules", "dist", "build", "out", "bin", "obj", "coverage", ".serena", "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".next", ".turbo", ".cache", ".gradle"]);
+
+// With `skipped`, a real directory named like build output is recorded (relative, forward slashes) and not entered; the caller must
+// then prove Git ignores each one as a whole. Without it every entry is walked.
+function walkCheckout(root: string, skipped?: string[]): string | undefined {
 	let seen = 0;
 	const stack = [root];
 	while (stack.length) {
@@ -1761,7 +1768,8 @@ function walkCheckout(root: string): string | undefined {
 			const full = path.join(dir, e.name);
 			if (e.isSymbolicLink()) return "checkout contains a link";
 			if (e.name === ".git" || (dir === root && e.name === ".gitmodules")) return "checkout contains a nested repository or submodule";
-			if (e.isDirectory()) stack.push(full);
+			if (e.isDirectory() && skipped && BUILD_DIRS.has(e.name)) skipped.push(path.relative(root, full).replace(/\\/g, "/"));
+			else if (e.isDirectory()) stack.push(full);
 			else if (!e.isFile() || fs.lstatSync(full).nlink !== 1) return "checkout contains a hard link or special file";
 		}
 	}
@@ -1810,12 +1818,16 @@ export function verifyCleanup(g: CleanupGrant, live: DeliveryLive = defaultDeliv
 		if (entries.some((e) => e !== self[0] && overlaps(e.path, candidate) && normPath(e.path) !== normPath(primary))) return "nested or overlapping registered checkout";
 		// Hardened local proof, shared with delivery fingerprints: refuses candidate-controlled programs (filters), hidden/skipped/sparse index states, gitlinks and linked directories BEFORE any Git command reads the working tree. fsmonitor is disabled inside the helper.
 		try { checkoutPreflight(candidate); } catch { return "checkout state is not provable (filters, hidden or sparse index entries, submodules or links)"; }
-		const walked = walkCheckout(candidate);
+		const buildDirs: string[] = [];
+		const walked = walkCheckout(candidate, buildDirs);
 		if (walked) return walked;
 		let status: string[];
 		try { status = hardenedGit(candidate, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--ignore-submodules=none"]).toString("utf8").split(" ").filter(Boolean); } catch { return "git status could not be read"; }
-		if (status.some((line) => line.startsWith("!!"))) return "ignored content is retained: unknown ignored data is never assumed disposable";
-		if (status.length) return "tracked or untracked changes are present";
+		// The only ignored content allowed is whole build-output folders, and every folder the walk skipped must be one of them.
+		const ignored = status.filter((line) => line.startsWith("!! ")).map((line) => line.slice(3));
+		if (ignored.some((entry) => !entry.endsWith("/") || !buildDirs.includes(entry.slice(0, -1)))) return "ignored content is retained: only whole ignored build-output folders (target, node_modules, dist and similar) are assumed disposable";
+		if (buildDirs.some((dir) => !ignored.includes(`${dir}/`))) return "a folder named like build output is not ignored by Git as a whole, so its content was not verified";
+		if (status.length > ignored.length) return "tracked or untracked changes are present";
 		return undefined;
 	} catch {
 		return "live state could not be read";
