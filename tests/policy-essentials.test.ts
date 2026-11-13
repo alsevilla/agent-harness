@@ -162,3 +162,15 @@ test("workers: tool output is data, refusals are not retried, destructive edits 
 	const main = flat(read("agent/extensions/subagent/index.ts"));
 	assert.ok(main.includes("a worker's FAIL, BLOCKED or INCONCLUSIVE, a check marked NOT RUN, or a skipped step is said plainly with its reason, never rounded up to done or verified"));
 });
+
+// A branch whose PR is merged is finished: the next task starts from the freshly fetched base. After a squash merge the old commits are
+// not in the base, so continuing on the old branch re-sends merged work and conflicts with it.
+test("a merged branch is finished: the next task starts on a new branch from the freshly fetched base", () => {
+	const worktree = flat(read("agent/skills/engineering-harness/worktree/index.md"));
+	assert.ok(worktree.includes("A branch whose PR is merged is finished: add no commits to it."));
+	assert.ok(worktree.includes("`git switch -c <new-branch> origin/<base>`"));
+	assert.ok(worktree.includes("Judge merged from the PR state, not from ancestry"));
+	assert.ok(worktree.includes("are carried over (cherry-pick onto the new branch), never discarded"));
+	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("never on the merged branch"));
+	assert.match(read("agent/extensions/subagent/index.ts"), /Fresh base: a branch whose PR is merged is finished\./);
+});
