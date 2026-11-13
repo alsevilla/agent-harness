@@ -669,7 +669,7 @@ const MODEL_SLOT = Type.Union([Type.Literal("fallback"), Type.Null()]);
 const PR_BASE = Type.Optional(Type.Union([Type.String({ description: "Exact base branch the trusted release-engineer must use for PR create/edit of this entry. Omitted keeps the legacy syntactic-only base check; supply it whenever the base is known." }), Type.Null()]));
 
 // Post-merge checkout cleanup request (single-mode trusted release-engineer only): a selector plus main's quiescence declaration, never proof; the runtime re-verifies everything live before minting and again in the child guard. Null is listed so the SDK keeps it for runtime refusal.
-const KNOWLEDGE_FIELD = "The LEARN checkpoint reached before deletion: the exact text NO LESSON, or the absolute path of the saved knowledge record (an existing .md file outside the checkout and outside every _evidence and _scratch folder). A BLOCKED or missing checkpoint means no cleanup.";
+const KNOWLEDGE_FIELD = "The LEARN checkpoint reached before deletion: the exact text NO LESSON, or the absolute path of the saved knowledge record (the docs/knowledge .md file committed in the merged PR head, or an existing .md file outside the checkout; never under _evidence or _scratch). A BLOCKED or missing checkpoint means no cleanup.";
 const CLEANUP = Type.Optional(Type.Union([Type.Object({
 	checkout: Type.String({ description: "Exact absolute forward-slash path of the merged task checkout under worktrees/<repo>/<task>" }),
 	branch: Type.String(), base: Type.String(), pr: Type.Number(), headSha: Type.String({ description: "40-hex PR head the checkout is on" }), mergeCommit: Type.String({ description: "40-hex merge commit of the merged PR" }),

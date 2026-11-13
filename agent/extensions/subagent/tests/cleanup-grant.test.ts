@@ -46,11 +46,12 @@ const REMOVE = (p: string) => `git worktree remove ${q(p)}`;
 
 let n = 0;
 interface Task { dir: string; branch: string; head: string; evidence: string; scratch: string }
-function makeTask(): Task {
+function makeTask(opts: { record?: string } = {}): Task {
 	const name = `task-${++n}`;
 	const branch = `feat/${name}`;
 	const dir = `${WT}/${name}`;
 	git(PRIMARY, "worktree", "add", "-q", "-b", branch, dir);
+	if (opts.record) { fs.mkdirSync(path.dirname(`${dir}/${opts.record}`), { recursive: true }); fs.writeFileSync(`${dir}/${opts.record}`, "# Lesson\n"); git(dir, "add", "-A"); git(dir, "commit", "-q", "-m", "lesson"); }
 	return { dir: slash(fs.realpathSync.native(dir)), branch, head: git(dir, "rev-parse", "HEAD"), evidence: `${WT}/_evidence/${name}`, scratch: `${WT}/_scratch/${name}` };
 }
 const view = (t: Task, over: Record<string, unknown> = {}) => ({ number: 12, state: "MERGED", baseRefName: "main", headRefName: t.branch, headRefOid: t.head, isCrossRepository: false, mergeCommit: { oid: MERGE }, ...over });
@@ -539,8 +540,9 @@ test("knowledge gate: cleanup is refused until LEARN is settled as NO LESSON or 
 	for (const knowledge of [undefined, "", " ", true, "no lesson", "BLOCKED", "SAVED", "notes/lesson.md", `${PRIMARY}/lesson.txt`]) assert.match((mint(t, { req: { knowledge } }).res as any).reason ?? "", need, String(knowledge));
 	const inside = /the knowledge record lies inside a folder this cleanup deletes/;
 	fs.writeFileSync(`${t.dir}/lesson.md`, "x");
-	assert.match((mint(t, { req: { knowledge: `${t.dir}/lesson.md` } }).res as any).reason, inside, "inside the checkout");
+	assert.match((mint(t, { req: { knowledge: `${t.dir}/lesson.md` } }).res as any).reason, /inside the checkout this cleanup deletes and is not committed in the PR head/, "uncommitted, inside the checkout");
 	fs.rmSync(`${t.dir}/lesson.md`);
+	assert.equal(mint(t, { req: { knowledge: `${t.dir}/a.txt`.replace(/a\.txt$/, "a.md") } }).res.ok, false, "a path the PR head does not contain");
 	for (const kind of ["_evidence", "_scratch"]) assert.match((mint(t, { req: { knowledge: `${WT}/${kind}/x/lesson.md` } }).res as any).reason, inside, kind);
 	const store = slash(path.join(root, "local-knowledge"));
 	fs.mkdirSync(store, { recursive: true });
@@ -550,6 +552,9 @@ test("knowledge gate: cleanup is refused until LEARN is settled as NO LESSON or 
 	fs.writeFileSync(`${store}/lesson.md`, "# Lesson\n");
 	assert.equal(mint(t, { req: { knowledge: `${store}/lesson.md` } }).res.ok, true, "a saved record outside the targets");
 	assert.equal(mint(makeTask()).res.ok, true, "NO LESSON");
+	// The usual case: docs/knowledge/<slug>.md committed in the PR head, inside the checkout that is about to be removed.
+	const c = makeTask({ record: "docs/knowledge/lesson.md" });
+	assert.equal(mint(c, { req: { knowledge: `${c.dir}/docs/knowledge/lesson.md` } }).res.ok, true, "committed in the PR head");
 });
 
 // Field report: after a merge the task checkout was always retained, because any build or test run leaves ignored output.

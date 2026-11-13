@@ -104,7 +104,7 @@ Describe the task to main as usual; it routes the work. Useful commands:
 | `/subagent roles` | Edit one role's default model, fallbacks and thinking level |
 | `/subagent create` | Preview and create a project-local role (operator only) |
 | `/authorization`, `/revoke-authorization` | Show or withdraw session approvals |
-| `/learn <packet>` | Save one verified lesson to the ignored local knowledge store |
+| `/learn <packet>` | Save one verified lesson as a file in `docs/knowledge/`, committed with the task's PR |
 
 The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/review`, `/plan` and the domain guides) are optional files you load yourself; they are not exported by the package.
 
@@ -307,7 +307,7 @@ The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.10
 
 | Asset | Status |
 | --- | --- |
-| Source release | v1.19.1 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
+| Source release | v1.20.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
 | Copilot CLI | Latest release only; no older version is supported |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated. Serena, Graphify and QMD work through their skills' shell commands |
 | Token and turn savings | Pi's request shaping (execution ledger, output cap, worker masking, duplicate-read notes, main checkpoints, cache health) is Pi-only: Copilot builds its own requests. Both Copilot hooks add the working rules that cut turns: the lookup order with the three helpers by path, calls batched in one turn, no retry of a repeated failure or guard refusal, and small diffs |

@@ -55,7 +55,7 @@ agent/extensions/engineering-environment/config.json
 /agent/bin/
 agent/extensions/refresh/config.json
 
-# Knowledge library: private and local notes stay unversioned and unindexed
+# Knowledge library: the retired private and local stores stay ignored so old machine-local notes are never committed by accident
 docs/knowledge/private/
 docs/knowledge/local/
 docs/plans/
