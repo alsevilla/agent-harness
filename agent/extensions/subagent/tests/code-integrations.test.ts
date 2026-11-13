@@ -407,3 +407,26 @@ test("the Graphify skill loads only for a launch folder with a graph", async () 
     assert.equal(graphSkill(unspecified), true, "without a launch folder the skill loads as before");
   });
 });
+
+// Lessons were saved but a later worker only met them if it happened to search QMD. Every worker now starts with the titles from the
+// candidate's docs/knowledge/README.md index and is told to read the matching record before diagnosing in that area.
+test("saved lessons: a worker's prompt lists the project's lesson titles, bounded; nothing is added when the project has none", async () => {
+  const { savedLessonsGuidance } = await import("../code-integrations.ts");
+  const project = fs.mkdtempSync(join(tmpdir(), "saved-lessons-"));
+  fs.mkdirSync(join(project, ".git"));
+  assert.equal(savedLessonsGuidance(project), "", "no docs/knowledge");
+  fs.mkdirSync(join(project, "docs", "knowledge"), { recursive: true });
+  fs.writeFileSync(join(project, "docs", "knowledge", "README.md"), "# Knowledge\n\nIntro with a [link](other.md).\n\n## Records\n\n- [Modem needs a 2 s pause after AT+CMGS](modem-pause.md)\n- [Backups lock the WAL](backup-wal.md)\n- [Outside](../../secret.md)\n");
+  const text = savedLessonsGuidance(project);
+  assert.match(text, /## Saved lessons\nThis project keeps verified lessons from earlier tasks in .*\/docs\/knowledge\/ /);
+  assert.match(text, /Before you diagnose a failure, choose an approach or repeat a step in an area one of these titles names, read that file first/);
+  assert.match(text, /- Modem needs a 2 s pause after AT\+CMGS \(modem-pause\.md\)\n- Backups lock the WAL \(backup-wal\.md\)\n$/);
+  assert.doesNotMatch(text, /secret|other\.md/, "only index lines naming a file in the folder");
+  const prompt = assembleChildSystemPrompt({ name: "debugger", systemPrompt: "ROLE" }, { cwd: join(project, "docs"), codeIntegrationsEnabled: false } as any);
+  assert.ok(prompt.includes("- Backups lock the WAL (backup-wal.md)"), "every role, found from a subfolder of the candidate");
+  fs.writeFileSync(join(project, "docs", "knowledge", "README.md"), Array.from({ length: 60 }, (_, i) => `- [Lesson ${i}](l-${i}.md)`).join("\n"));
+  const many = savedLessonsGuidance(project);
+  assert.equal(many.split("\n").filter((l) => l.startsWith("- Lesson")).length, 40);
+  assert.match(many, /- \(more in the index\)\n$/);
+  fs.rmSync(project, { recursive: true, force: true });
+});

@@ -129,6 +129,7 @@ A `tool_call` guard runs on main and every worker. It blocks risky shell operati
 | Risk | What happens |
 | --- | --- |
 | Ordinary delivery and risky operations | Trusted `release-engineer` delivery (commit, feature push, PR create, and title/body edit of the task's own open PR) needs no `request_authorization`, grant or `push_branch` lease after main confirms the checks passed; merge and release each need their own delivery approval, which lasts for the session until `/revoke-authorization` (running children keep their copies until they exit), and other risky operations need an exact single-use grant. |
+| Saved lessons | A verified, reusable lesson is one file at `docs/knowledge/<slug>.md` in the project, committed with the PR that produced it; `docs/knowledge/README.md` lists them, one line each. Every worker is shown those titles when it starts and reads the matching file before it diagnoses or decides in that area. A project whose `AGENTS.md` names another knowledge folder saves there instead (its titles are not shown automatically). |
 | Merge | One approval names the exact PR and head SHA; the runtime computes and shows the candidate fingerprint itself. That one approval covers the merge, the knowledge checkpoint and the post-merge cleanup. |
 | Release | Its own approval, naming version and target SHA; refused if the tag exists. |
 | Cleanup after merge | The task's worktree (if any), then its `_scratch/<task>` and `_evidence/<task>` folders, each removed once after live checks that the PR merged as approved and nothing still uses them. |
@@ -331,7 +332,7 @@ The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.10
 | [`agent/skills/engineering-harness/`](agent/skills/engineering-harness/SKILL.md) | Routing and phase procedures |
 | [Subagent README](agent/extensions/subagent/README.md) | Launch modes, handoffs, guard, grants, cleanup, usage: the technical reference |
 | [docs/copilot-acceptance.md](docs/copilot-acceptance.md) | Copilot CLI acceptance matrix |
-| [docs/knowledge](docs/knowledge/README.md) | Decision and knowledge records |
+| [docs/knowledge](docs/knowledge/README.md) | Saved lessons: one file per lesson, with the README as the index |
 | [docs/simulations](docs/simulations/pi-shaping.md) | Token-saving simulations: method, fixtures and results |
 
 ## Contributing
