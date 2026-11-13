@@ -26,6 +26,12 @@ How it works ([`scripts/simulate-pi-shaping.mjs`](../../scripts/simulate-pi-shap
 
 Cache model: Pi places one breakpoint on the system block and one on the last message. A request reads the longest earlier-written prefix ending within 20 blocks of its breakpoint and writes everything after it. Cost is input-token equivalents: cache read 0.1x and cache write 1.25x of the input price; for Claude Haiku 5.5, a request over 100k input tokens costs 5x. Sizes are serialized request characters / 4. The system prompt and tool definitions are checked to be identical across every request of a run (`systemPromptStable`).
 
+### Tool-schema audit
+
+Each arm also reports `toolSchemas`: total/min/max serialized active-definition characters, per-tool exposure counts and sizes, and the number of distinct ordered schema lists. This uses the actual Pi request contexts, including definitions registered by loaded extensions. Changes in descriptions, parameters or ordering count as distinct variants. Message bodies are excluded; per-tool totals exclude the array punctuation included in the overall total.
+
+For an existing Pi recorder trace, run `NATIVE_PROBE_HOST_MODULES=<matching Pi node_modules> node scripts/audit-tool-schemas.mjs /absolute/path/to/requests.jsonl`. Current Pi declares tools through system-message updates; the audit uses that installed Pi version’s `getCurrentTools` to reconstruct each active catalog. Legacy explicit `tools` arrays need no Pi dependency. This measures active catalogs before provider-specific serialization, not the bytes of a provider HTTP payload. No provider calls are made and schema contents are not printed. The simulation deletes its temporary raw traces after computing the audit. These measurements do not automatically remove tools, prove a tool is unnecessary, or measure production integration overhead: the fixture tool list is fixed. Existing checked-in result files may predate this additive field; rerun the command above to obtain it.
+
 ## Long main sessions
 
 ```sh

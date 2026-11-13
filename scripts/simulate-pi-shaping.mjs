@@ -2,13 +2,14 @@
 // twice with the same tool calls: with the harness's request shaping and without it. Every request Pi sends is recorded, then priced
 // with an Anthropic-style prompt-cache model. Needs an installed Pi; no model, network or credentials.
 // Run: NATIVE_PROBE_HOST_MODULES=<node_modules holding @earendil-works/pi-coding-agent> npm run simulate:pi > docs/simulations/pi-shaping-results.json
+import { auditToolSchemas, resolveToolDeclarations } from "./audit-tool-schemas.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import readline from "node:readline";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(here);
@@ -16,6 +17,7 @@ const modules = process.env.NATIVE_PROBE_HOST_MODULES ?? join(execFileSync("npm"
 const piCli = join(modules, "@earendil-works", "pi-coding-agent", "dist", "bundle", "cli.js");
 const piAi = join(modules, "@earendil-works", "pi-ai", "dist", "index.js");
 if (!existsSync(piCli) || !existsSync(piAi)) throw new Error(`No Pi install under ${modules}; set NATIVE_PROBE_HOST_MODULES to the node_modules folder that holds @earendil-works/pi-coding-agent.`);
+const { getCurrentTools } = await import(pathToFileURL(piAi).href);
 const piVersion = JSON.parse(readFileSync(join(modules, "@earendil-works", "pi-coding-agent", "package.json"), "utf8")).version;
 
 // Fixtures: each file is one generated line pattern, so the runs need no checked-in sources.
@@ -83,7 +85,7 @@ function measure(requests) {
 		haiku += (r * 0.1 + w * 1.25) * (sizes[n] > 100_000 ? 5 : 1); // Claude Haiku 5.5 charges 5x for a request over 100k input tokens
 		entries.add(keys[keys.length - 1]);
 	});
-	return { requests: requests.length, systemPromptStable: systems.size === 1, sent: sizes.reduce((a, b) => a + b, 0), peak: Math.max(...sizes), over100k: sizes.filter((s) => s > 100_000).length,
+	return { toolSchemas: auditToolSchemas(resolveToolDeclarations(requests, getCurrentTools)), requests: requests.length, systemPromptStable: systems.size === 1, sent: sizes.reduce((a, b) => a + b, 0), peak: Math.max(...sizes), over100k: sizes.filter((s) => s > 100_000).length,
 		cacheRead: read, cacheWrite: write, hitPercent: Math.round((100 * read) / (read + write)), cost: Math.round(flat), haikuCost: Math.round(haiku) };
 }
 
