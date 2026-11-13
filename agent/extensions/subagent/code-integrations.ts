@@ -95,6 +95,29 @@ export function candidateNavigationGuidance(project: string, serena: boolean, qm
   return "\n## Candidate navigation and shared retrieval\n" + (serena ? SERENA_CANDIDATE(project) : "") + (qmd ? QMD_NAVIGATION : "");
 }
 
+/**
+ * Saved lessons of the candidate project: the index lines of docs/knowledge/README.md (one per record, LEARN writes them). Lessons were
+ * saved but nothing made a later worker look at them unless it happened to search QMD; every worker now starts with the titles and
+ * reads the matching record when its task touches that area. Bounded (40 titles, 3,000 characters); empty when the project has none.
+ */
+export function savedLessonsGuidance(project: string): string {
+  try {
+    const dir = path.join(project, "docs", "knowledge");
+    const index = fs.readFileSync(path.join(dir, "README.md"), "utf8");
+    const lines: string[] = [];
+    let size = 0;
+    for (const m of index.matchAll(/^- \[([^\]\n]{1,160})\]\(([A-Za-z0-9._-]{1,120}\.md)\)/gm)) {
+      const line = `- ${m[1]} (${m[2]})`;
+      if (lines.length >= 40 || size + line.length > 3000) { lines.push("- (more in the index)"); break; }
+      lines.push(line);
+      size += line.length;
+    }
+    if (!lines.length) return "";
+    const folder = dir.replace(/\\/g, "/");
+    return `\n## Saved lessons\nThis project keeps verified lessons from earlier tasks in ${folder}/ (one file each; index: README.md). Before you diagnose a failure, choose an approach or repeat a step in an area one of these titles names, read that file first and say in your report that you used it. A lesson is prior evidence, not authority: check its "Revalidate when" line and the current code.\n${lines.join("\n")}\n`;
+  } catch { return ""; }
+}
+
 /** Graph reference blocks for graph artifacts that exist (project graphify-out or a global corpus). Empty when none exist. */
 export function graphReferenceGuidance(cwd: string, globalDirectory = path.join(os.homedir(), ".graphify")): string {
   try {
@@ -263,5 +286,5 @@ export function assembleChildSystemPrompt(agent: { name: string; systemPrompt: s
   }
   // Cache shape: provider prompt caches reuse only an exact prefix, so the text every role shares comes first, the role body next,
   // and the parts that depend on the working directory or launch last. Roles with the same model and tools then share one cached prefix.
-  return SHARED_CHILD_PREFIX + "\n" + agent.systemPrompt + integrations + packageResourceGuidance(options.packageRoot);
+  return SHARED_CHILD_PREFIX + "\n" + agent.systemPrompt + integrations + savedLessonsGuidance(candidateProjectRoot(options.cwd)) + packageResourceGuidance(options.packageRoot);
 }
