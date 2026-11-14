@@ -200,6 +200,12 @@ test("browser skill names only supported Betterwright calls for fixtures and scr
 	assert.match(skill, /`addInitScript\(\{path\}\)` reads only files in Betterwright's own artifact directory/);
 	assert.match(skill, /Browser file inputs may only read files inside the artifact directory/);
 	assert.match(skill, /serve the build with single-page fallback/);
+	// Field report and a run against Betterwright 2.8.7: an empty snippet fails with "code must be a non-empty string" (PowerShell has no
+	// `<` redirection), and a snippet that loads its fixture with require fails with "require is not defined".
+	assert.match(skill, /pass the file as the argument: `betterwright run "<absolute file>"`/);
+	assert.match(skill, /code must be a non-empty string/);
+	assert.match(skill, /no `require`, `import`, `fs` or `process` \(`require is not defined`\)/);
+	assert.match(skill, /`page\.setContent\(\.\.\.\)` does not run it/);
 });
 
 // Field data (/subagent usage): two reviewer runs took in 552k tokens of new content, $1.10 of their $1.53: whole files, not the diff.
