@@ -523,6 +523,32 @@ test("delivery envelope: round trip keeps the record under deliveryActions; lega
 	for (const [name, edit] of ttlCases) assert.throws(() => C.loadChildDelivery(tamper(edit)), /delivery records are session-scoped; expiresAt or TTL is unsupported/, name);
 });
 
+// Field report: a trusted release-engineer pushing verified changes to an existing PR ran `git push origin HEAD:fix/part-a-browser-fixtures`
+// and was refused as needing a grant. HEAD:<branch> sends the same commits as <branch> when HEAD is on that branch, which this path verifies.
+test("existing-PR push: HEAD:<branch> is automatic for the trusted release-engineer on that branch; force, protected, other-branch and untrusted pushes stay guarded", () => {
+	resetState();
+	const repo = makeRepo("head-refspec-push");
+	git(repo, "checkout", "-q", "feat/x");
+	const trusted = { scope: "child" as const, store: newStore(), agentDir: AGENT_DIR, pushTarget: { candidate: repo, pushUrl: GH_URL, branch: "feat/x" }, gateCommits: true };
+	const run = (guard: any, command: string) => C.guardToolCall(guard, "bash", { command }, repo) as { reason: string } | undefined;
+	for (const ok of ["git push origin feat/x", "git push -u origin feat/x", "git push origin HEAD:feat/x", "git push --set-upstream origin HEAD:feat/x", "git push origin feat/x:feat/x"]) assert.equal(run(trusted, ok), undefined, ok);
+	for (const bad of [
+		"git push origin HEAD:feat/other", "git push origin HEAD:main", "git push origin HEAD:master", "git push origin main:feat/x", "git push origin feat/other:feat/x",
+		"git push origin +HEAD:feat/x", "git push --force origin HEAD:feat/x", "git push -f origin feat/x", "git push --force-with-lease origin feat/x", "git push upstream HEAD:feat/x",
+		"git push origin HEAD:refs/tags/v1", "git push origin :feat/x", "git push origin HEAD", "git push",
+	]) assert.match(run(trusted, bad)?.reason ?? "", /\[GIT_PUBLISH/, bad);
+	assert.match(run(trusted, "git push --force origin HEAD:feat/x")!.reason, /not an automatic push form: use git push origin <branch> \(also with -u, or as HEAD:<branch>\)/);
+	assert.doesNotMatch(run(trusted, "git push -f origin feat/x")!.reason, /launched with no approved operations/);
+	// HEAD on another branch: HEAD:feat/x would send that branch's commits, so it is refused.
+	git(repo, "checkout", "-q", "-b", "feat/elsewhere");
+	assert.match(run(trusted, "git push origin HEAD:feat/x")?.reason ?? "", /\[GIT_PUBLISH\]/, "HEAD is not on the target branch");
+	git(repo, "checkout", "-q", "feat/x");
+	// Untrusted worker and the lease path keep the plain rule.
+	assert.match(run({ scope: "child", store: newStore(), agentDir: AGENT_DIR }, "git push origin HEAD:feat/x")?.reason ?? "", /\[GIT_PUBLISH\]/, "no trusted context");
+	assert.equal(C.parseNormalPush("git push origin HEAD:feat/x"), undefined, "the lease path does not take a refspec");
+	assert.deepEqual(C.parseNormalPush("git push origin HEAD:feat/x", true), { branch: "feat/x" });
+});
+
 test("live readers run from a neutral cwd with explicit git -C: gh and git lookups never resolve from the candidate", (t) => {
 	resetState();
 	const store = storeWith();

@@ -987,11 +987,21 @@ export function validatePushBranch(name: string): string {
 }
 
 // Whole-command normal push forms only. Anything else (flags, refspecs, other remotes, compounds, quoting) is not a normal push.
-export function parseNormalPush(command: string): { branch: string } | undefined {
+// Field report: a trusted release-engineer's `git push origin HEAD:fix/part-a-browser-fixtures` to an existing PR was refused as needing
+// a grant. With `headRefspec`, `HEAD:<branch>` and `<branch>:<branch>` are also normal: they send the same commits as `<branch>` when
+// HEAD is attached to that branch, which only the trusted automatic path verifies; the lease path keeps the plain form.
+export function parseNormalPush(command: string, headRefspec = false): { branch: string } | undefined {
 	const match = /^git push (?:(?:-u|--set-upstream) )?origin (\S+)$/.exec(String(command));
 	if (!match) return undefined;
+	let name = match[1];
+	const colon = name.indexOf(":");
+	if (colon >= 0) {
+		const source = name.slice(0, colon);
+		name = name.slice(colon + 1);
+		if (!headRefspec || (source !== "HEAD" && source !== name)) return undefined;
+	}
 	try {
-		return { branch: validatePushBranch(match[1]) };
+		return { branch: validatePushBranch(name) };
 	} catch {
 		return undefined;
 	}
@@ -2268,7 +2278,7 @@ function trustedTargetLive(target: { candidate: string; pushUrl: string; branch:
 
 function normalTrustedPush(target: { candidate: string; pushUrl: string; branch: string } | undefined, decision: Extract<Decision, { action: "block" }>, liveUrl: (candidate: string, branch: string) => string | undefined): boolean {
 	if (!target || decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "GIT_PUBLISH") return false;
-	const normal = parseNormalPush(decision.op.command);
+	const normal = parseNormalPush(decision.op.command, true);
 	if (!normal || normal.branch !== target.branch) return false;
 	try { return trustedTargetLive(target, decision.op.cwd, liveUrl); } catch { return false; }
 }
@@ -2733,6 +2743,10 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}.`;
 		if (parseNormalCommit(decision.op.command) !== undefined) return commitWhy ? `${head}git commit; not automatic here: ${commitWhy}.` : `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
 		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
+	}
+	// A trusted release-engineer push in a form that is never automatic: name the accepted forms instead of pointing at approvals.
+	if (scope === "child" && gateCommits && decision.op.kind === "shell" && decision.rules.length === 1 && decision.rules[0] === "GIT_PUBLISH" && /^git push( |$)/.test(decision.op.command) && parseNormalPush(decision.op.command, true) === undefined) {
+		return `${head}git push; not an automatic push form: use git push origin <branch> (also with -u, or as HEAD:<branch>), with cwd = the candidate root on that feature branch. A force push, another remote, another refspec, a tag, a protected branch or any other flag is never automatic and needs an operator grant for the exact command.`;
 	}
 	// A delivery command in a form the guard does not accept is a command error, not a missing approval.
 	const form = decision.op.kind === "shell" && decision.rules.length === 1 && decision.rules[0] === "GIT_PUBLISH" ? deliveryFormWhy(decision.op.command) : undefined;
