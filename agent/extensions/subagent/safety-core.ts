@@ -2408,7 +2408,22 @@ function insideRoot(target: string, cwd: string, root: string): boolean {
 	if (/^(\/dev\/null|nul|\$null)$/i.test(target) || /^&\d$/.test(target)) return false;
 	const full = normPath(resolveTarget(cwd, target));
 	const r = normPath(protectedRoot(root));
-	return full === r || full.startsWith(`${r}/`);
+	if (!(full === r || full.startsWith(`${r}/`))) return false;
+	return !artifactOutsideCheckout(resolveTarget(cwd, target), protectedRoot(root));
+}
+// Field report: a test-engineer could not save its assigned report in <parent>/worktrees/<repo>/_evidence/<task>/, refused as "into the
+// candidate checkout". The protected root is the folder the worker was launched in; when main launches it in a folder above the
+// checkouts (the project's parent, or the worktrees group), the artifact folders lie inside that root although they are in no checkout.
+// A target in the artifact placement is not a candidate write when no folder from it up to the protected root is a Git checkout.
+function artifactOutsideCheckout(full: string, root: string): boolean {
+	if (!PLACEMENT.test(full)) return false;
+	try {
+		for (let dir = path.posix.dirname(full); dir.length >= root.length; dir = path.posix.dirname(dir)) {
+			if (fs.statSync(`${dir}/.git`, { throwIfNoEntry: false }) !== undefined) return false;
+			if (dir === path.posix.dirname(dir)) break;
+		}
+		return true;
+	} catch { return false; }
 }
 // Field report: 'cat > <_scratch>/run.js <<'EOF' … EOF' was refused as "redirects output into the candidate checkout ()" because the
 // heredoc body (JavaScript such as "page.evaluate(() =>") was checked as shell, and a line ending in "=>" looked like a redirect with

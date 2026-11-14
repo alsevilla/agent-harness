@@ -81,6 +81,27 @@ test("artifact folder: created at grant time inside the placement; never without
 	assert.ok(!fs.existsSync(path.join(root, "proj", "elsewhere")), "nothing created outside the placement");
 });
 
+// Field report: a test-engineer finished a PR verification and could not save its assigned report in
+// <parent>/worktrees/<repo>/_evidence/<task>/: "redirects output into the candidate checkout". Its protected root is its launch folder,
+// and main had launched it above the checkouts, so the artifact folder lay inside that root. Artifact folders outside every checkout
+// are writable from any launch folder; checkout files and look-alike folders inside a checkout stay refused.
+test("read-only role launched above the checkouts: the assigned _evidence report is writable, checkout files are not", () => {
+	const parent = slash(path.join(root, "above", "RFID"));
+	const primary = `${parent}/app`, group = `${parent}/worktrees/app`, ev = `${group}/_evidence/pr69`, wt = `${group}/task-1`;
+	for (const d of [`${primary}/.git`, `${primary}/src`, ev, `${group}/_scratch/pr69`, `${wt}/src`, `${primary}/worktrees/x/_evidence/y`]) fs.mkdirSync(d, { recursive: true });
+	fs.writeFileSync(`${wt}/.git`, "gitdir: elsewhere\n");
+	const call = (launch: string, tool: string, input: Record<string, unknown>) => guardToolCall({ scope: "child", store: createGrantStore(), agentDir, readOnlyRoot: launch, reads: new Set<string>() }, tool, input, launch) as { reason: string } | undefined;
+	for (const launch of [parent, `${parent}/worktrees`, group, ev]) {
+		for (const command of [`cat > "${ev}/PR69-CURRENT-VERIFICATION-REPORT.md" <<'EOF'\n# Report\nSTATUS: PASS\nEOF`, `npm test > "${group}/_scratch/pr69/test.log" 2>&1`, `mkdir -p "${ev}/shots"`]) assert.equal(call(launch, "bash", { command }), undefined, `${launch}: ${command.slice(0, 40)}`);
+		assert.equal(call(launch, "powershell", { command: `Set-Content -Path "${ev}/REPORT.md" -Value "x"` }), undefined, launch);
+	}
+	// From the parent folder, both checkouts, a loose file and a look-alike folder inside a checkout stay protected.
+	for (const target of [`${primary}/src/a.rs`, `${wt}/src/a.rs`, `${parent}/notes.txt`, `${primary}/worktrees/x/_evidence/y/f.md`, `${group}/REPORT.md`]) {
+		assert.match(call(parent, "bash", { command: `echo x > "${target}"` })?.reason ?? "", /\[READ_ONLY_ROLE\]/, target);
+	}
+	assert.match(call(primary, "bash", { command: `echo x > "${primary}/worktrees/x/_evidence/y/f.md"` })?.reason ?? "", /\[READ_ONLY_ROLE\]/, "inside the checkout itself");
+});
+
 // Read-only roles: the child guard refuses changes to the candidate checkout, shell included; writes outside it stay allowed.
 test("read-only role: writes into the candidate are refused (not grantable); reads, tests and evidence writes outside it pass", () => {
 	const candidate = slash(path.join(root, "ro", "app"));
