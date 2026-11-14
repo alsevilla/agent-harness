@@ -194,6 +194,12 @@ test("browser skill names only supported Betterwright calls for fixtures and scr
 	assert.match(skill, /page\.addInitScript\(fn, arg\)/);
 	assert.match(skill, /page-local mock, not network isolation/);
 	assert.match(skill, /take screenshots with the `screenshot\(\)` helper/);
+	// Field report and a run against Betterwright 2.8.7: a fixture file in the task's _scratch folder is refused, and a static server
+	// answers a client-side route with 404. The skill no longer calls _scratch the artifact directory.
+	assert.doesNotMatch(skill, /which is also the artifact directory/);
+	assert.match(skill, /`addInitScript\(\{path\}\)` reads only files in Betterwright's own artifact directory/);
+	assert.match(skill, /Browser file inputs may only read files inside the artifact directory/);
+	assert.match(skill, /serve the build with single-page fallback/);
 });
 
 // Field data (/subagent usage): two reviewer runs took in 552k tokens of new content, $1.10 of their $1.53: whole files, not the diff.
