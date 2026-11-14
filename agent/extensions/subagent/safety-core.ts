@@ -2634,13 +2634,30 @@ export function artifactGroupHint(root: string): string {
 	return path.posix.basename(path.posix.dirname(parent)) === "worktrees" ? parent : `${parent}/worktrees/${path.posix.basename(r)}`;
 }
 /** Why a read-only worker's tool call would change its candidate checkout, or undefined when it does not. */
+// Field report: read-only verification workers could not write their reports to the assigned _evidence folder. One cause: after
+// `cd "<evidence folder>" && cat > REPORT.md` the relative target was resolved against the worker's start folder, the candidate.
+// A leading literal `cd <dir> &&` now moves the folder the rest is judged from. Only that exact shape: `&&` (the rest does not run when
+// the cd fails), at the very start (so no subshell scopes it), and no other directory change later; anything else keeps the start folder.
+const CD_NAMES = "cd|chdir|pushd|popd|set-location|push-location|pop-location|sl";
+const LEADING_CD = new RegExp(`^\\s*(?:cd|chdir|pushd|set-location|push-location|sl)\\s+(?:-(?:path|literalpath)\\s+)?(?:"([^"$\`%]+)"|'([^'%]+)'|([^\\s;&|<>$\`%"'()]+))\\s*&&\\s*`, "i");
+const LATER_CD = new RegExp(`(^|[\\s;&|({])(?:${CD_NAMES})(\\s|$)`, "i");
+function leadingCd(command: string, cwd: string): { rest: string; cwd: string } | undefined {
+	const m = LEADING_CD.exec(command);
+	if (!m) return undefined;
+	const rest = command.slice(m[0].length);
+	if (LATER_CD.test(rest)) return undefined;
+	return { rest, cwd: resolveTarget(cwd, m[1] ?? m[2] ?? m[3]) };
+}
+
 export function readOnlyViolation(toolName: string, input: Record<string, unknown>, cwd: string, root: string): string | undefined {
 	if (toolName === "edit" || toolName === "write") {
 		const p = typeof input?.path === "string" ? input.path : typeof (input as any)?.file_path === "string" ? (input as any).file_path : "";
 		return insideRoot(p, cwd, root) ? `${toolName} changes a file in the candidate checkout` : undefined;
 	}
 	if (toolName !== "bash" && toolName !== "powershell") return undefined;
-	const command = withLiteralVariables(String(input?.command ?? ""));
+	let command = withLiteralVariables(String(input?.command ?? ""));
+	const moved = leadingCd(command, cwd);
+	if (moved) { command = moved.rest; cwd = moved.cwd; }
 	for (const code of interpreterHeredocs(command)) for (const t of codeTargets(code)) { const why = roTarget("interpreter code writes", t, cwd, root); if (why) return why; }
 	const shell = withoutDataBodies(command);
 	// Scanned over the whole command: segment splitting treats "(" as a subshell and would cut a .NET call apart.
