@@ -2408,7 +2408,53 @@ function insideRoot(target: string, cwd: string, root: string): boolean {
 	if (/^(\/dev\/null|nul|\$null)$/i.test(target) || /^&\d$/.test(target)) return false;
 	const full = normPath(resolveTarget(cwd, target));
 	const r = normPath(protectedRoot(root));
-	return full === r || full.startsWith(`${r}/`);
+	if (full === r || full.startsWith(`${r}/`)) return !artifactOutsideCheckout(resolveTarget(cwd, target), protectedRoot(root));
+	return relatedCheckout(resolveTarget(cwd, target), protectedRoot(root));
+}
+// The launch folder is not always the candidate. Two launches left the candidate unprotected: in a subfolder of a checkout (the rest of
+// that checkout was writable) and in the task's artifact folder (the whole candidate was). The guard now also protects, from the launch
+// folder alone: the Git checkout that contains it, and, for a launch inside <parent>/worktrees/<repo>/_evidence|_scratch, that project's
+// primary checkout <parent>/<repo> and its task worktrees <parent>/worktrees/<repo>/<task>. A home folder kept under Git is not treated
+// as the containing checkout, and artifact folders stay writable.
+const related = new Map<string, { enclosing?: string; primary?: string; group?: string }>();
+function relatedCheckout(full: string, root: string): boolean {
+	let info = related.get(root);
+	if (!info) {
+		info = {};
+		try {
+			if (fs.statSync(`${root}/.git`, { throwIfNoEntry: false }) === undefined) {
+				const home = normPath(slashed(os.homedir()));
+				for (let dir = path.posix.dirname(root); dir !== path.posix.dirname(dir); dir = path.posix.dirname(dir)) {
+					if (fs.statSync(`${dir}/.git`, { throwIfNoEntry: false }) === undefined) continue;
+					if (normPath(dir) !== home) info.enclosing = dir;
+					break;
+				}
+			}
+		} catch { /* no enclosing checkout is known */ }
+		const m = /^(.*)\/worktrees\/([^/]+)\/_(?:evidence|scratch)(?:\/|$)/.exec(root);
+		if (m) { info.primary = `${m[1]}/${m[2]}`; info.group = `${m[1]}/worktrees/${m[2]}`; }
+		related.set(root, info);
+	}
+	const t = normPath(full);
+	const under = (dir: string | undefined) => dir !== undefined && (t === normPath(dir) || t.startsWith(`${normPath(dir)}/`));
+	if (under(info.primary)) return true;
+	if (info.group !== undefined && t.startsWith(`${normPath(info.group)}/`) && !t.slice(normPath(info.group).length + 1).startsWith("_")) return true;
+	if (under(info.enclosing)) return !(PLACEMENT.test(full) && artifactOutsideCheckout(full, `${info.enclosing}/_`));
+	return false;
+}
+// Field report: a test-engineer could not save its assigned report in <parent>/worktrees/<repo>/_evidence/<task>/, refused as "into the
+// candidate checkout". The protected root is the folder the worker was launched in; when main launches it in a folder above the
+// checkouts (the project's parent, or the worktrees group), the artifact folders lie inside that root although they are in no checkout.
+// A target in the artifact placement is not a candidate write when no folder from it up to the protected root is a Git checkout.
+function artifactOutsideCheckout(full: string, root: string): boolean {
+	if (!PLACEMENT.test(full)) return false;
+	try {
+		for (let dir = path.posix.dirname(full); dir.length >= root.length; dir = path.posix.dirname(dir)) {
+			if (fs.statSync(`${dir}/.git`, { throwIfNoEntry: false }) !== undefined) return false;
+			if (dir === path.posix.dirname(dir)) break;
+		}
+		return true;
+	} catch { return false; }
 }
 // Field report: 'cat > <_scratch>/run.js <<'EOF' … EOF' was refused as "redirects output into the candidate checkout ()" because the
 // heredoc body (JavaScript such as "page.evaluate(() =>") was checked as shell, and a line ending in "=>" looked like a redirect with
