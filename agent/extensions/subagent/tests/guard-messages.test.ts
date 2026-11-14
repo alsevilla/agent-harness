@@ -113,6 +113,34 @@ test("read-only role launched above the checkouts: the assigned _evidence report
 	assert.equal(call(`${primary}/frontend`, "bash", { command: `cat > "${ev}/REPORT.md"` }), undefined, "the report, from a subfolder launch");
 });
 
+// Field report: a read-only verifier saved its report with bash and python -c "..."; the file read back corrupted (4,495 bytes). Inside a
+// shell-quoted script the interpreter reads \n and \t in Windows paths as a newline and a tab. A quoted heredoc keeps every character,
+// so inline interpreter code that writes a .md or .txt report is refused with that form; the report text itself is the regression case.
+test("report text survives a quoted heredoc exactly; inline interpreter code writing a report is refused with that form", (t) => {
+	const dir = slash(path.join(root, "quoting", "worktrees", "app", "_evidence", "pr69"));
+	fs.mkdirSync(dir, { recursive: true });
+	const candidate = slash(path.join(root, "quoting", "app"));
+	fs.mkdirSync(candidate, { recursive: true });
+	const ro = { scope: "child" as const, store: createGrantStore(), agentDir, readOnlyRoot: candidate, reads: new Set<string>() };
+	const call = (tool: string, command: string) => guardToolCall(ro, tool, { command }, candidate) as { reason: string } | undefined;
+	const report = ["# PR69 verification", "", "Ran `cargo test` in C:\\Users\\MSI\\RFID\\new\\tests: \"PASS\", cost $5, 100% done.", "", "```sh", "echo 'it''s' > out.log && git diff --stat $BASE...HEAD", "```", "| check | result |", "|---|---|", "| A5 | FAIL: `undefined is not a function` |"].join("\n");
+	const heredoc = `cat > "${dir}/REPORT.md" <<'REPORT_EOF'\n${report}\nREPORT_EOF`;
+	assert.equal(call("bash", heredoc), undefined, "the quoted heredoc is allowed");
+	assert.equal(call("powershell", `@'\n${report}\n'@ | Set-Content -LiteralPath "${dir}/REPORT.md" -Encoding utf8`), undefined, "the single-quoted here-string is allowed");
+	for (const bad of [`python -c "open('${dir}/REPORT.md','w').write('x')"`, `python3 -c "from pathlib import Path; Path('${dir}/REPORT.md').write_text('x')"`, `node -e "require('fs').writeFileSync('${dir}/notes.txt','x')"`]) {
+		const reason = call("bash", bad)?.reason ?? "";
+		assert.match(reason, /inline code \(-[ce]\) writes a text report .* write it with a quoted heredoc, which keeps every character: cat > "<absolute path>" <<'REPORT_EOF'/, bad);
+	}
+	assert.equal(call("bash", `node -e "require('fs').writeFileSync('${dir}/data.json','{}')"`), undefined, "other inline writes are unchanged");
+	assert.equal(call("bash", `python3 - <<'PY'\nopen("${dir}/REPORT.md","w").write("x")\nPY`), undefined, "a script in a quoted heredoc is unchanged");
+	assert.match(call("bash", `cat > "${candidate}/a.rs" <<'REPORT_EOF'\nx\nREPORT_EOF`)?.reason ?? "", /\[READ_ONLY_ROLE\]/, "candidate files stay protected");
+	// The allowed command, run for real: the file must hold the report byte for byte.
+	const run = spawnSync("bash", ["-c", heredoc], { encoding: "utf8" });
+	if (run.error) { t.skip("no bash on this host"); return; }
+	assert.equal(run.status, 0, run.stderr);
+	assert.equal(fs.readFileSync(`${dir}/REPORT.md`, "utf8"), `${report}\n`);
+});
+
 // Read-only roles: the child guard refuses changes to the candidate checkout, shell included; writes outside it stay allowed.
 test("read-only role: writes into the candidate are refused (not grantable); reads, tests and evidence writes outside it pass", () => {
 	const candidate = slash(path.join(root, "ro", "app"));
@@ -491,7 +519,11 @@ test("read-only roles: every write form is refused inside the checkout and allow
 	for (const [tool, form] of forms) {
 		assert.match(check(tool, form("REPORT.md")) ?? "", /into the candidate checkout/, `${tool}: ${form("REPORT.md")}`);
 		assert.match(check(tool, form(`${repo}/docs/REPORT.md`)) ?? "", /into the candidate checkout/, `${tool} absolute: ${form("")}`);
-		assert.equal(check(tool, form(`${ev}/REPORT.md`)), undefined, `${tool} evidence: ${form(`${ev}/REPORT.md`)}`);
+		// Inline interpreter code (-c, -e) writing a text report is refused for its quoting, wherever it writes; other files there pass.
+		const inline = /^(python3?|node) -[ce] /.test(form("x"));
+		if (inline) assert.match(check(tool, form(`${ev}/REPORT.md`)) ?? "", /write it with a quoted heredoc/, `${tool} evidence report: ${form("")}`);
+		else assert.equal(check(tool, form(`${ev}/REPORT.md`)), undefined, `${tool} evidence: ${form(`${ev}/REPORT.md`)}`);
+		assert.equal(check(tool, form(`${ev}/result.json`)), undefined, `${tool} evidence data: ${form(`${ev}/result.json`)}`);
 	}
 	// A move or rename changes its source too.
 	assert.match(check("bash", `mv src/db.rs ${ev}/db.rs`) ?? "", /into the candidate checkout/);
