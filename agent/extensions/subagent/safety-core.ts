@@ -2642,7 +2642,13 @@ function readOnlyShell(text: string, cwd: string, root: string, depth = 0): stri
 		const positionals = args.filter((a) => !a.startsWith("-"));
 		if (RO_SHELLS.has(name)) { const at = lower.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a)); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args[at + 1], cwd, root, depth + 1); if (inner) return inner; } continue; }
 		if (name === "cmd") { const at = lower.findIndex((a) => a === "/c" || a === "/k"); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args.slice(at + 1).join(" "), cwd, root, depth + 1); if (inner) return inner; } continue; }
-		if (INTERPRETERS.has(name)) { const at = args.findIndex((a) => CODE_FLAGS.has(a)); if (at >= 0 && args[at + 1] !== undefined) for (const t of codeTargets(args[at + 1])) { const why = roTarget(`${name} inline code writes`, t, cwd, root); if (why) return why; } }
+		if (INTERPRETERS.has(name)) { const at = args.findIndex((a) => CODE_FLAGS.has(a)); if (at >= 0 && args[at + 1] !== undefined) for (const t of codeTargets(args[at + 1])) {
+			const why = roTarget(`${name} inline code writes`, t, cwd, root);
+			if (why) return why;
+			// Field report: a verifier saved its report with python -c "..." and the file came back corrupted: inside a shell-quoted script the
+			// interpreter reads \n and \t in Windows paths as a newline and a tab, and the shell rewrites quotes, $ and backticks first.
+			if (/\.(md|txt)$/i.test(t)) return `${name} inline code (${args[at]}) writes a text report (${shownTarget(t)}), and a shell-quoted script changes backslashes, quotes, $ and backticks in the text; write it with a quoted heredoc, which keeps every character: cat > "<absolute path>" <<'REPORT_EOF' ... REPORT_EOF (PowerShell: @' ... '@ | Set-Content -LiteralPath "<absolute path>" -Encoding utf8), then read the file back`;
+		} }
 		if (name === "dd") for (const a of args) if (/^of=/i.test(a)) { const why = roTarget("dd writes", a.slice(3), cwd, root); if (why) return why; }
 		if (name === "pwsh" || name === "powershell") { const at = lower.findIndex((a) => a === "-c" || a === "-command"); if (at >= 0 && args[at + 1] !== undefined) { const inner = readOnlyShell(args.slice(at + 1).join(" "), cwd, root, depth + 1); if (inner) return inner; } continue; }
 		if (name === "git") {
