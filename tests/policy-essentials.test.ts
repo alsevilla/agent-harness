@@ -184,3 +184,14 @@ test("verification re-runs and ordinary delivery stay on the economy tier", () =
 	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
 	assert.ok(routing.includes("Every other test or check run, including a re-run after a fix round, is economy, and so is ordinary delivery by the `release-engineer`"));
 });
+
+// Field report (Betterwright 2.8.7): the browser skill's fixture example called page.route(), which the snippet runtime does not have,
+// so the run stopped before navigation. The skill names only calls the runtime supports.
+test("browser skill names only supported Betterwright calls for fixtures and screenshots", () => {
+	const skill = read("agent/skills/browser/SKILL.md");
+	const calls = skill.replace(/has no `page\.route\(\)`[^;]*; and no `page\.screenshot\(\)`|has no `page\.route\(\)` \([^)]*\) and no `page\.screenshot\(\)`/, "");
+	assert.doesNotMatch(calls, /page\.route\(|page\.screenshot\(/, "unsupported calls appear only in the sentence that says they are unsupported");
+	assert.match(skill, /page\.addInitScript\(fn, arg\)/);
+	assert.match(skill, /page-local mock, not network isolation/);
+	assert.match(skill, /take screenshots with the `screenshot\(\)` helper/);
+});
