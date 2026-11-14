@@ -100,6 +100,17 @@ test("read-only role launched above the checkouts: the assigned _evidence report
 		assert.match(call(parent, "bash", { command: `echo x > "${target}"` })?.reason ?? "", /\[READ_ONLY_ROLE\]/, target);
 	}
 	assert.match(call(primary, "bash", { command: `echo x > "${primary}/worktrees/x/_evidence/y/f.md"` })?.reason ?? "", /\[READ_ONLY_ROLE\]/, "inside the checkout itself");
+	// The launch folder is not always the candidate. Launched in the task's artifact folder, the project's primary checkout and its task
+	// worktrees are still protected; launched in a subfolder of a checkout, the rest of that checkout is.
+	fs.mkdirSync(`${primary}/frontend`, { recursive: true });
+	fs.mkdirSync(slash(path.join(root, "above", "other", ".git")), { recursive: true });
+	for (const launch of [ev, `${group}/_scratch/pr69`]) {
+		for (const target of [`${primary}/src/a.rs`, `${wt}/src/a.rs`, `${wt}/new.txt`]) assert.match(call(launch, "bash", { command: `echo x > "${target}"` })?.reason ?? "", /\[READ_ONLY_ROLE\]/, `${launch} -> ${target}`);
+		assert.ok(call(launch, "edit", { path: `${primary}/src/a.rs` }), "edit tool");
+		for (const ok of [`cat > "${ev}/REPORT.md"`, "echo x > notes.md", `echo x > "${group}/_scratch/pr69/out.log"`, `echo x > "${slash(path.join(root, "above", "other"))}/f.txt"`]) assert.equal(call(launch, "bash", { command: ok }), undefined, `${launch}: ${ok}`);
+	}
+	assert.match(call(`${primary}/frontend`, "bash", { command: `echo x > "${primary}/src/a.rs"` })?.reason ?? "", /\[READ_ONLY_ROLE\]/, "the rest of the checkout, from a subfolder launch");
+	assert.equal(call(`${primary}/frontend`, "bash", { command: `cat > "${ev}/REPORT.md"` }), undefined, "the report, from a subfolder launch");
 });
 
 // Read-only roles: the child guard refuses changes to the candidate checkout, shell included; writes outside it stay allowed.
