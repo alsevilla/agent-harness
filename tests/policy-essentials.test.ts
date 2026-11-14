@@ -174,3 +174,13 @@ test("a merged branch is finished: the next task starts on a new branch from the
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("never on the merged branch"));
 	assert.match(read("agent/extensions/subagent/index.ts"), /Fresh base: a branch whose PR is merged is finished\./);
 });
+
+// Field data (/subagent usage, one database task): planner, three test-engineer runs and an ordinary delivery ran on capable for $0.96
+// of a $1.92 worker total; their economy defaults would have cost about $0.05.
+test("verification re-runs and ordinary delivery stay on the economy tier", () => {
+	const main = read("agent/extensions/subagent/index.ts");
+	assert.match(main, /capable for open decisions and for one final verification of a complex change/);
+	assert.match(main, /Economy for every other test or check run, including a re-run after a fix round, and for ordinary delivery by the release-engineer/);
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("Every other test or check run, including a re-run after a fix round, is economy, and so is ordinary delivery by the `release-engineer`"));
+});
