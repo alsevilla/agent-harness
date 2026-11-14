@@ -195,3 +195,11 @@ test("browser skill names only supported Betterwright calls for fixtures and scr
 	assert.match(skill, /page-local mock, not network isolation/);
 	assert.match(skill, /take screenshots with the `screenshot\(\)` helper/);
 });
+
+// Field data (/subagent usage): two reviewer runs took in 552k tokens of new content, $1.10 of their $1.53: whole files, not the diff.
+test("a review starts from the diff and reads around each change by range", () => {
+	const review = flat(read("agent/skills/engineering-harness/review/index.md"));
+	assert.ok(review.includes("start from the diff: `git diff --stat <base>...<head>`, then the diff of each changed file"));
+	assert.ok(review.includes("open a whole file only when the change cannot be judged without it, and do not read unchanged files end to end"));
+	assert.match(read("agent/extensions/subagent/index.ts"), /A review packet names the comparison base and head/);
+});
