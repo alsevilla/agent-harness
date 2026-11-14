@@ -94,6 +94,14 @@ test("read-only role: writes into the candidate are refused (not grantable); rea
 		assert.ok(r?.block, bad);
 		assert.match(r!.reason, /^Blocked by harness safety guard \[READ_ONLY_ROLE\] op [0-9a-f]{16}: .*; not grantable: this role is read-only/, bad);
 	}
+	// Field report: verification workers could not write reports to their assigned _evidence folder after `cd "<folder>" && cat > REPORT.md`:
+	// the relative target was judged from the start folder. A leading literal `cd <dir> &&` moves the folder the rest is judged from.
+	for (const ok of [`cd "${evidence}" && cat > REPORT.md`, `cd ${evidence} && npm test > test.log 2>&1`, `Set-Location "${evidence}" && Set-Content REPORT.md "x"`, `Push-Location -Path '${evidence}' && "x" > REPORT.md`]) assert.equal(call(ok), undefined, ok);
+	for (const bad of [
+		`cd "${evidence}" && cd "${candidate}" && echo x > f.txt`, `cd "${evidence}"; cat > REPORT.md`, `cd "${evidence}" || true; echo x > f.txt`, "cd src && echo x > f.txt",
+		`cd "${evidence}" && echo x > ../../../../app/f.txt`, `cd "${evidence}" && (cd "${candidate}" && echo x > f.txt)`, `(cd "${evidence}" && true); echo x > f.txt`,
+		`cd "$EV" && echo x > f.txt`, `cd "${evidence}" && popd && echo x > f.txt`, `cd "${evidence}" && git commit -m x`,
+	]) assert.match(call(bad)?.reason ?? "", /\[READ_ONLY_ROLE\]/, bad);
 	assert.ok((guardToolCall(ro, "edit", { path: `${candidate}/a.ts` }, candidate) as any)?.block, "edit tool inside the candidate");
 	assert.equal(guardToolCall(ro, "write", { path: `${evidence}/notes.md` }, candidate), undefined, "write tool outside the candidate");
 	const writer = { scope: "child" as const, store: createGrantStore(), agentDir };
