@@ -174,3 +174,32 @@ test("a merged branch is finished: the next task starts on a new branch from the
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("never on the merged branch"));
 	assert.match(read("agent/extensions/subagent/index.ts"), /Fresh base: a branch whose PR is merged is finished\./);
 });
+
+// Field data (/subagent usage, one database task): planner, three test-engineer runs and an ordinary delivery ran on capable for $0.96
+// of a $1.92 worker total; their economy defaults would have cost about $0.05.
+test("verification re-runs and ordinary delivery stay on the economy tier", () => {
+	const main = read("agent/extensions/subagent/index.ts");
+	assert.match(main, /capable for open decisions and for one final verification of a complex change/);
+	assert.match(main, /Economy for every other test or check run, including a re-run after a fix round, and for ordinary delivery by the release-engineer/);
+	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
+	assert.ok(routing.includes("Every other test or check run, including a re-run after a fix round, is economy, and so is ordinary delivery by the `release-engineer`"));
+});
+
+// Field report (Betterwright 2.8.7): the browser skill's fixture example called page.route(), which the snippet runtime does not have,
+// so the run stopped before navigation. The skill names only calls the runtime supports.
+test("browser skill names only supported Betterwright calls for fixtures and screenshots", () => {
+	const skill = read("agent/skills/browser/SKILL.md");
+	const calls = skill.replace(/has no `page\.route\(\)`[^;]*; and no `page\.screenshot\(\)`|has no `page\.route\(\)` \([^)]*\) and no `page\.screenshot\(\)`/, "");
+	assert.doesNotMatch(calls, /page\.route\(|page\.screenshot\(/, "unsupported calls appear only in the sentence that says they are unsupported");
+	assert.match(skill, /page\.addInitScript\(fn, arg\)/);
+	assert.match(skill, /page-local mock, not network isolation/);
+	assert.match(skill, /take screenshots with the `screenshot\(\)` helper/);
+});
+
+// Field data (/subagent usage): two reviewer runs took in 552k tokens of new content, $1.10 of their $1.53: whole files, not the diff.
+test("a review starts from the diff and reads around each change by range", () => {
+	const review = flat(read("agent/skills/engineering-harness/review/index.md"));
+	assert.ok(review.includes("start from the diff: `git diff --stat <base>...<head>`, then the diff of each changed file"));
+	assert.ok(review.includes("open a whole file only when the change cannot be judged without it, and do not read unchanged files end to end"));
+	assert.match(read("agent/extensions/subagent/index.ts"), /A review packet names the comparison base and head/);
+});
