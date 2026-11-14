@@ -453,8 +453,9 @@ async function runAgentAttempt(
 		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
 		if (guard.claimed.length) safetyGrants.lend?.(ownerId, guard.claimed);
 		args.push("--extension", guard.entry);
-		// Read-only role (no edit/write tool) or a readOnly launch: its guard refuses changes to the candidate checkout, shell included.
-		const readOnlyRoot = lease?.access === "read" || (agent.tools !== undefined && !agent.tools.some((t) => t === "edit" || t === "write")) ? canonicalCwd(cwd ?? defaultCwd) : undefined;
+		// Read-only role (no edit tool) or a readOnly launch: its guard refuses changes to the candidate checkout, shell included.
+		// A write tool alone keeps a role read-only: test-engineer and reviewer have it to save their reports outside the candidate.
+		const readOnlyRoot = lease?.access === "read" || (agent.tools !== undefined && !agent.tools.includes("edit")) ? canonicalCwd(cwd ?? defaultCwd) : undefined;
 		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
 		let wasAborted = false;
 		// Durable per-worker trace of tool calls and guard results (worker-trace.ts): workers keep no session file of their own.

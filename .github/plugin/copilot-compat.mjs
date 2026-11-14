@@ -11,9 +11,12 @@ const HEADER_KEYS = ["name", "description", "tools"];
 export function nativeTools(piTools) {
   if (typeof piTools !== "string" || !piTools.trim()) throw new Error("tools must be a non-empty comma-separated string");
   const out = [];
-  for (const raw of piTools.split(",")) {
-    const tool = raw.trim();
+  const names = piTools.split(",").map((raw) => raw.trim());
+  for (const tool of names) {
     if (!Object.hasOwn(ALIASES, tool)) throw new Error(`unmappable tool: ${JSON.stringify(tool)}`);
+    // A role with write but no edit is read-only in Pi: its guard confines write to report files outside the candidate. Copilot has
+    // no path-confined write, and its edit tool would let the role change code, so that grant is not projected.
+    if (tool === "write" && !names.includes("edit")) continue;
     if (!out.includes(ALIASES[tool])) out.push(ALIASES[tool]);
   }
   return out.join(", ");

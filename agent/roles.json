@@ -162,7 +162,7 @@
         "thinking": "medium"
       }
     },
-    "tools": "read, grep, find, ls, bash, powershell"
+    "tools": "read, grep, find, ls, bash, powershell, write"
   },
   {
     "name": "general-worker",
@@ -310,7 +310,7 @@
         "thinking": "low"
       }
     },
-    "tools": "read, grep, find, ls, bash, powershell"
+    "tools": "read, grep, find, ls, bash, powershell, write"
   },
   {
     "name": "ui-ux-specialist",
