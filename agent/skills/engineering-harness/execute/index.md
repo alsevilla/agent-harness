@@ -7,9 +7,9 @@
 2. If a material decision or requirement is unresolved, stop affected writes and
    return the missing decision. Do not invent product/persistence/security semantics.
 3. Main session: launch the appropriate single writer: backend-worker for APIs/services/business logic, database-worker for all database implementation, frontend-worker for UI, platform-worker for accepted infrastructure, or general-worker for other tooling/docs/config. Main assigns file seams and one writer for mixed work; no automatic chain.
-   Standalone T0 work outside assigned implementation/recovery goes to
-   general-worker (main edits directly only when the host reports no usable
-   dispatch, and then only reads and such edits). Compiler/reviewer fixes and failed edits within delegated work remain
+   Main does a small known T0 change itself (a fix, rename, config, wording or doc
+   edit in about 3 files or fewer, with no open decision): read, edit, run the
+   focused check. A change that grows past that is handed to a worker. Compiler/reviewer fixes and failed edits within delegated work remain
    worker-owned, even when mechanical. Inspect failures, then steer the active worker
    or dispatch a smaller evidence-based recovery packet to the same role. Partial
    completion leaves authorized work to finish; the AGENTS retry cap (2 fix rounds,

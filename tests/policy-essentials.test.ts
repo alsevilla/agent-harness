@@ -20,7 +20,7 @@ test("main policy keeps its never-rules and stays short", () => {
 		"never accept PASS from a digest",
 		"Act once you know enough: never re-derive established facts or re-open the user's decisions",
 	]) assert.ok(text.includes(rule), rule);
-	assert.ok(policy.length <= 6700, `AGENTS.md is ${policy.length} chars; it is read on every main turn`);
+	assert.ok(policy.length <= 7000, `AGENTS.md is ${policy.length} chars; it is read on every main turn`);
 });
 
 test("every role keeps the leaf boundary and states it once", () => {
@@ -225,4 +225,16 @@ test("main finishes the request: an actionable FAIL or gap is the next launch, n
 	assert.ok(policy.includes("then reassess: change the cause, packet or role and continue; return to the user only when no untried approach remains."));
 	assert.ok(!policy.includes("return to main/user with the evidence"));
 	assert.match(read("agent/extensions/subagent/index.ts"), /A list of remaining gaps is not a completion\./);
+});
+
+// The user asked for the harness to work like a single coding agent: main does small known tasks itself and reports the way one would.
+// Larger or riskier work, independent verification, review and delivery stay delegated.
+test("main does small known work directly and follows single-agent conduct rules", () => {
+	const policy = flat(read("agent/AGENTS.md"));
+	assert.ok(policy.includes("Main does small known tasks itself (T0) and orchestrates the rest"));
+	assert.ok(policy.includes("-> main directly: read what it needs, edit, run the focused check, report."));
+	assert.ok(policy.includes("Main never edits a candidate a worker is writing, and never does larger implementation, VERIFY, REVIEW, SHIP or delegated recovery itself"));
+	assert.ok(!policy.includes("Main is orchestrator only"));
+	const main = read("agent/extensions/subagent/index.ts");
+	for (const rule of [/Direct work \(T0\): do a small known change yourself/, /Report faithfully: when a check fails, say so and show the output/, /approval for one action does not carry to the next/, /Do not commit, push or open a PR unless the user asked\./, /Ask the user only when a decision is theirs to make/]) assert.match(main, rule);
 });

@@ -8,7 +8,7 @@ Read only when measuring or changing routing/skill-selection guidance. This is a
 - Tests: `tests/evaluate-routing.test.mjs` (`node:test`, deterministic unit checks; found by the canonical runner `scripts/run-node-tests.mjs`).
 
 ## Field meanings
-- `route`: the orchestrator's main route label (`T0_MAIN` (only the no-usable-dispatch fallback; standalone T0 otherwise routes to `T1_WORKER` with `general-worker`), `T1_WORKER`, `T2_DEBUG_WORKER`, `T3_SPECIALIST_FIRST`, `T4_ORACLE_ESCALATION`, `DISCOVER_SCOUT_FIRST`, `LOCAL_DONE`, `VERIFY_INDEPENDENT`, `REVIEW`, `SHIP_AUTHORIZED`, `BLOCKED_NO_AUTHORITY`, `STOP_NO_LAUNCH`, `QUEUE_NO_LAUNCH`). It is not a role name.
+- `route`: the orchestrator's main route label (`T0_MAIN` (main does a small known change itself, with no worker; a larger or new-behaviour change routes to `T1_WORKER`), `T1_WORKER`, `T2_DEBUG_WORKER`, `T3_SPECIALIST_FIRST`, `T4_ORACLE_ESCALATION`, `DISCOVER_SCOUT_FIRST`, `LOCAL_DONE`, `VERIFY_INDEPENDENT`, `REVIEW`, `SHIP_AUTHORIZED`, `BLOCKED_NO_AUTHORITY`, `STOP_NO_LAUNCH`, `QUEUE_NO_LAUNCH`). It is not a role name.
 - `roles`: actual named roles launched. Without `calls` the list order is the legacy order evidence; with `calls` it is only a multiset cross-check against the calls' agents and never runtime order.
 - `skills`: skills or modules selected for the case, including guidance already loaded earlier in the session. Selection is not a read: the evaluator cannot verify that a skill was read or activated, and a correctly formatted name does not prove activation.
 - `expect.routes`: accepted route labels. Policy-valid alternatives are listed explicitly.

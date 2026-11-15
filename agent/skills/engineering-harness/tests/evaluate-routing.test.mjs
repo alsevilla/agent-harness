@@ -115,13 +115,18 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual(c.R39.expect.skills_forbidden, ["frontend/design-dashboards", "frontend/ui-ux-pro-max", "browser"]);
 	});
 
-	it("main_edits_directly_only_in_labelled_no_usable_dispatch_fallback", () => {
+	// Main does a small known change itself (T0), with no worker; the same holds when the host has no usable dispatch.
+	it("main_does_small_known_changes_directly_with_no_worker", () => {
 		const t0 = loadFixture().cases.filter((c) => c.expect.routes.includes("T0_MAIN"));
-		assert.deepEqual(t0.map((c) => c.id), ["R36"]);
-		assert.deepEqual(t0[0].expect.routes, ["T0_MAIN"]);
-		assert.match(t0[0].context, /no usable dispatch/);
-		assert.deepEqual(t0[0].expect.roles_allowed, []);
-		assert.deepEqual(byId(loadFixture()).R07.expect.routes, ["T1_WORKER"]);
+		assert.deepEqual(t0.map((c) => c.id), ["R07", "R36"]);
+		for (const c of t0) {
+			assert.deepEqual(c.expect.routes, ["T0_MAIN"]);
+			assert.deepEqual(c.expect.roles_required, []);
+			assert.deepEqual(c.expect.roles_allowed, []);
+		}
+		assert.match(t0[0].context, /Main does this T0 edit itself/);
+		assert.match(t0[1].context, /no usable dispatch/);
+		assert.deepEqual(byId(loadFixture()).R34.expect.routes, ["T1_WORKER"], "a ten-file rename is a worker task");
 	});
 
 	it("current_policy_expectations", () => {
@@ -135,8 +140,8 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual(x("R02").roles_required, ["database-specialist"]);
 		assert.deepEqual(x("R02").roles_allowed, ["database-specialist", "database-worker"]);
 		assert.deepEqual(x("R05").roles_required, ["debugger", "backend-worker"]);
-		assert.deepEqual(x("R07").routes, ["T1_WORKER"]);
-		assert.deepEqual(x("R07").roles_required, ["general-worker"]);
+		assert.deepEqual(x("R07").routes, ["T0_MAIN"]);
+		assert.deepEqual(x("R07").roles_required, []);
 		assert.deepEqual(x("R08").roles_required, ["general-worker"]);
 		assert.deepEqual(x("R09").roles_required, ["test-engineer"]);
 		assert.deepEqual(x("R10").roles_required, ["reviewer"]);
