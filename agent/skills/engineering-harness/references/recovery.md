@@ -89,7 +89,7 @@ After a fix fails with an unexplained cause, return to DEBUG immediately. After
 two distinct evidence-backed correction attempts fail, stop repeating the route:
 reassess diagnosis and use stronger review if material risk or disagreement remains.
 This means change/reassess the route within existing authority, not automatically stop
-work or request another approval. Cap (AGENTS): at most 2 fix rounds per task and 2 review cycles per candidate, then reassess and return to main/user with the evidence; a new distinct failure starts a fresh count; unexplained failures still go to debugger first; no automatic escalation. The cap is a reassess/report trigger, not a refusal to continue authorized work. Incomplete partial edits are remaining scope, not
+work or request another approval. Cap (AGENTS): at most 2 fix rounds per task and 2 review cycles per candidate, then reassess: change the cause, the packet or the role and continue, and return to the user only when no untried approach remains; a new distinct failure starts a fresh count; unexplained failures still go to debugger first; no automatic escalation. The cap is a reassess trigger, not a reason to stop authorized work or to hand the user a list of gaps. Incomplete partial edits are remaining scope, not
 two failed evidence-backed corrections. Honor explicit user pause/stop requests;
 questions about a blocker do not themselves revoke implementation authority.
 Oracle remains restricted to the exceptional triggers above; no automatic Oracle run.

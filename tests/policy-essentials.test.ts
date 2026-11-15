@@ -20,7 +20,7 @@ test("main policy keeps its never-rules and stays short", () => {
 		"never accept PASS from a digest",
 		"Act once you know enough: never re-derive established facts or re-open the user's decisions",
 	]) assert.ok(text.includes(rule), rule);
-	assert.ok(policy.length <= 6500, `AGENTS.md is ${policy.length} chars; it is read on every main turn`);
+	assert.ok(policy.length <= 6700, `AGENTS.md is ${policy.length} chars; it is read on every main turn`);
 });
 
 test("every role keeps the leaf boundary and states it once", () => {
@@ -214,4 +214,15 @@ test("a review starts from the diff and reads around each change by range", () =
 	assert.ok(review.includes("start from the diff: `git diff --stat <base>...<head>`, then the diff of each changed file"));
 	assert.ok(review.includes("open a whole file only when the change cannot be judged without it, and do not read unchanged files end to end"));
 	assert.match(read("agent/extensions/subagent/index.ts"), /A review packet names the comparison base and head/);
+});
+
+// Field report: asked to complete a task, main stopped after listing the gaps ("You're right, I stopped too early"), more than five times
+// in one task. The policy made listing missing evidence a way to finish, and sent a capped retry back to the user.
+test("main finishes the request: an actionable FAIL or gap is the next launch, not a completion", () => {
+	const policy = flat(read("agent/AGENTS.md"));
+	assert.ok(policy.includes("Finish when the request is done, not when its gaps are listed: a FAIL, INCONCLUSIVE or unrun check you can still act on is the next launch, not a result."));
+	assert.ok(policy.includes("Stop early only for a decision, credential or approval only the user can give, and name it."));
+	assert.ok(policy.includes("then reassess: change the cause, packet or role and continue; return to the user only when no untried approach remains."));
+	assert.ok(!policy.includes("return to main/user with the evidence"));
+	assert.match(read("agent/extensions/subagent/index.ts"), /A list of remaining gaps is not a completion\./);
 });
