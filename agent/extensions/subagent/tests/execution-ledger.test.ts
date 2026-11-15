@@ -44,6 +44,19 @@ test("the state view: changed files, reads still current or changed since, and t
 	assert.doesNotMatch(l.view()!, /git status/, "inspection changes nothing");
 });
 
+// test-engineer and reviewer write their report with the write tool, last. That is not a change to what the checks tested.
+test("writing a report into the task's artifact folder does not mark the checks as outdated; writing a source file does", () => {
+	const l = createExecutionLedger();
+	l.onResult("read", { path: "src/main.rs" }, text(lines(40)), false, cwd);
+	l.onResult("bash", { command: "cargo test -p backend sms" }, text("test result: ok"), false, cwd);
+	l.onResult("bash", { command: "git status" }, text("clean"), false, cwd);
+	for (const report of ["D:/work/RFID/worktrees/app/_evidence/pr69/REPORT.md", "D:\\work\\RFID\\worktrees\\app\\_scratch\\pr69\\notes.md"]) l.onResult("write", { path: report, content: "# Report" }, text("ok"), false, cwd);
+	assert.match(l.view()!, /`cargo test -p backend sms` passed at step 2, no change since/);
+	assert.match(l.view()!, /Changed by you: .*REPORT\.md/, "the report is still listed as written");
+	l.onResult("write", { path: "src/new.rs", content: "x" }, text("ok"), false, cwd);
+	assert.match(l.view()!, /`cargo test -p backend sms` passed at step 2, files changed since/);
+});
+
 test("inspection reuse notes must at least halve output, including command overhead", () => {
 	for (const command of ["git status", `rg ${"long_pattern".repeat(20)}`]) {
 		const display = command.length > 90 ? `${command.slice(0, 89)}…` : command;
