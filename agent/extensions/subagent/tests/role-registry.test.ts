@@ -600,7 +600,13 @@ const approved = JSON.parse(fs.readFileSync(new URL("./fixtures/approved-user-pr
   roles: { name: string; defaultModelTier: "economy" | "capable"; tiers: Record<string, ApprovedTier>; tools: string[] }[];
 };
 // The one approved tool delta: release-engineer gains native write for named knowledge/release artifacts only (tools otherwise pinned; model tuples never change here).
-const APPROVED_TOOL_DELTAS: Record<string, string[]> = { "release-engineer": ["read", "grep", "find", "ls", "bash", "powershell", "edit", "write"] };
+// write for release-engineer (knowledge and release files) and, approved 2026-11-14, for test-engineer and reviewer: they save their
+// reports of findings with it and stay read-only for the candidate (no edit tool; the guard confines write to files outside it).
+const APPROVED_TOOL_DELTAS: Record<string, string[]> = {
+  "release-engineer": ["read", "grep", "find", "ls", "bash", "powershell", "edit", "write"],
+  "test-engineer": ["read", "grep", "find", "ls", "bash", "powershell", "write"],
+  reviewer: ["read", "grep", "find", "ls", "bash", "powershell", "write"],
+};
 // Test-local LF digests of the 20 shipped profiles: git blobs at e2ddaed (== HEAD) with CRLF->LF only. Checkout EOL (core.autocrlf) is not content;
 // the fixture's raw profileSha256 pins the historical mixed-EOL checkout (line 5 LF) and stays byte-immutable.
 const PROFILE_LF_SHA256: Record<string, string> = {
@@ -792,13 +798,18 @@ test("approved preset update differs from the immutable baseline only by the rec
   assert.deepEqual(Object.keys(approved.roles.find((role) => role.name === "oracle")!.tiers), ["capable"]);
 });
 
-test("write is the one approved tool delta: only release-engineer gains it, pinned to its baseline tools plus write", () => {
+test("write is the one approved tool delta: release-engineer, test-engineer and reviewer gain it, each pinned to its baseline tools plus write", () => {
   const pinned = baseline.roles.find((role) => role.name === "release-engineer");
   assert.ok(pinned);
   assert.deepEqual(APPROVED_TOOL_DELTAS["release-engineer"], [...pinned.normal.tools, "write"]);
-  assert.equal(Object.keys(APPROVED_TOOL_DELTAS).length, 1, "no other role has an approved tool delta");
+  for (const name of ["test-engineer", "reviewer"]) {
+    const base = baseline.roles.find((role) => role.name === name)!;
+    assert.deepEqual(APPROVED_TOOL_DELTAS[name], [...base.normal.tools, "write"]);
+    assert.ok(!APPROVED_TOOL_DELTAS[name].includes("edit"), `${name}: write for reports only, never edit`);
+  }
+  assert.equal(Object.keys(APPROVED_TOOL_DELTAS).length, 3, "no other role has an approved tool delta");
   for (const role of RAW_ROLES()) {
-    if (role.name !== "release-engineer") assert.doesNotMatch(role.tools, /(^|,\s*)write(\s*,|$)/, `${role.name}: no write grant`);
+    if (!(role.name in APPROVED_TOOL_DELTAS)) assert.doesNotMatch(role.tools, /(^|,\s*)write(\s*,|$)/, `${role.name}: no write grant`);
   }
 });
 

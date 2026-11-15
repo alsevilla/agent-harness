@@ -232,7 +232,7 @@ export function configureCodeIntegrations(args: string[], agent: AgentConfig, ex
   }
   // Exact names preserve role authority; never select all serena_* tools by wildcard.
   const tools = new Set([...(agent.tools ?? ["read", "grep", "find", "ls"]), ...config.readOnlyTools]);
-  if (tools.has("edit") || tools.has("write")) for (const tool of config.workerTools) tools.add(tool);
+  if (tools.has("edit")) for (const tool of config.workerTools) tools.add(tool);
   // Omitted integrations drop matching tools even when the role's own allowlist names them.
   for (const tool of tools) if (omitted.some(prefix => tool.startsWith(prefix))) tools.delete(tool);
   for (const tool of extraTools) tools.add(tool);

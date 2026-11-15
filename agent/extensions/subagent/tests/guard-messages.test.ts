@@ -141,6 +141,29 @@ test("report text survives a quoted heredoc exactly; inline interpreter code wri
 	assert.equal(fs.readFileSync(`${dir}/REPORT.md`, "utf8"), `${report}\n`);
 });
 
+// A human test engineer or reviewer writes a report of findings before handing back. test-engineer and reviewer now hold the write tool
+// for that, with no shell quoting in the way, and stay read-only: a role without edit is read-only, and the guard confines write.
+test("test-engineer and reviewer hold write for reports only: read-only by launch, evidence writable, candidate refused", () => {
+	const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8")) as { name: string; tools: string }[];
+	for (const role of roles) {
+		const tools = role.tools.split(",").map((t) => t.trim());
+		if (role.name === "test-engineer" || role.name === "reviewer") assert.deepEqual(tools.slice(-1).concat(tools.includes("edit") ? ["edit"] : []), ["write"], role.name);
+		else if (role.name !== "release-engineer") assert.ok(!tools.includes("write"), `${role.name}: no write tool`);
+	}
+	const launcher = fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+	assert.match(launcher, /agent\.tools !== undefined && !agent\.tools\.includes\("edit"\)\) \? canonicalCwd/, "a role without edit is launched read-only, with or without write");
+	const base = slash(path.join(root, "report-tool"));
+	const candidate = `${base}/app`, ev = `${base}/worktrees/app/_evidence/pr69`;
+	for (const d of [`${candidate}/.git`, `${candidate}/src`, ev]) fs.mkdirSync(d, { recursive: true });
+	fs.writeFileSync(`${candidate}/src/a.rs`, "fn main() {}\n");
+	const ro = { scope: "child" as const, store: createGrantStore(), agentDir, readOnlyRoot: candidate, reads: new Set<string>() };
+	const tool = (name: string, p: string) => guardToolCall(ro, name, { path: p, content: "# Report\nRan `cargo test` in C:\\RFID\\new\\tests\n" }, candidate) as { reason: string } | undefined;
+	assert.equal(tool("write", `${ev}/REPORT.md`), undefined, "the assigned report");
+	assert.equal(tool("write", `${ev}/shots/notes.txt`), undefined, "an evidence file in a subfolder");
+	for (const p of [`${candidate}/src/a.rs`, `${candidate}/REPORT.md`, `${candidate}/src/new.rs`, "REPORT.md"]) assert.match(tool("write", p)?.reason ?? "", /\[READ_ONLY_ROLE\]/, p);
+	assert.match(tool("edit", `${candidate}/src/a.rs`)?.reason ?? "", /\[READ_ONLY_ROLE\]/, "edit stays refused");
+});
+
 // Read-only roles: the child guard refuses changes to the candidate checkout, shell included; writes outside it stay allowed.
 test("read-only role: writes into the candidate are refused (not grantable); reads, tests and evidence writes outside it pass", () => {
 	const candidate = slash(path.join(root, "ro", "app"));

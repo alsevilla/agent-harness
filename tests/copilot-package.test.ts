@@ -103,7 +103,9 @@ test("all profiles expose native Copilot headers with unchanged native tools and
       expect(Object.keys(header)).toEqual(["name", "description", "tools"]);
       for (const key of ["model", "fallbackModel", "thinking", "metadata", "pi"]) expect(header[key]).toBeUndefined();
     }
-    const expectedTools = [...new Set(role.tools.split(",").map((tool) => aliases[tool.trim()]).filter(Boolean))].join(", ");
+    const piTools = role.tools.split(",").map((tool) => tool.trim());
+    // write without edit is the Pi-guarded report grant of a read-only role: it has no native counterpart.
+    const expectedTools = [...new Set(piTools.filter((tool) => tool !== "write" || piTools.includes("edit")).map((tool) => aliases[tool]).filter(Boolean))].join(", ");
     expect(metadata.tools).toBe(expectedTools);
   }
 });
