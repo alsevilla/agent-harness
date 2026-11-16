@@ -46,8 +46,8 @@ Main follows a fixed protocol (full text: [`agent/AGENTS.md`](agent/AGENTS.md)):
 3. **Pick roles** by name (see [Roles](#roles)).
 4. **Write one packet:** task, candidate, contract, evidence paths, scope, checks. By default the candidate is a feature branch in your main checkout; a worktree is used only for parallel writers, uncommitted user work, a live process on the main checkout, or when main must stay on the base branch.
 5. **Delegate and wait.** Common sequences run as one fixed shape: T1 worker; T2 debugger → worker; T3 optional planner → optional specialist → worker → test-engineer, with an optional reviewer. A step that doesn't report `STATUS: PASS` stops the shape and returns to main.
-6. **Accept on STATUS and EVIDENCE**, never by re-reading code; at most two fix rounds per task.
-7. **Finish:** report changes, checks and residual risk, or deliver through `release-engineer`.
+6. **Accept on STATUS and EVIDENCE**, never by re-reading code; after two fix rounds on a task, main changes the cause, the packet or the role and continues.
+7. **Finish** when the request is done, not when its gaps are listed: a failed or unrun check main can still act on is the next launch. Main stops early only for a decision, credential or approval that only you can give. Then it reports changes, checks and residual risk, or delivers through `release-engineer`.
 
 Workers reply in four lines (STATUS, NEXT, RISKS, EVIDENCE) and put detail in a REPORT file. Routing and evidence rules are instructions the model follows; the runtime enforces only what [Safety and delivery](#safety-and-delivery) and [Context and cost](#context-and-cost) describe.
 
@@ -115,7 +115,7 @@ The native package exposes these 21 generic roles:
 | Kind | Roles |
 | --- | --- |
 | Implementation (write code) | `backend-worker`, `frontend-worker`, `database-worker`, `platform-worker`, `general-worker` |
-| Diagnosis and checks (read-only) | `debugger`, `test-engineer`, `reviewer`, `scout`, `planner` |
+| Diagnosis and checks (read-only for the code; `test-engineer` and `reviewer` write their report of findings with the `write` tool, outside the checkout) | `debugger`, `test-engineer`, `reviewer`, `scout`, `planner` |
 | Specialists (read-only advice) | `api-specialist`, `architecture-specialist`, `concurrency-specialist`, `database-specialist`, `devops-specialist`, `observability-specialist`, `performance-specialist`, `security-specialist`, `ui-ux-specialist` |
 | Escalation | `oracle` |
 | Delivery | `release-engineer` |
@@ -339,7 +339,7 @@ The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.10
 
 | Asset | Status |
 | --- | --- |
-| Source release | v1.20.4 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
+| Source release | v1.21.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
 | Copilot CLI | Latest release only; no older version is supported |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated. Serena, Graphify and QMD work through their skills' shell commands |
 | Token and turn savings | Pi's request shaping (execution ledger, output cap, worker masking, duplicate-read notes, main checkpoints, cache health) is Pi-only: Copilot builds its own requests. Both Copilot hooks add the working rules that cut turns: the lookup order with the three helpers by path, calls batched in one turn, no retry of a repeated failure or guard refusal, and small diffs |
