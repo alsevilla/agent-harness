@@ -432,7 +432,11 @@ async function runNodeSuite() {
 		const long = assistantStore(60);
 		const hidden = inspector(long.store, () => "hidden").view;
 		hidden.render(40);
-		assert.equal(hidden.handleMouse(ev("press", b.col, b.top + 3)), undefined, "hidden has no gutter");
+		// Hidden has no gutter: that column is transcript text, so a press starts a text selection, never a thumb drag.
+		hidden.handleMouse(ev("press", b.col, b.top + 3));
+		assert.equal(hidden.drag, undefined, "hidden has no gutter");
+		assert.equal(hidden.viewport.isScrollbarActive, false);
+		hidden.handleMouse(ev("release", b.col, b.top + 3));
 	});
 
 	test("gutter column follows each render: framed, resized, and unframed narrow widths", () => {
@@ -446,7 +450,9 @@ async function runNodeSuite() {
 		view.handleMouse(ev("release", b40.col, b40.top + 1));
 		view.render(60);
 		const b60 = bar(view, 60);
-		assert.equal(view.handleMouse(ev("press", b40.col, b40.top + 1, { width: 60 })), undefined, "old column is no longer the gutter");
+		view.handleMouse(ev("press", b40.col, b40.top + 1, { width: 60 }));
+		assert.equal(view.drag, undefined, "old column is no longer the gutter: a press there is text, not the thumb");
+		view.handleMouse(ev("release", b40.col, b40.top + 1, { width: 60 }));
 		assert.equal(view.handleMouse(ev("press", b60.col, b60.top + 1, { width: 60 }))?.capture, true, "resized gutter captures");
 		view.handleMouse(ev("release", b60.col, b60.top + 1, { width: 60 }));
 		view.render(6);
@@ -454,6 +460,75 @@ async function runNodeSuite() {
 		assert.equal(narrow.col, 5);
 		assert.equal(view.handleMouse(ev("press", narrow.col, narrow.top + 1, { width: 6 }))?.capture, true, "unframed gutter at column 5");
 		view.handleMouse(ev("release", narrow.col, narrow.top + 1, { width: 6 }));
+	});
+
+	// Field report: in the subagents window only the rows on screen could be selected and copied, and the worker list scrolled only
+	// with the arrow keys. A drag now selects in transcript coordinates, auto-scrolls at the body's edge and copies on release.
+	test("drag selection spans rows scrolled out of view, auto-scrolls at the edge, and copies every selected row", async () => {
+		const { store } = assistantStore(60);
+		const { host, view } = inspector(store, () => "auto");
+		const copied: string[] = [];
+		host.copyTextToClipboard = async (text: string) => { copied.push(text); return true; };
+		view.render(40);
+		wheel(view, -1000);
+		view.render(40);
+		assert.equal(view.viewport.scrollTop, 0, "premise: at the top");
+		const top = view.bodyTop + 2;
+		assert.equal(view.handleMouse(ev("press", 3, top))?.capture, true, "a body press captures for a selection");
+		view.handleMouse(ev("drag", 10, top + 4));
+		view.render(40);
+		assert.ok(view.render(40).some((line: string) => line.includes("\x1b[7m")), "the selection is painted");
+		// Hold the pointer below the body: the view scrolls and the selection follows.
+		view.handleMouse(ev("drag", 10, top + view.viewport.viewportHeight + 5));
+		await new Promise((resolve) => setTimeout(resolve, 400));
+		assert.ok(view.viewport.scrollTop > 0, "auto-scrolled while the pointer was past the bottom row");
+		view.handleMouse(ev("release", 10, top + view.viewport.viewportHeight + 5));
+		await new Promise((resolve) => setTimeout(resolve, 120));
+		const scrolled = view.viewport.scrollTop;
+		await new Promise((resolve) => setTimeout(resolve, 120));
+		assert.equal(view.viewport.scrollTop, scrolled, "auto-scroll stops on release");
+		assert.equal(copied.length, 1, "copied once, on release");
+		const text = copied[0];
+		assert.match(text, /^ne 1\b|line 1\b/, text.slice(0, 40));
+		const last = Math.max(...[...text.matchAll(/line (\d+)/g)].map((m) => Number(m[1])));
+		assert.ok(last * 2 - 1 > view.viewport.viewportHeight, `the copy reaches rows that were never on screen at once (line ${last})`);
+		assert.doesNotMatch(text, /\x1b/, "plain text, no styles");
+		assert.equal(view.selectedText(), text, "the selection stays until the next press");
+	});
+
+	test("a click without a drag selects nothing and copies nothing; the scrollbar gutter still drags the thumb", () => {
+		const { store } = assistantStore(60);
+		const { host, view } = inspector(store, () => "always");
+		const copied: string[] = [];
+		host.copyTextToClipboard = async (text: string) => { copied.push(text); return true; };
+		view.render(40);
+		const b = bar(view);
+		view.handleMouse(ev("press", 5, b.top + 2));
+		view.handleMouse(ev("release", 5, b.top + 2));
+		assert.equal(view.selectedText(), undefined);
+		assert.equal(copied.length, 0);
+		assert.equal(view.handleMouse(ev("press", b.col, b.top + 2))?.capture, true, "gutter press is the thumb");
+		assert.notEqual(view.drag, undefined);
+		view.handleMouse(ev("release", b.col, b.top + 2));
+	});
+
+	test("the wheel over the worker list changes the selected worker; over the transcript it scrolls", () => {
+		const store = new monitor.WorkerStore();
+		const ids = ["first", "second", "third"].map((task) => { const r = store.begin("worker", task, "provider/model", "high"); store.started(r.id); return r.id; });
+		const host = { terminal: { rows: 40 }, requestRender() {} };
+		const view = new monitor.WorkerInspector(store, host, theme, () => {}, ids[0], new Map(), () => "auto");
+		view.render(40);
+		const listRow = 2 + view.firstRow; // framed: two cells of frame and padding
+		view.handleMouse({ type: "wheel", x: 10, y: listRow, width: 40, height: 40, wheelDelta: 3 });
+		assert.equal(view.selectedId, ids[1], "wheel down moves to the next worker");
+		view.handleMouse({ type: "wheel", x: 10, y: listRow, width: 40, height: 40, wheelDelta: 3 });
+		view.handleMouse({ type: "wheel", x: 10, y: listRow, width: 40, height: 40, wheelDelta: 3 });
+		assert.equal(view.selectedId, ids[2], "stops at the last worker");
+		view.handleMouse({ type: "wheel", x: 10, y: listRow, width: 40, height: 40, wheelDelta: -3 });
+		assert.equal(view.selectedId, ids[1], "wheel up moves back");
+		view.render(40);
+		view.handleMouse({ type: "wheel", x: 10, y: 2 + view.bodyTop + 1, width: 40, height: 40, wheelDelta: 3 });
+		assert.equal(view.selectedId, ids[1], "wheel over the transcript does not change the worker");
 	});
 
 	test("leaving the gutter or the frame clears hover", () => {
