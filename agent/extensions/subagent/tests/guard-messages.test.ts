@@ -434,6 +434,19 @@ test("delivery commands: a conventional-commit colon is accepted; an unaccepted 
 	assert.match(blockReason(decideToolCall("bash", { command: merge }, "/tmp", agentDir) as any, "child", true), /grantable/);
 });
 
+// Field report: a release-engineer's `gh auth status && gh repo view --json nameWithOwner,defaultBranchRef` (PowerShell) was refused as
+// PKG_PUBLISH_AUTH. `gh auth status` only reads the login state; --show-token (-t) prints the token, so that form stays guarded.
+test("gh auth status is read-only, alone and in a compound; showing the token and every credential change stay guarded", () => {
+	const store = createGrantStore();
+	for (const scope of ["main", "child"] as const) for (const tool of ["bash", "powershell"]) {
+		const call = (command: string) => guardToolCall({ scope, store, agentDir }, tool, { command }, root) as { reason: string } | undefined;
+		for (const ok of ["gh auth status", "gh auth status && gh repo view --json nameWithOwner,defaultBranchRef", "gh auth status --hostname github.com", "gh auth status -h github.com", "gh auth status | cat"]) assert.equal(call(ok), undefined, `${scope} ${tool}: ${ok}`);
+		for (const bad of ["gh auth status --show-token", "gh auth status -t", "gh auth status -ht github.com", "gh auth status && gh auth token", "gh auth login", "gh auth token", "gh auth logout", "gh auth refresh -s repo", "gh auth setup-git", "gh auth switch", "gh auth status; gh auth login --with-token"]) {
+			assert.match(call(bad)?.reason ?? "", /\[PKG_PUBLISH_AUTH\]/, `${scope} ${tool}: ${bad}`);
+		}
+	}
+});
+
 // Release notes need the previous release: gh release list and view are read-only and pass; every other gh release command stays gated.
 test("gh release list and view pass the guard; create, delete, edit, upload and chained forms stay blocked", () => {
 	const store = createGrantStore();
