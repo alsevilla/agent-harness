@@ -395,7 +395,11 @@ function classifySegment(rawTokens: string[], out: Set<RiskRule>, depth: number)
 		if ((sub1 === "pr" && sub2 === "merge") || (sub1 === "release" && sub2 === "create")) mergeReleaseSeen = true;
 		if ((sub1 === "pr" && ["create", "merge", "close", "edit", "ready", "review"].includes(sub2)) || (sub1 === "release" && !["list", "view"].includes(sub2)) || (sub1 === "repo" && ["create", "delete", "rename", "edit"].includes(sub2))) add(out, "GIT_PUBLISH");
 		if (sub1 === "api" && lower.some((a) => ["post", "put", "patch", "delete"].includes(a))) add(out, "GIT_PUBLISH");
-		if (sub1 === "auth") add(out, "PKG_PUBLISH_AUTH");
+		// Field report: a release-engineer's `gh auth status && gh repo view ...` was refused. `gh auth status` only reads the login state;
+		// with --show-token (-t) it prints the token, so that form, and every other auth subcommand (login, logout, refresh, token,
+		// setup-git, switch), stays guarded.
+		const readsStatus = sub1 === "auth" && sub2 === "status" && !lower.some((a) => a === "-t" || a.startsWith("--show-token") || /^-[a-z]*t/.test(a) && !a.startsWith("--"));
+		if (sub1 === "auth" && !readsStatus) add(out, "PKG_PUBLISH_AUTH");
 		return;
 	}
 	if (["npm", "pnpm", "yarn", "bun"].includes(name)) {
