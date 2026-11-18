@@ -226,3 +226,15 @@ test("main finishes the request: an actionable FAIL or gap is the next launch, n
 	assert.ok(!policy.includes("return to main/user with the evidence"));
 	assert.match(read("agent/extensions/subagent/index.ts"), /A list of remaining gaps is not a completion\./);
 });
+
+// Field report: after a merge, cleanup kept an evidence folder because an unrelated test server was running and its open files could not
+// be listed. No process referenced the folder. Use is now judged per exact target, and the removal itself reports a real lock.
+test("cleanup judges use per exact target: an unrelated process, or unlistable open files alone, does not retain a folder", () => {
+	for (const file of ["agent/skills/engineering-harness/worktree/index.md", "agent/agents/release-engineer.md"]) {
+		const text = flat(read(file));
+		assert.ok(text.includes("A process blocks a target only on confirmed use: its working directory, its command line or a file it holds open lies inside that target."), file);
+		assert.ok(text.includes("such as an unrelated dev or test server, does not block, and is not stopped or restarted for the cleanup"), file);
+		assert.ok(text.includes("Being unable to list a process's open files is not unknown use by itself"), file);
+		assert.ok(text.includes("report that failure exactly (the command, its error text and what remains) as RETAINED"), file);
+	}
+});
