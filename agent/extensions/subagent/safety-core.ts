@@ -2442,6 +2442,28 @@ function relatedCheckout(full: string, root: string): boolean {
 	if (under(info.enclosing)) return !(PLACEMENT.test(full) && artifactOutsideCheckout(full, `${info.enclosing}/_`));
 	return false;
 }
+// Field report: a verifier accepted a _scratch path inside its checkout, then every write there was refused as READ_ONLY_ROLE, and two
+// decision exchanges with main were needed to move it. The packet is now checked before a read-only launch: an artifact path the
+// worker could never write is refused with the external placement to use instead.
+const ARTIFACT_PATH = /(?:[A-Za-z]:[\\/]|\/)[^\s"'`<>|*?]*?[\\/]_(?:scratch|evidence)(?:[\\/][^\s"'`<>|*?,;]*)?|(?<![\w./\\-])_(?:scratch|evidence)[\\/][^\s"'`<>|*?,;]*/g;
+/** For a read-only launch: the packet's _scratch/_evidence paths that the guard would refuse, with the external placement to use. */
+export function misplacedArtifactPaths(packet: string, root: string): string | undefined {
+	const r = protectedRoot(root);
+	const misplaced: string[] = [];
+	for (const m of String(packet).matchAll(ARTIFACT_PATH)) {
+		const p = slashed(m[0]).replace(/[.:)\]]+$/, "");
+		if (!misplaced.includes(p) && insideRoot(p, r, r)) misplaced.push(p);
+	}
+	if (!misplaced.length) return undefined;
+	// The worker's checkout root: the launch folder, or the checkout that contains it.
+	let checkout = r;
+	for (let dir = r; dir !== path.posix.dirname(dir); dir = path.posix.dirname(dir)) if (fs.statSync(`${dir}/.git`, { throwIfNoEntry: false }) !== undefined) { checkout = dir; break; }
+	const inGroup = /\/worktrees\/[^/]+$/.test(path.posix.dirname(checkout));
+	const group = inGroup ? path.posix.dirname(checkout) : `${path.posix.dirname(checkout)}/worktrees/${path.posix.basename(checkout)}`;
+	const suggest = (p: string) => { const m = /\/?_(scratch|evidence)(?:\/([^/]+))?/.exec(p); return `${group}/_${m?.[1] ?? "scratch"}/${m?.[2] ?? "<task>"}`; };
+	return `Not launched: this read-only worker may not write inside ${r}, and the packet assigns artifact path(s) there that every write would refuse: ${misplaced.map((p) => `${p} (use ${suggest(p)})`).join("; ")}. Put the packet's _scratch and _evidence paths in the external placement and launch again.`;
+}
+
 // Field report: a test-engineer could not save its assigned report in <parent>/worktrees/<repo>/_evidence/<task>/, refused as "into the
 // candidate checkout". The protected root is the folder the worker was launched in; when main launches it in a folder above the
 // checkouts (the project's parent, or the worktrees group), the artifact folders lie inside that root although they are in no checkout.

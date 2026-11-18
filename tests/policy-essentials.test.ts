@@ -238,3 +238,14 @@ test("cleanup judges use per exact target: an unrelated process, or unlistable o
 		assert.ok(text.includes("report that failure exactly (the command, its error text and what remains) as RETAINED"), file);
 	}
 });
+
+// Field report: a backend worker reported PASS while its report said the tests were written after the code and the required RED evidence
+// was never captured. A missing required evidence step is a check not run, and main treats that gate as unmet whatever STATUS says.
+test("missing RED or other required evidence is INCONCLUSIVE for the worker and an unmet gate for main", () => {
+	const handoff = read("agent/extensions/subagent/compact-handoff.ts");
+	assert.match(handoff, /Required evidence you did not capture counts as a check not run, even when the change works: for example the failing test before the fix \(RED\)/);
+	assert.match(handoff, /it is PASS only when the packet allowed that exception, and STATUS names the exception, its reason and the replacement evidence/);
+	const main = read("agent/extensions/subagent/index.ts");
+	assert.match(main, /that gate is unmet whatever the STATUS line says/);
+	assert.match(main, /Never call the work verified while a required gate is unmet\./);
+});
