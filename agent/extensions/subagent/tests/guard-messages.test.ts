@@ -164,6 +164,27 @@ test("test-engineer and reviewer hold write for reports only: read-only by launc
 	assert.match(tool("edit", `${candidate}/src/a.rs`)?.reason ?? "", /\[READ_ONLY_ROLE\]/, "edit stays refused");
 });
 
+// Field report: a verifier accepted a _scratch path inside its checkout, then every write there was refused, and two decision exchanges
+// were needed to move it. A read-only launch is now refused before it starts, with the external path to use.
+test("read-only dispatch: artifact paths the worker could never write are refused before launch, with the external path", async () => {
+	const { misplacedArtifactPaths } = await import("../safety-core.ts");
+	const base = slash(path.join(root, "dispatch", "RFID"));
+	const primary = `${base}/app`, group = `${base}/worktrees/app`, wt = `${group}/task-1`;
+	for (const d of [`${primary}/.git`, `${primary}/src`, wt]) fs.mkdirSync(d, { recursive: true });
+	fs.writeFileSync(`${wt}/.git`, "gitdir: elsewhere\n");
+	const inside = misplacedArtifactPaths(`Write REPORT.md and logs to ${primary}/_scratch/verify-a7/.`, primary) ?? "";
+	assert.match(inside, /^Not launched: this read-only worker may not write inside /);
+	assert.ok(inside.includes(`${primary}/_scratch/verify-a7/ (use ${group}/_scratch/verify-a7)`), inside);
+	assert.ok((misplacedArtifactPaths("Scratch: _scratch/verify-a7/run.js", primary) ?? "").includes(`(use ${group}/_scratch/verify-a7)`), "a relative path resolves from the launch folder");
+	assert.ok((misplacedArtifactPaths(`Scratch ${wt}/_scratch/x/run.js`, wt) ?? "").includes(`(use ${group}/_scratch/x)`), "a task worktree suggests its group's folder");
+	assert.ok((misplacedArtifactPaths(`Evidence ${primary}/_evidence/x`, `${primary}/src`) ?? "").includes(`(use ${group}/_evidence/x)`), "a subfolder launch suggests from its checkout");
+	assert.equal(misplacedArtifactPaths(`Evidence: ${group}/_evidence/verify-a7/REPORT.md, scratch ${group}/_scratch/verify-a7.`, primary), undefined, "external paths launch");
+	assert.equal(misplacedArtifactPaths("Use the _scratch folder main names; see src/_evidence_parser.rs", primary), undefined, "words that are not paths launch");
+	const launcher = fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+	assert.match(launcher, /const misplaced = misplacedArtifactPaths\(task, canonicalCwd\(cwd \?\? defaultCwd\)\);\n\t\t\tif \(misplaced\) throw new Error\(misplaced\);/);
+	assert.ok(launcher.indexOf("misplacedArtifactPaths(task") < launcher.indexOf("owners.begin({ workerId: ownerId"), "checked before ownership, grants and the spawn");
+});
+
 // Read-only roles: the child guard refuses changes to the candidate checkout, shell included; writes outside it stay allowed.
 test("read-only role: writes into the candidate are refused (not grantable); reads, tests and evidence writes outside it pass", () => {
 	const candidate = slash(path.join(root, "ro", "app"));
