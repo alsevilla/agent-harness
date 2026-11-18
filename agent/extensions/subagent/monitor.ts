@@ -1,4 +1,4 @@
-import { matchesKey, Key, getKeybindings, isKeyRelease, truncateToWidth, wrapTextWithAnsi, visibleWidth, ScrollView, MouseRegion, type Component, type ScrollViewScrollbar, type TuiMouseEvent, type TuiMouseEventResult, type TUI } from "@earendil-works/pi-tui";
+import { matchesKey, Key, getKeybindings, isKeyRelease, truncateToWidth, wrapTextWithAnsi, visibleWidth, sliceByColumn, stripTerminalSequences, ScrollView, MouseRegion, type Component, type ScrollViewScrollbar, type TuiMouseEvent, type TuiMouseEventResult, type TUI } from "@earendil-works/pi-tui";
 import type { ModelSlot, ModelTier } from "./model-routing.ts";
 import { modelProvenance, observeAssistant, observedId, type ObservedModel } from "./provenance.ts";
 import { formatChanges, formatTrace, formatTraceIndex, pickWorker } from "./trace.ts";
@@ -227,6 +227,11 @@ export class WorkerStore {
 }
 
 interface ReadingPosition {top: number; following: boolean}
+interface TextPoint {row: number; col: number}
+// Reverse video over the selected columns, re-asserted after each style code inside them (as Pi's fullscreen selection does).
+function highlight(text: string): string {
+  return "\x1b[7m" + text.replace(/\x1b\[[0-9;]*m/g, (code) => code + "\x1b[7m") + "\x1b[27m";
+}
 export class WorkerInspector implements Component {
   selectedId?: string;
   private documentLines: string[] = [];
@@ -245,6 +250,11 @@ export class WorkerInspector implements Component {
   // Gutter cell geometry (inner, post-frame coordinates) for the current render; undefined when no gutter is painted.
   private track?: {col: number; top: number; height: number};
   private drag?: {grab: number};
+  // Text selection in transcript (document) coordinates, so it can extend past the visible rows while the view auto-scrolls.
+  // Field report: in this window only the rows on screen could be selected and copied; the main window copies the whole selection.
+  private selection?: {anchor: TextPoint; focus: TextPoint; active: boolean; moved: boolean};
+  private autoScroll?: {timer: ReturnType<typeof setInterval>; direction: number; x: number; y: number};
+  private bodyWidth = 0;
   constructor(private store: WorkerStore, private tui: TUI, private theme: any, private done: () => void, id?: string, private positions = new Map<string, ReadingPosition>(), private scrollbarMode: () => ScrollViewScrollbar = () => "auto") { this.selectedId = id; }
   invalidate() { for (const entry of this.turns.values()) entry.component.invalidate(); for (const component of this.responses.values()) component.invalidate(); }
   dispose() {
@@ -252,6 +262,7 @@ export class WorkerInspector implements Component {
     for (const entry of this.turns.values()) entry.component.updateResult({content: [{type: "text", text: entry.tool.output}], details: entry.tool.details, isError: entry.tool.state === "error"}, false);
     this.turns.clear(); this.responses.clear(); this.regions = [];
     this.clearPointer();
+    this.selection = undefined;
   }
   private turn(tool: ToolActivity): ToolExecutionComponent {
     let entry = this.turns.get(tool.id);
@@ -286,6 +297,7 @@ export class WorkerInspector implements Component {
     this.viewport.setScrollbar(scrollbar);
     const gutter = scrollbar !== "hidden" && width > 1;
     const bodyWidth = gutter ? width - 1 : width;
+    this.bodyWidth = bodyWidth;
     this.jump = undefined; this.track = undefined;
     const all = this.store.list();
     const selected = all.find(r => r.id === this.selectedId) ?? all[0]; this.selectedId = selected?.id;
@@ -339,7 +351,7 @@ export class WorkerInspector implements Component {
       }
       this.bodyTop = rows.length;
       this.track = gutter ? {col: width - 1, top: this.bodyTop, height: this.viewport.viewportHeight} : undefined;
-      const visible = this.documentLines.slice(this.viewport.scrollTop, this.viewport.scrollTop + available);
+      const visible = this.documentLines.slice(this.viewport.scrollTop, this.viewport.scrollTop + available).map((line, row) => this.highlightRow(line, this.viewport.scrollTop + row));
       if (!this.viewport.isFollowingEnd && visible.length) {
         // Same label, styling, and click-to-bottom behavior as Pi's fullscreen transcript.
         const keys = getKeybindings().getKeys("tui.altScreen.bottom").map(key => key.split("+").map(part => part.charAt(0).toUpperCase() + part.slice(1)).join("+")).join("/");
@@ -362,7 +374,7 @@ export class WorkerInspector implements Component {
       }
     }
     while (rows.length < height - 1) rows.push(" ");
-    rows.push(" ↑/↓ worker · PgUp/PgDn scroll · Ctrl+End latest · Esc close");
+    rows.push(" ↑/↓ or wheel on the list: worker · PgUp/PgDn scroll · drag: select and copy · Ctrl+End latest · Esc close");
     // Paint every cell so the main transcript cannot bleed through the overlay.
     const painted = rows.slice(0, height).map(row => {
       const line = truncateToWidth(row, Math.max(1, width), "…");
@@ -390,6 +402,85 @@ export class WorkerInspector implements Component {
     else if (keybindings.matches(data, "tui.altScreen.bottom") || matchesKey(data, Key.end)) this.viewport.scrollToEnd();
     else if (matchesKey(data, "ctrl+o")) { this.expanded = !this.expanded; for (const entry of this.turns.values()) entry.component.setExpanded(this.expanded); }
     this.tui.requestRender();
+  }
+  private selectionBounds(): {start: TextPoint; end: TextPoint} | undefined {
+    const s = this.selection;
+    if (!s || (s.anchor.row === s.focus.row && s.anchor.col === s.focus.col)) return undefined;
+    const forward = s.anchor.row < s.focus.row || (s.anchor.row === s.focus.row && s.anchor.col <= s.focus.col);
+    return forward ? {start: s.anchor, end: s.focus} : {start: s.focus, end: s.anchor};
+  }
+  // Columns of a document row inside the selection: from the start column on the first row, to the end column on the last.
+  private selectedColumns(row: number, line: string): {from: number; to: number} | undefined {
+    const b = this.selectionBounds();
+    if (!b || row < b.start.row || row > b.end.row) return undefined;
+    const width = visibleWidth(line);
+    const from = row === b.start.row ? b.start.col : 0;
+    const to = row === b.end.row ? Math.min(width, b.end.col) : width;
+    return to > from ? {from, to} : undefined;
+  }
+  private highlightRow(line: string, row: number): string {
+    const cols = this.selectedColumns(row, line);
+    if (!cols) return line;
+    return sliceByColumn(line, 0, cols.from, true) + highlight(sliceByColumn(line, cols.from, cols.to - cols.from, true)) + sliceByColumn(line, cols.to, Math.max(0, visibleWidth(line) - cols.to), true);
+  }
+  /** Plain text of the selection across every transcript row it covers, scrolled out of view or not. */
+  selectedText(): string | undefined {
+    const b = this.selectionBounds();
+    if (!b) return undefined;
+    const lines: string[] = [];
+    for (let row = b.start.row; row <= b.end.row; row++) {
+      const line = this.documentLines[row] ?? "";
+      const cols = this.selectedColumns(row, line);
+      lines.push(cols ? stripTerminalSequences(sliceByColumn(line, cols.from, cols.to - cols.from, true)).trimEnd() : "");
+    }
+    const text = lines.join("\n");
+    return text.trim() ? text : undefined;
+  }
+  // Same clipboard path as Pi's fullscreen selection (its injected clipboard, with a "Copied!" flash); OSC 52 otherwise.
+  private copySelection() {
+    const text = this.selectedText();
+    if (!text) return;
+    const host = this.tui as unknown as {copyTextToClipboard?: (t: string) => Promise<boolean>; terminal?: {write?: (d: string) => void}};
+    try {
+      if (typeof host.copyTextToClipboard === "function") void host.copyTextToClipboard(text).catch(() => {});
+      else host.terminal?.write?.(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
+    } catch { /* copying is best effort */ }
+  }
+  // Inner coordinates to a transcript position; a pointer above or below the body clamps to its first or last visible row.
+  private textPoint(x: number, y: number): TextPoint {
+    const h = Math.max(1, this.viewport.viewportHeight);
+    const row = Math.max(0, Math.min(this.documentLines.length - 1, this.viewport.scrollTop + Math.max(0, Math.min(h - 1, y - this.bodyTop))));
+    return {row, col: Math.max(0, Math.min(this.bodyWidth, x))};
+  }
+  private stopAutoScroll() { if (this.autoScroll) clearInterval(this.autoScroll.timer); this.autoScroll = undefined; }
+  // While a selection drag sits on or beyond the body's top or bottom row, scroll one line every 50 ms and extend the selection.
+  private updateAutoScroll(x: number, y: number) {
+    const direction = y <= this.bodyTop ? -1 : y >= this.bodyTop + this.viewport.viewportHeight - 1 ? 1 : 0;
+    if (direction === 0) { this.stopAutoScroll(); return; }
+    if (this.autoScroll) { this.autoScroll.direction = direction; this.autoScroll.x = x; this.autoScroll.y = y; return; }
+    const timer = setInterval(() => {
+      const a = this.autoScroll, s = this.selection;
+      if (!a || !s?.active) { this.stopAutoScroll(); return; }
+      const before = this.viewport.scrollTop;
+      this.viewport.scrollBy(a.direction);
+      if (this.viewport.scrollTop === before) { this.stopAutoScroll(); return; }
+      s.focus = this.textPoint(a.x, a.y);
+      this.tui.requestRender();
+    }, 50);
+    (timer as {unref?: () => void}).unref?.();
+    this.autoScroll = {timer, direction, x, y};
+  }
+  private dragSelection(x: number, y: number, release: boolean): TuiMouseEventResult {
+    const s = this.selection!;
+    const point = this.textPoint(x, y);
+    if (point.row !== s.focus.row || point.col !== s.focus.col) s.moved = true;
+    s.focus = point;
+    if (!release) { this.updateAutoScroll(x, y); return {handled: true, capture: true, render: true}; }
+    this.stopAutoScroll();
+    s.active = false;
+    if (s.moved && this.selectedText()) this.copySelection();
+    else this.selection = undefined; // a click, not a selection: the click handler still runs
+    return {handled: true, render: true};
   }
   // Gutter cell in inner (post-frame) coordinates.
   private onTrack(x: number, y: number): boolean {
@@ -423,10 +514,12 @@ export class WorkerInspector implements Component {
     return {handled: true, render: true};
   }
   // Ends hover and any captured thumb drag. Safe to repeat.
-  clearPointer() { this.drag = undefined; this.viewport.setScrollbarActive(false); }
+  clearPointer() { this.drag = undefined; this.viewport.setScrollbarActive(false); this.stopAutoScroll(); if (this.selection?.active) this.selection.active = false; }
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
     const ox = this.framed ? 2 : 0;
     if (this.drag && (event.type === "drag" || event.type === "release")) return this.dragThumb(event.x - ox, event.y - ox, event.type === "release");
+    // Like the thumb drag, a selection drag keeps following the pointer outside the frame.
+    if (this.selection?.active && (event.type === "drag" || event.type === "release")) return this.dragSelection(event.x - ox, event.y - ox, event.type === "release");
     if (event.type === "move") return this.hover(event.x - ox, event.y - ox);
     // Any press starts a new gesture, so it ends a stale drag even when the frame rejects it below.
     if (event.type === "press") this.drag = undefined;
@@ -442,6 +535,12 @@ export class WorkerInspector implements Component {
       this.viewport.setScrollbarActive(true);
       return {handled: true, capture: true, render: true};
     }
+    // A press in the transcript body (not on the scrollbar gutter) starts a text selection.
+    if (event.type === "press" && event.button === "left" && event.x < this.bodyWidth && event.y >= this.bodyTop && event.y < this.bodyTop + this.viewport.viewportHeight && this.documentLines.length) {
+      const point = this.textPoint(event.x, event.y);
+      this.selection = {anchor: point, focus: point, active: true, moved: false};
+      return {handled: true, capture: true, render: true};
+    }
     if (event.type === "click" && event.button === "left") {
       if (this.onTrack(event.x, event.y) && this.viewport.isScrollbarVisible) return {handled: true, render: false};
       if (this.jump && event.y === this.jump.row && event.x >= this.jump.col && event.x < this.jump.col + this.jump.width) { this.viewport.scrollToEnd(); return {handled: true, render: true}; }
@@ -455,6 +554,13 @@ export class WorkerInspector implements Component {
           if (result) { this.tui.requestRender(); return {handled: true, render: true}; }
         }
       }
+    }
+    // Wheel over the worker list moves the selected worker, as ↑/↓ do; anywhere else it scrolls the transcript.
+    if (event.type === "wheel" && event.y >= this.firstRow && event.y < this.firstRow + this.shown.length) {
+      const list = this.store.list(), index = Math.max(0, list.findIndex(r => r.id === this.selectedId));
+      const step = Math.sign(event.wheelDelta ?? 0);
+      if (step) this.selectedId = list[Math.min(list.length - 1, Math.max(0, index + step))]?.id;
+      return {handled: true, render: true};
     }
     if (event.type === "wheel") { this.hover(event.x, event.y); this.viewport.scrollBy(event.wheelDelta ?? 0); return { handled: true, render: true }; }
     return undefined;
