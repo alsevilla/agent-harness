@@ -38,7 +38,7 @@ For an existing Pi recorder trace, run `NATIVE_PROBE_HOST_MODULES=<matching Pi n
 npm run simulate:main > docs/simulations/main-sessions-results.json
 ```
 
-Offline, no Pi host; under a second. [`scripts/simulate-main-sessions.mjs`](../../scripts/simulate-main-sessions.mjs) builds a seeded synthetic session: about 12% user messages, 33% subagent PASS results with 2.5-8.5k-character reports, and main's own reads and shell output of 0.5-7.5k characters, with a 14k-token system prompt. Requests 150, 300 and 480 are priced three ways: no shaping, older-result shortening alone (batches of ten), and the production context hook (`registerHandoffWindow`: shortening plus checkpoint folding at 50k). Same cache model as above, at Opus 5.5 cache prices (read 0.05x, write 1.25x). `PASTE_SHARE=0.5` makes half the user messages 3-6k-character pastes.
+Offline, no Pi host; under a second. [`scripts/simulate-main-sessions.mjs`](../../scripts/simulate-main-sessions.mjs) builds a seeded synthetic session: about 12% user messages, 33% subagent PASS results with 2.5-8.5k-character reports, and main's own reads and shell output of 0.5-7.5k characters, with a 14k-token system prompt. Requests 150, 300 and 480 are priced three ways: no shaping, older-result shortening alone (batches of ten), and the production context hook (`registerHandoffWindow`: shortening plus checkpoint folding at 50k, or 25k when the early-fold conditions hold). Synthetic report paths stand in for persisted reports. Same cache model as above, at Opus 5.5 cache prices (read 0.05x, write 1.25x). `PASTE_SHARE=0.5` makes half the user messages 3-6k-character pastes.
 
 ## Limits
 

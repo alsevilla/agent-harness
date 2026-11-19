@@ -12,6 +12,8 @@
 // Main's own large tool outputs (read, bash, grep, find, ls) get the same treatment: the newest `window` stay word for word,
 // older ones are masked in whole batches by a one-line stub naming the tool and its file or command. Errors and short
 // outputs are never masked. Plain masking, not summarization: it saves tokens without a model call or a guessed digest.
+import { lstatSync, realpathSync } from "node:fs";
+import { basename, isAbsolute } from "node:path";
 import { stoppedJobsCardPart, type StoppedJob } from "./stopped-jobs.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -401,7 +403,7 @@ export function createCardTrail() {
 // STATUS/NEXT/EVIDENCE lines, and main's last reply in each turn; the last exchange
 // before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
 // card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
-// (default 50k; 0 off) or /subagent fold asked for one. Only user messages are kept alongside the checkpoint, so the kept part holds no
+// (default 50k; 0 off), safe to fold at half that size, or /subagent fold asked for one. The kept part holds no
 // earlier assistant turn whose thinking would no longer match the history before it. The checkpoint and fold point stay fixed, so later
 // requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed. Its selected
 // branch is the durable source of user messages across native compaction and reload; no separate archive can leak another branch.
@@ -479,7 +481,112 @@ function renderCheckpoint(entries: string[]): string {
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
 }
-export function createMainFold(threshold: number) {
+// A report name: REPORT.md, or REPORT joined to other words by - _ or . (REPORT-backend.md, PR69-VERIFICATION-REPORT.md), as field
+// reports are named. Not notes.md or reportcard.md. It must sit in an _evidence folder, where durable reports belong; _scratch holds
+// temporary files.
+const REPORT_NAME = /(^|[-_.])REPORT([-_.][^\\/]*)?\.md$/i;
+const IN_EVIDENCE = /[\\/]_evidence[\\/]/;
+/** Lexical check for a local report path. The file probe also checks the resolved location. */
+export function isReportPath(file: string): boolean {
+	return (isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file)) && !/^[\\/]{2}/.test(file) && IN_EVIDENCE.test(file) && REPORT_NAME.test(basename(file.replace(/\\/g, "/")));
+}
+/** A report probe: the file's modification time in ms, or undefined when it is not a regular file. */
+export type ReportProbe = (file: string, launchedAt: number) => number | undefined;
+function onDisk(file: string): number | undefined {
+	// Worker text is untrusted. Probe only local report paths, never read file contents.
+	if (!isAbsolute(file)) return undefined;
+	try {
+		const stat = lstatSync(file, { throwIfNoEntry: false });
+		return stat?.isFile() && isReportPath(realpathSync.native(file)) ? Math.floor(stat.mtimeMs) : undefined;
+	} catch { return undefined; }
+}
+// A report must have been written during the run. FAT and some network shares store times in 2-second steps, so allow
+// for rounding down at launch.
+const MTIME_SLACK_MS = 2_000;
+function currentReport(file: string, launchedAt: number, completedAt: number, probe: ReportProbe): boolean {
+	if (!isReportPath(file)) return false;
+	const mtime = probe(file, launchedAt);
+	return typeof mtime === "number" && mtime >= launchedAt - MTIME_SLACK_MS && mtime <= completedAt;
+}
+// An unfinished result is kept outside the notes cap, whole up to 12,000 characters (a background completion notice is bounded below
+// that), otherwise as its head and tail. A large foreground failure would else sit at full size in every later checkpoint; the full
+// text stays recoverable from the saved session, its EVIDENCE path or subagent_control result.
+const UNFINISHED_WHOLE = 12_000;
+const UNFINISHED_HEAD = 8_000;
+const UNFINISHED_TAIL = 2_000;
+const keptBody = (text: string) => text.length <= UNFINISHED_WHOLE ? text
+	: `${text.slice(0, UNFINISHED_HEAD)}\n[… ${(text.length - UNFINISHED_HEAD - UNFINISHED_TAIL).toLocaleString("en-US")} characters omitted; the full result is in the saved session, its EVIDENCE path or subagent_control result …]\n${text.slice(-UNFINISHED_TAIL)}`;
+
+function recoverablePass(handoff: Handoff | undefined, run: { launchedAt: number; completedAt: number } | undefined, probe: ReportProbe): boolean {
+	if (!handoff || !run) return false;
+	const f = handoff.fields;
+	return settledPass(f) && f.risks.length === f.status.length && f.evidence.length === f.status.length
+		&& f.evidence.every((file) => clip(file) === file && currentReport(file, run.launchedAt, run.completedAt, probe));
+}
+
+/** Match results to their launch and completion. A later result fetch uses the original background completion. */
+function runTimes(messages: readonly Message[]) {
+	const callAt = new Map<unknown, number>();
+	const jobAt = new Map<string, number>();
+	const jobDone = new Map<string, { launchedAt: number; completedAt: number }>();
+	const runs = new Map<Message, { launchedAt: number; completedAt: number }>();
+	const controlTargets = new Map<unknown, unknown>();
+	for (const m of messages) {
+		const at = typeof m.timestamp === "number" && Number.isFinite(m.timestamp) ? m.timestamp : undefined;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const p of m.content) {
+				if (p?.type !== "toolCall" || typeof p.id !== "string") continue;
+				if (p.name === "subagent" && at !== undefined) callAt.set(p.id, at);
+				if (p.name === "subagent_control" && p.arguments?.action === "result") controlTargets.set(p.id, p.arguments.target);
+			}
+			continue;
+		}
+		let launchedAt: number | undefined;
+		const completedAt = at;
+		if (m.role === "toolResult" && m.toolName === "subagent") {
+			launchedAt = callAt.get(m.toolCallId);
+			if (m.details?.background === true && typeof m.details?.jobId === "string" && launchedAt !== undefined) {
+				jobAt.set(m.details.jobId, launchedAt);
+				jobDone.delete(m.details.jobId);
+				continue;
+			}
+		} else if (m.role === "custom" && m.customType === COMPLETION_TYPE) {
+			let notice: any;
+			try { notice = JSON.parse(textOf(m.content) ?? ""); } catch { continue; }
+			const job = notice?.runtime?.job;
+			launchedAt = jobAt.get(job);
+			if (at !== undefined && launchedAt !== undefined) {
+				const run = { launchedAt, completedAt: at };
+				jobDone.set(job, run);
+				if (typeof notice.result?.target === "string") jobDone.set(notice.result.target, run);
+			}
+		} else if (m.role === "toolResult" && m.toolName === "subagent_control") {
+			const target = controlTargets.get(m.toolCallId);
+			const run = typeof target === "string" ? jobDone.get(target) : undefined;
+			if (run && at !== undefined && run.completedAt <= at) runs.set(m, run);
+			continue;
+		}
+		if (launchedAt !== undefined && completedAt !== undefined && completedAt >= launchedAt) {
+			runs.set(m, { launchedAt, completedAt });
+		}
+	}
+	return { runs, controlTargets };
+}
+
+/** The window parser skips errors and partial notices. Folding must account for them separately. */
+function workerResult(message: Message, resultCalls: ReadonlyMap<unknown, unknown>): boolean {
+	if (message.role === "custom") return message.customType === COMPLETION_TYPE;
+	if (message.role !== "toolResult") return false;
+	if (message.toolName === "subagent_control") {
+		return resultCalls.has(message.toolCallId) || handoffOf(message, 0) !== undefined;
+	}
+	if (message.toolName !== "subagent") return false;
+	return message.isError === true || message.details?.background !== true || message.details?.results?.length > 0;
+}
+
+/** `probe` only reads a file's modification time (tests and simulations replace it); the report path rule and the launch-time rule
+ *  always apply. */
+export function createMainFold(threshold: number, probe: ReportProbe = onDisk) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
 	let summaryStamp: unknown; // native compaction or branch summaries must reset a fold even when branch recovery restores its anchor
 	let folded = false;
@@ -508,26 +615,43 @@ export function createMainFold(threshold: number) {
 			const prefixBefore = (end: number) => summaries.filter((m) => view.indexOf(m) < end);
 			let current: T[] = folded ? [...prefixBefore(point), message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
-			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
-			if (idle && due && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
-				// The notes come from the saved messages (whole results, before any request-only shortening), from the previous fold point.
+			if (idle && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
+				const size = estimateTokens(current);
+				if (!asked && (threshold <= 0 || size < threshold / 2)) return folded ? current : undefined;
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
-				const nextEntries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
-				// Reported risks are not recoverable observations: retain them in full outside the notes cap.
-				const risks = history.slice(0, -1).flatMap((m, i) => {
+				const earlier = history.slice(0, -1);
+				const { runs, controlTargets } = runTimes(earlier);
+				const results = earlier.flatMap((m, i) => {
+					if (!workerResult(m, controlTargets)) return [];
 					const handoff = handoffOf(m, i);
-					if (!handoff) return [];
-					return handoff.fields.risks.filter((risk) => !noRisk(risk)).map((risk) =>
-						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`);
+					return [{ m, i, handoff, recoverable: recoverablePass(handoff, runs.get(m), probe) }];
 				});
-				const nextCheckpoint = [renderCheckpoint(nextEntries), ...risks].join("\n");
-				const nextUsers = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
+				const olderUsers = earlier.filter((m) => m.role === "user");
+				const nextUsers = olderUsers.map(retainUserMessage);
+				const early = !asked && size < threshold;
+				// An early fold never clips user text for the first time. Users before the previous fold point were already clipped by it, so
+				// only users since that point count; otherwise one long paste would turn early folds off for the rest of the session.
+				const firstNew = earlier.slice(0, from).filter((m) => m.role === "user").length;
+				if (early && (nextUsers.some((m, i) => i >= firstNew && m !== olderUsers[i])
+					|| !results.some(({ i }) => i >= from)
+					|| results.some(({ i, recoverable }) => i >= from && !recoverable))) return folded ? current : undefined;
+				const nextEntries = [...entries, ...renderTurns(turnsOf(earlier.slice(from)))];
+				// Unfinished results and reported risks stay outside the recoverable notes cap.
+				const kept = results.flatMap(({ m, handoff, recoverable }) => {
+					const risks = handoff ? handoff.fields.risks.filter((risk) => !noRisk(risk)).map((risk) =>
+						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`) : [];
+					if (recoverable) return risks;
+					const label = handoff?.label ?? m.toolName ?? "background completion";
+					const body = keptBody(textOf(m.content) ?? JSON.stringify(m.content));
+					return [`[unfinished worker result: ${label}]\n${body}`, ...risks];
+				});
+				const nextCheckpoint = [renderCheckpoint(nextEntries), ...kept].join("\n");
 				const candidate = [...prefixBefore(at), { role: "custom", customType: CHECKPOINT_TYPE, content: nextCheckpoint, display: false, timestamp: last!.timestamp } as unknown as T, ...nextUsers as T[], ...view.slice(at)];
 				// Fold only when it pays: every fold rewrites the cache from the checkpoint on, so a fold that saves little (once the kept
 				// part - native summaries, retained user messages - is itself near the threshold) costs more than it saves. A simulated
 				// paste-heavy session folded on 63 of 120 user turns at a 23% cache hit before this check. /subagent fold always folds.
-				if (asked || estimateTokens(current) - estimateTokens(candidate) >= threshold / 2) {
+				if (asked || size - estimateTokens(candidate) >= (early ? threshold / 4 : threshold / 2)) {
 					entries = nextEntries; checkpoint = nextCheckpoint; users = nextUsers;
 					stamp = last!.timestamp; folded = true; asked = false;
 					current = [...prefixBefore(at), message() as unknown as T, ...users as T[], ...view.slice(at)];
@@ -546,12 +670,12 @@ export function requestMainFold(): string {
 }
 
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
-export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined): number {
+export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined, probe: ReportProbe = onDisk): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
 	const trail = createCardTrail();
 	const foldAt = mainFoldFromEnv(env);
-	const fold = state && foldAt > 0 ? createMainFold(foldAt) : undefined;
+	const fold = state && foldAt > 0 ? createMainFold(foldAt, probe) : undefined;
 	activeFold = fold;
 	pi.on("context", (event, ctx) => {
 		// Native compaction only changes the built context; getBranch still contains the original

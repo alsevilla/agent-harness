@@ -36,7 +36,7 @@ The enabled worker arm calls the real execution ledger, duplicate-read suppressi
 shell-output cap and context cap in their production order. After masking, dedupe
 and ledger reuse are disabled as in the worker entry. All four OpenAI models currently
 select the same 80k trigger and 95k budget; no environment overrides are inherited.
-The enabled main arm uses the real ten-result batching and 50k checkpoint policy.
+The enabled main arm uses the real ten-result batching and checkpoint policy (50k normally, 25k for recoverable PASS results with no user text clipped). The replay models its synthetic report references as persisted.
 Main histories below 25k estimated tokens now skip prefix rewriting. Worker ledger
 inventories wait for 80k read characters in read-only runs; edits, commands or
 packet-required checks bypass that deferral. Recording, dedupe and loop warnings
@@ -124,4 +124,4 @@ The same script with `--anthropic`: the same seven workloads, sizes and idealize
 | Claude Sonnet 5.5 | 2 | 0.20 | 2.50 |
 | Claude Haiku 5.5 | 0.10 | 0.01 (assumed: not listed) | 0.125 |
 
-Haiku 5.5 requests above 100k input tokens cost 5x; the other three have no long-request rate. The idealized warm cache is more generous than Anthropic's real one (breakpoints with a 20-block lookback and a 5-minute lifetime), which the [recorded Pi runs](pi-shaping.md) model instead. One regression is reported as measured: on Fable 5.1 the 150-request main session costs 6.5% more with shaping, because its cache reads are 2.5% of its input price and each shortening rewrites part of the cache.
+Haiku 5.5 requests above 100k input tokens cost 5x; the other three have no long-request rate. The idealized warm cache is more generous than Anthropic's real one (breakpoints with a 20-block lookback and a 5-minute lifetime), which the [recorded Pi runs](pi-shaping.md) model instead. One regression is reported as measured: on Fable 5.1 the 150-request main session costs about 5% more with shaping, because its cache reads are 2.5% of its input price and each shortening rewrites part of the cache.

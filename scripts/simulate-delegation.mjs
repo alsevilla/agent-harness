@@ -157,7 +157,7 @@ function runWorker(role, model, packet, steps, totals) {
 	});
 	request(REPORT_OUTPUT); // writes its REPORT and replies with the four handoff lines
 	totals.push(m.totals);
-	return `STATUS: PASS - ${role} done\nNEXT: none\nRISKS: none\nEVIDENCE: _evidence/task/REPORT.md\n${fill(`${role} findings`, HANDOFF_FINDINGS_CHARS)}`;
+	return `STATUS: PASS - ${role} done\nNEXT: none\nRISKS: none\nEVIDENCE: /sim/_evidence/task/REPORT.md\n${fill(`${role} findings`, HANDOFF_FINDINGS_CHARS)}`;
 }
 
 // The single agent: one context, plain Pi, every tool output kept. fresh: a new session (context) for each task.
@@ -190,14 +190,14 @@ function single(model, fresh) {
 function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFAULT, sameModel = false } = {}) {
 	const workers = [], mainM = meter(mainModel, MAIN_SYSTEM + TOOL_SCHEMA_CHARS + SUBAGENT_SCHEMA_CHARS);
 	let hook;
-	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined);
+	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined, (file, launchedAt) => file === "/sim/_evidence/task/REPORT.md" ? launchedAt : undefined);
 	const history = []; let t = 0, id = 0;
 	const mainRequest = (output) => { const view = hook({ messages: history })?.messages ?? history; mainM.request(view, output); };
 	const delegate = (role, steps, k, complexity = IMPLEMENTATION_COMPLEXITY[k]) => {
 		mainRequest(PACKET_OUTPUT);
 		const packet = `Task ${k} for ${role}: ${fill(`packet ${k} ${role}`, PACKET_CHARS)}\nChecks:\n- \`cargo test\``;
 		const callId = `m${id++}`;
-		history.push({ role: "assistant", content: [{ type: "text", text: fill(`plan ${k}`, SAY_CHARS) }, { type: "toolCall", id: callId, name: "subagent", arguments: { agent: role, task: packet } }] });
+		history.push({ role: "assistant", content: [{ type: "text", text: fill(`plan ${k}`, SAY_CHARS) }, { type: "toolCall", id: callId, name: "subagent", arguments: { agent: role, task: packet } }] , timestamp: ++t });
 		// Plan-time tiers (references/routing.md, "Explicit Pi model tier"): main sets economy for a bounded, known-contract
 		// implementation and leaves complex work on capable; other roles run their defaults. The same rule for both providers.
 		const tier = role === "backend-worker" ? implementationTier(complexity) : roles[role].defaultModelTier;
