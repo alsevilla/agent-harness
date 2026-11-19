@@ -77,7 +77,7 @@ function meter() {
 
 function replay(scenario, shaped, model) {
   const history = [], m = meter(), dedupe = createReadDedupe(), ledger = createExecutionLedger();
-  const fold = createMainFold(50_000, (file) => /^\/simulation\/_evidence\/report-\d+\/REPORT\.md$/.test(file));
+  const fold = createMainFold(50_000, (file) => /^\/simulation\/_evidence\/report-\d+\/REPORT\.md$/.test(file) ? Infinity : undefined);
   const policy = workerMaskPolicy({ provider: PROVIDER, id: model.id }, {});
   let masked = false;
   function request() {
@@ -109,7 +109,7 @@ function replay(scenario, shaped, model) {
       const size = scenario.name === 'long-worker' ? (tool === 'bash' ? 32_000 : 24_000) : scenario.name === 'repeated-reads' ? 12_000 : 1_000;
       body = fill(tool === 'read' ? args.path : args.command, size);
     }
-    history.push({ role: 'assistant', content: [...text(fill(`Step ${i}`, 300)), { type: 'toolCall', id: `c${i}`, name: tool, arguments: args }] });
+    history.push({ role: 'assistant', content: [...text(fill(`Step ${i}`, 300)), { type: 'toolCall', id: `c${i}`, name: tool, arguments: args }] , timestamp: i + 1 });
     let content = text(body);
     if (shaped && scenario.kind === 'worker') {
       content = ledger.onResult(tool, args, content, false, '/simulation') ?? content;

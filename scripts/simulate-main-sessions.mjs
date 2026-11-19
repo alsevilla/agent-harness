@@ -39,7 +39,7 @@ function session(turns) {
 function run(requests, arm) {
 	const full = session(requests - 1); // the first request is the opening user message; each step adds one more
 	let hook;
-	if (arm === "full") registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined, (file) => /^\/sim\/_evidence\/run\d+\/REPORT\.md$/.test(file));
+	if (arm === "full") registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined, (file) => /^\/sim\/_evidence\/run\d+\/REPORT\.md$/.test(file) ? Infinity : undefined);
 	const entries = new Set();
 	let cost = 0, read = 0, write = 0, last = 0, sysCached = false;
 	const cut = []; full.forEach((m, i) => { if (m.role !== "assistant") cut.push(i + 1); }); // request k sees the history up to its k-th step

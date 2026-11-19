@@ -490,12 +490,19 @@ const IN_EVIDENCE = /[\\/]_evidence[\\/]/;
 export function isReportPath(file: string): boolean {
 	return (isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file)) && !/^[\\/]{2}/.test(file) && IN_EVIDENCE.test(file) && REPORT_NAME.test(basename(file.replace(/\\/g, "/")));
 }
-function onDisk(file: string): boolean {
+/** A report probe: the file's modification time in ms, or undefined when it is not a regular file. */
+export type ReportProbe = (file: string) => number | undefined;
+function onDisk(file: string): number | undefined {
 	// Worker text is untrusted. Probe only local report paths, never read file contents.
-	try { return lstatSync(file, { throwIfNoEntry: false })?.isFile() === true; } catch { return false; }
+	try { const stat = lstatSync(file, { throwIfNoEntry: false }); return stat?.isFile() ? stat.mtimeMs : undefined; } catch { return undefined; }
 }
-function reportExists(file: string, probe: (file: string) => boolean = onDisk): boolean {
-	return isReportPath(file) && probe(file);
+// A report belongs to the run that names it only when it was written after that run was launched. A REPORT.md left by an earlier run
+// at the same path would otherwise count as this run's evidence. FAT and some network shares store times in 2-second steps.
+const MTIME_SLACK_MS = 2_000;
+function currentReport(file: string, launchedAt: number, probe: ReportProbe): boolean {
+	if (!isReportPath(file)) return false;
+	const mtime = probe(file);
+	return typeof mtime === "number" && mtime >= launchedAt - MTIME_SLACK_MS;
 }
 // An unfinished result is kept outside the notes cap, whole up to 12,000 characters (a background completion notice is bounded below
 // that), otherwise as its head and tail. A large foreground failure would else sit at full size in every later checkpoint; the full
@@ -506,15 +513,41 @@ const UNFINISHED_TAIL = 2_000;
 const keptBody = (text: string) => text.length <= UNFINISHED_WHOLE ? text
 	: `${text.slice(0, UNFINISHED_HEAD)}\n[… ${(text.length - UNFINISHED_HEAD - UNFINISHED_TAIL).toLocaleString("en-US")} characters omitted; the full result is in the saved session, its EVIDENCE path or subagent_control result …]\n${text.slice(-UNFINISHED_TAIL)}`;
 
-function recoverablePass(handoff: Handoff | undefined, exists: (file: string) => boolean): boolean {
-	if (!handoff) return false;
+function recoverablePass(handoff: Handoff | undefined, launchedAt: number | undefined, probe: ReportProbe): boolean {
+	if (!handoff || launchedAt === undefined) return false;
 	const f = handoff.fields;
 	return settledPass(f) && f.risks.length === f.status.length && f.evidence.length === f.status.length
-		&& f.evidence.every((file) => clip(file) === file && reportExists(file, exists));
+		&& f.evidence.every((file) => clip(file) === file && currentReport(file, launchedAt, probe));
+}
+
+/** When the run behind a worker result was launched: the timestamp of main's message that called `subagent` for it. A foreground
+ *  result is matched by its tool call; a background completion or `subagent_control result` by its job id. Unknown: undefined. */
+function launchTimes(messages: readonly Message[]) {
+	const callAt = new Map<unknown, number>();
+	const jobAt = new Map<string, number>();
+	for (const m of messages) {
+		if (m.role === "assistant" && Array.isArray(m.content) && typeof m.timestamp === "number") {
+			for (const p of m.content) if (p?.type === "toolCall" && p.name === "subagent" && typeof p.id === "string") callAt.set(p.id, m.timestamp);
+		} else if (m.role === "toolResult" && m.toolName === "subagent" && m.details?.background === true && typeof m.details?.jobId === "string") {
+			const at = callAt.get(m.toolCallId);
+			if (at !== undefined) jobAt.set(m.details.jobId, at);
+		}
+	}
+	const job = (id: unknown) => typeof id === "string" ? jobAt.get(id.split("@")[0]) : undefined;
+	return (m: Message, controlTarget: ReadonlyMap<unknown, unknown>): number | undefined => {
+		if (m.role === "toolResult" && m.toolName === "subagent") return callAt.get(m.toolCallId);
+		if (m.role === "toolResult" && m.toolName === "subagent_control") return job(controlTarget.get(m.toolCallId));
+		if (m.role === "custom") {
+			let notice: any;
+			try { notice = JSON.parse(textOf(m.content) ?? ""); } catch { return undefined; }
+			return job(notice?.runtime?.job);
+		}
+		return undefined;
+	};
 }
 
 /** The window parser skips errors and partial notices. Folding must account for them separately. */
-function workerResult(message: Message, resultCalls: ReadonlySet<unknown>): boolean {
+function workerResult(message: Message, resultCalls: ReadonlyMap<unknown, unknown>): boolean {
 	if (message.role === "custom") return message.customType === COMPLETION_TYPE;
 	if (message.role !== "toolResult") return false;
 	if (message.toolName === "subagent_control") {
@@ -524,8 +557,9 @@ function workerResult(message: Message, resultCalls: ReadonlySet<unknown>): bool
 	return message.isError === true || message.details?.background !== true || message.details?.results?.length > 0;
 }
 
-/** `exists` checks only that a file is there (tests and simulations replace it); the report path rule always applies. */
-export function createMainFold(threshold: number, exists: (file: string) => boolean = onDisk) {
+/** `probe` only reads a file's modification time (tests and simulations replace it); the report path rule and the launch-time rule
+ *  always apply. */
+export function createMainFold(threshold: number, probe: ReportProbe = onDisk) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
 	let summaryStamp: unknown; // native compaction or branch summaries must reset a fold even when branch recovery restores its anchor
 	let folded = false;
@@ -560,13 +594,14 @@ export function createMainFold(threshold: number, exists: (file: string) => bool
 				if (!asked && (threshold <= 0 || size < threshold / 2)) return folded ? current : undefined;
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
 				const earlier = history.slice(0, -1);
-				const resultCalls = new Set(earlier.flatMap((m) => m.role === "assistant" && Array.isArray(m.content)
-					? m.content.filter((p) => p.type === "toolCall" && typeof p.id === "string" && p.name === "subagent_control" && p.arguments?.action === "result").map((p) => p.id)
+				const resultCalls = new Map(earlier.flatMap((m) => m.role === "assistant" && Array.isArray(m.content)
+					? m.content.filter((p) => p.type === "toolCall" && typeof p.id === "string" && p.name === "subagent_control" && p.arguments?.action === "result").map((p) => [p.id, p.arguments?.target] as const)
 					: []));
+				const launchedAt = launchTimes(earlier);
 				const results = earlier.flatMap((m, i) => {
 					if (!workerResult(m, resultCalls)) return [];
 					const handoff = handoffOf(m, i);
-					return [{ m, i, handoff, recoverable: recoverablePass(handoff, exists) }];
+					return [{ m, i, handoff, recoverable: recoverablePass(handoff, launchedAt(m, resultCalls), probe) }];
 				});
 				const olderUsers = earlier.filter((m) => m.role === "user");
 				const nextUsers = olderUsers.map(retainUserMessage);
@@ -611,12 +646,12 @@ export function requestMainFold(): string {
 }
 
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
-export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined, exists: (file: string) => boolean = onDisk): number {
+export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined, probe: ReportProbe = onDisk): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
 	const trail = createCardTrail();
 	const foldAt = mainFoldFromEnv(env);
-	const fold = state && foldAt > 0 ? createMainFold(foldAt, exists) : undefined;
+	const fold = state && foldAt > 0 ? createMainFold(foldAt, probe) : undefined;
 	activeFold = fold;
 	pi.on("context", (event, ctx) => {
 		// Native compaction only changes the built context; getBranch still contains the original
