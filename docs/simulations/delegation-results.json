@@ -2,7 +2,7 @@
   "schema": 1,
   "provider": "anthropic",
   "cacheModel": "system and last-message breakpoints; 20-block lookback",
-  "sourceCommit": "a06680fd27d175a25fd474e16d245964ed43912c",
+  "sourceCommit": "1675d7ad323623191cbd07b1c543c1dbe33ce55e",
   "roleDefaults": {
     "backend-worker": "claude-sonnet-5-5",
     "debugger": "claude-haiku-5-5",

@@ -4,7 +4,7 @@
   "cacheModel": "idealized warm complete-message prefixes; no expiry or cross-context reuse",
   "pricingDate": "2026-11-08",
   "pricingURL": "https://developers.openai.com/api/docs/pricing",
-  "sourceCommit": "a06680fd27d175a25fd474e16d245964ed43912c",
+  "sourceCommit": "1675d7ad323623191cbd07b1c543c1dbe33ce55e",
   "roleDefaults": {
     "backend-worker": "gpt-6.1-sol",
     "debugger": "gpt-6-luna",

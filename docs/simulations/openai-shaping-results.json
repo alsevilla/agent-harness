@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "sourceCommit": "a06680fd27d175a25fd474e16d245964ed43912c",
+  "sourceCommit": "1675d7ad323623191cbd07b1c543c1dbe33ce55e",
   "sourceHashes": {
-    "scripts/simulate-openai-shaping.mjs": "fcacd439362917c0449cdee3a05cfcb2454edcaf6cefa6c656f45cd04ec6e0fe",
-    "agent/extensions/subagent/handoff-window.ts": "42afcbc515f1572b66c6fa75f6f4a0792580fae36dcdecc83f89cca8d04944f2",
+    "scripts/simulate-openai-shaping.mjs": "9d66cc0a04d94097a9ea3437e759b9efd61f27b9c549a064b374c4cbf5c5d13d",
+    "agent/extensions/subagent/handoff-window.ts": "cf0bdda8eba9a7aa405fe5d153db0b4ad72a7ed4de30994bbbc3c16b6172b9db",
     "agent/extensions/subagent/read-dedupe.ts": "fffdfce68964794c6cf9b0d90e7c2504c60f1edcf7d4298df652b6edb30319de",
     "agent/extensions/subagent/execution-ledger.ts": "94455500a188d5994d1b9e006d4b8641bb8d0bd76f5735efd753d5f8afe93fb3",
     "agent/extensions/subagent/output-cap.ts": "fb99246a70e8f9e1a5e7f4ca92a1204b74b02164ed34bf8f4e6aa99b932faa32"
