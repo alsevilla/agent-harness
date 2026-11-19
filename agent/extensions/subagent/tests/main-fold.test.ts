@@ -12,11 +12,11 @@ type Msg = Record<string, any>;
 let clock = 0;
 const user = (text: string): Msg => ({ role: "user", content: text, timestamp: ++clock });
 const reply = (text: string, call?: string): Msg => ({ role: "assistant", content: [{ type: "thinking", thinking: "plan" }, { type: "text", text }, ...(call ? [{ type: "toolCall", id: call, name: "subagent", arguments: { agent: "backend-worker", task: "x" } }] : [])], timestamp: ++clock });
-const result = (call: string, n: number, size = 9000): Msg => ({ role: "toolResult", toolName: "subagent", toolCallId: call, content: [{ type: "text", text: `STATUS: PASS - task ${n} done\nNEXT: open the PR\nRISKS: none\nEVIDENCE: _evidence/t${n}/REPORT.md\n${"detail ".repeat(size / 7)}` }], details: { results: [{ agent: "backend-worker" }] }, timestamp: ++clock });
+const result = (call: string, n: number, size = 9000): Msg => ({ role: "toolResult", toolName: "subagent", toolCallId: call, content: [{ type: "text", text: `STATUS: PASS - task ${n} done\nNEXT: open the PR\nRISKS: none\nEVIDENCE: /w/_evidence/t${n}/REPORT.md\n${"detail ".repeat(size / 7)}` }], details: { results: [{ agent: "backend-worker" }] }, timestamp: ++clock });
 const turn = (n: number): Msg[] => [user(`Task ${n}: please pace the SMS sender (rule: never push to master)`), reply(`Launching backend-worker for task ${n}.`, `c${n}`), result(`c${n}`, n), reply(`Task ${n} is done; PR #${100 + n} is open.`)];
 
 function setup(env: Record<string, string>, card: () => string | undefined = () => undefined,
-	exists: ((file: string) => boolean) | null = (file) => /^_evidence\/t\d+\/REPORT\.md$/.test(file)) {
+	exists: ((file: string) => boolean) | null = (file) => /^\/w\/_evidence\/t\d+\/REPORT\.md$/.test(file)) {
 	const handlers = new Map<string, (event: unknown) => any>();
 	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, env, card, exists ?? undefined);
 	return async (messages: Msg[]) => ((await handlers.get("context")!({ messages: [...messages] }))?.messages ?? messages) as Msg[];
@@ -49,7 +49,7 @@ test("folds at an idle new user turn past the threshold; user messages stay sepa
 	const cp = String(folded[0].content);
 	assert.match(cp, /^\[main checkpoint, not user text\]/);
 	assert.deepEqual(folded.filter((m) => m.role === "user"), history.filter((m) => m.role === "user"));
-	assert.match(cp, /Result: \[older subagent result, shortened: subagent backend-worker\] STATUS PASS - task 1 done \| NEXT open the PR \| EVIDENCE _evidence\/t1\/REPORT\.md/);
+	assert.match(cp, /Result: \[older subagent result, shortened: subagent backend-worker\] STATUS PASS - task 1 done \| NEXT open the PR \| EVIDENCE \/w\/_evidence\/t1\/REPORT\.md/);
 	assert.match(cp, /Main: Task 12 is done; PR #112 is open\./);
 	assert.doesNotMatch(cp, /x{600}/, "notes do not duplicate truncated user previews");
 	assert.match(cp, /Main: Here is my analysis\. Want me to build it\?/, "the last exchange keeps main's question");
@@ -246,7 +246,7 @@ test("reported risks survive repeated folds even when old checkpoint notes excee
 		const folded = await request(history);
 		const checkpoint = String(folded.find((m) => m.customType === CHECKPOINT_TYPE)?.content);
 		assert.ok(checkpoint.includes(`RISKS: ${risk}`), "the full reported risk survives clipping and checkpoint pressure");
-		assert.ok(checkpoint.includes("_evidence/t1/REPORT.md"), "risk provenance remains available");
+		assert.ok(checkpoint.includes("/w/_evidence/t1/REPORT.md"), "risk provenance remains available");
 		assert.ok(checkpoint.includes("notes folded"), "ordinary old observations were discarded");
 		history.push(reply("Continuing."));
 	}
@@ -389,4 +389,37 @@ test("foreground errors and failed or partial notices block early folding and su
 			assert.ok(String(checkpoint.content).includes(typeof message.content === "string" ? message.content : failure), "the worker output survives intact");
 		}
 	}
+});
+
+// Review fixes: real report names qualify, an old paste already clipped by an earlier fold does not turn early folds off, and a large
+// unfinished result is kept as its head and tail, not whole in every later checkpoint.
+test("early fold: field report names qualify; relative or look-alike paths do not", async () => {
+	const { isReportPath } = await import("../handoff-window.ts");
+	for (const ok of ["/w/_evidence/a/REPORT.md", "/w/_evidence/a/REPORT-backend.md", "D:/work/RFID/worktrees/app/_evidence/b/PR69-CURRENT-VERIFICATION-REPORT.md", "D:\\w\\_evidence\\c\\verify_report.md"]) assert.equal(isReportPath(ok), true, ok);
+	for (const bad of ["_evidence/a/REPORT.md", "/w/_evidence/a/notes.md", "/w/_evidence/a/reportcard.md", "//server/share/REPORT.md", "/w/REPORT.txt"]) assert.equal(isReportPath(bad), false, bad);
+});
+
+test("an old paste already clipped by an earlier fold does not block later early folds; a large unfinished result is kept as head and tail", async () => {
+	const longReport = (n: number) => ({ ...result(`p${n}`, n) });
+	const request = setup({ [MAIN_FOLD_ENV]: "50000" });
+	const history: Msg[] = [user("p".repeat(4000))];
+	for (let n = 1; n <= 24; n++) history.push(longReport(n));
+	history.push(user("go"));
+	requestMainFold(); // /subagent fold: this first fold may clip the paste
+	assert.equal((await request(history))[0].customType, CHECKPOINT_TYPE, "premise: a fold that clipped the paste");
+	for (let n = 30; n <= 41; n++) history.push(longReport(n));
+	history.push(user("again"));
+	const second = await request(history);
+	assert.match(String(second[0].content), /task 30 done/, "the next finished segment folds early");
+
+	const big = setup({ [MAIN_FOLD_ENV]: "25000" });
+	const failure = `STATUS: FAIL - A7 failed\nNEXT: fix\nRISKS: none\nEVIDENCE: none\n${"f".repeat(30_000)}TAIL-MARK`;
+	const h2: Msg[] = [user("begin"), { ...result("ff", 1), content: [{ type: "text", text: failure }] }];
+	for (let n = 2; n <= 12; n++) h2.push(result(`q${n}`, n));
+	h2.push(user("continue"));
+	const cp = String((await big(h2))[0].content);
+	assert.match(cp, /\[unfinished worker result: subagent[^\]]*\]\nSTATUS: FAIL - A7 failed/);
+	assert.match(cp, /characters omitted; the full result is in the saved session, its EVIDENCE path or subagent_control result/);
+	assert.match(cp, /TAIL-MARK/, "the tail is kept");
+	assert.ok(cp.length < 30_000, `bounded (${cp.length})`);
 });

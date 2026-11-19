@@ -481,17 +481,34 @@ function renderCheckpoint(entries: string[]): string {
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
 }
-function reportExists(file: string): boolean {
+// A report name: REPORT.md, or REPORT joined to other words by - _ or . (REPORT-backend.md, PR69-VERIFICATION-REPORT.md), as field
+// reports are named. Not notes.md or reportcard.md.
+const REPORT_NAME = /(^|[-_.])REPORT([-_.][^\\/]*)?\.md$/i;
+/** Whether worker text names a local report file the fold may rely on. The path rule always applies; `probe` only checks existence. */
+export function isReportPath(file: string): boolean {
+	return (isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file)) && !/^[\\/]{2}/.test(file) && REPORT_NAME.test(basename(file.replace(/\\/g, "/")));
+}
+function onDisk(file: string): boolean {
 	// Worker text is untrusted. Probe only local report paths, never read file contents.
-	if (!isAbsolute(file) || /^[\\/]{2}/.test(file) || basename(file) !== "REPORT.md") return false;
 	try { return lstatSync(file, { throwIfNoEntry: false })?.isFile() === true; } catch { return false; }
 }
+function reportExists(file: string, probe: (file: string) => boolean = onDisk): boolean {
+	return isReportPath(file) && probe(file);
+}
+// An unfinished result is kept outside the notes cap, whole up to 12,000 characters (a background completion notice is bounded below
+// that), otherwise as its head and tail. A large foreground failure would else sit at full size in every later checkpoint; the full
+// text stays recoverable from the saved session, its EVIDENCE path or subagent_control result.
+const UNFINISHED_WHOLE = 12_000;
+const UNFINISHED_HEAD = 8_000;
+const UNFINISHED_TAIL = 2_000;
+const keptBody = (text: string) => text.length <= UNFINISHED_WHOLE ? text
+	: `${text.slice(0, UNFINISHED_HEAD)}\n[… ${(text.length - UNFINISHED_HEAD - UNFINISHED_TAIL).toLocaleString("en-US")} characters omitted; the full result is in the saved session, its EVIDENCE path or subagent_control result …]\n${text.slice(-UNFINISHED_TAIL)}`;
 
 function recoverablePass(handoff: Handoff | undefined, exists: (file: string) => boolean): boolean {
 	if (!handoff) return false;
 	const f = handoff.fields;
 	return settledPass(f) && f.risks.length === f.status.length && f.evidence.length === f.status.length
-		&& f.evidence.every((file) => clip(file) === file && exists(file));
+		&& f.evidence.every((file) => clip(file) === file && reportExists(file, exists));
 }
 
 /** The window parser skips errors and partial notices. Folding must account for them separately. */
@@ -505,7 +522,8 @@ function workerResult(message: Message, resultCalls: ReadonlySet<unknown>): bool
 	return message.isError === true || message.details?.background !== true || message.details?.results?.length > 0;
 }
 
-export function createMainFold(threshold: number, exists = reportExists) {
+/** `exists` checks only that a file is there (tests and simulations replace it); the report path rule always applies. */
+export function createMainFold(threshold: number, exists: (file: string) => boolean = onDisk) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
 	let summaryStamp: unknown; // native compaction or branch summaries must reset a fold even when branch recovery restores its anchor
 	let folded = false;
@@ -551,7 +569,10 @@ export function createMainFold(threshold: number, exists = reportExists) {
 				const olderUsers = earlier.filter((m) => m.role === "user");
 				const nextUsers = olderUsers.map(retainUserMessage);
 				const early = !asked && size < threshold;
-				if (early && (nextUsers.some((m, i) => m !== olderUsers[i])
+				// An early fold never clips user text for the first time. Users before the previous fold point were already clipped by it, so
+				// only users since that point count; otherwise one long paste would turn early folds off for the rest of the session.
+				const firstNew = earlier.slice(0, from).filter((m) => m.role === "user").length;
+				if (early && (nextUsers.some((m, i) => i >= firstNew && m !== olderUsers[i])
 					|| !results.some(({ i }) => i >= from)
 					|| results.some(({ i, recoverable }) => i >= from && !recoverable))) return folded ? current : undefined;
 				const nextEntries = [...entries, ...renderTurns(turnsOf(earlier.slice(from)))];
@@ -561,7 +582,7 @@ export function createMainFold(threshold: number, exists = reportExists) {
 						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`) : [];
 					if (recoverable) return risks;
 					const label = handoff?.label ?? m.toolName ?? "background completion";
-					const body = textOf(m.content) ?? JSON.stringify(m.content);
+					const body = keptBody(textOf(m.content) ?? JSON.stringify(m.content));
 					return [`[unfinished worker result: ${label}]\n${body}`, ...risks];
 				});
 				const nextCheckpoint = [renderCheckpoint(nextEntries), ...kept].join("\n");
@@ -588,7 +609,7 @@ export function requestMainFold(): string {
 }
 
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
-export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined, exists = reportExists): number {
+export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined, exists: (file: string) => boolean = onDisk): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
 	const trail = createCardTrail();

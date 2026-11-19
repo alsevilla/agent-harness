@@ -157,7 +157,7 @@ function runWorker(role, model, packet, steps, totals) {
 	});
 	request(REPORT_OUTPUT); // writes its REPORT and replies with the four handoff lines
 	totals.push(m.totals);
-	return `STATUS: PASS - ${role} done\nNEXT: none\nRISKS: none\nEVIDENCE: _evidence/task/REPORT.md\n${fill(`${role} findings`, HANDOFF_FINDINGS_CHARS)}`;
+	return `STATUS: PASS - ${role} done\nNEXT: none\nRISKS: none\nEVIDENCE: /sim/_evidence/task/REPORT.md\n${fill(`${role} findings`, HANDOFF_FINDINGS_CHARS)}`;
 }
 
 // The single agent: one context, plain Pi, every tool output kept. fresh: a new session (context) for each task.
@@ -190,7 +190,7 @@ function single(model, fresh) {
 function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFAULT, sameModel = false } = {}) {
 	const workers = [], mainM = meter(mainModel, MAIN_SYSTEM + TOOL_SCHEMA_CHARS + SUBAGENT_SCHEMA_CHARS);
 	let hook;
-	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined, (file) => file === "_evidence/task/REPORT.md");
+	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined, (file) => file === "/sim/_evidence/task/REPORT.md");
 	const history = []; let t = 0, id = 0;
 	const mainRequest = (output) => { const view = hook({ messages: history })?.messages ?? history; mainM.request(view, output); };
 	const delegate = (role, steps, k, complexity = IMPLEMENTATION_COMPLEXITY[k]) => {

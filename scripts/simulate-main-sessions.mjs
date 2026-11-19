@@ -24,7 +24,7 @@ function session(turns) {
 		const callId = `c${id++}`;
 		if (r < 0.45) { // a subagent result: PASS with a long report body
 			msgs.push({ role: "assistant", content: [{ type: "text", text: fill(400, `plan${t}`) }, { type: "toolCall", id: callId, name: "subagent", arguments: { agent: "backend-worker", task: fill(1200, `packet${t}`) } }] });
-			const body = `STATUS: PASS - done ${t}\nNEXT: none\nRISKS: none\nEVIDENCE: _evidence/run${t}.md\n${fill(2500 + rnd() * 6000, `report${t}`)}`;
+			const body = `STATUS: PASS - done ${t}\nNEXT: none\nRISKS: none\nEVIDENCE: /sim/_evidence/run${t}/REPORT.md\n${fill(2500 + rnd() * 6000, `report${t}`)}`;
 			msgs.push({ role: "toolResult", toolName: "subagent", toolCallId: callId, content: [{ type: "text", text: body }], details: { results: [{ agent: "backend-worker" }] } });
 		} else { // main's own read or shell output
 			const tool = r < 0.75 ? "read" : "bash";
@@ -39,7 +39,7 @@ function session(turns) {
 function run(requests, arm) {
 	const full = session(requests - 1); // the first request is the opening user message; each step adds one more
 	let hook;
-	if (arm === "full") registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined, (file) => /^_evidence\/run\d+\.md$/.test(file));
+	if (arm === "full") registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined, (file) => /^\/sim\/_evidence\/run\d+\/REPORT\.md$/.test(file));
 	const entries = new Set();
 	let cost = 0, read = 0, write = 0, last = 0, sysCached = false;
 	const cut = []; full.forEach((m, i) => { if (m.role !== "assistant") cut.push(i + 1); }); // request k sees the history up to its k-th step
