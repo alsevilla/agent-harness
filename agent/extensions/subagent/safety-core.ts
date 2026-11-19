@@ -1027,6 +1027,34 @@ export function parseNormalPush(command: string, headRefspec = false): { branch:
 // Normal commit grammar (whole command, ASCII, single spaces): git commit -m "<safe message>" or git commit -F "<absolute path>". Anything else is not a normal commit.
 const COMMIT_MESSAGE = /^(?:"([A-Za-z0-9 .,:_\/#()+-]{1,200})"|'([A-Za-z0-9 .,:_\/#()+-]{1,200})')$/;
 const COMMIT_FILE = /^"([A-Za-z0-9 ._\/:-]+)"$/;
+/** Which part of a single-argument `git commit -m|-F` fails parseNormalCommit, for the refusal. Names only the rule and the offending
+ *  punctuation, never the message text or the path, which may carry private content. */
+export function commitFormMismatch(command: string): string {
+	const match = /^git commit (-m|-F) ([\s\S]*)$/.exec(String(command ?? "").trim());
+	if (!match) return "the command is not git commit -m or -F with one argument";
+	const [, flag, arg] = match;
+	const quoted = /^"([\s\S]*)"$/.exec(arg) ?? (flag === "-m" ? /^'([\s\S]*)'$/.exec(arg) : null);
+	if (!quoted) return `the ${flag} argument is not in double quotes`;
+	const text = quoted[1];
+	const odd = (allowed: RegExp) => [...new Set([...text].filter((c) => /[\x21-\x7e]/.test(c) && !allowed.test(c)))].join(" ");
+	if (flag === "-m") {
+		if (/[\r\n]/.test(text)) return "the -m text spans more than one line; put it in a -F file";
+		if (/\\n/.test(text)) return "the -m text contains a \\n escape; put a multi-line message in a -F file";
+		if (/[^\x20-\x7e]/.test(text)) return "the -m text contains a non-ASCII or control character (such as a long dash, arrow, curly quote or tab); put it in a -F file or use plain ASCII";
+		const bad = odd(/[A-Za-z0-9 .,:_\/#()+-]/);
+		if (bad) return `the -m text contains ${bad}, which -m does not accept; put it in a -F file`;
+		if (text.length > 200) return `the -m text is ${text.length} characters, over the 200 limit; put it in a -F file`;
+		if (!/[A-Za-z0-9]/.test(text)) return "the -m text has no letter or digit";
+		return "the -m text is not accepted";
+	}
+	if (text.includes("\\")) return "the -F path uses backslashes; write it with forward slashes (C:/...)";
+	if (/[^\x20-\x7e]/.test(text)) return "the -F path contains a non-ASCII character";
+	const bad = odd(/[A-Za-z0-9 ._\/:-]/);
+	if (bad) return `the -F path contains ${bad}, which is not accepted in a path`;
+	if (!path.isAbsolute(text) && !/^[A-Za-z]:\//.test(text)) return "the -F path is not absolute";
+	if (badSegments(text)) return "the -F path has an empty, '.', '..' or trailing dot or space segment";
+	return "the -F argument is not accepted";
+}
 export function parseNormalCommit(command: string): { message?: string; file?: string } | undefined {
 	const text = String(command ?? "");
 	if (!/^[\x20-\x7e]+$/.test(text)) return undefined;
@@ -2852,7 +2880,7 @@ export function permissionMatches(pattern: string, command: string): boolean {
 
 // ---- Block messages: rule ids, the op digest, the program (never its arguments: a command may carry a credential), whether a grant can
 // ever help, and the exact next step.
-const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root); the -m text is one line of plain ASCII with no \\n escapes, the -F file lives in the task\'s _evidence or _scratch folder, and these forms need no grant';
+const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root); the -m text is 1-200 characters of ASCII letters, digits, space and . , : _ / # ( ) + - on one line (anything else goes in a -F file), the -F file lives in the task\'s _evidence or _scratch folder, and these forms need no grant';
 const RULE_ADVICE: Partial<Record<RiskRule, string>> = {
 	SECRET: `agents never read or write secret files (.env*, keys, credentials, .ssh/.aws/.gnupg) or name them in a command; to check .env settings run node "${REDACTED_ENV_SCRIPT}" "<absolute .env path>" (secret-like values hidden); .env.example, .env.sample and .env.template are ordinary files when named alone`,
 	OPAQUE_UNPARSEABLE: "the guard cannot parse this command (inline scripts with nested quotes, eval, encoded or deeply nested commands); write the script to a file in the task's _scratch folder and run it by path or pipe it on stdin (for example betterwright run < \"<absolute file>\")",
@@ -2869,7 +2897,7 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 	const head = `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: `;
 	if (scope === "child" && gateCommits && decision.rules.length === 1 && decision.rules[0] === "GIT_COMMIT" && decision.op.kind === "shell") {
 		const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
-		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}.`;
+		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}; here ${commitFormMismatch(decision.op.command)}.`;
 		if (parseNormalCommit(decision.op.command) !== undefined) return commitWhy ? `${head}git commit; not automatic here: ${commitWhy}.` : `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
 		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
 	}

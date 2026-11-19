@@ -347,6 +347,36 @@ test("H1 unsupported commit form gets the fixed secret-free hint; prefix and dig
 	}
 });
 
+// Field ticket: a trusted release-engineer's commit was refused as "not a normal commit form" and the handoff could not say why; a
+// standalone -F retry passed. The refusal now names the failing rule, never the message text or the path.
+test("H1b a refused commit form names the part that failed, without echoing the message or path", () => {
+	const g = trusted();
+	const f = artifact("widgets");
+	const cases: Array<[string, RegExp]> = [
+		['git commit -m "fix: don\'t drop SECRETWORD rows"', /here the -m text contains ', which -m does not accept; put it in a -F file\.$/],
+		['git commit -m "feat!: add SECRETWORD? yes; [skip]"', /here the -m text contains ! \? ; \[ \], which -m does not accept/],
+		['git commit -m "SECRETWORD \u2014 done"', /here the -m text contains a non-ASCII or control character/],
+		['git commit -m "SECRETWORD\nsecond"', /here the -m text spans more than one line/],
+		['git commit -m "SECRETWORD\\nsecond"', /here the -m text contains a \\n escape/],
+		[`git commit -m "${"SECRETWORD ".repeat(20)}"`, /here the -m text is 220 characters, over the 200 limit/],
+		["git commit -m SECRETWORD", /here the -m argument is not in double quotes/],
+		[`git commit -F ${f}`, /here the -F argument is not in double quotes/],
+		[`git commit -F "${f.replace(/\//g, "\\")}"`, /here the -F path uses backslashes; write it with forward slashes/],
+		['git commit -F "SECRETWORD/commit.md"', /here the -F path is not absolute/],
+		[`git commit -F "${f.replace(/[^/]+$/, "../SECRETWORD.md")}"`, /here the -F path has an empty, '\.', '\.\.' or trailing dot or space segment/],
+		[`git commit -F "${f.replace(/[^/]+$/, "SECRET&WORD.md")}"`, /here the -F path contains &, which is not accepted in a path/],
+	];
+	for (const [command, expected] of cases) {
+		const r = run(g, command) as { reason: string };
+		assert.ok(blocked(r), command);
+		assert.match(r.reason, /^Blocked by harness safety guard \[GIT_COMMIT\] op [0-9a-f]{16}: not a normal commit form: /, command);
+		assert.match(r.reason, expected, command);
+		assert.ok(!r.reason.includes("SECRETWORD") && !r.reason.includes("SECRET&") && !r.reason.includes(f), `no message or path echo: ${command}`);
+	}
+	assert.equal(run(g, `git commit -F "${f}"`), undefined, "the documented -F form still passes");
+	assert.equal(run(g, 'git commit -m "fix(guard): name the failing part, #42"'), undefined, "the documented -m form still passes");
+});
+
 test("H2 hint absent for amend, no-verify, -a, other flags and non-commit blocks; quoted forms unaffected", () => {
 	const g = trusted();
 	for (const command of ['git commit --amend -m "x"', 'git commit --no-verify -m "x"', 'git commit -a -m "x"', 'git commit -am "x"', 'git commit -m "x" --amend', "git commit --amend", `${GP} origin main`]) {
