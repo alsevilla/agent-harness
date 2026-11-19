@@ -479,6 +479,18 @@ function renderCheckpoint(entries: string[]): string {
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
 }
+/** Every result from `from` to the latest user message is finished: PASS, no risks, and an EVIDENCE path to reread; at least one. */
+function finishedSince(history: readonly Message[], from: number): boolean {
+	let any = false;
+	for (let i = from; i < history.length - 1; i++) {
+		const handoff = handoffOf(history[i], i);
+		if (!handoff) continue;
+		const f = handoff.fields;
+		if (!settledPass(f) || !f.evidence.some((e) => e.trim() && !/^none\.?$/i.test(e.trim()))) return false;
+		any = true;
+	}
+	return any;
+}
 export function createMainFold(threshold: number) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
 	let summaryStamp: unknown; // native compaction or branch summaries must reset a fold even when branch recovery restores its anchor
@@ -508,18 +520,27 @@ export function createMainFold(threshold: number) {
 			const prefixBefore = (end: number) => summaries.filter((m) => view.indexOf(m) < end);
 			let current: T[] = folded ? [...prefixBefore(point), message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
-			const due = asked || (threshold > 0 && estimateTokens(current) >= threshold);
+			// Fold finished work early (after CWL, arXiv 2606.11213, and Spine, arXiv 2610.37224: drop first the steps whose results are
+			// already persisted; keep user turns and unfinished work). When every result since the fold point is finished (PASS, no
+			// risks, a report path on disk to reread), the fold is due at half the threshold.
+			const size = estimateTokens(current);
+			const sinceFold = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
+			const trigger = threshold > 0 && size >= threshold ? threshold : threshold > 0 && size >= threshold / 2 && finishedSince(history, sinceFold) ? threshold / 2 : 0;
+			const due = asked || trigger > 0;
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
 			if (idle && due && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
 				// The notes come from the saved messages (whole results, before any request-only shortening), from the previous fold point.
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
 				const nextEntries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
-				// Reported risks are not recoverable observations: retain them in full outside the notes cap.
+				// Reported risks are not recoverable observations: retain them in full outside the notes cap. So is unfinished work: a
+				// result whose STATUS is not PASS keeps its STATUS, NEXT and EVIDENCE in full there too.
 				const risks = history.slice(0, -1).flatMap((m, i) => {
 					const handoff = handoffOf(m, i);
 					if (!handoff) return [];
-					return handoff.fields.risks.filter((risk) => !noRisk(risk)).map((risk) =>
-						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`);
+					const f = handoff.fields;
+					const open = f.status.every(isPass) ? [] : [`[unfinished worker result: ${handoff.label}] STATUS: ${f.status.join(" ; ")} | NEXT: ${f.next.join(" ; ") || "not supplied"} | EVIDENCE: ${f.evidence.join(" ; ") || "not supplied"}`];
+					return [...open, ...f.risks.filter((risk) => !noRisk(risk)).map((risk) =>
+						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${f.evidence.join(" ; ") || "not supplied"}`)];
 				});
 				const nextCheckpoint = [renderCheckpoint(nextEntries), ...risks].join("\n");
 				const nextUsers = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
@@ -527,7 +548,7 @@ export function createMainFold(threshold: number) {
 				// Fold only when it pays: every fold rewrites the cache from the checkpoint on, so a fold that saves little (once the kept
 				// part - native summaries, retained user messages - is itself near the threshold) costs more than it saves. A simulated
 				// paste-heavy session folded on 63 of 120 user turns at a 23% cache hit before this check. /subagent fold always folds.
-				if (asked || estimateTokens(current) - estimateTokens(candidate) >= threshold / 2) {
+				if (asked || size - estimateTokens(candidate) >= trigger / 2) {
 					entries = nextEntries; checkpoint = nextCheckpoint; users = nextUsers;
 					stamp = last!.timestamp; folded = true; asked = false;
 					current = [...prefixBefore(at), message() as unknown as T, ...users as T[], ...view.slice(at)];

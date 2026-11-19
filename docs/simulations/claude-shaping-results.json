@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "sourceCommit": "1ab70496f59113adf5b0abc785aeea67c1508b43",
+  "sourceCommit": "8fa18a64d9951eed9171b8e50cec2963d6ee48d4",
   "sourceHashes": {
     "scripts/simulate-openai-shaping.mjs": "e5754fee47739c72270764457f8cff348ad4a9055cdaa9db82327a35f2d67341",
-    "agent/extensions/subagent/handoff-window.ts": "0b2f1d930e1c9f72295f57c746b86a593a3661f8029641fb8af6e62cfca1663f",
+    "agent/extensions/subagent/handoff-window.ts": "ca9a1548215b8de7a9abb5dcee0a4c6240c8e7cbd894210ba9aaf396c0a55498",
     "agent/extensions/subagent/read-dedupe.ts": "fffdfce68964794c6cf9b0d90e7c2504c60f1edcf7d4298df652b6edb30319de",
-    "agent/extensions/subagent/execution-ledger.ts": "5dcdebcc2272ca9db309c1aac654c41ca397802705864f84a9fc0725b3b8c7a2",
+    "agent/extensions/subagent/execution-ledger.ts": "94455500a188d5994d1b9e006d4b8641bb8d0bd76f5735efd753d5f8afe93fb3",
     "agent/extensions/subagent/output-cap.ts": "fb99246a70e8f9e1a5e7f4ca92a1204b74b02164ed34bf8f4e6aa99b932faa32"
   },
   "provider": "anthropic",
@@ -191,23 +191,23 @@
       },
       "on": {
         "requests": 150,
-        "input": 5248981,
-        "read": 5068973,
-        "write": 180008,
-        "peak": 51343,
-        "last": 51343,
+        "input": 4903143,
+        "read": 4719550,
+        "write": 183593,
+        "peak": 46415,
+        "last": 36774,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 37.14541184393565,
+      "tokenSavingPercent": 41.286692800890336,
       "inputCostUSD": {
         "off": 3.3026537500000015,
-        "on": 3.517343250000001
+        "on": 3.4748
       },
-      "inputCostSavingPercent": -6.500514926822087,
+      "inputCostSavingPercent": -5.212361422991996,
       "noCacheInputCostUSD": {
         "off": 83.50991,
-        "on": 52.489810000000006
+        "on": 49.03142999999999
       }
     },
     {
@@ -225,23 +225,23 @@
       },
       "on": {
         "requests": 300,
-        "input": 15167356,
-        "read": 14790308,
-        "write": 377048,
-        "peak": 83931,
-        "last": 83931,
+        "input": 10655269,
+        "read": 10262133,
+        "write": 393136,
+        "peak": 46657,
+        "last": 46657,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 49.164655158805026,
+      "tokenSavingPercent": 64.28749519753511,
       "inputCostUSD": {
         "off": 9.745681999999999,
-        "on": 8.410677000000007
+        "on": 7.479733250000004
       },
-      "inputCostSavingPercent": 13.69842562070045,
+      "inputCostSavingPercent": 23.250797122253676,
       "noCacheInputCostUSD": {
         "off": 298.36241,
-        "on": 151.67355999999987
+        "on": 106.55269000000001
       }
     },
     {
@@ -259,23 +259,23 @@
       },
       "on": {
         "requests": 480,
-        "input": 25021398,
-        "read": 24400119,
-        "write": 621279,
-        "peak": 85520,
-        "last": 73559,
+        "input": 18211871,
+        "read": 17552566,
+        "write": 659305,
+        "peak": 51092,
+        "last": 51092,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 65.69641853054355,
+      "tokenSavingPercent": 75.03207452438383,
       "inputCostUSD": {
         "off": 21.807954500000015,
-        "on": 13.866017249999995
+        "on": 12.629454000000013
       },
-      "inputCostSavingPercent": 36.41761656280058,
+      "inputCostSavingPercent": 42.08785606187868,
       "noCacheInputCostUSD": {
         "off": 729.4106600000002,
-        "on": 250.21398
+        "on": 182.11870999999988
       }
     },
     {
@@ -429,23 +429,23 @@
       },
       "on": {
         "requests": 150,
-        "input": 5248981,
-        "read": 5068973,
-        "write": 180008,
-        "peak": 51343,
-        "last": 51343,
+        "input": 4903143,
+        "read": 4719550,
+        "write": 183593,
+        "peak": 46415,
+        "last": 36774,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 37.14541184393565,
+      "tokenSavingPercent": 41.286692800890336,
       "inputCostUSD": {
         "off": 2.146243000000001,
-        "on": 1.9138345999999997
+        "on": 1.8618749999999997
       },
-      "inputCostSavingPercent": 10.82861539909512,
+      "inputCostSavingPercent": 13.249571460454435,
       "noCacheInputCostUSD": {
         "off": 33.403964,
-        "on": 20.995924
+        "on": 19.612572
       }
     },
     {
@@ -463,23 +463,23 @@
       },
       "on": {
         "requests": 300,
-        "input": 15167356,
-        "read": 14790308,
-        "write": 377048,
-        "peak": 83931,
-        "last": 83931,
+        "input": 10655269,
+        "read": 10262133,
+        "write": 393136,
+        "peak": 46657,
+        "last": 46657,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 49.164655158805026,
+      "tokenSavingPercent": 64.28749519753511,
       "inputCostUSD": {
         "off": 6.863230600000003,
-        "on": 4.843301600000001
+        "on": 4.018106600000001
       },
-      "inputCostSavingPercent": 29.43116904741626,
+      "inputCostSavingPercent": 41.454588455763094,
       "noCacheInputCostUSD": {
         "off": 119.344964,
-        "on": 60.669424
+        "on": 42.62107600000001
       }
     },
     {
@@ -497,23 +497,23 @@
       },
       "on": {
         "requests": 480,
-        "input": 25021398,
-        "read": 24400119,
-        "write": 621279,
-        "peak": 85520,
-        "last": 73559,
+        "input": 18211871,
+        "read": 17552566,
+        "write": 659305,
+        "peak": 51092,
+        "last": 51092,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 65.69641853054355,
+      "tokenSavingPercent": 75.03207452438383,
       "inputCostUSD": {
         "off": 15.988123600000002,
-        "on": 7.986418799999999
+        "on": 6.807038200000003
       },
-      "inputCostSavingPercent": 50.047804233887724,
+      "inputCostSavingPercent": 57.42440845278427,
       "noCacheInputCostUSD": {
         "off": 291.7642639999999,
-        "on": 100.085592
+        "on": 72.84748400000005
       }
     },
     {
@@ -667,23 +667,23 @@
       },
       "on": {
         "requests": 150,
-        "input": 5248981,
-        "read": 5068973,
-        "write": 180008,
-        "peak": 51343,
-        "last": 51343,
+        "input": 4903143,
+        "read": 4719550,
+        "write": 183593,
+        "peak": 46415,
+        "last": 36774,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 37.14541184393565,
+      "tokenSavingPercent": 41.286692800890336,
       "inputCostUSD": {
         "off": 1.898303,
-        "on": 1.4638146000000003
+        "on": 1.4028925000000003
       },
-      "inputCostSavingPercent": 22.888253350492505,
+      "inputCostSavingPercent": 26.097546071412193,
       "noCacheInputCostUSD": {
         "off": 16.701982,
-        "on": 10.497962
+        "on": 9.806286
       }
     },
     {
@@ -701,23 +701,23 @@
       },
       "on": {
         "requests": 300,
-        "input": 15167356,
-        "read": 14790308,
-        "write": 377048,
-        "peak": 83931,
-        "last": 83931,
+        "input": 10655269,
+        "read": 10262133,
+        "write": 393136,
+        "peak": 46657,
+        "last": 46657,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 49.164655158805026,
+      "tokenSavingPercent": 64.28749519753511,
       "inputCostUSD": {
         "off": 6.396573100000002,
-        "on": 3.9006815999999995
+        "on": 3.035266600000003
       },
-      "inputCostSavingPercent": 39.019197638810724,
+      "inputCostSavingPercent": 52.548551348533756,
       "noCacheInputCostUSD": {
         "off": 59.672482,
-        "on": 30.334712
+        "on": 21.310538000000005
       }
     },
     {
@@ -735,23 +735,23 @@
       },
       "on": {
         "requests": 480,
-        "input": 25021398,
-        "read": 24400119,
-        "write": 621279,
-        "peak": 85520,
-        "last": 73559,
+        "input": 18211871,
+        "read": 17552566,
+        "write": 659305,
+        "peak": 51092,
+        "last": 51092,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 65.69641853054355,
+      "tokenSavingPercent": 75.03207452438383,
       "inputCostUSD": {
         "off": 15.259003600000003,
-        "on": 6.433221299999998
+        "on": 5.158775699999999
       },
-      "inputCostSavingPercent": 57.839833657290725,
+      "inputCostSavingPercent": 66.19192291166378,
       "noCacheInputCostUSD": {
         "off": 145.88213199999996,
-        "on": 50.042796
+        "on": 36.423742000000026
       }
     },
     {
@@ -905,23 +905,23 @@
       },
       "on": {
         "requests": 150,
-        "input": 5248981,
-        "read": 5068973,
-        "write": 180008,
-        "peak": 51343,
-        "last": 51343,
+        "input": 4903143,
+        "read": 4719550,
+        "write": 183593,
+        "peak": 46415,
+        "last": 36774,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 37.14541184393565,
+      "tokenSavingPercent": 41.286692800890336,
       "inputCostUSD": {
         "off": 0.09491515,
-        "on": 0.07319073
+        "on": 0.070144625
       },
-      "inputCostSavingPercent": 22.888253350492526,
+      "inputCostSavingPercent": 26.097546071412204,
       "noCacheInputCostUSD": {
         "off": 0.8350991000000006,
-        "on": 0.5248981000000001
+        "on": 0.49031430000000004
       }
     },
     {
@@ -939,23 +939,23 @@
       },
       "on": {
         "requests": 300,
-        "input": 15167356,
-        "read": 14790308,
-        "write": 377048,
-        "peak": 83931,
-        "last": 83931,
+        "input": 10655269,
+        "read": 10262133,
+        "write": 393136,
+        "peak": 46657,
+        "last": 46657,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 49.164655158805026,
+      "tokenSavingPercent": 64.28749519753511,
       "inputCostUSD": {
         "off": 1.2152001350000001,
-        "on": 0.19503408
+        "on": 0.15176332999999992
       },
-      "inputCostSavingPercent": 83.95045602920379,
+      "inputCostSavingPercent": 87.51124809577149,
       "noCacheInputCostUSD": {
         "off": 11.537801300000005,
-        "on": 1.516735599999999
+        "on": 1.0655269000000007
       }
     },
     {
@@ -973,23 +973,23 @@
       },
       "on": {
         "requests": 480,
-        "input": 25021398,
-        "read": 24400119,
-        "write": 621279,
-        "peak": 85520,
-        "last": 73559,
+        "input": 18211871,
+        "read": 17552566,
+        "write": 659305,
+        "peak": 51092,
+        "last": 51092,
         "over272k": 0,
         "over100k": 0
       },
-      "tokenSavingPercent": 65.69641853054355,
+      "tokenSavingPercent": 75.03207452438383,
       "inputCostUSD": {
         "off": 3.43080776,
-        "on": 0.32166106499999997
+        "on": 0.257938785
       },
-      "inputCostSavingPercent": 90.62433434043533,
+      "inputCostSavingPercent": 92.48168935586179,
       "noCacheInputCostUSD": {
         "off": 33.0902138,
-        "on": 2.502139800000003
+        "on": 1.8211870999999997
       }
     }
   ]

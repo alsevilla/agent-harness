@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "sourceCommit": "1ab70496f59113adf5b0abc785aeea67c1508b43",
+  "sourceCommit": "8fa18a64d9951eed9171b8e50cec2963d6ee48d4",
   "cacheModel": "Anthropic-style: 20-block lookback; Opus 5.5 cache read 0.05x, write 1.25x of input; characters / 4",
   "results": [
     {
@@ -23,14 +23,14 @@
       },
       "full": {
         "requests": 150,
-        "input": 7122293,
-        "cacheRead": 6709636,
-        "cacheWrite": 412657,
-        "cost": 851303,
+        "input": 4767335,
+        "cacheRead": 4533481,
+        "cacheWrite": 233854,
+        "cost": 518992,
         "lastRequest": 38193
       },
-      "tokenSavingPercent": 53.5,
-      "costSavingPercent": 14.4
+      "tokenSavingPercent": 68.9,
+      "costSavingPercent": 47.8
     },
     {
       "requests": 300,
@@ -52,14 +52,14 @@
       },
       "full": {
         "requests": 300,
-        "input": 15564632,
-        "cacheRead": 14596075,
-        "cacheWrite": 968557,
-        "cost": 1940500,
-        "lastRequest": 81996
+        "input": 11333828,
+        "cacheRead": 10748026,
+        "cacheWrite": 585802,
+        "cost": 1269654,
+        "lastRequest": 72421
       },
-      "tokenSavingPercent": 73.2,
-      "costSavingPercent": 42.2
+      "tokenSavingPercent": 80.5,
+      "costSavingPercent": 62.2
     },
     {
       "requests": 480,
@@ -81,14 +81,14 @@
       },
       "full": {
         "requests": 480,
-        "input": 25632986,
-        "cacheRead": 24203206,
-        "cacheWrite": 1429780,
-        "cost": 2997385,
-        "lastRequest": 84175
+        "input": 20174305,
+        "cacheRead": 19167542,
+        "cacheWrite": 1006763,
+        "cost": 2216831,
+        "lastRequest": 72741
       },
-      "tokenSavingPercent": 82.4,
-      "costSavingPercent": 62.5
+      "tokenSavingPercent": 86.1,
+      "costSavingPercent": 72.3
     }
   ]
 }

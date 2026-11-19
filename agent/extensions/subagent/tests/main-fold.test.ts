@@ -301,3 +301,33 @@ test("no repeated fold when the kept part alone is over the threshold; a fold th
 	const asked = await request(history);
 	assert.notEqual(String(asked.find((m) => m.customType === CHECKPOINT_TYPE)?.content), String(second.find((m) => m.customType === CHECKPOINT_TYPE)?.content), "/subagent fold folds even when it saves little");
 });
+
+// After CWL (arXiv 2606.11213) and Spine (arXiv 2610.37224): finished work, whose results are already persisted in a REPORT, is folded
+// first. When every result since the fold point is finished, the fold is due at half the threshold; unfinished work keeps full size.
+test("finished work folds at half the threshold; an unfinished result keeps the full threshold and its STATUS, NEXT and EVIDENCE", async () => {
+	const finished: Msg[] = [];
+	for (let n = 1; n <= 7; n++) finished.push(...turn(n));
+	finished.push(user("next task"));
+	const size = (messages: Msg[]) => Math.ceil(JSON.stringify(messages).length / 4);
+	assert.ok(size(finished) > 12_500 && size(finished) < 25_000, `premise: between half and the whole 25k threshold (${size(finished)})`);
+	const early = await setup({ [MAIN_FOLD_ENV]: "25000" })(finished);
+	assert.equal(early[0].customType, CHECKPOINT_TYPE, "every result is PASS with no risks and a report path: folds early");
+
+	const fail = (call: string): Msg => ({ role: "toolResult", toolName: "subagent", toolCallId: call, content: [{ type: "text", text: `STATUS: FAIL - A7 keyboard check failed\nNEXT: fix focus order\nRISKS: none\nEVIDENCE: _evidence/a7/REPORT.md\n${"r".repeat(9000)}` }], timestamp: ++clock });
+	const open: Msg[] = [];
+	for (let n = 1; n <= 6; n++) open.push(...turn(n));
+	open.push(user("check A7"), reply("Launching test-engineer.", "cf"), fail("cf"), reply("A7 failed."), user("ok"));
+	assert.ok(size(open) > 12_500 && size(open) < 25_000, `premise (${size(open)})`);
+	const waiting = await setup({ [MAIN_FOLD_ENV]: "25000" })(open);
+	assert.equal(waiting.some((m) => m.customType === CHECKPOINT_TYPE), false, "an unfinished result: no early fold");
+
+	const noReport = finished.map((m) => m.role === "toolResult" ? { ...m, content: [{ type: "text", text: String(m.content[0].text).replace(/EVIDENCE: [^\n]*/, "EVIDENCE: none") }] } : m);
+	assert.equal((await setup({ [MAIN_FOLD_ENV]: "25000" })(noReport)).some((m) => m.customType === CHECKPOINT_TYPE), false, "a PASS with no report to reread: no early fold");
+
+	const big = [...open.slice(0, -1)];
+	for (let n = 10; n <= 14; n++) big.push(...turn(n));
+	big.push(user("continue"));
+	const folded = await setup({ [MAIN_FOLD_ENV]: "25000" })(big);
+	assert.equal(folded[0].customType, CHECKPOINT_TYPE, "past the full threshold it folds as before");
+	assert.match(String(folded[0].content), /\[unfinished worker result: subagent[^\]]*\] STATUS: FAIL - A7 keyboard check failed \| NEXT: fix focus order \| EVIDENCE: _evidence\/a7\/REPORT\.md/, "unfinished work is kept in full");
+});
