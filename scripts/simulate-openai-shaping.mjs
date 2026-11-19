@@ -77,7 +77,7 @@ function meter() {
 
 function replay(scenario, shaped, model) {
   const history = [], m = meter(), dedupe = createReadDedupe(), ledger = createExecutionLedger();
-  const fold = createMainFold(50_000, (file) => /^\/simulation\/_evidence\/report-\d+\/REPORT\.md$/.test(file) ? Infinity : undefined);
+  const fold = createMainFold(50_000, (file, launchedAt) => /^\/simulation\/_evidence\/report-\d+\/REPORT\.md$/.test(file) ? launchedAt : undefined);
   const policy = workerMaskPolicy({ provider: PROVIDER, id: model.id }, {});
   let masked = false;
   function request() {
@@ -118,7 +118,10 @@ function replay(scenario, shaped, model) {
       const view = ledger.viewForResult();
       if (view) content = [...content, ...text(view)];
     }
-    history.push({ role: 'toolResult', toolName: tool, toolCallId: `c${i}`, content, isError: false });
+    const result = { role: 'toolResult', toolName: tool, toolCallId: `c${i}`, content, isError: false };
+    // Record completion for the fold without counting this fixture metadata as request text.
+    if (scenario.kind === 'main') Object.defineProperty(result, 'timestamp', { value: i + 1 });
+    history.push(result);
   }
   return m.finish();
 }

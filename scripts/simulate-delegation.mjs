@@ -190,7 +190,7 @@ function single(model, fresh) {
 function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFAULT, sameModel = false } = {}) {
 	const workers = [], mainM = meter(mainModel, MAIN_SYSTEM + TOOL_SCHEMA_CHARS + SUBAGENT_SCHEMA_CHARS);
 	let hook;
-	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined, (file) => file === "/sim/_evidence/task/REPORT.md" ? Infinity : undefined);
+	registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: String(HANDOFF_WINDOW), PI_SUBAGENT_MAIN_FOLD_TOKENS: String(MAIN_FOLD_TOKENS) }, () => undefined, (file, launchedAt) => file === "/sim/_evidence/task/REPORT.md" ? launchedAt : undefined);
 	const history = []; let t = 0, id = 0;
 	const mainRequest = (output) => { const view = hook({ messages: history })?.messages ?? history; mainM.request(view, output); };
 	const delegate = (role, steps, k, complexity = IMPLEMENTATION_COMPLEXITY[k]) => {

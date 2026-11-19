@@ -12,7 +12,7 @@
 // Main's own large tool outputs (read, bash, grep, find, ls) get the same treatment: the newest `window` stay word for word,
 // older ones are masked in whole batches by a one-line stub naming the tool and its file or command. Errors and short
 // outputs are never masked. Plain masking, not summarization: it saves tokens without a model call or a guessed digest.
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, isAbsolute } from "node:path";
 import { stoppedJobsCardPart, type StoppedJob } from "./stopped-jobs.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -486,23 +486,27 @@ function renderCheckpoint(entries: string[]): string {
 // temporary files.
 const REPORT_NAME = /(^|[-_.])REPORT([-_.][^\\/]*)?\.md$/i;
 const IN_EVIDENCE = /[\\/]_evidence[\\/]/;
-/** Whether worker text names a local report file the fold may rely on. The path rule always applies; `probe` only checks existence. */
+/** Lexical check for a local report path. The file probe also checks the resolved location. */
 export function isReportPath(file: string): boolean {
 	return (isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file)) && !/^[\\/]{2}/.test(file) && IN_EVIDENCE.test(file) && REPORT_NAME.test(basename(file.replace(/\\/g, "/")));
 }
 /** A report probe: the file's modification time in ms, or undefined when it is not a regular file. */
-export type ReportProbe = (file: string) => number | undefined;
+export type ReportProbe = (file: string, launchedAt: number) => number | undefined;
 function onDisk(file: string): number | undefined {
 	// Worker text is untrusted. Probe only local report paths, never read file contents.
-	try { const stat = lstatSync(file, { throwIfNoEntry: false }); return stat?.isFile() ? stat.mtimeMs : undefined; } catch { return undefined; }
+	if (!isAbsolute(file)) return undefined;
+	try {
+		const stat = lstatSync(file, { throwIfNoEntry: false });
+		return stat?.isFile() && isReportPath(realpathSync.native(file)) ? Math.floor(stat.mtimeMs) : undefined;
+	} catch { return undefined; }
 }
-// A report belongs to the run that names it only when it was written after that run was launched. A REPORT.md left by an earlier run
-// at the same path would otherwise count as this run's evidence. FAT and some network shares store times in 2-second steps.
+// A report must have been written during the run. FAT and some network shares store times in 2-second steps, so allow
+// for rounding down at launch.
 const MTIME_SLACK_MS = 2_000;
-function currentReport(file: string, launchedAt: number, probe: ReportProbe): boolean {
+function currentReport(file: string, launchedAt: number, completedAt: number, probe: ReportProbe): boolean {
 	if (!isReportPath(file)) return false;
-	const mtime = probe(file);
-	return typeof mtime === "number" && mtime >= launchedAt - MTIME_SLACK_MS;
+	const mtime = probe(file, launchedAt);
+	return typeof mtime === "number" && mtime >= launchedAt - MTIME_SLACK_MS && mtime <= completedAt;
 }
 // An unfinished result is kept outside the notes cap, whole up to 12,000 characters (a background completion notice is bounded below
 // that), otherwise as its head and tail. A large foreground failure would else sit at full size in every later checkpoint; the full
@@ -513,37 +517,60 @@ const UNFINISHED_TAIL = 2_000;
 const keptBody = (text: string) => text.length <= UNFINISHED_WHOLE ? text
 	: `${text.slice(0, UNFINISHED_HEAD)}\n[… ${(text.length - UNFINISHED_HEAD - UNFINISHED_TAIL).toLocaleString("en-US")} characters omitted; the full result is in the saved session, its EVIDENCE path or subagent_control result …]\n${text.slice(-UNFINISHED_TAIL)}`;
 
-function recoverablePass(handoff: Handoff | undefined, launchedAt: number | undefined, probe: ReportProbe): boolean {
-	if (!handoff || launchedAt === undefined) return false;
+function recoverablePass(handoff: Handoff | undefined, run: { launchedAt: number; completedAt: number } | undefined, probe: ReportProbe): boolean {
+	if (!handoff || !run) return false;
 	const f = handoff.fields;
 	return settledPass(f) && f.risks.length === f.status.length && f.evidence.length === f.status.length
-		&& f.evidence.every((file) => clip(file) === file && currentReport(file, launchedAt, probe));
+		&& f.evidence.every((file) => clip(file) === file && currentReport(file, run.launchedAt, run.completedAt, probe));
 }
 
-/** When the run behind a worker result was launched: the timestamp of main's message that called `subagent` for it. A foreground
- *  result is matched by its tool call; a background completion or `subagent_control result` by its job id. Unknown: undefined. */
-function launchTimes(messages: readonly Message[]) {
+/** Match results to their launch and completion. A later result fetch uses the original background completion. */
+function runTimes(messages: readonly Message[]) {
 	const callAt = new Map<unknown, number>();
 	const jobAt = new Map<string, number>();
+	const jobDone = new Map<string, { launchedAt: number; completedAt: number }>();
+	const runs = new Map<Message, { launchedAt: number; completedAt: number }>();
+	const controlTargets = new Map<unknown, unknown>();
 	for (const m of messages) {
-		if (m.role === "assistant" && Array.isArray(m.content) && typeof m.timestamp === "number") {
-			for (const p of m.content) if (p?.type === "toolCall" && p.name === "subagent" && typeof p.id === "string") callAt.set(p.id, m.timestamp);
-		} else if (m.role === "toolResult" && m.toolName === "subagent" && m.details?.background === true && typeof m.details?.jobId === "string") {
-			const at = callAt.get(m.toolCallId);
-			if (at !== undefined) jobAt.set(m.details.jobId, at);
+		const at = typeof m.timestamp === "number" && Number.isFinite(m.timestamp) ? m.timestamp : undefined;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const p of m.content) {
+				if (p?.type !== "toolCall" || typeof p.id !== "string") continue;
+				if (p.name === "subagent" && at !== undefined) callAt.set(p.id, at);
+				if (p.name === "subagent_control" && p.arguments?.action === "result") controlTargets.set(p.id, p.arguments.target);
+			}
+			continue;
+		}
+		let launchedAt: number | undefined;
+		const completedAt = at;
+		if (m.role === "toolResult" && m.toolName === "subagent") {
+			launchedAt = callAt.get(m.toolCallId);
+			if (m.details?.background === true && typeof m.details?.jobId === "string" && launchedAt !== undefined) {
+				jobAt.set(m.details.jobId, launchedAt);
+				jobDone.delete(m.details.jobId);
+				continue;
+			}
+		} else if (m.role === "custom" && m.customType === COMPLETION_TYPE) {
+			let notice: any;
+			try { notice = JSON.parse(textOf(m.content) ?? ""); } catch { continue; }
+			const job = notice?.runtime?.job;
+			launchedAt = jobAt.get(job);
+			if (at !== undefined && launchedAt !== undefined) {
+				const run = { launchedAt, completedAt: at };
+				jobDone.set(job, run);
+				if (typeof notice.result?.target === "string") jobDone.set(notice.result.target, run);
+			}
+		} else if (m.role === "toolResult" && m.toolName === "subagent_control") {
+			const target = controlTargets.get(m.toolCallId);
+			const run = typeof target === "string" ? jobDone.get(target) : undefined;
+			if (run && at !== undefined && run.completedAt <= at) runs.set(m, run);
+			continue;
+		}
+		if (launchedAt !== undefined && completedAt !== undefined && completedAt >= launchedAt) {
+			runs.set(m, { launchedAt, completedAt });
 		}
 	}
-	const job = (id: unknown) => typeof id === "string" ? jobAt.get(id.split("@")[0]) : undefined;
-	return (m: Message, controlTarget: ReadonlyMap<unknown, unknown>): number | undefined => {
-		if (m.role === "toolResult" && m.toolName === "subagent") return callAt.get(m.toolCallId);
-		if (m.role === "toolResult" && m.toolName === "subagent_control") return job(controlTarget.get(m.toolCallId));
-		if (m.role === "custom") {
-			let notice: any;
-			try { notice = JSON.parse(textOf(m.content) ?? ""); } catch { return undefined; }
-			return job(notice?.runtime?.job);
-		}
-		return undefined;
-	};
+	return { runs, controlTargets };
 }
 
 /** The window parser skips errors and partial notices. Folding must account for them separately. */
@@ -594,14 +621,11 @@ export function createMainFold(threshold: number, probe: ReportProbe = onDisk) {
 				if (!asked && (threshold <= 0 || size < threshold / 2)) return folded ? current : undefined;
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
 				const earlier = history.slice(0, -1);
-				const resultCalls = new Map(earlier.flatMap((m) => m.role === "assistant" && Array.isArray(m.content)
-					? m.content.filter((p) => p.type === "toolCall" && typeof p.id === "string" && p.name === "subagent_control" && p.arguments?.action === "result").map((p) => [p.id, p.arguments?.target] as const)
-					: []));
-				const launchedAt = launchTimes(earlier);
+				const { runs, controlTargets } = runTimes(earlier);
 				const results = earlier.flatMap((m, i) => {
-					if (!workerResult(m, resultCalls)) return [];
+					if (!workerResult(m, controlTargets)) return [];
 					const handoff = handoffOf(m, i);
-					return [{ m, i, handoff, recoverable: recoverablePass(handoff, launchedAt(m, resultCalls), probe) }];
+					return [{ m, i, handoff, recoverable: recoverablePass(handoff, runs.get(m), probe) }];
 				});
 				const olderUsers = earlier.filter((m) => m.role === "user");
 				const nextUsers = olderUsers.map(retainUserMessage);

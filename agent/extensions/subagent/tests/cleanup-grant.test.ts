@@ -887,3 +887,17 @@ test("plain-branch pending entry proposes the task form and never the primary ch
 	assert.deepEqual(entries[0].request, { task: p.task, branch: p.branch, base: "main", pr: 12, headSha: p.head });
 	assert.deepEqual(entries[0].retainedArtifacts.map((a: any) => a.path), [p.evidence, p.scratch]);
 });
+
+
+test("artifact cleanup diagnostics preserve an independent operator allow rule", () => {
+	const agentDir = fs.mkdtempSync(path.join(root, "cleanup-allow-"));
+	try {
+		const store = C.createGrantStore();
+		store.addArtifactCleanup([{ path: slash(path.join(agentDir, "_evidence", "task")), primary: agentDir, issuedAt: Date.now() }]);
+		const command = `rm -rf "${slash(path.join(agentDir, "separately-allowed"))}"`;
+		const check = () => C.guardToolCall({ scope: "child", store, agentDir }, "bash", { command }, agentDir);
+		assert.match(check().reason, /the approved cleanup covers only/);
+		fs.writeFileSync(path.join(agentDir, C.PERMISSIONS_FILE), JSON.stringify({ allow: [command] }));
+		assert.equal(check(), undefined);
+	} finally { fs.rmSync(agentDir, { recursive: true, force: true }); }
+});

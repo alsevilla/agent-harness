@@ -2938,9 +2938,9 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && cleanupAllows(guard.store, decision, live)) return undefined;
 	const artifact = guard.scope === "child" ? artifactCleanupDecision(guard.store, decision, live) : { allowed: false as const };
 	if (artifact.allowed) return undefined;
-	if ("reason" in artifact && artifact.reason) return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: cleanup folder removal; ${artifact.reason}.` };
 	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
 	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
+	if ("reason" in artifact && artifact.reason) return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: cleanup folder removal; ${artifact.reason}.` };
 	const miss = decision.grantable ? guard.store.grantMiss?.(guard.scope, canonicalCwd(cwd), decision.op) : undefined;
 	const commitWhy = guard.scope === "child" && guard.gateCommits === true && decision.op.kind === "shell" && decision.rules.length === 1 && decision.rules[0] === "GIT_COMMIT" ? commitRefusalWhy(guard.pushTarget, decision.op.command, decision.op.cwd, liveUrl) : undefined;
 	const reason = blockReason(decision, guard.scope, guard.gateCommits === true, commitWhy);

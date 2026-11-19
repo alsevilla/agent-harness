@@ -18,7 +18,7 @@ const launched = (call: string, n: number, size?: number): Msg[] => [reply("", c
 const turn = (n: number): Msg[] => [user(`Task ${n}: please pace the SMS sender (rule: never push to master)`), reply(`Launching backend-worker for task ${n}.`, `c${n}`), result(`c${n}`, n), reply(`Task ${n} is done; PR #${100 + n} is open.`)];
 
 function setup(env: Record<string, string>, card: () => string | undefined = () => undefined,
-	probe: ((file: string) => number | undefined) | null = (file) => /^\/w\/_evidence\/t\d+\/REPORT\.md$/.test(file) ? clock : undefined) {
+	probe: ((file: string, launchedAt: number) => number | undefined) | null = (file, launchedAt) => /^\/w\/_evidence\/t\d+\/REPORT\.md$/.test(file) ? launchedAt : undefined) {
 	const handlers = new Map<string, (event: unknown) => any>();
 	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, env, card, probe ?? undefined);
 	return async (messages: Msg[]) => ((await handlers.get("context")!({ messages: [...messages] }))?.messages ?? messages) as Msg[];
@@ -358,6 +358,8 @@ test("early fold requires an existing report and preserves long user text until 
 		assert.ok(estimateTokens(valid) > 12_500 && estimateTokens(valid) < 25_000);
 		assert.equal(folded(await request()(valid)), false, "a named but missing report is not recoverable");
 		writeFileSync(report, "Recorded findings");
+		const written = new Date(valid[1].timestamp);
+		utimesSync(report, written, written);
 		assert.equal(folded(await request()(valid)), true, "a real report enables early folding");
 		const source = join(dir, "queue.ts");
 		writeFileSync(source, "export const queue = [];");
@@ -365,6 +367,14 @@ test("early fold requires an existing report and preserves long user text until 
 			const history = timeline(evidence);
 			assert.deepEqual(await request()(history), history, "a source file cannot recover the handoff");
 		}
+		const scratch = join(dir, "_scratch");
+		mkdirSync(scratch);
+		const scratchReport = join(scratch, "REPORT.md");
+		writeFileSync(scratchReport, "Temporary findings");
+		const viaParent = timeline(join(dir, "_evidence") + "/../_scratch/REPORT.md");
+		const scratchTime = new Date(viaParent[1].timestamp);
+		utimesSync(scratchReport, scratchTime, scratchTime);
+		assert.deepEqual(await request()(viaParent), viaParent, "the actual report must be inside _evidence");
 		const hold = "Do not publish the PR until I approve.";
 		const history = timeline(report, user("x".repeat(2500) + hold + "x".repeat(2500)));
 		assert.ok(estimateTokens(history) < 25_000);
@@ -428,7 +438,7 @@ test("an old paste already clipped by an earlier fold does not block later early
 
 // A REPORT.md left at the same path by an earlier run must not count as this run's evidence: the report has to be written after main
 // launched the run (foreground: its subagent call; background completion or subagent_control result: the launch of its job).
-test("early fold: a report counts only when written after its run was launched; background jobs are matched by job id", async () => {
+test("early fold: reports must be written during the run, including when a background result is fetched later", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fold-current-"));
 	try {
 		mkdirSync(join(dir, "_evidence", "fg"), { recursive: true });
@@ -436,11 +446,11 @@ test("early fold: a report counts only when written after its run was launched; 
 		const fg = join(dir, "_evidence", "fg", "REPORT.md");
 		const bg = join(dir, "_evidence", "bg", "REPORT.md");
 		const stale = (file: string) => { writeFileSync(file, "old run"); const hour = new Date(Date.now() - 3_600_000); utimesSync(file, hour, hour); };
-		const fresh = (file: string) => writeFileSync(file, "this run");
+		const fresh = (file: string, time: number) => { writeFileSync(file, "this run"); utimesSync(file, new Date(time), new Date(time)); };
 		const request = () => setup({ [MAIN_FOLD_ENV]: "25000" }, () => undefined, null);
 		const folded = async (messages: Msg[]) => (await request()(messages)).some((m) => m.customType === CHECKPOINT_TYPE);
 		const pass = (evidence: string) => `STATUS: PASS - done\nNEXT: open the PR\nRISKS: none\nEVIDENCE: ${evidence}`;
-		clock = Date.now();
+		clock = Date.now() - 60_000;
 		const foreground = (count: number) => Array.from({ length: count }, (_, i) => {
 			const [call, item] = launched(`r${clock}-${i}`, i);
 			item.content[0].text = item.content[0].text.replace(/EVIDENCE: [^\n]*/, `EVIDENCE: ${fg}`);
@@ -451,8 +461,10 @@ test("early fold: a report counts only when written after its run was launched; 
 		assert.ok(estimateTokens(history) > 12_500 && estimateTokens(history) < 25_000);
 		stale(fg);
 		assert.equal(await folded(history), false, "a report older than the run's launch is not this run's evidence");
-		fresh(fg);
-		assert.equal(await folded(history), true, "the same path rewritten by this run counts");
+		fresh(fg, history[1].timestamp);
+		assert.equal(await folded(history), true, "a report written during the run counts");
+		fresh(fg, history.at(-1)!.timestamp + 5_000);
+		assert.equal(await folded(history), false, "a report overwritten after the handoff is not recoverable");
 
 		const launch = (job: string): Msg[] => [reply("", `launch-${job}`), { role: "toolResult", toolName: "subagent", toolCallId: `launch-${job}`, content: [{ type: "text", text: `Started background job ${job}.` }], details: { results: [], jobId: job, background: true }, timestamp: ++clock }];
 		const notice = (job: string): Msg => ({ role: "custom", customType: "subagent-completion", timestamp: ++clock,
@@ -460,17 +472,26 @@ test("early fold: a report counts only when written after its run was launched; 
 		const background = [user("begin"), ...launch("bg-5"), ...foreground(6), notice("bg-5"), user("continue")];
 		stale(bg);
 		assert.equal(await folded(background), false, "a background completion with a stale report blocks");
-		fresh(bg);
-		assert.equal(await folded(background), true, "matched to its launch by job id, a fresh report counts");
+		fresh(fg, background[3].timestamp);
+		fresh(bg, background[1].timestamp);
+		assert.equal(await folded(background), true, "a report written before the background completion counts");
 		const orphan = [user("begin"), ...foreground(6), notice("bg-9"), user("continue")];
 		assert.equal(await folded(orphan), false, "a completion whose launch is not in the history is not recoverable");
 
-		const control: Msg[] = [{ role: "assistant", content: [{ type: "toolCall", id: "ctl", name: "subagent_control", arguments: { action: "result", target: "bg-5@e" } }], timestamp: ++clock },
-			{ role: "toolResult", toolName: "subagent_control", toolCallId: "ctl", content: [{ type: "text", text: pass(bg) }], details: {}, timestamp: ++clock }];
-		const viaControl = [user("begin"), ...launch("bg-5"), ...foreground(6), ...control, user("continue")];
-		stale(bg);
-		assert.equal(await folded(viaControl), false, "subagent_control result with a stale report blocks");
-		fresh(bg);
-		assert.equal(await folded(viaControl), true, "subagent_control result is matched to its job's launch");
+		const control: Msg[] = [
+			{ role: "assistant", content: [{ type: "toolCall", id: "ctl", name: "subagent_control", arguments: { action: "result", target: "bg-5@e" } }], timestamp: clock + 10_000 },
+			{ role: "toolResult", toolName: "subagent_control", toolCallId: "ctl", content: [{ type: "text", text: pass(bg) }], timestamp: clock + 10_001 },
+		];
+		const origCompletion = background.at(-2)!;
+		const viaControl = [...background.slice(0, -1), ...control, { ...user("continue"), timestamp: clock + 10_002 }];
+		assert.equal(await folded(viaControl), true, "result fetch uses the original completion");
+		fresh(bg, origCompletion.timestamp + 5_000);
+		assert.equal(await folded(viaControl), false, "a result fetched later cannot bless an overwritten report");
+		const manual = request();
+		requestMainFold();
+		const checkpoint = (await manual(viaControl)).find((m) => m.customType === CHECKPOINT_TYPE);
+		assert.match(String(checkpoint?.content), /\[unfinished worker result: subagent_control\]/, "the fetched result stays outside the notes cap");
+		const noNotice = viaControl.filter((m) => m !== origCompletion);
+		assert.equal(await folded(noNotice), false, "a fetch without a recorded completion remains recoverable from the transcript only");
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
