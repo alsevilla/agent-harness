@@ -482,11 +482,13 @@ function renderCheckpoint(entries: string[]): string {
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
 }
 // A report name: REPORT.md, or REPORT joined to other words by - _ or . (REPORT-backend.md, PR69-VERIFICATION-REPORT.md), as field
-// reports are named. Not notes.md or reportcard.md.
+// reports are named. Not notes.md or reportcard.md. It must sit in an _evidence folder, where durable reports belong; _scratch holds
+// temporary files.
 const REPORT_NAME = /(^|[-_.])REPORT([-_.][^\\/]*)?\.md$/i;
+const IN_EVIDENCE = /[\\/]_evidence[\\/]/;
 /** Whether worker text names a local report file the fold may rely on. The path rule always applies; `probe` only checks existence. */
 export function isReportPath(file: string): boolean {
-	return (isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file)) && !/^[\\/]{2}/.test(file) && REPORT_NAME.test(basename(file.replace(/\\/g, "/")));
+	return (isAbsolute(file) || /^[A-Za-z]:[\\/]/.test(file)) && !/^[\\/]{2}/.test(file) && IN_EVIDENCE.test(file) && REPORT_NAME.test(basename(file.replace(/\\/g, "/")));
 }
 function onDisk(file: string): boolean {
 	// Worker text is untrusted. Probe only local report paths, never read file contents.

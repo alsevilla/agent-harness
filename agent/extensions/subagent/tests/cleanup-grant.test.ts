@@ -820,6 +820,41 @@ test("plain-branch cleanup: the task form mints from the merge approval and allo
 	assert.ok(fs.existsSync(p.evidence), "the guard decides only");
 });
 
+// Field report (PR #73, bg-19): an approved plain-branch cleanup had both folder removals refused as "This worker was launched with no
+// approved operations". Artifact folders hold build output (hard links, many files), and any live-check failure was reported as a
+// missing approval. Hard links and large folders are now allowed in artifact folders, and a removal in the scope states its reason.
+test("plain-branch cleanup: folders with build output are removable; every refusal of a scoped folder names its reason", () => {
+	const p = plainTask();
+	fs.mkdirSync(`${p.scratch}/target/debug/deps`, { recursive: true });
+	fs.writeFileSync(`${p.scratch}/target/debug/deps/app-1a2b.exe`, "bin");
+	fs.linkSync(`${p.scratch}/target/debug/deps/app-1a2b.exe`, `${p.scratch}/target/debug/app.exe`); // cargo hard-links its outputs
+	for (let i = 0; i < 25_000; i++) if (i % 1000 === 0) fs.mkdirSync(`${p.scratch}/target/debug/build/b${i / 1000}`, { recursive: true });
+	for (let i = 0; i < 25_000; i++) fs.writeFileSync(`${p.scratch}/target/debug/build/b${Math.floor(i / 1000)}/f${i}`, "");
+	const res = p.prepare();
+	assert.equal(res.ok, true, JSON.stringify(res));
+	const { child } = childFrom(res.grant);
+	const g = guardOf(child, live(p.pr));
+	const reason = (command: string, tool = "bash") => (C.guardToolCall(g, tool, { command }, PRIMARY, C.livePushUrl) as { reason: string } | undefined)?.reason ?? "";
+	assert.match(reason(`rm -rf '${p.evidence}'`), /cleanup folder removal; this removes an artifact folder of the approved cleanup, but not in an accepted form: run exactly rm -rf "/, "single quotes");
+	assert.match(reason(`Remove-Item -Path ${q(p.evidence)} -Recurse -Force`, "powershell"), /not in an accepted form/, "-Path instead of -LiteralPath");
+	assert.match(reason(`rm -rf ${q(`${WT}/_evidence/other`)}`), /the approved cleanup covers only .*_evidence\/plain-[^ ]* and .*_scratch\/plain-[^ ]*; this folder is not one of them/);
+	assert.equal(reason(`rm -rf ${q(p.evidence)}`), "", "the approved exact form is allowed");
+	assert.equal(reason(`rm -rf ${q(p.scratch)}`), "", "a build-output folder with a hard link and 25,000 files is removable");
+	assert.match(reason(`rm -rf ${q(p.scratch)}`), /this folder's cleanup was already used/, "a replay says so");
+	assert.ok(fs.existsSync(p.scratch), "the guard decides only");
+	// A link inside still refuses, with its reason; expiry says so too.
+	const p3 = plainTask();
+	const r3 = p3.prepare(); assert.equal(r3.ok, true, JSON.stringify(r3));
+	const g3 = guardOf(childFrom(r3.grant).child, live(p3.pr));
+	fs.symlinkSync(os.tmpdir(), `${p3.evidence}/link`);
+	assert.match((C.guardToolCall(g3, "bash", { command: `rm -rf ${q(p3.evidence)}` }, PRIMARY, C.livePushUrl) as { reason: string }).reason, /checkout contains a link; the folder was not removed/);
+	const before = clock.value;
+	clock.value += C.CLEANUP_TTL_MS + 1;
+	try {
+		assert.match((C.guardToolCall(g3, "bash", { command: `rm -rf ${q(p3.scratch)}` }, PRIMARY, C.livePushUrl) as { reason: string }).reason, /the cleanup approval for this folder expired \(10 minutes after main approved it\); ask main to launch the cleanup again/);
+	} finally { clock.value = before; }
+});
+
 test("plain-branch cleanup: refused without a matching merge approval, a named artifact directory, a merged PR or idle folders", () => {
 	const p = plainTask();
 	const refusals: [Record<string, unknown>, RegExp][] = [

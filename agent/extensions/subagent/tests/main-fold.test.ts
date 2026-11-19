@@ -1,6 +1,6 @@
 // Main checkpoints: at an idle task boundary main's earlier turns are folded into one checkpoint built from the messages (no model call),
 // so a long session stops carrying its whole history (field report: main at 348k tokens, 478 requests averaging ~159k, visibly slower).
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatCompletionNotice } from "../compact-handoff.ts";
@@ -341,7 +341,8 @@ test("finished work folds at half the threshold; an unfinished result keeps the 
 test("early fold requires an existing report and preserves long user text until the regular threshold", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "fold-reports-"));
 	try {
-		const report = join(dir, "REPORT.md");
+		mkdirSync(join(dir, "_evidence", "t"), { recursive: true });
+		const report = join(dir, "_evidence", "t", "REPORT.md");
 		const timeline = (evidence: string, opener = user("Inspect the queue")) => [
 			opener, ...Array.from({ length: 7 }, (_, i) => {
 				const item = result(`c${i}`, i);
@@ -393,10 +394,10 @@ test("foreground errors and failed or partial notices block early folding and su
 
 // Review fixes: real report names qualify, an old paste already clipped by an earlier fold does not turn early folds off, and a large
 // unfinished result is kept as its head and tail, not whole in every later checkpoint.
-test("early fold: field report names qualify; relative or look-alike paths do not", async () => {
+test("early fold: field report names in an _evidence folder qualify; relative, look-alike or _scratch paths do not", async () => {
 	const { isReportPath } = await import("../handoff-window.ts");
 	for (const ok of ["/w/_evidence/a/REPORT.md", "/w/_evidence/a/REPORT-backend.md", "D:/work/RFID/worktrees/app/_evidence/b/PR69-CURRENT-VERIFICATION-REPORT.md", "D:\\w\\_evidence\\c\\verify_report.md"]) assert.equal(isReportPath(ok), true, ok);
-	for (const bad of ["_evidence/a/REPORT.md", "/w/_evidence/a/notes.md", "/w/_evidence/a/reportcard.md", "//server/share/REPORT.md", "/w/REPORT.txt"]) assert.equal(isReportPath(bad), false, bad);
+	for (const bad of ["_evidence/a/REPORT.md", "/w/_evidence/a/notes.md", "/w/_evidence/a/reportcard.md", "//server/share/REPORT.md", "/w/REPORT.txt", "/w/_scratch/a/REPORT.md", "/w/out/REPORT.md"]) assert.equal(isReportPath(bad), false, bad);
 });
 
 test("an old paste already clipped by an earlier fold does not block later early folds; a large unfinished result is kept as head and tail", async () => {

@@ -691,6 +691,9 @@ export interface GrantStore {
 	takeCleanup(id: string): boolean;
 	cleanupCount(): number;
 	addArtifactCleanup(entries: ArtifactCleanup[]): void;
+	/** Every artifact folder this store was ever offered, live or not, so a refusal can say why (expired, used, out of scope). */
+	artifactScope?(): { path: string; primary: string; used: boolean }[];
+	markArtifactUsed?(path: string): void;
 	takeArtifactCleanup(target: string): ArtifactCleanup | undefined;
 }
 
@@ -714,6 +717,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 	let delivery: DeliveryGrant[] = [];
 	let cleanup: CleanupGrant[] = [];
 	let artifacts: ArtifactCleanup[] = [];
+	const offered = new Map<string, { path: string; primary: string; used: boolean }>();
+	const offer = (a: ArtifactCleanup) => { if (!offered.has(normPath(a.path))) offered.set(normPath(a.path), { path: a.path, primary: a.primary, used: false }); };
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
@@ -746,7 +751,7 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			if (valid.length > MAX_CLEANUP_GRANTS) throw new RangeError("too many cleanup scopes");
 			for (const g of valid) {
 				if (g.task === undefined) cleanup.push(g);
-				else for (const folder of cleanupTargets(g)) artifacts.push({ path: folder, primary: g.primary, issuedAt: g.issuedAt });
+				else for (const folder of cleanupTargets(g)) { const a = { path: folder, primary: g.primary, issuedAt: g.issuedAt }; artifacts.push(a); offer(a); }
 			}
 		},
 		findCleanup(candidate) {
@@ -771,7 +776,15 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 			for (const e of entries) {
 				artifacts = artifacts.filter((a) => normPath(a.path) !== normPath(e.path));
 				artifacts.push({ ...e });
+				offer(e);
 			}
+		},
+		artifactScope() {
+			return [...offered.values()].map((a) => ({ ...a }));
+		},
+		markArtifactUsed(target) {
+			const a = offered.get(normPath(target));
+			if (a) a.used = true;
 		},
 		takeArtifactCleanup(target) {
 			live();
@@ -1771,20 +1784,26 @@ const BUILD_DIRS = new Set(["target", "node_modules", "dist", "build", "out", "b
 
 // With `skipped`, a real directory named like build output is recorded (relative, forward slashes) and not entered; the caller must
 // then prove Git ignores each one as a whole. Without it every entry is walked.
-function walkCheckout(root: string, skipped?: string[]): string | undefined {
+// Artifact folders are walked with their own limits: build output put in _scratch (as worker guidance says) holds tens of thousands of
+// files and cargo hard-links its outputs. Removing a hard link deletes only that name, never the data another link keeps, so artifact
+// cleanup allows hard links; links and junctions, special files and nested repositories still refuse.
+const ARTIFACT_WALK_MAX = 200_000;
+function walkCheckout(root: string, skipped?: string[], limits: { max?: number; hardLinks?: boolean } = {}): string | undefined {
+	const max = limits.max ?? CLEANUP_WALK_MAX;
 	let seen = 0;
 	const stack = [root];
 	while (stack.length) {
 		const dir = stack.pop()!;
 		for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
 			if (dir === root && e.name === ".git") continue;
-			if (++seen > CLEANUP_WALK_MAX) return "checkout is too large to verify";
+			if (++seen > max) return `${limits.hardLinks ? "artifact folder" : "checkout"} is too large to verify (over ${max.toLocaleString("en-US")} entries)`;
 			const full = path.join(dir, e.name);
 			if (e.isSymbolicLink()) return "checkout contains a link";
 			if (e.name === ".git" || (dir === root && e.name === ".gitmodules")) return "checkout contains a nested repository or submodule";
 			if (e.isDirectory() && skipped && BUILD_DIRS.has(e.name)) skipped.push(path.relative(root, full).replace(/\\/g, "/"));
 			else if (e.isDirectory()) stack.push(full);
-			else if (!e.isFile() || fs.lstatSync(full).nlink !== 1) return "checkout contains a hard link or special file";
+			else if (!e.isFile()) return "checkout contains a special file";
+			else if (!limits.hardLinks && fs.lstatSync(full).nlink !== 1) return "checkout contains a hard link or special file";
 		}
 	}
 	return undefined;
@@ -2003,27 +2022,42 @@ export function verifyArtifactCleanup(a: ArtifactCleanup): string | undefined {
 		const st = fs.lstatSync(a.path);
 		if (!st.isDirectory() || st.isSymbolicLink()) return "artifact folder is not a plain directory";
 		if (normPath(slashed(fs.realpathSync.native(a.path))) !== normPath(a.path)) return "artifact folder is an alias or link";
-		return walkCheckout(a.path);
+		return walkCheckout(a.path, undefined, { max: ARTIFACT_WALK_MAX, hardLinks: true });
 	} catch {
 		return "artifact folder state could not be read";
 	}
 }
 
 // Child guard: exact form, only DESTRUCTIVE_FS, cwd is the primary and outside the folder, entry present and fresh, live proof holds. Consumes the entry.
-function artifactCleanupAllows(store: GrantStore, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive): boolean {
-	if (decision.op.kind !== "shell" || decision.rules.length !== 1 || decision.rules[0] !== "DESTRUCTIVE_FS") return false;
+// Field report: an approved plain-branch cleanup had both folder removals refused as "This worker was launched with no approved
+// operations", which hid the actual reason. A removal of a folder in the scope now gets that reason: the form, the folder, the expiry
+// or the live check that failed. Anything else falls through to the ordinary refusal.
+function artifactCleanupDecision(store: GrantStore, decision: Extract<Decision, { action: "block" }>, live: DeliveryLive): { allowed: true } | { allowed: false; reason?: string } {
+	if (decision.op.kind !== "shell" || !decision.rules.includes("DESTRUCTIVE_FS")) return { allowed: false };
+	const scoped = store.artifactScope?.() ?? [];
+	if (!scoped.length) return { allowed: false };
+	const named = scoped.find((a) => decision.op.kind === "shell" && normPath(slashed(decision.op.command)).includes(normPath(a.path)));
 	const target = parseArtifactRemoval(decision.op.command);
-	if (!target) return false;
+	if (!target || decision.rules.length !== 1) {
+		return named ? { allowed: false, reason: `this removes an artifact folder of the approved cleanup, but not in an accepted form: run exactly rm -rf "${named.path}" (bash) or Remove-Item -LiteralPath "${named.path}" -Recurse -Force (PowerShell), one folder per command, with cwd = ${named.primary}` } : { allowed: false };
+	}
 	try {
 		const entry = store.takeArtifactCleanup(target);
-		if (!entry) return false;
+		if (!entry) {
+			const known = scoped.find((a) => normPath(a.path) === normPath(target));
+			if (!known) return { allowed: false, reason: `the approved cleanup covers only ${scoped.map((a) => a.path).join(" and ")}; this folder is not one of them` };
+			return { allowed: false, reason: known.used ? "this folder's cleanup was already used" : `the cleanup approval for this folder expired (${CLEANUP_TTL_MS / 60_000} minutes after main approved it); ask main to launch the cleanup again` };
+		}
 		const fresh = (live.now?.() ?? Date.now()) - entry.issuedAt <= CLEANUP_TTL_MS;
 		const placed = normPath(decision.op.cwd) === normPath(entry.primary) && !overlaps(decision.op.cwd, entry.path);
-		if (fresh && placed && verifyArtifactCleanup(entry) === undefined) return true;
+		const why = !fresh ? `the cleanup approval for this folder expired (${CLEANUP_TTL_MS / 60_000} minutes after main approved it); ask main to launch the cleanup again`
+			: !placed ? `run it with cwd = the primary checkout ${entry.primary}, outside the folder`
+			: verifyArtifactCleanup(entry);
+		if (why === undefined) { store.markArtifactUsed?.(target); return { allowed: true }; }
 		store.addArtifactCleanup([entry]); // a refused attempt consumes nothing
-		return false;
+		return { allowed: false, reason: `${why}; the folder was not removed` };
 	} catch {
-		return false;
+		return { allowed: false, reason: "the folder's state could not be read; the folder was not removed" };
 	}
 }
 
@@ -2902,7 +2936,9 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 	if (guard.scope === "child" && guard.gateCommits === true && leasedCommit(guard.store, decision, liveUrl)) return undefined;
 	if (guard.scope === "child" && deliveryAllows(guard.store, decision, live)) return undefined;
 	if (guard.scope === "child" && cleanupAllows(guard.store, decision, live)) return undefined;
-	if (guard.scope === "child" && artifactCleanupAllows(guard.store, decision, live)) return undefined;
+	const artifact = guard.scope === "child" ? artifactCleanupDecision(guard.store, decision, live) : { allowed: false as const };
+	if (artifact.allowed) return undefined;
+	if ("reason" in artifact && artifact.reason) return { block: true, reason: `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: cleanup folder removal; ${artifact.reason}.` };
 	// User allow rules: only what an operator could approve anyway, and never merge or release (they keep their own action grants).
 	if (decision.grantable && decision.op.kind === "shell" && !isMergeOrRelease(decision.op.command) && loadPermissions(guard.agentDir).allow.some((p) => permissionMatches(p, (decision.op as { command: string }).command))) return undefined;
 	const miss = decision.grantable ? guard.store.grantMiss?.(guard.scope, canonicalCwd(cwd), decision.op) : undefined;

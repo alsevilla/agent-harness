@@ -77,7 +77,7 @@ function meter() {
 
 function replay(scenario, shaped, model) {
   const history = [], m = meter(), dedupe = createReadDedupe(), ledger = createExecutionLedger();
-  const fold = createMainFold(50_000, (file) => /^\/simulation\/report-\d+\/REPORT\.md$/.test(file));
+  const fold = createMainFold(50_000, (file) => /^\/simulation\/_evidence\/report-\d+\/REPORT\.md$/.test(file));
   const policy = workerMaskPolicy({ provider: PROVIDER, id: model.id }, {});
   let masked = false;
   function request() {
@@ -102,7 +102,7 @@ function replay(scenario, shaped, model) {
     let tool, args, body;
     if (scenario.kind === 'main') {
       tool = 'subagent'; args = { task: `task-${i}` };
-      body = `STATUS: PASS completed\nNEXT: done\nRISKS: none\nEVIDENCE: /simulation/report-${i}/REPORT.md\n` + fill(`Evidence ${i}`, 1450);
+      body = `STATUS: PASS completed\nNEXT: done\nRISKS: none\nEVIDENCE: /simulation/_evidence/report-${i}/REPORT.md\n` + fill(`Evidence ${i}`, 1450);
     } else {
       tool = scenario.name === 'long-worker' && i % 2 ? 'bash' : 'read';
       args = tool === 'bash' ? { command: `npm run check-${i}` } : { path: `/simulation/file-${scenario.name === 'repeated-reads' ? i % 5 : i}.ts` };
