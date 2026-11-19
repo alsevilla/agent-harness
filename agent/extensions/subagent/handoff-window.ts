@@ -12,6 +12,8 @@
 // Main's own large tool outputs (read, bash, grep, find, ls) get the same treatment: the newest `window` stay word for word,
 // older ones are masked in whole batches by a one-line stub naming the tool and its file or command. Errors and short
 // outputs are never masked. Plain masking, not summarization: it saves tokens without a model call or a guessed digest.
+import { lstatSync } from "node:fs";
+import { basename, isAbsolute } from "node:path";
 import { stoppedJobsCardPart, type StoppedJob } from "./stopped-jobs.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -401,7 +403,7 @@ export function createCardTrail() {
 // STATUS/NEXT/EVIDENCE lines, and main's last reply in each turn; the last exchange
 // before the fold keeps more of main's reply. Folds happen only when no job runs and no decision or stopped-job note waits (the state
 // card is empty), only when the request starts a new user turn, and only once main's request reaches PI_SUBAGENT_MAIN_FOLD_TOKENS
-// (default 50k; 0 off) or /subagent fold asked for one. Only user messages are kept alongside the checkpoint, so the kept part holds no
+// (default 50k; 0 off), safe to fold at half that size, or /subagent fold asked for one. The kept part holds no
 // earlier assistant turn whose thinking would no longer match the history before it. The checkpoint and fold point stay fixed, so later
 // requests extend the cached prefix; a later fold adds to the same checkpoint. The saved session is never changed. Its selected
 // branch is the durable source of user messages across native compaction and reload; no separate archive can leak another branch.
@@ -479,19 +481,31 @@ function renderCheckpoint(entries: string[]): string {
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;
 }
-/** Every result from `from` to the latest user message is finished: PASS, no risks, and an EVIDENCE path to reread; at least one. */
-function finishedSince(history: readonly Message[], from: number): boolean {
-	let any = false;
-	for (let i = from; i < history.length - 1; i++) {
-		const handoff = handoffOf(history[i], i);
-		if (!handoff) continue;
-		const f = handoff.fields;
-		if (!settledPass(f) || !f.evidence.some((e) => e.trim() && !/^none\.?$/i.test(e.trim()))) return false;
-		any = true;
-	}
-	return any;
+function reportExists(file: string): boolean {
+	// Worker text is untrusted. Probe only local report paths, never read file contents.
+	if (!isAbsolute(file) || /^[\\/]{2}/.test(file) || basename(file) !== "REPORT.md") return false;
+	try { return lstatSync(file, { throwIfNoEntry: false })?.isFile() === true; } catch { return false; }
 }
-export function createMainFold(threshold: number) {
+
+function recoverablePass(handoff: Handoff | undefined, exists: (file: string) => boolean): boolean {
+	if (!handoff) return false;
+	const f = handoff.fields;
+	return settledPass(f) && f.risks.length === f.status.length && f.evidence.length === f.status.length
+		&& f.evidence.every((file) => clip(file) === file && exists(file));
+}
+
+/** The window parser skips errors and partial notices. Folding must account for them separately. */
+function workerResult(message: Message, resultCalls: ReadonlySet<unknown>): boolean {
+	if (message.role === "custom") return message.customType === COMPLETION_TYPE;
+	if (message.role !== "toolResult") return false;
+	if (message.toolName === "subagent_control") {
+		return resultCalls.has(message.toolCallId) || handoffOf(message, 0) !== undefined;
+	}
+	if (message.toolName !== "subagent") return false;
+	return message.isError === true || message.details?.background !== true || message.details?.results?.length > 0;
+}
+
+export function createMainFold(threshold: number, exists = reportExists) {
 	let stamp: unknown; // the timestamp of the user message the fold keeps; set once folded
 	let summaryStamp: unknown; // native compaction or branch summaries must reset a fold even when branch recovery restores its anchor
 	let folded = false;
@@ -520,35 +534,42 @@ export function createMainFold(threshold: number) {
 			const prefixBefore = (end: number) => summaries.filter((m) => view.indexOf(m) < end);
 			let current: T[] = folded ? [...prefixBefore(point), message() as unknown as T, ...users as T[], ...view.slice(point)] : view.slice();
 			const last = history[history.length - 1];
-			// Fold finished work early (after CWL, arXiv 2606.11213, and Spine, arXiv 2610.37224: drop first the steps whose results are
-			// already persisted; keep user turns and unfinished work). When every result since the fold point is finished (PASS, no
-			// risks, a report path on disk to reread), the fold is due at half the threshold.
-			const size = estimateTokens(current);
-			const sinceFold = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
-			const trigger = threshold > 0 && size >= threshold ? threshold : threshold > 0 && size >= threshold / 2 && finishedSince(history, sinceFold) ? threshold / 2 : 0;
-			const due = asked || trigger > 0;
 			const at = last?.role === "user" ? view.lastIndexOf(last as T) : -1;
-			if (idle && due && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
-				// The notes come from the saved messages (whole results, before any request-only shortening), from the previous fold point.
+			if (idle && at > (folded ? point : 0) && typeof last?.timestamp === "number") {
+				const size = estimateTokens(current);
+				if (!asked && (threshold <= 0 || size < threshold / 2)) return folded ? current : undefined;
 				const from = folded ? Math.max(0, history.findIndex((m) => m?.role === "user" && m.timestamp === stamp)) : 0;
-				const nextEntries = [...entries, ...renderTurns(turnsOf(history.slice(from, history.length - 1)))];
-				// Reported risks are not recoverable observations: retain them in full outside the notes cap. So is unfinished work: a
-				// result whose STATUS is not PASS keeps its STATUS, NEXT and EVIDENCE in full there too.
-				const risks = history.slice(0, -1).flatMap((m, i) => {
+				const earlier = history.slice(0, -1);
+				const resultCalls = new Set(earlier.flatMap((m) => m.role === "assistant" && Array.isArray(m.content)
+					? m.content.filter((p) => p.type === "toolCall" && typeof p.id === "string" && p.name === "subagent_control" && p.arguments?.action === "result").map((p) => p.id)
+					: []));
+				const results = earlier.flatMap((m, i) => {
+					if (!workerResult(m, resultCalls)) return [];
 					const handoff = handoffOf(m, i);
-					if (!handoff) return [];
-					const f = handoff.fields;
-					const open = f.status.every(isPass) ? [] : [`[unfinished worker result: ${handoff.label}] STATUS: ${f.status.join(" ; ")} | NEXT: ${f.next.join(" ; ") || "not supplied"} | EVIDENCE: ${f.evidence.join(" ; ") || "not supplied"}`];
-					return [...open, ...f.risks.filter((risk) => !noRisk(risk)).map((risk) =>
-						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${f.evidence.join(" ; ") || "not supplied"}`)];
+					return [{ m, i, handoff, recoverable: recoverablePass(handoff, exists) }];
 				});
-				const nextCheckpoint = [renderCheckpoint(nextEntries), ...risks].join("\n");
-				const nextUsers = history.slice(0, history.length - 1).filter((m) => m?.role === "user").map(retainUserMessage);
+				const olderUsers = earlier.filter((m) => m.role === "user");
+				const nextUsers = olderUsers.map(retainUserMessage);
+				const early = !asked && size < threshold;
+				if (early && (nextUsers.some((m, i) => m !== olderUsers[i])
+					|| !results.some(({ i }) => i >= from)
+					|| results.some(({ i, recoverable }) => i >= from && !recoverable))) return folded ? current : undefined;
+				const nextEntries = [...entries, ...renderTurns(turnsOf(earlier.slice(from)))];
+				// Unfinished results and reported risks stay outside the recoverable notes cap.
+				const kept = results.flatMap(({ m, handoff, recoverable }) => {
+					const risks = handoff ? handoff.fields.risks.filter((risk) => !noRisk(risk)).map((risk) =>
+						`[reported worker risk: ${handoff.label}] RISKS: ${risk} | EVIDENCE: ${handoff.fields.evidence.join(" ; ") || "not supplied"}`) : [];
+					if (recoverable) return risks;
+					const label = handoff?.label ?? m.toolName ?? "background completion";
+					const body = textOf(m.content) ?? JSON.stringify(m.content);
+					return [`[unfinished worker result: ${label}]\n${body}`, ...risks];
+				});
+				const nextCheckpoint = [renderCheckpoint(nextEntries), ...kept].join("\n");
 				const candidate = [...prefixBefore(at), { role: "custom", customType: CHECKPOINT_TYPE, content: nextCheckpoint, display: false, timestamp: last!.timestamp } as unknown as T, ...nextUsers as T[], ...view.slice(at)];
 				// Fold only when it pays: every fold rewrites the cache from the checkpoint on, so a fold that saves little (once the kept
 				// part - native summaries, retained user messages - is itself near the threshold) costs more than it saves. A simulated
 				// paste-heavy session folded on 63 of 120 user turns at a 23% cache hit before this check. /subagent fold always folds.
-				if (asked || size - estimateTokens(candidate) >= trigger / 2) {
+				if (asked || size - estimateTokens(candidate) >= (early ? threshold / 4 : threshold / 2)) {
 					entries = nextEntries; checkpoint = nextCheckpoint; users = nextUsers;
 					stamp = last!.timestamp; folded = true; asked = false;
 					current = [...prefixBefore(at), message() as unknown as T, ...users as T[], ...view.slice(at)];
@@ -567,12 +588,12 @@ export function requestMainFold(): string {
 }
 
 /** Main session only in practice: leaves have no subagent tool, so their requests contain nothing to collapse. */
-export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined): number {
+export function registerHandoffWindow(pi: Pick<ExtensionAPI, "on">, env: NodeJS.ProcessEnv = process.env, state?: () => string | undefined, exists = reportExists): number {
 	const window = handoffWindowFromEnv(env);
 	if (window === 0 && !state) return 0; // off and no state card: no handler, today's behavior exactly
 	const trail = createCardTrail();
 	const foldAt = mainFoldFromEnv(env);
-	const fold = state && foldAt > 0 ? createMainFold(foldAt) : undefined;
+	const fold = state && foldAt > 0 ? createMainFold(foldAt, exists) : undefined;
 	activeFold = fold;
 	pi.on("context", (event, ctx) => {
 		// Native compaction only changes the built context; getBranch still contains the original

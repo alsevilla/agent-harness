@@ -1,8 +1,12 @@
 // Main checkpoints: at an idle task boundary main's earlier turns are folded into one checkpoint built from the messages (no model call),
 // so a long session stops carrying its whole history (field report: main at 348k tokens, 478 requests averaging ~159k, visibly slower).
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { formatCompletionNotice } from "../compact-handoff.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHECKPOINT_TYPE, DEFAULT_MAIN_FOLD_TOKENS, MAIN_FOLD_ENV, mainFoldFromEnv, registerHandoffWindow, requestMainFold, STATE_CARD_TYPE } from "../handoff-window.ts";
+import { CHECKPOINT_TYPE, DEFAULT_MAIN_FOLD_TOKENS, estimateTokens, MAIN_FOLD_ENV, mainFoldFromEnv, registerHandoffWindow, requestMainFold, STATE_CARD_TYPE } from "../handoff-window.ts";
 
 type Msg = Record<string, any>;
 let clock = 0;
@@ -11,9 +15,10 @@ const reply = (text: string, call?: string): Msg => ({ role: "assistant", conten
 const result = (call: string, n: number, size = 9000): Msg => ({ role: "toolResult", toolName: "subagent", toolCallId: call, content: [{ type: "text", text: `STATUS: PASS - task ${n} done\nNEXT: open the PR\nRISKS: none\nEVIDENCE: _evidence/t${n}/REPORT.md\n${"detail ".repeat(size / 7)}` }], details: { results: [{ agent: "backend-worker" }] }, timestamp: ++clock });
 const turn = (n: number): Msg[] => [user(`Task ${n}: please pace the SMS sender (rule: never push to master)`), reply(`Launching backend-worker for task ${n}.`, `c${n}`), result(`c${n}`, n), reply(`Task ${n} is done; PR #${100 + n} is open.`)];
 
-function setup(env: Record<string, string>, card: () => string | undefined = () => undefined) {
+function setup(env: Record<string, string>, card: () => string | undefined = () => undefined,
+	exists: ((file: string) => boolean) | null = (file) => /^_evidence\/t\d+\/REPORT\.md$/.test(file)) {
 	const handlers = new Map<string, (event: unknown) => any>();
-	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, env, card);
+	registerHandoffWindow({ on: (name: string, fn: any) => handlers.set(name, fn) } as never, env, card, exists ?? undefined);
 	return async (messages: Msg[]) => ((await handlers.get("context")!({ messages: [...messages] }))?.messages ?? messages) as Msg[];
 }
 
@@ -329,5 +334,59 @@ test("finished work folds at half the threshold; an unfinished result keeps the 
 	big.push(user("continue"));
 	const folded = await setup({ [MAIN_FOLD_ENV]: "25000" })(big);
 	assert.equal(folded[0].customType, CHECKPOINT_TYPE, "past the full threshold it folds as before");
-	assert.match(String(folded[0].content), /\[unfinished worker result: subagent[^\]]*\] STATUS: FAIL - A7 keyboard check failed \| NEXT: fix focus order \| EVIDENCE: _evidence\/a7\/REPORT\.md/, "unfinished work is kept in full");
+	assert.match(String(folded[0].content), /\[unfinished worker result: subagent[^\]]*\]\nSTATUS: FAIL - A7 keyboard check failed\nNEXT: fix focus order\nRISKS: none\nEVIDENCE: _evidence\/a7\/REPORT\.md/, "unfinished work is kept in full");
+});
+
+
+test("early fold requires an existing report and preserves long user text until the regular threshold", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "fold-reports-"));
+	try {
+		const report = join(dir, "REPORT.md");
+		const timeline = (evidence: string, opener = user("Inspect the queue")) => [
+			opener, ...Array.from({ length: 7 }, (_, i) => {
+				const item = result(`c${i}`, i);
+				item.content[0].text = item.content[0].text.replace(/EVIDENCE: [^\n]*/, `EVIDENCE: ${evidence}`);
+				return item;
+			}), user("continue"),
+		];
+		const request = () => setup({ [MAIN_FOLD_ENV]: "25000" }, () => undefined, null);
+		const folded = (messages: Msg[]) => messages.some((m) => m.customType === CHECKPOINT_TYPE);
+		const valid = timeline(report);
+		assert.ok(estimateTokens(valid) > 12_500 && estimateTokens(valid) < 25_000);
+		assert.equal(folded(await request()(valid)), false, "a named but missing report is not recoverable");
+		writeFileSync(report, "Recorded findings");
+		assert.equal(folded(await request()(valid)), true, "a real report enables early folding");
+		const source = join(dir, "queue.ts");
+		writeFileSync(source, "export const queue = [];");
+		for (const evidence of [source, `${source}:1`]) {
+			const history = timeline(evidence);
+			assert.deepEqual(await request()(history), history, "a source file cannot recover the handoff");
+		}
+		const hold = "Do not publish the PR until I approve.";
+		const history = timeline(report, user("x".repeat(2500) + hold + "x".repeat(2500)));
+		assert.ok(estimateTokens(history) < 25_000);
+		assert.deepEqual(await request()(history), history, "the early fold must not cut a user message");
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("foreground errors and failed or partial notices block early folding and survive later folds", async () => {
+	const failure = "STATUS: FAIL - required check failed\nNEXT: fix\nRISKS: none\nEVIDENCE: none\nDetailed failure: focus order changed.";
+	const error = { ...result("failed", 8), isError: true, content: [{ type: "text", text: failure }] };
+	const notice = (state: string, text: string) => ({
+		role: "custom", customType: "subagent-completion", timestamp: ++clock,
+		content: formatCompletionNotice({ job: "bg-8", state, workers: ["test-engineer"], target: "bg-8@test", text }),
+	});
+	for (const message of [error, notice("failed", failure), notice("completed", failure + " details".repeat(1000))]) {
+		const request = setup({ [MAIN_FOLD_ENV]: "25000" });
+		const history = [user("begin"), ...Array.from({ length: 7 }, (_, i) => result(`c${i}`, i)), message, user("continue")];
+		assert.ok(estimateTokens(history) > 12_500 && estimateTokens(history) < 25_000);
+		assert.deepEqual(await request(history), history, "unfinished work blocks the early fold");
+		for (let round = 0; round < 2; round++) {
+			history.push(reply("old output ".repeat(12_000)), user("next"));
+			const messages = await request(history);
+			const checkpoint = messages.find((m) => m.customType === CHECKPOINT_TYPE);
+			assert.ok(checkpoint, "the larger request still folds");
+			assert.ok(String(checkpoint.content).includes(typeof message.content === "string" ? message.content : failure), "the worker output survives intact");
+		}
+	}
 });

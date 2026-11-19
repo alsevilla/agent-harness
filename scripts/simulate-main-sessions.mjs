@@ -1,6 +1,6 @@
 // Long main sessions: a seeded synthetic session of 150, 300 and 480 requests (user messages, subagent PASS results with long reports,
 // main's own reads and shell output) priced three ways: no shaping, older-result shortening alone, and the full main shaping
-// (shortening in batches of ten plus checkpoint folding at 50k) through the production context hook. Same Anthropic-style cache model as
+// (shortening in batches of ten plus checkpoint folding at half or all of 50k) through the production context hook. Fixture report paths model persisted reports. Same Anthropic-style cache model as
 // simulate-pi-shaping.mjs, at Opus 5.5 cache prices (read 0.05x, write 1.25x of input). Offline; no Pi host, model or network.
 // Run: npm run simulate:main > docs/simulations/main-sessions-results.json
 import { createHash } from "node:crypto";
@@ -39,7 +39,7 @@ function session(turns) {
 function run(requests, arm) {
 	const full = session(requests - 1); // the first request is the opening user message; each step adds one more
 	let hook;
-	if (arm === "full") registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined);
+	if (arm === "full") registerHandoffWindow({ on: (_, fn) => { hook = fn; } }, { PI_SUBAGENT_HANDOFF_WINDOW: "10", PI_SUBAGENT_MAIN_FOLD_TOKENS: "50000" }, () => undefined, (file) => /^_evidence\/run\d+\.md$/.test(file));
 	const entries = new Set();
 	let cost = 0, read = 0, write = 0, last = 0, sysCached = false;
 	const cut = []; full.forEach((m, i) => { if (m.role !== "assistant") cut.push(i + 1); }); // request k sees the history up to its k-th step

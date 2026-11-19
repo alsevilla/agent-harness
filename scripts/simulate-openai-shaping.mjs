@@ -77,7 +77,7 @@ function meter() {
 
 function replay(scenario, shaped, model) {
   const history = [], m = meter(), dedupe = createReadDedupe(), ledger = createExecutionLedger();
-  const fold = createMainFold(50_000);
+  const fold = createMainFold(50_000, (file) => /^\/simulation\/report-\d+\.md$/.test(file));
   const policy = workerMaskPolicy({ provider: PROVIDER, id: model.id }, {});
   let masked = false;
   function request() {
