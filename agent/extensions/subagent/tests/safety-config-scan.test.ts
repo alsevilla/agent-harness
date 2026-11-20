@@ -286,7 +286,7 @@ test("candidate declared defaults equal the independent approved-preset oracle f
 	assert.deepEqual({ model: writer.model, thinking: writer.thinking, tools: writer.tools }, { model: "anthropic/claude-haiku-5-5", thinking: "medium", tools: "read, grep, find, ls, bash, powershell, edit" }, "technical-writer default declaration");
 	// User-approved 2026-11-20: planner and architecture-specialist merged into system-architect; its default (economy) tier runs at
 	// medium thinking, the planner's level. The frozen fixture keeps the old name.
-	const renamed: Record<string, { name: string; thinking?: string }> = { "architecture-specialist": { name: "system-architect", thinking: "medium" }, "test-engineer": { name: "qa-engineer" }, reviewer: { name: "code-reviewer" } };
+	const renamed: Record<string, { name: string; thinking?: string }> = { "architecture-specialist": { name: "system-architect", thinking: "medium" }, "test-engineer": { name: "qa-engineer" }, reviewer: { name: "code-reviewer" }, debugger: { name: "diagnostic-engineer" } };
 	assert.ok(!declared.has("planner") && !declared.has("architecture-specialist"));
 	for (const role of golden.roles) {
 		const d = declared.get(renamed[role.name]?.name ?? role.name);

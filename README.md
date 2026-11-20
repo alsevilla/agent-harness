@@ -110,7 +110,7 @@ The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/
 
 ## Roles
 
-The native package exposes 21 roles. If you customized the former `debugger` role, rename its override and direct calls to `diagnostic-engineer`. T2 shapes still accept `packets.debugger`.
+The native package exposes these 21 generic roles. If you customized the former `debugger` role, rename its override and direct calls to `diagnostic-engineer`. T2 shapes still accept `packets.debugger`.
 
 | Kind | Roles |
 | --- | --- |

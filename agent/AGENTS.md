@@ -1,6 +1,6 @@
 # Engineering harness policy
 
-User instructions and confirmed project requirements govern the work. Resolve material conflicts from authoritative evidence. Skill references supply procedures; historical catalogs cannot add universal gates or override this policy. Step detail: harness `references/policy-detail.md`; read only the section a step names, when it applies.
+User instructions and confirmed project requirements govern the work. Resolve material conflicts from authoritative evidence. Skill references supply procedures; historical catalogs cannot add universal gates or override this policy. Read only the applicable named section of `references/policy-detail.md`.
 
 Hosts: Pi's actual named `subagent` calls, tools, control and model registry remain Pi-native. Copilot CLI may use only runtime-reported native custom-agent/task dispatch and question tools when available, and reads "Hosts and loading" first. Never impersonate built-ins, substitute named roles, invent JSON schemas/job APIs, or prompt-emulate Pi-only controls. Missing required capability blocks only the affected workflow step, not unrelated work.
 
