@@ -110,7 +110,7 @@ The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/
 
 ## Roles
 
-The native package exposes these 21 generic roles. If you customized the former `debugger` role, rename its override and direct calls to `diagnostic-engineer`. T2 shapes still accept `packets.debugger`.
+The native package exposes these 21 generic roles. Version 1.23.0 renamed several of them (see its release notes): move any `roles.json` overrides and direct calls to the names below. Shape packet keys are unchanged, except T3's first step, now `architect`.
 
 | Kind | Roles |
 | --- | --- |
@@ -208,7 +208,7 @@ Where the harness cost goes, for the whole session:
 | Main model | Main | Complex implementation (capable tier) | Economy-tier workers |
 | --- | --- | --- | --- |
 | Claude Fable 5.1 | $3.11 (68%) | $1.36 (30%) | $0.12 (3%) |
-| Claude Opus 5.5 | $1.36 (48%) | $1.36 (48%) | $0.12 (4%) |
+| Claude Opus 5.5 | $1.37 (48%) | $1.36 (48%) | $0.12 (4%) |
 | Claude Sonnet 5.5 | $0.80 (35%) | $1.36 (60%) | $0.12 (5%) |
 | Claude Haiku 5.5 | $0.04 (3%) | $1.36 (89%) | $0.12 (8%) |
 | GPT-6 Astra | $4.01 (77%) | $1.05 (20%) | $0.12 (2%) |
@@ -220,7 +220,7 @@ The economy-tier workers cost almost nothing. The bill is main reading results a
 
 Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.4M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna (Haiku's long session pays its 5x price above 100k tokens).
 
-Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 39-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
+Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 40-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
 
 The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 18% and 62%); under Sonnet 5.5 and Sol it is cheaper up to eight (7% and 6%) and more expensive at twelve (11% and 13%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 57% under Fable, 41% under Opus, 24% under Sonnet, 68% under Astra, 20% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 

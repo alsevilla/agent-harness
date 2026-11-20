@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { foldCase } from "./path-case.ts";
 
 /** sha256 of the reviewed canonical agent/AGENTS.md after CRLF->LF only (no trim, BOM strip or case folding). A policy edit must update this and the coverage manifest in tests/child-context.test.ts. */
-export const REVIEWED_POLICY_SHA256 = "e7de919706e4b0f29d94b4aef52f6fd8a30b44fbb42bfdfc67465d95cad9efe4";
+export const REVIEWED_POLICY_SHA256 = "6611b5d3d680203a5928622ac96e754ec69c980b6d26e8ceb198f5a18d1f4c9a";
 
 export const COMPACT_LEAF_CONTRACT = `# Pi leaf contract
 

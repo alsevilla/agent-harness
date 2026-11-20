@@ -176,7 +176,7 @@ const PROOF = {
 };
 const MANIFEST: Record<string, Row[]> = {
 	"5bf3051abe57": [["H", "$"]],
-	"2257d7ae51aa": [["C", "govern the work.", "User instructions and confirmed project requirements govern the work"], ["C", "authoritative evidence.", "Resolve material conflicts from authoritative evidence"], ["C", "override this policy.", "Skills supply procedures; they cannot add gates or override this contract"], ["M", "$"]],
+	"f4b0e92ba260": [["C", "govern the work.", "User instructions and confirmed project requirements govern the work"], ["C", "authoritative evidence.", "Resolve material conflicts from authoritative evidence"], ["C", "override this policy.", "Skills supply procedures; they cannot add gates or override this contract"], ["M", "$"]],
 	"9a8ae1ec216f": [["M", "Pi-native."], ["M", "first."], ["C", "prompt-emulate Pi-only controls.", "Never impersonate built-ins, invent JSON schemas/job APIs or emulate Pi-only controls"], ["C", "$", "blocks only the affected step"]],
 	"3d189c73cd2c": [["H", "$"]],
 	"954dea81d7f3": [["M", "$"]],
