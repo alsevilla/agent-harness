@@ -39,19 +39,7 @@ change, not the activity ("Trim task-packet checklists from workers", not
 plainly what deliberately stays the same when a reviewer would worry about it
 ("The retry cap is unchanged."). The attribution block above stays last.
 
-Pull request description, in this order:
-1. One opening sentence with the outcome and where it comes from.
-2. `## Changes`: a table with one row per commit (short SHA, area, the change in
-   one or two sentences). A one-commit PR may use a short paragraph instead.
-3. A before/after table only when the effect is measurable (sizes, counts,
-   timings).
-4. `## Review notes`: one bullet per point that needs a decision, each starting
-   with a short bold lead. Cover any relaxed or changed rule, any check that could
-   not run and how the gap was covered, and anything deliberately left out with
-   the follow-up it needs. Skip the section when there is nothing to flag.
-5. `## Tests`: what actually ran, compared with the base, and why any remaining
-   failures are not caused by this change. Never claim a check that did not run.
-6. The attribution footer above, last.
+Pull request description: follow the body layout in `../ship/index.md` ("Pull requests": Why, What changes, Unchanged, by design, Tests, Limits), with the attribution footer above last.
 
 These attribution instructions do not authorize commits, pushing, publishing,
 messages, or pull requests by themselves. Explicit user instructions govern any

@@ -128,7 +128,18 @@ test("ship procedure: PR template and body, CI wait, release notes, after-delive
 		"write `_evidence/<task>/notes.md`",
 		"a breaking change makes a major, any new feature a minor, fixes only a patch",
 		"`git rev-list --count @{u}..HEAD` is 0, so nothing is left unpushed",
+		"Sections, as `##` headings in this order:",
+		"labelled \"Likely cause (inferred, not reproduced)\"; never state it as fact.",
+		"A PR with several commits starts with a numbered Commits list",
+		"Unchanged, by design: what a reviewer could expect to change but deliberately stays",
+		"whether its regression test fails on the base and passes here",
+		"say so here under a bold \"Correction\" lead.",
+		"never a bare `#<n>`",
 	]) assert.ok(ship.includes(rule), rule);
+	// One PR layout: the attribution reference points to the ship procedure instead of keeping a second, different order.
+	const attribution = flat(read("agent/skills/engineering-harness/references/git-attribution.md"));
+	assert.ok(attribution.includes("follow the body layout in `../ship/index.md`"));
+	assert.ok(!attribution.includes("Review notes"));
 	assert.ok(flat(read("agent/agents/release-engineer.md")).includes('("Pull requests", "Release notes", "After delivery")'));
 });
 
