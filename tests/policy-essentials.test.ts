@@ -330,7 +330,7 @@ test("role names match their duties: complete descriptions, workers are workers,
 	for (const worker of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) {
 		assert.match(read(`agent/agents/${worker}.md`), /^You are the [a-z]+ implementation worker\b/m, `${worker}: introduces itself as a worker, not a specialist`);
 	}
-	assert.match(read("agent/agents/debugger.md"), /^You are the debugger\./m);
+	assert.match(read("agent/agents/debugger.md"), /^You are the diagnostics engineer\./m);
 	const general = flat(read("agent/agents/general-worker.md"));
 	assert.ok(general.includes("Project documentation belongs to technical-writer") && !/\bdocs and config\b/.test(general), "general-worker: docs go to technical-writer");
 	assert.ok(flat(read("agent/AGENTS.md")).includes("technical-writer for docs and LEARN records"));

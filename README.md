@@ -115,14 +115,16 @@ The native package exposes these 21 generic roles:
 | Kind | Roles |
 | --- | --- |
 | Implementation (write code) | `backend-worker`, `frontend-worker`, `database-worker`, `platform-worker`, `general-worker` |
-| Diagnosis and checks (read-only for the code; `qa-engineer` and `code-reviewer` write their report of findings with the `write` tool, outside the checkout) | `debugger`, `qa-engineer`, `code-reviewer`, `scout` |
+| Codebase reconnaissance | `scout` locates relevant files, callers and tests |
+| Root-cause diagnosis | `debugger` is the diagnostics engineer. It reproduces failures and hands the proposed fix to a worker. |
+| Independent checks | `qa-engineer` verifies behavior. `code-reviewer` reviews changes. Both write findings outside the checkout. |
 | Planning and architecture (read-only proposal; main owns the plan) | `system-architect` |
 | Specialists (read-only advice) | `api-specialist`, `concurrency-specialist`, `database-specialist`, `devops-specialist`, `observability-specialist`, `performance-specialist`, `security-specialist`, `ui-ux-specialist` |
 | Escalation | `oracle` |
 | Documentation (writes docs and LEARN records in the checkout; never code) | `technical-writer` |
 | Delivery | `release-engineer` |
 
-Roles that check work run on a different model family from the roles that write it, so they are less likely to share its blind spots: implementation workers run Claude first, `code-reviewer` and `qa-engineer` run GPT first, and `oracle` uses both. On Pi, `oracle` runs two passes on every launch: GPT-6.1 Sol answers, then Claude Opus 5.5 reviews that answer independently and gives the final one ([how](agent/extensions/subagent/README.md#two-pass-oracle)). Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json`; its prompt uses the same five sections (Knows/loads, Before starting, Workflow, Where to look, Common failures). User roles in your Pi agent directory and project roles in `.pi/agents/` override bundled ones (package < user < project).
+Roles that check work run on a different model family from the roles that write it, so they are less likely to share its blind spots: implementation workers run Claude first, `code-reviewer` and `qa-engineer` run GPT first, and `oracle` uses both. On Pi, `oracle` runs two passes on every launch: GPT-6.1 Sol answers, then Claude Opus 5.5 reviews that answer independently and gives the final one ([how](agent/extensions/subagent/README.md#two-pass-oracle)). Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json`; most role prompts use five sections (Knows/loads, Before starting, Workflow, Where to look, Common failures). User roles in your Pi agent directory and project roles in `.pi/agents/` override bundled ones (package < user < project).
 
 ## Safety and delivery
 
