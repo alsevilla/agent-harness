@@ -98,7 +98,7 @@ Pi-only, main-owned judgment. Add `modelSlot: "fallback"` to one entry (with an 
 Scenarios:
 - backend-worker: add one validated field to an existing endpoint whose schema and focused tests are named in the packet -> explicit economy.
 - frontend-worker: adjust presentational state of an existing component whose design is already approved and whose focused tests are named -> explicit economy.
-- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> explicit economy; security-sensitive automation -> explicit `capable` (also its default).
+- general-worker: bounded config or script edit whose seam and focused checks are named in the packet -> explicit economy; security-sensitive automation -> explicit `capable` (also its default).
 - backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; explicit `capable` (also its default, so omission runs capable too), the owning specialist first when a decision is open.
 - frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy.
 - frontend-worker: layout, spacing, alignment, overflow or responsive fix judged by how it renders -> no explicit economy (its default capable tier), with browser evidence when the task needs it; a fix that cannot be seen rendered is INCONCLUSIVE, not PASS.

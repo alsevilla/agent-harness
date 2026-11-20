@@ -74,7 +74,7 @@ test("LEARN saves one file per lesson in docs/knowledge, committed with the PR, 
 test("main chooses tiers at plan time and keeps a task's tier for its first fix round", () => {
 	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
 	assert.ok(routing.includes("decide each task's `modelTier` in the plan, before launching any"));
-	assert.ok(routing.includes("- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> explicit economy"));
+	assert.ok(routing.includes("- general-worker: bounded config or script edit whose seam and focused checks are named in the packet -> explicit economy"));
 	assert.ok(routing.includes("the fix round keeps the task's tier and passes the failed REPORT and the failing command output as they are"));
 	assert.ok(routing.includes("never an automatic upgrade"));
 	const main = flat(read("agent/extensions/subagent/index.ts"));
@@ -318,4 +318,21 @@ test("the five implementation workers carry the shared worker rules byte-for-byt
 	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url))) {
 		if (!WORKERS.includes(file.replace(/\.md$/, ""))) assert.ok(!read(`agent/agents/${file}`).includes(START), `${file}: not an implementation worker`);
 	}
+});
+
+// Name-to-duty audit: each role's description and opening line say the duty its name implies, and docs have one owner.
+test("role names match their duties: complete descriptions, workers are workers, docs belong to technical-writer", () => {
+	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url)).filter((f) => f.endsWith(".md"))) {
+		const description = read(`agent/agents/${file}`).split("\n").find((line) => line.startsWith("description: "))!;
+		assert.match(description, /[.)]$/, `${file}: description is a complete sentence`);
+		assert.doesNotMatch(description, /in the [a-z-]+ agent\b|read-only [a-z-]+ agent\./, `${file}: no self-reference to its own agent name`);
+	}
+	for (const worker of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) {
+		assert.match(read(`agent/agents/${worker}.md`), /^You are the [a-z]+ implementation worker\b/m, `${worker}: introduces itself as a worker, not a specialist`);
+	}
+	assert.match(read("agent/agents/debugger.md"), /^You are the debugger\./m);
+	const general = flat(read("agent/agents/general-worker.md"));
+	assert.ok(general.includes("Project documentation belongs to technical-writer") && !/\bdocs and config\b/.test(general), "general-worker: docs go to technical-writer");
+	assert.ok(flat(read("agent/AGENTS.md")).includes("technical-writer for docs and LEARN records"));
+	assert.match(read("agent/agents/devops-specialist.md").split("\n")[2], /containers, orchestrators and cloud services/);
 });

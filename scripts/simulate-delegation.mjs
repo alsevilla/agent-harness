@@ -47,9 +47,9 @@ const PI_SYSTEM = 7_271, MAIN_SYSTEM = 14_084 + readFileSync(new URL("../agent/A
 // Re-measured 2026-11-13 on v1.20.1 with measure-child-prompt.mjs, live/profile-checkout shape:
 // includes this repository's four saved lesson titles; lesson-body reads are not modeled.
 // v1.23.0: each figure plus that role's measured change against master, both measured 2026-11-20 the same way: backend-worker +266
-// (20,836 -> 21,102), debugger -606 (17,701 -> 17,095), qa-engineer (test-engineer on master) -608 (19,878 -> 19,270), and
+// (20,836 -> 21,102), debugger -616 (17,701 -> 17,085), qa-engineer (test-engineer on master) -608 (19,878 -> 19,270), and
 // system-architect (planner merged with architecture-specialist) +1,185 over the planner (16,325 -> 17,510).
-const CHILD_PROMPT = { "backend-worker": 20_104, debugger: 16_097, "system-architect": 16_512, "qa-engineer": 17_884 };
+const CHILD_PROMPT = { "backend-worker": 20_104, debugger: 16_087, "system-architect": 16_512, "qa-engineer": 17_884 };
 const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 // Per model call: assistant text kept in the history, and output tokens billed (text plus thinking, the same in every arm).
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;

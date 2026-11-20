@@ -187,7 +187,7 @@ const MANIFEST: Record<string, Row[]> = {
 	"f243dc23925a": [["M", "$"]],
 	"3f1d6278595a": [["M", "$"]],
 	"97bd86fb55e3": [["M", "$"]],
-	"9df3b0461e1b": [["M", "$"]],
+	"f29c93fe0fae": [["M", "$"]],
 	"aa2c382cc284": [["M", "candidate identity."], ["C", "main history.", "Leaves lack main history"], ["M", "$"]],
 	"af003d42d21f": [["M", "$"]],
 	"f204cdb7ec3c": [["M", "speculative patches."], ["C", "approach remains.", "2 review cycles per candidate"], ["C", "a fresh count;", PROOF.freshCount], ["C", "approval gate.", "the cap is no refusal of authorized work"], ["M", "$"]],

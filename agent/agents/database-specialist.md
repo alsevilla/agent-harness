@@ -1,6 +1,6 @@
 ---
 name: database-specialist
-description: Read-only specialist for relational and NoSQL database invariants and semantics,
+description: Read-only database specialist that decides the invariants and semantics a change must keep in relational and NoSQL engines, covering constraints, transactions and consistency, concurrent writers and retries, migrations of existing data, indexes and access patterns, durability and recovery.
 tools: read, search, execute
 ---
 

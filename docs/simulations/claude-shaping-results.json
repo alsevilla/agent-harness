@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "sourceCommit": "1273fc1c624539ea3cd556ca9d8abcc771311aca",
+  "sourceCommit": "597abd2a9c5b3eb3d028bfde6be29f86b08174ae",
   "sourceHashes": {
     "scripts/simulate-openai-shaping.mjs": "9d66cc0a04d94097a9ea3437e759b9efd61f27b9c549a064b374c4cbf5c5d13d",
     "agent/extensions/subagent/handoff-window.ts": "cf0bdda8eba9a7aa405fe5d153db0b4ad72a7ed4de30994bbbc3c16b6172b9db",

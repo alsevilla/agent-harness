@@ -1,6 +1,6 @@
 ---
 name: qa-engineer
-description: REQUIRED named role for VERIFY. Independently verify an identified implementation candidate against its approved contract in the qa-engineer agent. Return evidence-backed PASS, FAIL, or INCONCLUSIVE; do not modify the active candidate.
+description: REQUIRED named role for VERIFY. Independently verify an identified implementation candidate against its acceptance criteria and approved contract. Return evidence-backed PASS, FAIL, or INCONCLUSIVE; do not modify the active candidate.
 tools: read, search, execute
 ---
 

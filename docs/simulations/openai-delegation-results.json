@@ -4,7 +4,7 @@
   "cacheModel": "idealized warm complete-message prefixes; no expiry or cross-context reuse",
   "pricingDate": "2026-11-08",
   "pricingURL": "https://developers.openai.com/api/docs/pricing",
-  "sourceCommit": "4512b7003216a7101726282527f854b32f22a371",
+  "sourceCommit": "597abd2a9c5b3eb3d028bfde6be29f86b08174ae",
   "roleDefaults": {
     "backend-worker": "gpt-6.1-sol",
     "debugger": "gpt-6-luna",
@@ -155,7 +155,7 @@
     "MAIN_SYSTEM": 20772,
     "CHILD_PROMPT": {
       "backend-worker": 20104,
-      "debugger": 16097,
+      "debugger": 16087,
       "system-architect": 16512,
       "qa-engineer": 17884
     },
@@ -214,17 +214,17 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
-        "cost": 23.2909,
+        "cost": 23.2907,
         "byModel": {
-          "gpt-6-astra": 23.2909
+          "gpt-6-astra": 23.2907
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
         "cost": 5.1852,
         "byModel": {
@@ -258,17 +258,17 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
-        "cost": 3.8915,
+        "cost": 3.8914,
         "byModel": {
-          "gpt-6.1-sol": 3.8915
+          "gpt-6.1-sol": 3.8914
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
         "cost": 1.8558,
         "byModel": {
@@ -301,7 +301,7 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
         "cost": 1.9457,
         "byModel": {
@@ -311,7 +311,7 @@
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
         "cost": 1.5146,
         "byModel": {
@@ -345,7 +345,7 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
         "cost": 0.2329,
         "byModel": {
@@ -355,7 +355,7 @@
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8449165,
+        "sent": 8449051,
         "peak": 61902,
         "cost": 1.2134,
         "byModel": {
@@ -426,7 +426,7 @@
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 5.2482,
+      "cost": 5.2481,
       "singleFresh": 16.6934
     },
     {
@@ -503,7 +503,7 @@
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 1.9188,
+      "cost": 1.9187,
       "singleFresh": 2.6057
     },
     {

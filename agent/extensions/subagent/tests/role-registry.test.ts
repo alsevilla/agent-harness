@@ -46,7 +46,10 @@ const APPROVED_THINKING: Record<string, string> = { "system-architect.economy": 
 // User-approved 2026-11-20 (agents-folder audit): api-specialist also checks existing APIs for problems, and performance-specialist
 // starts from a reported slowdown, and observability-specialist names external dependencies instead of one project's devices; their
 // description lines changed with their scope.
-const APPROVED_DESCRIPTION_CHANGES = new Set(["api-specialist", "performance-specialist", "observability-specialist", "release-engineer"]);
+// The 2026-11-20 name-to-duty audit: database-specialist's description was cut off mid-sentence, general-worker hands docs to
+// technical-writer, devops-specialist covers containers, orchestrators, CI/CD and cloud as well as hosts, and debugger drops a
+// self-reference. qa-engineer and code-reviewer are covered by RENAMED.
+const APPROVED_DESCRIPTION_CHANGES = new Set(["api-specialist", "performance-specialist", "observability-specialist", "release-engineer", "database-specialist", "general-worker", "devops-specialist", "debugger"]);
 // User-approved 2026-11-20: technical-writer is added after the frozen baseline (it takes LEARN from release-engineer). It has no fixture
 // entry; it carries general-worker's native tools line and writing tools, and its settings are pinned in its own test below.
 const ADDED_ROLES: Record<string, string> = { "technical-writer": "general-worker" };
