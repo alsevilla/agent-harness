@@ -41,6 +41,10 @@ const GENERIC_ROLES = [
 const RENAMED: Record<string, string> = { "architecture-specialist": "system-architect" };
 function current(name: string): string { return RENAMED[name] ?? name; }
 const APPROVED_THINKING: Record<string, string> = { "system-architect.economy": "medium" };
+// User-approved 2026-11-20 (agents-folder audit): api-specialist also checks existing APIs for problems, and performance-specialist
+// starts from a reported slowdown, and observability-specialist names external dependencies instead of one project's devices; their
+// description lines changed with their scope.
+const APPROVED_DESCRIPTION_CHANGES = new Set(["api-specialist", "performance-specialist", "observability-specialist"]);
 const approvedThinking = (fixtureName: string, tier: string, pinned: string) => APPROVED_THINKING[`${current(fixtureName)}.${tier}`] ?? pinned;
 
 // Canonical definitions carry no Pi settings: model, fallback, thinking and Pi tools come from roles.json; text is the definition file.
@@ -678,8 +682,8 @@ test("tier-only baseline pins the 20 shipped roles; header removal removed only 
     const lines = text.split("\n");
     const at = lines.indexOf(entry.nativeToolsLine);
     assert.ok(at > 0, `${name}: native tools line preserved`);
-    // A renamed role has a new description; every other role keeps its recorded one.
-    if (name in RENAMED) assert.match(lines[at - 1], /^description: \S/, `${name}: description line present`);
+    // A renamed role or an approved scope change has a new description; every other role keeps its recorded one.
+    if (name in RENAMED || APPROVED_DESCRIPTION_CHANGES.has(name)) assert.match(lines[at - 1], /^description: \S/, `${name}: description line present`);
     else assert.equal(lines[at - 1], entry.descriptionLine, `${name}: description line preserved`);
     // Role bodies are prompt text and may change freely; only the header shape is pinned here.
     for (const field of ["model", "fallbackModel", "thinking", "metadata", "pi."]) assert.ok(!text.slice(0, text.indexOf("\n---", 4)).split("\n").some((line) => line.trimStart().startsWith(field === "pi." ? field : `${field}:`)), `${name}: header carries no ${field}`);

@@ -264,3 +264,24 @@ test("missing RED or other required evidence is INCONCLUSIVE for the worker and 
 	assert.match(main, /that gate is unmet whatever the STATUS line says/);
 	assert.match(main, /Never call the work verified while a required gate is unmet\./);
 });
+
+// Agents-folder audit: every specialist states what it hands back, and generic team roles carry no single project's hardware or domain.
+test("specialists state what they return; generic roles name no single project's devices", () => {
+	const role = (name: string) => flat(read(`agent/agents/${name}.md`));
+	const api = role("api-specialist");
+	assert.ok(api.includes("You work in one of two modes"), "api: design and check modes");
+	assert.ok(api.includes("Return findings ranked CRITICAL, HIGH, MEDIUM or LOW, each with the endpoint, the evidence"), "api: check-mode findings");
+	assert.ok(api.includes("each consumer's impact with a breaking or non-breaking verdict"), "api: design-mode return");
+	const perf = role("performance-specialist");
+	assert.ok(perf.includes("When something is reported slow, start from the symptom"), "performance: starts from the reported slowness");
+	assert.ok(perf.includes("Return recommendations ranked by expected gain"), "performance: ranked recommendations");
+	assert.ok(perf.includes("For frontend paths:"), "performance: frontend slowness");
+	const security = role("security-specialist");
+	assert.ok(security.includes("each with the realistic attack or failure path"), "security: findings return");
+	assert.ok(security.includes("dependency and supply-chain risk"), "security: supply chain");
+	assert.ok(security.includes("Escalate serious security uncertainty to `oracle`") && !security.includes("senior reviewer"), "security: escalates to a real role");
+	assert.ok(role("concurrency-specialist").includes("Return each invariant at risk with the concrete interleaving"), "concurrency: return");
+	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url)).filter((f) => f.endsWith(".md"))) {
+		assert.doesNotMatch(read(`agent/agents/${file}`), /\bRFID\b|\breader connected\b|\bdevice taps?\b|\bHID readers?\b/i, file);
+	}
+});
