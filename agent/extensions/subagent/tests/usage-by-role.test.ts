@@ -115,10 +115,10 @@ test("cost per completed task counts failed and aborted cost against completed t
 	const scope = newUsageScope();
 	run(scope, "backend", false, 100, 10, 0.3);
 	run(scope, "backend", false, 100, 10, 0.1, "failed");
-	run(scope, "debugger", false, 100, 10, 0.2, "aborted");
+	run(scope, "diagnostic-engineer", false, 100, 10, 0.2, "aborted");
 	const text = formatUsageSummary(scope);
 	assert.match(text, /backend: 2 tasks[^\n]*\$0\.4000 SDK-estimated; \$0\.4000 per completed task/, "0.3 + 0.1 over 1 completed");
-	assert.doesNotMatch(text.split("\n").find((l) => l.includes("debugger:")) ?? "", /per completed task/, "no completed task: no ratio");
+	assert.doesNotMatch(text.split("\n").find((l) => l.includes("diagnostic-engineer:")) ?? "", /per completed task/, "no completed task: no ratio");
 	assert.match(text, /Foreground:[\s\S]*cost: \$0\.6000 SDK-estimated; \$0\.6000 per completed task/);
 });
 
@@ -132,7 +132,7 @@ test("usage: from 100k the Main context line names the checkpoint fold, /subagen
 // Measuring worker masking: the providers' own per-request input (input + cacheRead + cacheWrite), peak and count over 100k, per role.
 test("usage: each role shows its peak request and how many requests were over 100k; slices are unchanged", () => {
 	const scope = newUsageScope();
-	const job = new LogicalUsage(scope, true, "debugger");
+	const job = new LogicalUsage(scope, true, "diagnostic-engineer");
 	job.attempt();
 	job.turn({ input: 10, output: 5, cacheRead: 60_000, cacheWrite: 1_000, cost: { total: 0.01 } });
 	job.turn({ input: 10, output: 5, cacheRead: 104_000, cacheWrite: 3_000, cost: { total: 0.05 } });
@@ -141,7 +141,7 @@ test("usage: each role shows its peak request and how many requests were over 10
 	const other = new LogicalUsage(scope, true, "scout");
 	other.attempt(); other.turn({ input: 5, output: 1, cacheRead: 9_000, cacheWrite: 100, cost: { total: 0.001 } }); other.settle("completed");
 	const text = formatUsageSummary(scope);
-	assert.match(text, /debugger: [^\n]*per completed task; cache hit 98%; peak request 110,510 tok, 2 requests over 100,000/);
+	assert.match(text, /diagnostic-engineer: [^\n]*per completed task; cache hit 98%; peak request 110,510 tok, 2 requests over 100,000/);
 	assert.match(text, /scout: [^\n]*per completed task; cache hit \d+%; peak request 9,105 tok$/m, "no over-100k note when none was");
 	assert.equal("peakRequest" in scope.background, false, "slices keep their shape");
 });

@@ -25,7 +25,7 @@ orchestrator substitution. A leaf subagent seeing this router follows only its
 assigned role and returns requests for other roles to the main conversation.
 # Execute
 
-> **Main-session dispatch boundary:** Any instruction in this skill to invoke a worker, QA engineer, code reviewer, debugger, specialist, or oracle is an instruction for the **main Pi conversation only**. If Execute is visible inside a custom subagent, that subagent must not call `Agent` / legacy `Task`; it must return a handoff request to the main conversation.
+> **Main-session dispatch boundary:** Any instruction in this skill to invoke a worker, QA engineer, code reviewer, diagnostic-engineer, specialist, or oracle is an instruction for the **main Pi conversation only**. If Execute is visible inside a custom subagent, that subagent must not call `Agent` / legacy `Task`; it must return a handoff request to the main conversation.
 
 
 Implement an approved Execution Plan safely and with evidence.
@@ -1003,7 +1003,7 @@ Do not silently fix unrelated failures.
 
 ## Unclear Cause
 
-Use `debugger` when diagnosis is non-obvious.
+Use `diagnostic-engineer` when diagnosis is non-obvious.
 
 Do not guess.
 
@@ -1238,7 +1238,7 @@ Use deterministic tests or repeated/stress verification when justified.
 
 If concurrency correctness remains uncertain:
 
-use `concurrency-specialist`, `debugger`, Code Reviewer, or Oracle according to established escalation policy.
+use `concurrency-specialist`, `diagnostic-engineer`, Code Reviewer, or Oracle according to established escalation policy.
 
 ---
 
@@ -1350,9 +1350,9 @@ Do not transfer implementation ownership to the specialist unless explicitly jus
 
 ---
 
-# Debugger Trigger
+# Diagnostic engineer Trigger
 
-Use `debugger` when:
+Use `diagnostic-engineer` when:
 
 - RED behaves unexpectedly;
 - GREEN repeatedly fails;
@@ -1363,7 +1363,7 @@ Use `debugger` when:
 - database behavior contradicts expectations;
 - the same implementation approach has failed more than once.
 
-Debugger diagnoses before another patch attempt.
+Diagnostic engineer diagnoses before another patch attempt.
 
 ---
 
@@ -1381,7 +1381,7 @@ STOP routine worker iteration.
 
 Use:
 
-- debugger;
+- diagnostic-engineer;
 - relevant specialist;
 - Code Reviewer;
 - Oracle if established escalation criteria are met.

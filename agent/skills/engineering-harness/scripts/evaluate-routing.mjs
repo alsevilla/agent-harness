@@ -26,7 +26,7 @@ export const ROUTES = new Set([
 // Mirrors agent/agents/*.md; tests/evaluate-routing.test.mjs checks the drift.
 export const ROLES = new Set([
 	"api-specialist", "backend-worker", "concurrency-specialist",
-	"debugger", "devops-specialist", "frontend-worker", "general-worker",
+	"diagnostic-engineer", "devops-specialist", "frontend-worker", "general-worker",
 	"observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
 	"code-reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
 	"system-architect", "technical-writer", "qa-engineer", "ui-ux-specialist",
@@ -476,7 +476,7 @@ export function shapeChain(shape, at) {
 	const gate = shape.name === "T3" ? { modelTier: "capable" } : {};
 	const steps = [];
 	if (has(packets, "architect")) steps.push({ agent: "system-architect", modelTier: "economy" });
-	if (has(packets, "debugger")) steps.push({ agent: "debugger" });
+	if (has(packets, "debugger")) steps.push({ agent: "diagnostic-engineer" });
 	if (has(packets, "specialist")) steps.push({ agent: shape.specialist });
 	steps.push({ agent: shape.worker });
 	if (has(packets, "test")) steps.push({ agent: "qa-engineer", ...gate });

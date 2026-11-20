@@ -45,7 +45,7 @@ Main follows a fixed protocol (full text: [`agent/AGENTS.md`](agent/AGENTS.md)):
 2. **Gather** at most three named files plus read-only git status; every other read goes to a read-only role.
 3. **Pick roles** by name (see [Roles](#roles)).
 4. **Write one packet:** task, candidate, contract, evidence paths, scope, checks. By default the candidate is a feature branch in your main checkout; a worktree is used only for parallel writers, uncommitted user work, a live process on the main checkout, or when main must stay on the base branch.
-5. **Delegate and wait.** Common sequences run as one fixed shape: T1 worker; T2 debugger → worker; T3 optional system-architect → optional specialist → worker → qa-engineer, with an optional code-reviewer. A step that doesn't report `STATUS: PASS` stops the shape and returns to main.
+5. **Delegate and wait.** Common sequences run as one fixed shape: T1 worker; T2 diagnostic-engineer → worker; T3 optional system-architect → optional specialist → worker → qa-engineer, with an optional code-reviewer. A step that doesn't report `STATUS: PASS` stops the shape and returns to main.
 6. **Accept on STATUS and EVIDENCE**, never by re-reading code; after two fix rounds on a task, main changes the cause, the packet or the role and continues.
 7. **Finish** when the request is done, not when its gaps are listed: a failed or unrun check main can still act on is the next launch. Main stops early only for a decision, credential or approval that only you can give. Then it reports changes, checks and residual risk, or delivers through `release-engineer`.
 
@@ -110,13 +110,13 @@ The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/
 
 ## Roles
 
-The native package exposes these 21 generic roles:
+The native package exposes 21 roles. If you customized the former `debugger` role, rename its override and direct calls to `diagnostic-engineer`. T2 shapes still accept `packets.debugger`.
 
 | Kind | Roles |
 | --- | --- |
 | Implementation (write code) | `backend-worker`, `frontend-worker`, `database-worker`, `platform-worker`, `general-worker` |
 | Codebase reconnaissance | `scout` locates relevant files, callers and tests |
-| Root-cause diagnosis | `debugger` is the diagnostics engineer. It reproduces failures and hands the proposed fix to a worker. |
+| Root-cause diagnosis | `diagnostic-engineer` reproduces failures and hands the proposed fix to a worker. |
 | Independent checks | `qa-engineer` verifies behavior. `code-reviewer` reviews changes. Both write findings outside the checkout. |
 | Planning and architecture (read-only proposal; main owns the plan) | `system-architect` |
 | Specialists (read-only advice) | `api-specialist`, `concurrency-specialist`, `database-specialist`, `devops-specialist`, `observability-specialist`, `performance-specialist`, `security-specialist`, `ui-ux-specialist` |

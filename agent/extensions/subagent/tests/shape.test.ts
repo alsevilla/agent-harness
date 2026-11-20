@@ -12,9 +12,9 @@ test("T1 is one worker step with the packet as-is", () => {
 	assert.deepEqual(roles({ name: "T1", worker: "backend-worker", packets: { worker: "add field" } }), [{ agent: "backend-worker", task: "add field" }]);
 });
 
-test("T2 runs debugger then worker; later steps get the previous report; test and review are optional", () => {
+test("T2 runs diagnostic-engineer then worker; later steps get the previous report; test and review are optional", () => {
 	const chain = roles({ name: "T2", worker: "frontend-worker", packets: { debugger: "find cause", worker: "fix it", test: "verify", review: "review" }, cwd: "/w" });
-	assert.deepEqual(chain.map((s) => s.agent), ["debugger", "frontend-worker", "qa-engineer", "code-reviewer"]);
+	assert.deepEqual(chain.map((s) => s.agent), ["diagnostic-engineer", "frontend-worker", "qa-engineer", "code-reviewer"]);
 	assert.equal(chain[0].task, "find cause");
 	assert.ok(chain.slice(1).every((s) => s.task.endsWith("Previous step report:\n{previous}")));
 	assert.ok(chain.every((s) => s.cwd === "/w"));

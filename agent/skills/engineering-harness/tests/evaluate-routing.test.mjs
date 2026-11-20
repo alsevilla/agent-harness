@@ -134,7 +134,7 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual(x("R04").roles_allowed, ["ui-ux-specialist", "frontend-worker"]);
 		assert.deepEqual(x("R02").roles_required, ["database-specialist"]);
 		assert.deepEqual(x("R02").roles_allowed, ["database-specialist", "database-worker"]);
-		assert.deepEqual(x("R05").roles_required, ["debugger", "backend-worker"]);
+		assert.deepEqual(x("R05").roles_required, ["diagnostic-engineer", "backend-worker"]);
 		assert.deepEqual(x("R07").routes, ["T1_WORKER"]);
 		assert.deepEqual(x("R07").roles_required, ["general-worker"]);
 		assert.deepEqual(x("R08").roles_required, ["general-worker"]);
@@ -180,7 +180,7 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual(r.roles_allowed, []);
 		r = c.R31.expect;
 		assert.deepEqual(r.routes, ["T2_DEBUG_WORKER"]);
-		assert.deepEqual(r.roles_required, ["debugger"]);
+		assert.deepEqual(r.roles_required, ["diagnostic-engineer"]);
 		assert.ok(!r.roles_allowed.includes("release-engineer"));
 		r = c.R32.expect;
 		assert.deepEqual(r.routes, ["BLOCKED_NO_AUTHORITY"]);
@@ -286,14 +286,14 @@ describe("EvaluatorTests", () => {
 
 	it("role_order_violation_detected", () => {
 		const fx = loadFixture();
-		const rep = evaluateRows(setRow(perfectPredictions(fx), "R05", { roles: ["backend-worker", "debugger"] }), fx);
+		const rep = evaluateRows(setRow(perfectPredictions(fx), "R05", { roles: ["backend-worker", "diagnostic-engineer"] }), fx);
 		assert.equal(rep.violations.role_order, 1);
 		assert.equal(rep.violations.role_missing, 0);
 	});
 
 	it("policy_valid_alternative_route_accepted", () => {
 		const fx = loadFixture();
-		const rep = evaluateRows(setRow(perfectPredictions(fx), "R06", { route: "T2_DEBUG_WORKER", roles: ["debugger", "backend-worker"] }), fx);
+		const rep = evaluateRows(setRow(perfectPredictions(fx), "R06", { route: "T2_DEBUG_WORKER", roles: ["diagnostic-engineer", "backend-worker"] }), fx);
 		assert.equal(rep.ok, true);
 	});
 
@@ -470,7 +470,7 @@ describe("ModelTierTests", () => {
 
 	it("six_difficult_roles_require_explicit_capable_and_controls_allow_economy", () => {
 		const c = byId(fx);
-		for (const [cid, role] of [["R18", "security-specialist"], ["R17", "concurrency-specialist"], ["R05", "debugger"], ["R10", "code-reviewer"], ["R02", "database-specialist"], ["R09", "qa-engineer"]]) {
+		for (const [cid, role] of [["R18", "security-specialist"], ["R17", "concurrency-specialist"], ["R05", "diagnostic-engineer"], ["R10", "code-reviewer"], ["R02", "database-specialist"], ["R09", "qa-engineer"]]) {
 			assert.deepEqual(c[cid].expect.model_tiers[role], ["capable"], cid);
 			assert.equal(c[cid].critical, true, cid);
 		}
@@ -533,8 +533,8 @@ describe("ModelTierTests", () => {
 	});
 
 	it("every_batch_entry_is_scored", () => {
-		const okEntries = [{ agent: "debugger", task: "t", modelTier: "capable" }, { agent: "backend-worker", task: "t" }];
-		const badEntries = [{ agent: "debugger", task: "t", modelTier: "capable" }, { agent: "debugger", task: "t" }, { agent: "backend-worker", task: "t" }];
+		const okEntries = [{ agent: "diagnostic-engineer", task: "t", modelTier: "capable" }, { agent: "backend-worker", task: "t" }];
+		const badEntries = [{ agent: "diagnostic-engineer", task: "t", modelTier: "capable" }, { agent: "diagnostic-engineer", task: "t" }, { agent: "backend-worker", task: "t" }];
 		for (const key of ["chain", "tasks"]) {
 			const rows = perfectPredictions(fx);
 			const row = caseRow(rows, "R05");
@@ -543,10 +543,10 @@ describe("ModelTierTests", () => {
 			assert.equal(rep.violations.tier_omitted + rep.violations.tier_wrong, 0, key);
 			assert.equal(rep.ok, key === "chain", key); // parallel tasks prove no precedence
 			row.calls = [{ [key]: badEntries }];
-			row.roles = ["debugger", "debugger", "backend-worker"];
+			row.roles = ["diagnostic-engineer", "diagnostic-engineer", "backend-worker"];
 			assert.equal(runRows(rows).violations.tier_omitted, 1, key);
 		}
-		const dag = [{ id: "a", agent: "debugger", task: "t", modelTier: "capable" }, { id: "b", agent: "backend-worker", task: "t", dependsOn: ["a"] }];
+		const dag = [{ id: "a", agent: "diagnostic-engineer", task: "t", modelTier: "capable" }, { id: "b", agent: "backend-worker", task: "t", dependsOn: ["a"] }];
 		const rows = perfectPredictions(fx);
 		caseRow(rows, "R05").calls = [{ dag }];
 		assert.equal(runRows(rows).ok, true);
@@ -556,7 +556,7 @@ describe("ModelTierTests", () => {
 
 	it("separate_calls_do_not_prove_order_or_completion", () => {
 		const rows = perfectPredictions(fx);
-		caseRow(rows, "R05").calls = [{ agent: "debugger", task: "t", modelTier: "capable" }, { agent: "backend-worker", task: "t" }];
+		caseRow(rows, "R05").calls = [{ agent: "diagnostic-engineer", task: "t", modelTier: "capable" }, { agent: "backend-worker", task: "t" }];
 		const rep = runRows(rows);
 		assert.equal(rep.violations.order_unobserved, 1);
 		assert.equal(rep.critical_failures, 1);
@@ -634,7 +634,7 @@ describe("ModelTierTests", () => {
 			assert.equal(native.expandShape(bad).ok, false);
 			assert.throws(() => ev.shapeChain(bad, "s"));
 		}
-		assert.throws(() => ev.parseCalls([{ shape: shapes[0], chain: [{ agent: "debugger", task: "t" }] }], "calls"), /shape already is a chain/);
+		assert.throws(() => ev.parseCalls([{ shape: shapes[0], chain: [{ agent: "diagnostic-engineer", task: "t" }] }], "calls"), /shape already is a chain/);
 	});
 
 	it("native_parity_check_detects_in_memory_drift", () => {
@@ -668,8 +668,8 @@ describe("NativeCallValidationTests", () => {
 			["null dependsOn", [{ ...sec, dependsOn: null }]],
 			["non-string parent", [node("a"), { ...sec, dependsOn: [1] }]],
 			["duplicate parent", [node("a"), { ...sec, dependsOn: ["a", "a"] }]],
-			["duplicate id", [node("d", "debugger"), node("d", "backend-worker")]],
-			["two-node cycle", [node("d", "debugger", { dependsOn: ["w"] }), node("w", "backend-worker", { dependsOn: ["d"] })]],
+			["duplicate id", [node("d", "diagnostic-engineer"), node("d", "backend-worker")]],
+			["two-node cycle", [node("d", "diagnostic-engineer", { dependsOn: ["w"] }), node("w", "backend-worker", { dependsOn: ["d"] })]],
 			["three-node cycle", [node("a", "security-specialist", { dependsOn: ["c"] }), node("b", "security-specialist", { dependsOn: ["a"] }), node("c", "security-specialist", { dependsOn: ["b"] })]],
 			["unknown key", [{ ...sec, dependson: ["a"] }]],
 			["missing id", [entry()]],
@@ -934,9 +934,9 @@ describe("ProjectScopeTierTests", () => {
 
 describe("CallOrderTests", () => {
 	const fx = loadFixture();
-	const DBG = node("d", "debugger", { modelTier: "capable" });
+	const DBG = node("d", "diagnostic-engineer", { modelTier: "capable" });
 	const WRK = node("w", "backend-worker");
-	const r05 = (calls, roles = ["debugger", "backend-worker"]) => {
+	const r05 = (calls, roles = ["diagnostic-engineer", "backend-worker"]) => {
 		const rows = perfectPredictions(fx);
 		const row = caseRow(rows, "R05");
 		row.calls = calls;
@@ -946,7 +946,7 @@ describe("CallOrderTests", () => {
 
 	it("dependency_ancestry_decides_not_declaration_order", () => {
 		const dbgFirst = [DBG, { ...WRK, dependsOn: ["d"] }];
-		for (const [label, nodes] of [["debugger declared first", dbgFirst], ["worker declared first", [...dbgFirst].reverse()]]) {
+		for (const [label, nodes] of [["diagnostic-engineer declared first", dbgFirst], ["worker declared first", [...dbgFirst].reverse()]]) {
 			const rep = r05([{ dag: nodes }]);
 			assert.equal(rep.ok, true, label);
 			assert.equal(rep.critical_failures, 0, label);
@@ -955,7 +955,7 @@ describe("CallOrderTests", () => {
 
 	it("reversed_dependency_is_critical_whatever_the_declaration_order", () => {
 		const reversedEdge = [{ ...DBG, dependsOn: ["w"] }, WRK];
-		for (const [label, nodes] of [["debugger declared first", reversedEdge], ["worker declared first", [...reversedEdge].reverse()]]) {
+		for (const [label, nodes] of [["diagnostic-engineer declared first", reversedEdge], ["worker declared first", [...reversedEdge].reverse()]]) {
 			const rep = r05([{ dag: nodes }]);
 			assert.equal(rep.violations.role_order, 1, label);
 			assert.equal(rep.critical_failures, 1, label);
@@ -964,11 +964,11 @@ describe("CallOrderTests", () => {
 	});
 
 	it("roles_list_order_is_not_runtime_order", () => {
-		assert.equal(r05([{ dag: [DBG, { ...WRK, dependsOn: ["d"] }] }], ["backend-worker", "debugger"]).ok, true);
+		assert.equal(r05([{ dag: [DBG, { ...WRK, dependsOn: ["d"] }] }], ["backend-worker", "diagnostic-engineer"]).ok, true);
 	});
 
 	it("parallel_and_unrelated_nodes_prove_no_precedence", () => {
-		const entries = [entry("debugger", { modelTier: "capable" }), entry("backend-worker")];
+		const entries = [entry("diagnostic-engineer", { modelTier: "capable" }), entry("backend-worker")];
 		for (const [label, call] of [["tasks", { tasks: entries }], ["dag without edge", { dag: [DBG, WRK] }]]) {
 			const rep = r05([call]);
 			assert.equal(rep.violations.order_unobserved, 1, label);
@@ -979,7 +979,7 @@ describe("CallOrderTests", () => {
 	});
 
 	it("chain_order_is_guaranteed_within_the_call", () => {
-		const good = [entry("debugger", { modelTier: "capable" }), entry("backend-worker")];
+		const good = [entry("diagnostic-engineer", { modelTier: "capable" }), entry("backend-worker")];
 		assert.equal(r05([{ chain: good }]).ok, true);
 		const rep = r05([{ chain: [...good].reverse() }]);
 		assert.equal(rep.violations.role_order, 1);
@@ -987,26 +987,26 @@ describe("CallOrderTests", () => {
 	});
 
 	it("separate_calls_do_not_prove_order", () => {
-		const rep = r05([entry("debugger", { modelTier: "capable" }), entry("backend-worker")]);
+		const rep = r05([entry("diagnostic-engineer", { modelTier: "capable" }), entry("backend-worker")]);
 		assert.equal(rep.violations.order_unobserved, 1);
 		assert.equal(rep.ok, false);
 	});
 
 	it("every_dispatch_of_the_later_role_needs_an_earlier_ancestor", () => {
-		const rep = r05([{ dag: [DBG, { ...WRK, dependsOn: ["d"] }, node("x", "backend-worker")] }], ["debugger", "backend-worker", "backend-worker"]);
+		const rep = r05([{ dag: [DBG, { ...WRK, dependsOn: ["d"] }, node("x", "backend-worker")] }], ["diagnostic-engineer", "backend-worker", "backend-worker"]);
 		assert.equal(rep.violations.order_unobserved, 1);
 	});
 
 	it("transitive_ancestry_counts", () => {
 		const nodes = [DBG, { ...WRK, dependsOn: ["d"] }, node("w2", "backend-worker", { dependsOn: ["w"] })];
-		assert.equal(r05([{ dag: nodes }], ["debugger", "backend-worker", "backend-worker"]).ok, true);
+		assert.equal(r05([{ dag: nodes }], ["diagnostic-engineer", "backend-worker", "backend-worker"]).ok, true);
 	});
 
 	it("roles_must_match_calls_as_a_multiset", () => {
 		const rows = perfectPredictions(fx);
 		const row = caseRow(rows, "R05");
 		row.calls = [{ dag: [DBG, { ...WRK, dependsOn: ["d"] }] }];
-		row.roles = ["debugger", "debugger", "backend-worker"];
+		row.roles = ["diagnostic-engineer", "diagnostic-engineer", "backend-worker"];
 		rejects(() => evaluateRows(rows, fx));
 	});
 
@@ -1016,7 +1016,7 @@ describe("CallOrderTests", () => {
 		const fixture = ev.parseFixture(JSON.stringify(raw));
 		const base = perfectPredictions(fx).map((r) => ({ id: r.id, route: r.route, roles: r.roles, skills: r.skills }));
 		assert.equal(evaluateRows(base, fixture).ok, true);
-		caseRow(base, "R05").roles = ["backend-worker", "debugger"];
+		caseRow(base, "R05").roles = ["backend-worker", "diagnostic-engineer"];
 		const rep = evaluateRows(base, fixture);
 		assert.equal(rep.violations.role_order, 1);
 		assert.equal(rep.critical_failures, 1);
@@ -1065,11 +1065,11 @@ describe("DispatchLimitTests", () => {
 
 	it("near_miss_cases_carry_dispatch_limits", () => {
 		const c = byId(fx);
-		for (const [cid, role] of [["R33", "debugger"], ["R34", "general-worker"], ["R35", "backend-worker"]]) {
+		for (const [cid, role] of [["R33", "diagnostic-engineer"], ["R34", "general-worker"], ["R35", "backend-worker"]]) {
 			assert.equal(c[cid].kind, "near_miss", cid);
 			assert.deepEqual({ ...c[cid].expect.max_dispatches }, { [role]: 1 }, cid); // parsed objects have a null prototype
 		}
-		assert.deepEqual(c.R33.expect.roles_required, ["debugger", "backend-worker"]);
+		assert.deepEqual(c.R33.expect.roles_required, ["diagnostic-engineer", "backend-worker"]);
 	});
 
 	it("within_limit_passes_in_every_call_mode", () => {
@@ -1092,14 +1092,14 @@ describe("DispatchLimitTests", () => {
 	});
 
 	it("limit_applies_per_role_not_to_other_allowed_roles", () => {
-		const dbg = { agent: "debugger", task: "t" };
+		const dbg = { agent: "diagnostic-engineer", task: "t" };
 		const wrk = { agent: "backend-worker", task: "t" };
-		assert.equal(runCase("R33", ["debugger", "backend-worker", "backend-worker"], [{ chain: [dbg, wrk, wrk] }]).violations.dispatch_over, 0);
-		assert.equal(runCase("R33", ["debugger", "debugger", "backend-worker"], [{ chain: [dbg, dbg, wrk] }]).violations.dispatch_over, 1);
+		assert.equal(runCase("R33", ["diagnostic-engineer", "backend-worker", "backend-worker"], [{ chain: [dbg, wrk, wrk] }]).violations.dispatch_over, 0);
+		assert.equal(runCase("R33", ["diagnostic-engineer", "diagnostic-engineer", "backend-worker"], [{ chain: [dbg, dbg, wrk] }]).violations.dispatch_over, 1);
 	});
 
 	it("counts_do_not_prove_order", () => {
-		const rep = runCase("R33", ["debugger", "backend-worker"], [{ tasks: [{ agent: "debugger", task: "t" }, { agent: "backend-worker", task: "t" }] }]);
+		const rep = runCase("R33", ["diagnostic-engineer", "backend-worker"], [{ tasks: [{ agent: "diagnostic-engineer", task: "t" }, { agent: "backend-worker", task: "t" }] }]);
 		assert.equal(rep.violations.dispatch_over, 0);
 		assert.equal(rep.violations.order_unobserved, 1);
 	});
@@ -1118,7 +1118,7 @@ describe("DispatchLimitTests", () => {
 
 	it("fixture_validation", () => {
 		const raw = rawFixture();
-		for (const bad of [{}, { "backend-worker": 0 }, { "backend-worker": true }, { "backend-worker": "1" }, { "backend-worker": 1.5 }, { debugger: 1 }, { nonsense: 1 }]) {
+		for (const bad of [{}, { "backend-worker": 0 }, { "backend-worker": true }, { "backend-worker": "1" }, { "backend-worker": 1.5 }, { "diagnostic-engineer": 1 }, { nonsense: 1 }]) {
 			const mutated = clone(raw);
 			mutated.cases.find((c) => c.id === "R35").expect.max_dispatches = bad;
 			rejects(() => ev.parseFixture(JSON.stringify(mutated)), JSON.stringify(bad));

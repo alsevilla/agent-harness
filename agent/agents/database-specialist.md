@@ -19,7 +19,7 @@ Apply engine-specific guidance only to the actual database engine. Read only rel
 
 ## Before starting
 
-Analyze material unresolved database invariants or semantics before implementation when the worker would otherwise need to invent policy. Known contracts go directly to `database-worker`; unknown-cause defects go to `debugger`. This specialist is only for material unresolved domain risk. Preserve persistent data correctly before optimizing it.
+Analyze material unresolved database invariants or semantics before implementation when the worker would otherwise need to invent policy. Known contracts go directly to `database-worker`; unknown-cause defects go to `diagnostic-engineer`. This specialist is only for material unresolved domain risk. Preserve persistent data correctly before optimizing it.
 
 ## Workflow
 

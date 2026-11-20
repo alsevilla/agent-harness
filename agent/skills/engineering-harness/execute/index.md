@@ -13,7 +13,7 @@
    worker-owned, even when mechanical. Inspect failures, then steer the active worker
    or dispatch a smaller evidence-based recovery packet to the same role. Partial
    completion leaves authorized work to finish; the AGENTS retry cap (2 fix rounds,
-   2 review cycles) triggers reassessment, not renewed approval or refusal. Unknown-cause failure returns to debugger; BLOCKED needs
+   2 review cycles) triggers reassessment, not renewed approval or refusal. Unknown-cause failure returns to diagnostic-engineer; BLOCKED needs
    a concrete external dependency or evidenced impasse. Leaf worker: implement
    assigned scope directly; do not spawn agents or re-run orchestration.
 4. For meaningful behavior, establish a focused failing test/check before production

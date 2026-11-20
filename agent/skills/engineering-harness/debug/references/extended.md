@@ -1086,9 +1086,9 @@ This prevents thrashing.
 
 ---
 
-# Debugger Agent
+# Diagnostic engineer
 
-Use `debugger` when:
+Use `diagnostic-engineer` when:
 
 - reproduction is non-trivial;
 - multiple layers are involved;
@@ -1117,9 +1117,9 @@ Ask:
 
 ---
 
-# Debugger Agent Independence
+# Independent diagnosis
 
-The debugger agent's report is evidence.
+The diagnostic engineer's report is evidence.
 
 Do not blindly accept it.
 

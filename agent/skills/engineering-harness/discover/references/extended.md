@@ -556,9 +556,9 @@ Invoke a specialist during discovery only when specialist analysis is necessary 
 
 Otherwise defer specialist consultation to planning.
 
-## Debugger
+## Diagnostic engineer
 
-For a bug where the failure itself is not understood, discovery may recommend or use `debugger` to establish reproducible evidence.
+For a bug where the failure itself is not understood, discovery may recommend or use `diagnostic-engineer` to establish reproducible evidence.
 
 Do not turn every feature discovery into debugging.
 

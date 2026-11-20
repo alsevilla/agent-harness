@@ -43,9 +43,9 @@ test("alignment reports drift: widened tools, model keys, missing/extra profiles
   tampered["code-reviewer"].model = "x";
   delete tampered["oracle"];
   tampered["ghost"] = { name: "ghost", description: "d", tools: "read" };
-  tampered["debugger"].name = "other";
+  tampered["diagnostic-engineer"].name = "other";
   const problems = compat.checkAlignment(roles, tampered).join("\n");
-  for (const p of [/scout.*tools/, /reviewer.*(model|keys)/, /oracle.*missing/, /ghost.*(extra|unknown)/, /debugger.*name/]) expect(problems).toMatch(p);
+  for (const p of [/scout.*tools/, /reviewer.*(model|keys)/, /oracle.*missing/, /ghost.*(extra|unknown)/, /diagnostic-engineer.*name/]) expect(problems).toMatch(p);
 });
 
 test("an unmappable registry tool is reported, not skipped", () => {

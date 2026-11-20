@@ -10,10 +10,10 @@ Scout answers **where / what is affected**, not **why it fails**.
 
 ## Debugging
 A request to fix an existing malfunction is a bug-fix incident.
-If root cause is not established by evidence: subagent `shape` T2 (`debugger -> worker`, optional qa-engineer and code-reviewer).
+If root cause is not established by evidence: subagent `shape` T2 (`diagnostic-engineer -> worker`, optional qa-engineer and code-reviewer).
 Add Scout first only when location/blast radius is unknown. Add a specialist only when debugging exposes a material unresolved domain decision. Add independent verification/review only when risk warrants it.
-Debugger may be skipped when evidence already establishes the cause and the remaining work is implementation-only.
-If a speculative fix fails or produces an unexplained regression, use debugger before another speculative patch.
+Diagnostic engineer may be skipped when evidence already establishes the cause and the remaining work is implementation-only.
+If a speculative fix fails or produces an unexplained regression, use diagnostic-engineer before another speculative patch.
 
 ## Optional roles
 Before launching an optional scout, system-architect, specialist, verifier or code-reviewer, name in its packet the uncertainty it will resolve and the decision that changes based on its answer. Skip the optional role when no such decision remains. Independent checks required for material risks remain required. This is packet guidance, not a new router or runtime gate.
@@ -79,7 +79,7 @@ A checker on the same model family as the work it checks tends to share its blin
 ## Release / SHIP / LEARN
 Use `release-engineer` when the task actually enters SHIP, and `technical-writer` when it enters LEARN or needs documentation (READMEs, runbooks, upgrade notes, guides).
 
-SHIP remains conditional: ordinary coding completion is not a release. `release-engineer` reads `engineering-harness/ship/index.md`, validates exact candidate/version, fresh evidence, migrations/config/artifacts, destination and explicit authority, and performs only authorized release operations. Automatic PR delivery: when the task includes PR delivery and every required check passed on the exact candidate, main selects `release-engineer` for the task-owned commit, non-force feature push and PR create/update without an extra approval prompt; a local-only/no-publication instruction or a failed/blocked required check means no `release-engineer` launch (failing checks of unknown cause go to the debugger first). Merge and release each need their own explicit approval (merge: exact PR + approved candidate HEAD SHA; release: version + target SHA) and one never authorizes the other. This is an orchestration gate; the routing fixture cases R29-R32 check the expected selection offline and are not evidence of live autonomous delivery.
+SHIP remains conditional: ordinary coding completion is not a release. `release-engineer` reads `engineering-harness/ship/index.md`, validates exact candidate/version, fresh evidence, migrations/config/artifacts, destination and explicit authority, and performs only authorized release operations. Automatic PR delivery: when the task includes PR delivery and every required check passed on the exact candidate, main selects `release-engineer` for the task-owned commit, non-force feature push and PR create/update without an extra approval prompt; a local-only/no-publication instruction or a failed/blocked required check means no `release-engineer` launch (failing checks of unknown cause go to the diagnostic-engineer first). Merge and release each need their own explicit approval (merge: exact PR + approved candidate HEAD SHA; release: version + target SHA) and one never authorizes the other. This is an orchestration gate; the routing fixture cases R29-R32 check the expected selection offline and are not evidence of live autonomous delivery.
 
 LEARN is also conditional: `technical-writer` reads `engineering-harness/learn/index.md` only when stable reusable knowledge is worth preserving. Do not create session summaries as durable knowledge.
 
@@ -112,8 +112,8 @@ Scenarios:
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.
 - Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. Each item's packet names its own unit id and owned files and states that sibling units are not its work. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.
-- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 debugger -> worker; T3 [system-architect] -> [specialist] -> worker -> qa-engineer [-> code-reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
-- Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `debugger` first. No automatic self-looping helpers, new modes or unbounded retries.
+- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 diagnostic-engineer -> worker; T3 [system-architect] -> [specialist] -> worker -> qa-engineer [-> code-reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
+- Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `diagnostic-engineer` first. No automatic self-looping helpers, new modes or unbounded retries.
 
 ### Single versus parallel
 Decide per batch before dispatch by independence, task size, setup or context overhead and reconciliation cost. These are judgments; no runtime metric or saving is established by this rule.
@@ -122,7 +122,7 @@ Decide per batch before dispatch by independence, task size, setup or context ov
 - Parallel costs two hidden overheads (after SquidAgent, arXiv 2610.08647, where parallel agents often ran slower than one serial agent): re-exploration, siblings rediscovering what main already knows, and alignment, reconciling outputs made independently. Run a batch in parallel only when each item's expected output (the code it must change and its report, estimated in output size, which models judge better than duration) is large against both. Several small items go to one writer.
 - Every parallel packet starts with one shared block, identical text in every sibling: the decisions already made, conventions, the file map and the shared checks. The item's own part (its unit id, owned files and acceptance) follows. Siblings then build on main's knowledge instead of rediscovering it, and siblings with the same role, model and folder (for example parallel scouts or reviewers on one checkout) also share a cached prompt prefix; writers in separate worktrees have different system prompts, so for them the gain is the avoided re-exploration only.
 - Choosing single is not a bypass: it never removes a mandatory role, specialist gate, independent verification or review, or tier rule. Main still runs each required gate.
-- One investigation per unknown bug: several symptoms of one suspected cause, or one file's edits, go to one debugger or one writer, not one worker per symptom. Split only where causes or ownership are independent.
+- One investigation per unknown bug: several symptoms of one suspected cause, or one file's edits, go to one diagnostic-engineer or one writer, not one worker per symptom. Split only where causes or ownership are independent.
 
 ### Evidence before decomposition
 When discovery or another prerequisite finding is needed, accept the discovery or prerequisite evidence before any material downstream assignment. Decompose dependent downstream work only after the prerequisite result is accepted; each child brief then carries only the accepted decisions it needs. Already-known localized contracts do not require redundant discovery: assign directly. Parallelize only disjoint, independent assignments. This rule adds no universal chain or gate and removes no mandatory role.
@@ -167,7 +167,7 @@ Do not repeatedly relaunch expensive agents with unchanged prompts. Fix the bloc
 ## Context discipline
 Keep task packets concise. Prefer file paths + relevant snippets/evidence over full files.
 Default output targets:
-- Scout/specialist/debugger: concise handoff, normally <= 700 words.
+- Scout/specialist/diagnostic-engineer: concise handoff, normally <= 700 words.
 - Worker: concise completion + changed files + tests.
 - QA engineer/code-reviewer/release-engineer: findings/evidence only, normally <= 700 words.
 Longer output is justified only when the evidence itself requires it.

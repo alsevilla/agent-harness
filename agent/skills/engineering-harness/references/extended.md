@@ -42,7 +42,7 @@ perform every engineering role itself.
 After choosing a phase, dispatch the dedicated role when that phase has one:
 
 - repository reconnaissance -> `scout` when needed;
-- unknown-cause defect -> `debugger` (mandatory);
+- unknown-cause defect -> `diagnostic-engineer` (mandatory);
 - non-trivial backend implementation -> `backend-worker`;
 - non-trivial frontend implementation -> `frontend-worker`;
 - non-trivial general implementation -> `general-worker`;

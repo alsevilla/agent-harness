@@ -277,9 +277,9 @@ test("expandRetainedResult keeps every text block and the tool-call-only tail ca
 
 test("expandRetainedResult reports failed or aborted children as failures with the exact error text", () => {
 	const failed = expandRetainedResult({
-		details: { results: [{ agent: "debugger", exitCode: 1, stopReason: "error", errorMessage: "503 provider unavailable", messages: [] }] },
+		details: { results: [{ agent: "diagnostic-engineer", exitCode: 1, stopReason: "error", errorMessage: "503 provider unavailable", messages: [] }] },
 	});
-	assert.equal(failed, "### debugger — FAILED/STOPPED\nERROR: 503 provider unavailable\n(no final assistant output)");
+	assert.equal(failed, "### diagnostic-engineer — FAILED/STOPPED\nERROR: 503 provider unavailable\n(no final assistant output)");
 	const aborted = expandRetainedResult({
 		details: { results: [{ agent: "worker", exitCode: 0, stopReason: "aborted", stderr: "killed", messages: [] }] },
 	});

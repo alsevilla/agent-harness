@@ -31,7 +31,7 @@ named worker role. For example, fixing only one of two fixtures leaves the secon
 fixture to implement, even if today's tests pass; a documented midnight edge case
 needs a bounded deterministic correction/check, not renewed user authorization.
 
-If another correction fails with an unexplained cause, dispatch debugger to
+If another correction fails with an unexplained cause, dispatch diagnostic-engineer to
 reassess before another implementation attempt. Use a justified specialist or
 review route only when its normal trigger applies. Reassessing/splitting the task
 within existing authority does not require a new user approval. Report BLOCKED
@@ -51,10 +51,10 @@ A `completed` process label or stop reason `stop` does not certify a usable hand
 
 ## New failures and oversized assignments
 A newly observed panic, failing test, or unexplained runtime error in delegated
-work returns to DEBUG immediately. A debugger run for a different failure is not
+work returns to DEBUG immediately. A diagnostic-engineer run for a different failure is not
 evidence for the new one. After collecting the failing test name, command, output,
 and candidate path, the next substantive action is an actual `subagent` call to
-`debugger`; do not trace the test/production code, form a cause, or fix it in the
+`diagnostic-engineer`; do not trace the test/production code, form a cause, or fix it in the
 main session. Delegate the smallest reproduction, full panic/error output (not
 only grep/tail summaries), affected paths, accepted behavior, and read-only scope.
 A failing suite output still counts as failure when a shell pipeline exits zero.
@@ -67,7 +67,7 @@ the appropriate backend-worker, frontend-worker or general-worker. Selected inde
 verification belongs to qa-engineer, identified by exact candidate and contract.
 Spot checks go to a read-only role and never substitute for these roles.
 
-After debugger evidence, route a material unresolved persistence/schema/migration
+After diagnostic-engineer evidence, route a material unresolved persistence/schema/migration
 choice to database-specialist (or the actual domain specialist needed). Do not
 summon a specialist solely because a test name mentions a database. Then send the
 accepted correction to the implementation worker and any selected independent
@@ -83,13 +83,13 @@ Escalate coordination to a configured `capable` tier or specialist route when au
 high-consequence decisions remain unresolved, or one clarified follow-up still
 returns incomplete/contradictory reasoning. Preserve the evidence and name the
 unresolved question. Do not use a code-reviewer to take over worker writes or skip the
-debugger role. A disputed diagnosis may receive read-only review of its evidence.
+diagnostic-engineer role. A disputed diagnosis may receive read-only review of its evidence.
 
 After a fix fails with an unexplained cause, return to DEBUG immediately. After
 two distinct evidence-backed correction attempts fail, stop repeating the route:
 reassess diagnosis and use stronger review if material risk or disagreement remains.
 This means change/reassess the route within existing authority, not automatically stop
-work or request another approval. Cap (AGENTS): at most 2 fix rounds per task and 2 review cycles per candidate, then reassess: change the cause, the packet or the role and continue, and return to the user only when no untried approach remains; a new distinct failure starts a fresh count; unexplained failures still go to debugger first; no automatic escalation. The cap is a reassess trigger, not a reason to stop authorized work or to hand the user a list of gaps. Incomplete partial edits are remaining scope, not
+work or request another approval. Cap (AGENTS): at most 2 fix rounds per task and 2 review cycles per candidate, then reassess: change the cause, the packet or the role and continue, and return to the user only when no untried approach remains; a new distinct failure starts a fresh count; unexplained failures still go to diagnostic-engineer first; no automatic escalation. The cap is a reassess trigger, not a reason to stop authorized work or to hand the user a list of gaps. Incomplete partial edits are remaining scope, not
 two failed evidence-backed corrections. Honor explicit user pause/stop requests;
 questions about a blocker do not themselves revoke implementation authority.
 Oracle remains restricted to the exceptional triggers above; no automatic Oracle run.

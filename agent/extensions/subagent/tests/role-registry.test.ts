@@ -30,7 +30,7 @@ const committedTier = (name: string, tier: string) => roles.find((role: { name: 
 // Expected tier values of the contract tests below come from the approved-preset fixture (the single hard-coded snapshot); `approved` is initialised before any test runs.
 const approvedTier = (name: string, tier: string) => approved.roles.find((role) => current(role.name) === name)!.tiers[tier]!;
 const GENERIC_ROLES = [
-  "api-specialist", "system-architect", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
+  "api-specialist", "system-architect", "backend-worker", "concurrency-specialist", "diagnostic-engineer", "devops-specialist",
   "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer",
   "code-reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "qa-engineer", "ui-ux-specialist", "platform-worker",
   "technical-writer",
@@ -40,16 +40,16 @@ const GENERIC_ROLES = [
 // old name; `current` maps it to the role that replaced it. system-architect keeps architecture-specialist's tiers, models and tools;
 // its economy tier runs at medium thinking (the planner's level, for routine unit proposals) and capable stays high.
 // User-approved 2026-11-20 as well: test-engineer is renamed qa-engineer and reviewer code-reviewer, with no other change.
-const RENAMED: Record<string, string> = { "architecture-specialist": "system-architect", "test-engineer": "qa-engineer", reviewer: "code-reviewer" };
+const RENAMED: Record<string, string> = { "architecture-specialist": "system-architect", "test-engineer": "qa-engineer", reviewer: "code-reviewer", debugger: "diagnostic-engineer" };
 function current(name: string): string { return RENAMED[name] ?? name; }
 const APPROVED_THINKING: Record<string, string> = { "system-architect.economy": "medium" };
 // User-approved 2026-11-20 (agents-folder audit): api-specialist also checks existing APIs for problems, and performance-specialist
 // starts from a reported slowdown, and observability-specialist names external dependencies instead of one project's devices; their
 // description lines changed with their scope.
 // The 2026-11-20 name-to-duty audit: database-specialist's description was cut off mid-sentence, general-worker hands docs to
-// technical-writer, devops-specialist covers containers, orchestrators, CI/CD and cloud as well as hosts, and debugger drops a
-// self-reference. qa-engineer and code-reviewer are covered by RENAMED.
-const APPROVED_DESCRIPTION_CHANGES = new Set(["api-specialist", "performance-specialist", "observability-specialist", "release-engineer", "database-specialist", "general-worker", "devops-specialist", "debugger"]);
+// technical-writer, devops-specialist covers containers, orchestrators, CI/CD and cloud as well as hosts.
+// RENAMED covers description changes for renamed roles.
+const APPROVED_DESCRIPTION_CHANGES = new Set(["api-specialist", "performance-specialist", "observability-specialist", "release-engineer", "database-specialist", "general-worker", "devops-specialist"]);
 // User-approved 2026-11-20: technical-writer is added after the frozen baseline (it takes LEARN from release-engineer). It has no fixture
 // entry; it carries general-worker's native tools line and writing tools, and its settings are pinned in its own test below.
 const ADDED_ROLES: Record<string, string> = { "technical-writer": "general-worker" };
@@ -157,7 +157,7 @@ test("registry fields override annotations field-wise in real package discovery"
 test("registry registers exactly the 21 generic roles, unique, without statusline-setup or the merged and renamed roles", () => {
   assert.equal(roles.length, 21);
   assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 21);
-  for (const gone of ["planner", "architecture-specialist", "test-engineer", "reviewer"]) {
+  for (const gone of ["planner", "architecture-specialist", "test-engineer", "reviewer", "debugger"]) {
     assert.ok(!roles.some((r: { name: string }) => r.name === gone), `${gone}: merged or renamed`);
     assert.ok(!fs.existsSync(new URL(`../../../agents/${gone}.md`, import.meta.url)), `${gone} definition removed`);
   }

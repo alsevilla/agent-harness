@@ -12,7 +12,7 @@ Historical catalogs and router guidance live under engineering-harness/reference
 they cannot add mandatory phases or override current global policy.
 
 Named procedure ownership in this profile:
-- DEBUG -> debugger -> engineering-harness/debug
+- DEBUG -> diagnostic-engineer -> engineering-harness/debug
 - DISCOVER reconnaissance -> scout -> engineering-harness/discover
 - VERIFY -> qa-engineer -> engineering-harness/verify
 - REVIEW -> code-reviewer -> engineering-harness/review
@@ -35,7 +35,7 @@ Database roles use the project's own database guidance.
 ## Compatibility
 Pi's manual shortcuts live under ~/.pi/agent/prompts/. They expand instructions;
 they do not automatically fork agents. Required debug/verify/review routes use
-actual subagent calls to debugger, qa-engineer or code-reviewer with task packets.
+actual subagent calls to diagnostic-engineer, qa-engineer or code-reviewer with task packets.
 SHIP/LEARN use the actual `release-engineer` role when those phases are selected.
 The parent skills select ordinary module indexes rather than registering each
 module as another skill. Restricting a shortcut does not prevent reference reads.

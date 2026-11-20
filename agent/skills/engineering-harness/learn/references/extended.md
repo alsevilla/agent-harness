@@ -86,7 +86,7 @@ Preserve knowledge, not history.
 
 Bad project memory:
 
-> We ran the tests, then the debugger found a problem, then the
+> We ran the tests, then the diagnostic-engineer found a problem, then the
 > reviewer looked at three files.
 
 Useful project memory:
@@ -175,7 +175,7 @@ Examples of temporary active work:
 
 Bad:
 
-> Fix the flaky scan test, delete the debugger worktree, rerun Verify,
+> Fix the flaky scan test, delete the diagnostic-engineer worktree, rerun Verify,
 > then Review.
 
 Bad:
@@ -1924,7 +1924,7 @@ Before writing, internally or visibly construct:
   baseline/RED                                                    EVIDENCE NOT
   worktrees                                                       RETRIEVED
 
-  temp debugger    ---                  ---       current run     ESTABLISHED   no            yes         ---         DISCARD
+  temp diagnostic-engineer    ---                  ---       current run     ESTABLISHED   no            yes         ---         DISCARD
   worktree
 
   unresolved       PROCESS/constraint   PROJECT   confirmed       ESTABLISHED   maybe         partially   maybe       REPORT ONLY

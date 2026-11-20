@@ -132,13 +132,13 @@ check = 'python3 -B check.py'
 fix = "python3 -c " + shlex.quote("from pathlib import Path; p=Path('calc.py'); p.write_text(p.read_text().replace('a - b', 'a + b'))")
 before = manifest(fixture)
 caps, results, _ = native('S2', fixture, [
-    ('debugger', [shell(check)], 'read-only check.py execution; do not change files'),
+    ('diagnostic-engineer', [shell(check)], 'read-only check.py execution; do not change files'),
     ('backend-worker', [('view', {'path': str(fixture / 'calc.py')}), shell(fix), shell(check)], 'edit calc.py only; run check.py')])
 assert 'AssertionError' in results['child-0-0']
 assert 'GREEN' in results['child-1-2']
 assert {k for k in before if before[k] != manifest(fixture)[k]} == {'calc.py'}
 assert set(before) == set(manifest(fixture))
-s['S2'] = {'status': 'PASS native offline', 'evidence': 'debugger RED, terminal handoff, backend-worker bounded edit, GREEN; only calc.py changed'}
+s['S2'] = {'status': 'PASS native offline', 'evidence': 'diagnostic-engineer RED, terminal handoff, backend-worker bounded edit, GREEN; only calc.py changed'}
 
 names = sorted({t.get('function', {}).get('name', '') for c in caps for t in c.get('tools', [])})
 s['S3'] = {'status': 'See separate interactive S3 receipts', 'ask_user_advertised': 'ask_user' in names,

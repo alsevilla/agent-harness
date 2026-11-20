@@ -270,7 +270,7 @@ probeTest("a user roles.json overlays a bundled default field-wise and keeps the
 const MALFORMED_USER_ROLES: [string, string, RegExp][] = [
 	["unparseable JSON", '[{"name":"oracle"', /user roles\.json/],
 	["not a JSON list", '{"name":"scout"}', /must be a JSON list/],
-	["capitalised Name key", '[{"Name":"debugger","provider":"openai-codex","model":"gpt-6-luna"}]', /user roles\.json/],
+	["capitalised Name key", '[{"Name":"diagnostic-engineer","provider":"openai-codex","model":"gpt-6-luna"}]', /user roles\.json/],
 	["unknown key modle", '[{"name":"scout","modle":"gpt-6-luna"}]', /user roles\.json/],
 	["non-string tools", '[{"name":"scout","tools":5}]', /user roles\.json/],
 	["empty name", '[{"name":"","model":"x"}]', /user roles\.json/],
@@ -389,7 +389,7 @@ for (const scope of ["both", "project"]) {
 		const root = copyNativeTree();
 		const cwd = projectWithAgentsDir();
 		linkAgents(root, path.join(cwd, ".pi", "agents"), ["code-reviewer", "scout"]);
-		linkAgents(root, path.join(cwd, ".pi", "agents"), ["debugger"], () => "renamed-alias");
+		linkAgents(root, path.join(cwd, ".pi", "agents"), ["diagnostic-engineer"], () => "renamed-alias");
 		const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, scope);
 		if (scope === "both") assertAllCanonical(found, root, scope);
 		else assert.deepEqual(found.agents, []);

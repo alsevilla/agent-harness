@@ -422,7 +422,7 @@ test("saved lessons: a worker's prompt lists the project's lesson titles, bounde
   assert.match(text, /Before you diagnose a failure, choose an approach or repeat a step in an area one of these titles names, read that file first/);
   assert.match(text, /- Modem needs a 2 s pause after AT\+CMGS \(modem-pause\.md\)\n- Backups lock the WAL \(backup-wal\.md\)\n$/);
   assert.doesNotMatch(text, /secret|other\.md/, "only index lines naming a file in the folder");
-  const prompt = assembleChildSystemPrompt({ name: "debugger", systemPrompt: "ROLE" }, { cwd: join(project, "docs"), codeIntegrationsEnabled: false } as any);
+  const prompt = assembleChildSystemPrompt({ name: "diagnostic-engineer", systemPrompt: "ROLE" }, { cwd: join(project, "docs"), codeIntegrationsEnabled: false } as any);
   assert.ok(prompt.includes("- Backups lock the WAL (backup-wal.md)"), "every role, found from a subfolder of the candidate");
   fs.writeFileSync(join(project, "docs", "knowledge", "README.md"), Array.from({ length: 60 }, (_, i) => `- [Lesson ${i}](l-${i}.md)`).join("\n"));
   const many = savedLessonsGuidance(project);
