@@ -30,7 +30,7 @@ A synthetic current-state entry (fictional paths and job IDs, pointing at no rea
 ```text
 - Entry: synthetic-task-A (fictional)
   - Status: current phase VERIFY; PAUSED
-  - Owner: test-engineer, job synthetic-job-0042 (fictional), PAUSED by user, tracked in the current session registry
+  - Owner: qa-engineer, job synthetic-job-0042 (fictional), PAUSED by user, tracked in the current session registry
   - Completed: schema draft reviewer-accepted; brief outcome only
   - Gap/hold: `PAUSED by user (ref m00042)` stays ACTIVE until released; export-path security review UNKNOWN
   - Next: resume the verify job once the user releases the pause; no other action is authorized

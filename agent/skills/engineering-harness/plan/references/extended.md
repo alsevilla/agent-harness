@@ -424,7 +424,7 @@ For these domains:
 - strongly prefer explicit invariants;
 - require meaningful boundary and regression testing;
 - require independent verification when appropriate;
-- require Reviewer for behavioral changes unless there is a concrete reason not to.
+- require Code Reviewer for behavioral changes unless there is a concrete reason not to.
 
 ---
 
@@ -628,7 +628,7 @@ When specialists disagree:
 2. inspect repository/runtime evidence;
 3. determine whether one position can be disproven;
 4. compare recommendations against requirements and invariants;
-5. use Reviewer when independent review can resolve the issue;
+5. use Code Reviewer when independent review can resolve the issue;
 6. use Oracle only when important high-consequence uncertainty remains.
 
 Do not choose based on confidence or verbosity.
@@ -954,7 +954,7 @@ Tasks should correspond to meaningful engineering units.
 
 The execution task list is primarily for implementation ownership.
 
-Do not treat `test-engineer` as the implementation owner merely because independent tests are needed.
+Do not treat `qa-engineer` as the implementation owner merely because independent tests are needed.
 
 The normal separation is:
 
@@ -966,15 +966,15 @@ WORKER
 
 then:
 
-TEST ENGINEER
+QA ENGINEER
 → independent adversarial verification
 
 then, when required:
 
-REVIEWER
+CODE REVIEWER
 → independent code/design review
 
-Worker TDD and Test Engineer verification serve different purposes.
+Worker TDD and QA Engineer verification serve different purposes.
 
 Do not collapse them into one phase.
 
@@ -992,9 +992,9 @@ Typical owners:
 
 Specialists normally advise rather than implement.
 
-`test-engineer` independently verifies rather than replacing worker-owned TDD.
+`qa-engineer` independently verifies rather than replacing worker-owned TDD.
 
-`reviewer` reviews.
+`code-reviewer` reviews.
 
 `oracle` adjudicates exceptional unresolved uncertainty.
 
@@ -1134,7 +1134,7 @@ Worker-owned TDD is implementation evidence.
 
 It is not automatically sufficient independent verification.
 
-Use `test-engineer` when appropriate, especially for:
+Use `qa-engineer` when appropriate, especially for:
 
 - business rules;
 - domain logic;
@@ -1151,7 +1151,7 @@ Use `test-engineer` when appropriate, especially for:
 
 For HIGH or CRITICAL behavioral domain logic, independent verification should normally be REQUIRED.
 
-Define what the Test Engineer should challenge.
+Define what the QA Engineer should challenge.
 
 Examples:
 
@@ -1166,7 +1166,7 @@ Examples:
 - interaction with existing invariants;
 - acceptance criteria the worker may have interpreted too narrowly.
 
-Do not merely tell Test Engineer:
+Do not merely tell QA Engineer:
 
 "Run the tests."
 
@@ -1174,7 +1174,7 @@ Do not merely tell Test Engineer:
 
 # Independent Verification Must Remain Independent
 
-The Test Engineer should receive:
+The QA Engineer should receive:
 
 - objective;
 - requirements;
@@ -1188,7 +1188,7 @@ It may inspect worker-written tests.
 
 However, it should independently reason about missing cases rather than assuming those tests define complete correctness.
 
-Test Engineer output should establish:
+QA Engineer output should establish:
 
 - what was independently tested;
 - what passed;
@@ -1200,7 +1200,7 @@ Test Engineer output should establish:
 
 # Review Planning
 
-## Step 10 — Determine Reviewer Requirement
+## Step 10 — Determine Code Reviewer Requirement
 
 Classify review as:
 
@@ -1210,7 +1210,7 @@ RECOMMENDED
 
 NOT REQUIRED
 
-Reviewer is normally REQUIRED for:
+Code Reviewer is normally REQUIRED for:
 
 - HIGH or CRITICAL risk behavioral changes;
 - critical business rules;
@@ -1228,11 +1228,11 @@ Reviewer is normally REQUIRED for:
 - production deployment changes with meaningful recovery risk;
 - data-integrity-sensitive behavior.
 
-Do not downgrade Reviewer merely because the implementation appears small.
+Do not downgrade Code Reviewer merely because the implementation appears small.
 
-Reviewer may be RECOMMENDED for meaningful but contained MEDIUM-risk changes where independent review adds value.
+Code Reviewer may be RECOMMENDED for meaningful but contained MEDIUM-risk changes where independent review adds value.
 
-Reviewer may be NOT REQUIRED for genuinely trivial or low-risk work.
+Code Reviewer may be NOT REQUIRED for genuinely trivial or low-risk work.
 
 ---
 
@@ -1248,8 +1248,8 @@ unless an established escalation condition already exists.
 
 Oracle becomes appropriate when:
 
-- Reviewer returns ESCALATE;
-- worker and Reviewer materially disagree;
+- Code Reviewer returns ESCALATE;
+- worker and Code Reviewer materially disagree;
 - specialists conflict on a high-risk issue;
 - potential data loss remains unresolved;
 - concurrency correctness remains uncertain;
@@ -1459,7 +1459,7 @@ State:
 - risk of each choice;
 - what would resolve the uncertainty.
 
-Use Reviewer or Oracle according to established escalation rules when appropriate.
+Use Code Reviewer or Oracle according to established escalation rules when appropriate.
 
 ---
 
@@ -1784,7 +1784,7 @@ No additional observability required.
 
 State:
 
-**Test Engineer:** REQUIRED / RECOMMENDED / NOT REQUIRED
+**QA Engineer:** REQUIRED / RECOMMENDED / NOT REQUIRED
 
 If REQUIRED or RECOMMENDED, specify the independent verification mission.
 
@@ -1806,7 +1806,7 @@ Example:
 
 State:
 
-**Reviewer:** REQUIRED / RECOMMENDED / NOT REQUIRED
+**Code Reviewer:** REQUIRED / RECOMMENDED / NOT REQUIRED
 
 Explain why based on consequence and domain risk, not diff size.
 
@@ -1966,13 +1966,13 @@ Return the issue to planning or discovery as appropriate.
 
 Worker completion does not automatically mean feature completion.
 
-When Test Engineer is REQUIRED:
+When QA Engineer is REQUIRED:
 
 EXECUTE
 → worker TDD/regression evidence
-→ TEST ENGINEER independent verification
+→ QA ENGINEER independent verification
 
-Test Engineer should challenge the implementation against:
+QA Engineer should challenge the implementation against:
 
 - requirements;
 - invariants;
@@ -1981,7 +1981,7 @@ Test Engineer should challenge the implementation against:
 - failure modes;
 - relevant domain risks.
 
-A worker PASS does not override a Test Engineer FAIL.
+A worker PASS does not override a QA Engineer FAIL.
 
 Resolve the evidence.
 
@@ -1989,14 +1989,14 @@ Resolve the evidence.
 
 # Handoff to Review
 
-When Reviewer is REQUIRED:
+When Code Reviewer is REQUIRED:
 
 implementation
 → worker tests
 → independent verification when required
-→ REVIEWER
+→ CODE REVIEWER
 
-Reviewer should receive:
+Code Reviewer should receive:
 
 - objective;
 - requirements;
@@ -2008,7 +2008,7 @@ Reviewer should receive:
 - independent verification findings;
 - known out-of-scope findings.
 
-Reviewer should review the resulting system behavior and implementation rather than merely checking whether the worker followed instructions mechanically.
+Code Reviewer should review the resulting system behavior and implementation rather than merely checking whether the worker followed instructions mechanically.
 
 ---
 

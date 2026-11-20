@@ -187,7 +187,7 @@ const MANIFEST: Record<string, Row[]> = {
 	"f243dc23925a": [["M", "$"]],
 	"3f1d6278595a": [["M", "$"]],
 	"97bd86fb55e3": [["M", "$"]],
-	"1a5f2b064931": [["M", "$"]],
+	"9df3b0461e1b": [["M", "$"]],
 	"aa2c382cc284": [["M", "candidate identity."], ["C", "main history.", "Leaves lack main history"], ["M", "$"]],
 	"af003d42d21f": [["M", "$"]],
 	"f204cdb7ec3c": [["M", "speculative patches."], ["C", "approach remains.", "2 review cycles per candidate"], ["C", "a fresh count;", PROOF.freshCount], ["C", "approval gate.", "the cap is no refusal of authorized work"], ["M", "$"]],
@@ -319,7 +319,7 @@ test("assembled child prompts keep the existing shared guidance and gain the con
 			assert.ok(effective.includes(phrase), `${name}: ${phrase}`);
 		}
 		assert.equal(effective.split("# Pi leaf contract").length - 1, 1);
-		if (name === "general-worker.md" || name === "backend-worker.md" || name === "reviewer.md" || name === "test-engineer.md" || name === "system-architect.md") {
+		if (name === "general-worker.md" || name === "backend-worker.md" || name === "reviewer.md" || name === "qa-engineer.md" || name === "system-architect.md") {
 			const before = Buffer.byteLength(prompt) + Buffer.byteLength(POLICY_LF);
 			const after = Buffer.byteLength(effective) - 1;
 			console.log(`child-context static subset ${name}: before=${before} after=${after} net=${before - after} (role+CORE+handoff+global; LF bytes; excludes base prompt, tool defs, integrations)`);

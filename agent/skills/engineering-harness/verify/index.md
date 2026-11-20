@@ -13,7 +13,7 @@ checks and outcomes, candidate identity where relevant, disposition, confidence 
 unresolved limits in the assigned REPORT file; no unsupported completion or downstream claims.
 
 ## VERIFY procedure
-This procedure belongs to `test-engineer`.
+This procedure belongs to `qa-engineer`.
 
 Verify the exact candidate against the approved contract. Do not modify production code.
 

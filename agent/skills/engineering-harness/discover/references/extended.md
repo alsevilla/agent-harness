@@ -562,9 +562,9 @@ For a bug where the failure itself is not understood, discovery may recommend or
 
 Do not turn every feature discovery into debugging.
 
-## Reviewer
+## Code Reviewer
 
-Reviewer is normally not required during discovery.
+Code Reviewer is normally not required during discovery.
 
 ## Oracle
 

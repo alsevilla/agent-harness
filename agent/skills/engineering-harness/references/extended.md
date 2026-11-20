@@ -47,8 +47,8 @@ After choosing a phase, dispatch the dedicated role when that phase has one:
 - non-trivial frontend implementation -> `frontend-worker`;
 - non-trivial general implementation -> `general-worker`;
 - non-trivial infrastructure, GitOps or CI workflow file implementation -> `platform-worker`;
-- independent verification -> `test-engineer`;
-- adversarial review -> `reviewer`;
+- independent verification -> `qa-engineer`;
+- adversarial review -> `code-reviewer`;
 - unresolved specialist-domain decision -> the justified read-only specialist.
 
 The router and lifecycle skills define **how to route and what evidence is

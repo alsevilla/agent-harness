@@ -4,12 +4,12 @@
   "cacheModel": "idealized warm complete-message prefixes; no expiry or cross-context reuse",
   "pricingDate": "2026-11-08",
   "pricingURL": "https://developers.openai.com/api/docs/pricing",
-  "sourceCommit": "4f17d5a2634bd3daf75b5b463781ace2ffb41472",
+  "sourceCommit": "1273fc1c624539ea3cd556ca9d8abcc771311aca",
   "roleDefaults": {
     "backend-worker": "gpt-6.1-sol",
     "debugger": "gpt-6-luna",
     "system-architect": "gpt-6-luna",
-    "test-engineer": "gpt-6-luna"
+    "qa-engineer": "gpt-6-luna"
   },
   "implementationRouting": [
     {
@@ -152,12 +152,12 @@
     "WRITE_X": 1.25,
     "CACHE_LOOKBACK_BLOCKS": 20,
     "PI_SYSTEM": 7271,
-    "MAIN_SYSTEM": 20769,
+    "MAIN_SYSTEM": 20772,
     "CHILD_PROMPT": {
       "backend-worker": 20423,
       "debugger": 16529,
       "system-architect": 16843,
-      "test-engineer": 18318
+      "qa-engineer": 18316
     },
     "MAIN_FOLD_TOKENS": 50000,
     "HANDOFF_WINDOW": 10,
@@ -214,21 +214,21 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
-        "cost": 23.3342,
+        "cost": 23.3339,
         "byModel": {
-          "gpt-6-astra": 23.3342
+          "gpt-6-astra": 23.3339
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
-        "cost": 5.187,
+        "cost": 5.1868,
         "byModel": {
-          "gpt-6-astra": 4.0121,
+          "gpt-6-astra": 4.0119,
           "gpt-6.1-sol": 1.0499,
           "gpt-6-luna": 0.125
         }
@@ -258,7 +258,7 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
         "cost": 3.8981,
         "byModel": {
@@ -268,7 +268,7 @@
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
         "cost": 1.8574,
         "byModel": {
@@ -301,17 +301,17 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
-        "cost": 1.9491,
+        "cost": 1.949,
         "byModel": {
-          "gpt-6.1-terra": 1.9491
+          "gpt-6.1-terra": 1.949
         }
       },
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
         "cost": 1.5161,
         "byModel": {
@@ -345,7 +345,7 @@
       "harnessSameModel": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
         "cost": 0.2333,
         "byModel": {
@@ -355,7 +355,7 @@
       "harnessRoleModels": {
         "contexts": 22,
         "requests": 294,
-        "sent": 8470898,
+        "sent": 8470767,
         "peak": 61982,
         "cost": 1.215,
         "byModel": {
@@ -370,77 +370,77 @@
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 0,
-      "cost": 5.0795,
+      "cost": 5.0793,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 1,
-      "cost": 5.187,
+      "cost": 5.1868,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 2,
-      "cost": 5.275,
+      "cost": 5.2748,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 4,
-      "cost": 5.4264,
+      "cost": 5.4263,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 6,
-      "cost": 5.626,
+      "cost": 5.6258,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 8,
-      "cost": 5.7799,
+      "cost": 5.7797,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "orient",
       "value": 12,
-      "cost": 6.2797,
+      "cost": 6.2795,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 1,
-      "cost": 5.187,
+      "cost": 5.1868,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 5.2499,
+      "cost": 5.2497,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 2,
-      "cost": 5.2934,
+      "cost": 5.2932,
       "singleFresh": 16.6934
     },
     {
       "main": "gpt-6-astra",
       "sweep": "economyX",
       "value": 3,
-      "cost": 5.4051,
+      "cost": 5.4049,
       "singleFresh": 16.6934
     },
     {
@@ -475,14 +475,14 @@
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 6,
-      "cost": 2.2965,
+      "cost": 2.2964,
       "singleFresh": 2.6057
     },
     {
       "main": "gpt-6.1-sol",
       "sweep": "orient",
       "value": 8,
-      "cost": 2.4504,
+      "cost": 2.4503,
       "singleFresh": 2.6057
     },
     {
@@ -503,7 +503,7 @@
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 1.5,
-      "cost": 1.9204,
+      "cost": 1.9203,
       "singleFresh": 2.6057
     },
     {
@@ -517,7 +517,7 @@
       "main": "gpt-6.1-sol",
       "sweep": "economyX",
       "value": 3,
-      "cost": 2.0756,
+      "cost": 2.0755,
       "singleFresh": 2.6057
     },
     {
@@ -566,7 +566,7 @@
       "main": "gpt-6.1-terra",
       "sweep": "orient",
       "value": 12,
-      "cost": 2.6089,
+      "cost": 2.6088,
       "singleFresh": 1.3028
     },
     {
@@ -587,7 +587,7 @@
       "main": "gpt-6.1-terra",
       "sweep": "economyX",
       "value": 2,
-      "cost": 1.6226,
+      "cost": 1.6225,
       "singleFresh": 1.3028
     },
     {

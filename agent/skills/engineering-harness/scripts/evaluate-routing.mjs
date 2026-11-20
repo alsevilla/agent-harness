@@ -28,8 +28,8 @@ export const ROLES = new Set([
 	"api-specialist", "backend-worker", "concurrency-specialist",
 	"debugger", "devops-specialist", "frontend-worker", "general-worker",
 	"observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
-	"reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
-	"system-architect", "technical-writer", "test-engineer", "ui-ux-specialist",
+	"code-reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
+	"system-architect", "technical-writer", "qa-engineer", "ui-ux-specialist",
 ]);
 const set = (...items) => new Set(items);
 const KINDS = set("positive", "near_miss");
@@ -479,8 +479,8 @@ export function shapeChain(shape, at) {
 	if (has(packets, "debugger")) steps.push({ agent: "debugger" });
 	if (has(packets, "specialist")) steps.push({ agent: shape.specialist });
 	steps.push({ agent: shape.worker });
-	if (has(packets, "test")) steps.push({ agent: "test-engineer", ...gate });
-	if (has(packets, "review")) steps.push({ agent: "reviewer", ...gate });
+	if (has(packets, "test")) steps.push({ agent: "qa-engineer", ...gate });
+	if (has(packets, "review")) steps.push({ agent: "code-reviewer", ...gate });
 	return steps.map((step) => ({ ...step, task: "shape packet" }));
 }
 

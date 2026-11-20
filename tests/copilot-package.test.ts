@@ -136,7 +136,7 @@ test("Copilot profiles and common skill are standalone, scoped native contracts"
     expect(body).toMatch(/candidate/i);
     expect(body).toMatch(/evidence|report/i);
     expect(body).toMatch(/helper/i);
-    if (["reviewer", "test-engineer", "debugger", "scout", "database-specialist", "security-specialist"].includes(name)) {
+    if (["code-reviewer", "qa-engineer", "debugger", "scout", "database-specialist", "security-specialist"].includes(name)) {
       expect(body).toMatch(/read.only|do not modify|without modifying/i);
     }
     expect(body.length).toBeGreaterThan(0);

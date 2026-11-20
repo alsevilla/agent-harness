@@ -40,7 +40,7 @@ test("alignment reports drift: widened tools, model keys, missing/extra profiles
   const h = headers();
   const tampered = structuredClone(h);
   tampered["scout"].tools = "read, search, execute, edit";
-  tampered["reviewer"].model = "x";
+  tampered["code-reviewer"].model = "x";
   delete tampered["oracle"];
   tampered["ghost"] = { name: "ghost", description: "d", tools: "read" };
   tampered["debugger"].name = "other";
@@ -54,10 +54,10 @@ test("an unmappable registry tool is reported, not skipped", () => {
 });
 
 test("exact named dispatch needs a supported capability and the exact available role", () => {
-  const names = ["reviewer", "scout"];
-  expect(compat.resolveRole("reviewer", names, "supported")).toEqual({ ok: true, role: "reviewer" });
-  for (const status of ["unsupported", "unverified", undefined, "yes"]) expect(compat.resolveRole("reviewer", names, status as never).ok).toBe(false);
-  for (const missing of ["test-engineer", "Reviewer", "reviewer ", "general-purpose", ""]) {
+  const names = ["code-reviewer", "scout"];
+  expect(compat.resolveRole("code-reviewer", names, "supported")).toEqual({ ok: true, role: "code-reviewer" });
+  for (const status of ["unsupported", "unverified", undefined, "yes"]) expect(compat.resolveRole("code-reviewer", names, status as never).ok).toBe(false);
+  for (const missing of ["qa-engineer", "Reviewer", "reviewer ", "general-purpose", ""]) {
     const r = compat.resolveRole(missing, names, "supported");
     expect(r.ok).toBe(false);
     expect("role" in r).toBe(false);
@@ -96,14 +96,14 @@ test("handoff needs nonblank next action and risk statement, and dense complete 
 });
 
 test("exact role matching refuses malformed requested role and inventory without throwing", () => {
-  const sparse = new Array(2); sparse[0] = "reviewer";
-  for (const inv of ["senior-reviewer", "reviewer", undefined, null, {}, 7, ["reviewer", 1], ["reviewer", ""], ["reviewer", null], ["reviewer", " "], sparse, new Set(["reviewer"])]) {
+  const sparse = new Array(2); sparse[0] = "code-reviewer";
+  for (const inv of ["senior-reviewer", "code-reviewer", undefined, null, {}, 7, ["code-reviewer", 1], ["code-reviewer", ""], ["code-reviewer", null], ["code-reviewer", " "], sparse, new Set(["code-reviewer"])]) {
     let r: { ok: boolean } | undefined;
-    expect(() => { r = compat.resolveRole("reviewer", inv as never, "supported"); }).not.toThrow();
+    expect(() => { r = compat.resolveRole("code-reviewer", inv as never, "supported"); }).not.toThrow();
     expect(r!.ok).toBe(false);
   }
-  for (const req of [undefined, null, 7, ["reviewer"], "", "  "]) expect(compat.resolveRole(req as never, ["reviewer"], "supported").ok).toBe(false);
-  expect(compat.resolveRole("reviewer", ["scout", "reviewer"], "supported")).toEqual({ ok: true, role: "reviewer" });
+  for (const req of [undefined, null, 7, ["code-reviewer"], "", "  "]) expect(compat.resolveRole(req as never, ["code-reviewer"], "supported").ok).toBe(false);
+  expect(compat.resolveRole("code-reviewer", ["scout", "code-reviewer"], "supported")).toEqual({ ok: true, role: "code-reviewer" });
 });
 
 test("approval comparison rejects non-textual, blank, and malformed options/answers/records; matching is exact", () => {
@@ -194,15 +194,15 @@ test("check CLI refuses unsupported scalar headers", () => {
 });
 
 test("decorated sparse arrays are not dense: refused for inventory and handoff evidence/checks", () => {
-  const inv: string[] = ["reviewer"]; inv.length = 2; (inv as any).note = "metadata";
-  expect(compat.resolveRole("reviewer", inv, "supported").ok).toBe(false);
+  const inv: string[] = ["code-reviewer"]; inv.length = 2; (inv as any).note = "metadata";
+  expect(compat.resolveRole("code-reviewer", inv, "supported").ok).toBe(false);
   const ev: unknown[] = new Array(1); (ev as any).note = "metadata, not a path";
   const checks: unknown[] = new Array(1); (checks as any).note = "m";
   const ok = { ...packet, status: "PASS", checks: [{ command: "npm test", exitCode: 0 }], evidence: [resolve(root, "README.md")], next: "none", risks: "none" };
   expect(compat.validateHandoff({ ...ok, evidence: ev } as never).length).toBeGreaterThan(0);
   expect(compat.validateHandoff({ ...ok, checks } as never).length).toBeGreaterThan(0);
-  const dense = ["reviewer"]; (dense as any).note = "extra non-index property is not a hole";
-  expect(compat.resolveRole("reviewer", dense, "supported").ok).toBe(true);
+  const dense = ["code-reviewer"]; (dense as any).note = "extra non-index property is not a hole";
+  expect(compat.resolveRole("code-reviewer", dense, "supported").ok).toBe(true);
   expect(compat.validateHandoff(ok)).toEqual([]);
 });
 
@@ -234,7 +234,7 @@ test("malformed or missing model source fails clearly and is never taken from el
 });
 
 test("model compatibility is never ready: absent evidence unverified, rejected/unadvertised unsupported, advertised still unverified", () => {
-  const req = compat.modelRequirement(real("reviewer"));
+  const req = compat.modelRequirement(real("code-reviewer"));
   const none = compat.modelCompatibility(req, undefined);
   expect(none).toMatchObject({ status: "unverified", ready: false });
   expect(compat.modelCompatibility(req, { rejectedModels: [req.model] })).toMatchObject({ status: "unsupported", ready: false });
@@ -250,26 +250,26 @@ test("model compatibility is never ready: absent evidence unverified, rejected/u
 });
 
 test("native identity needs canonical registry role, explicit namespace and exact qualified runtime inventory", () => {
-  const inv = ["probe:reviewer", "probe:scout", "explore", "reviewer"];
-  expect(compat.nativeIdentity(roles, "reviewer", "probe", inv, "supported")).toEqual({ ok: true, nativeName: "probe:reviewer" });
+  const inv = ["probe:code-reviewer", "probe:scout", "explore", "code-reviewer"];
+  expect(compat.nativeIdentity(roles, "code-reviewer", "probe", inv, "supported")).toEqual({ ok: true, nativeName: "probe:code-reviewer" });
   for (const [role, ns, i, cap] of [
-    ["reviewer", "probe", inv, "unverified"], ["reviewer", "probe", inv, "unsupported"], ["reviewer", "probe", inv, undefined],
-    ["reviewer", "other", inv, "supported"], ["reviewer", "", inv, "supported"], ["reviewer", undefined, inv, "supported"], ["reviewer", "pro:be", inv, "supported"],
+    ["code-reviewer", "probe", inv, "unverified"], ["code-reviewer", "probe", inv, "unsupported"], ["code-reviewer", "probe", inv, undefined],
+    ["code-reviewer", "other", inv, "supported"], ["code-reviewer", "", inv, "supported"], ["code-reviewer", undefined, inv, "supported"], ["code-reviewer", "pro:be", inv, "supported"],
     ["explore", "probe", ["probe:explore", "explore"], "supported"], ["ghost", "probe", ["probe:ghost"], "supported"],
-    ["review", "probe", inv, "supported"], ["Reviewer", "probe", inv, "supported"], ["reviewer", "probe", ["probe:reviewer-2", "xprobe:reviewer"], "supported"],
-    ["reviewer", "probe", ["reviewer"], "supported"], ["reviewer", "probe", "probe:reviewer", "supported"], ["reviewer", "probe", new Array(1), "supported"],
-    [undefined, "probe", inv, "supported"], ["test-engineer", "probe", inv, "supported"],
+    ["review", "probe", inv, "supported"], ["Reviewer", "probe", inv, "supported"], ["code-reviewer", "probe", ["probe:code-reviewer-2", "xprobe:code-reviewer"], "supported"],
+    ["code-reviewer", "probe", ["code-reviewer"], "supported"], ["code-reviewer", "probe", "probe:code-reviewer", "supported"], ["code-reviewer", "probe", new Array(1), "supported"],
+    [undefined, "probe", inv, "supported"], ["qa-engineer", "probe", inv, "supported"],
   ] as const) {
     const r = compat.nativeIdentity(roles, role as never, ns as never, i as never, cap as never);
     expect(r.ok, JSON.stringify([role, ns, cap])).toBe(false);
     expect("nativeName" in r).toBe(false);
   }
-  expect(compat.nativeIdentity([], "reviewer", "probe", inv, "supported").ok).toBe(false);
+  expect(compat.nativeIdentity([], "code-reviewer", "probe", inv, "supported").ok).toBe(false);
 });
 
 test("role preflight keeps native availability separate from non-ready model compatibility", () => {
-  const inv = ["probe:reviewer"];
-  const p = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported" });
+  const inv = ["probe:code-reviewer"];
+  const p = compat.rolePreflight(roles, { role: "code-reviewer", namespace: "probe", inventory: inv, dispatch: "supported" });
   expect(p.native.ok).toBe(true);
   expect(p.model).toMatchObject({ status: "unverified", ready: false });
   expect("ready" in p).toBe(false);
@@ -277,27 +277,27 @@ test("role preflight keeps native availability separate from non-ready model com
   expect(p.modelRequirementsVerified).toBe(false);
   expect(p.modelBoundDelegation).toBe("non-ready");
   expect(p.limitations.join(" ")).toMatch(/not.*(intercept|authority)/i);
-  const none = compat.rolePreflight(roles, { role: "reviewer" } as never);
+  const none = compat.rolePreflight(roles, { role: "code-reviewer" } as never);
   expect(none.native.ok).toBe(false);
   expect("ready" in none).toBe(false);
   expect(none.nativeDispatchReady).toBe(false);
   expect(none.modelRequirementsVerified).toBe(false);
   expect(() => compat.rolePreflight(roles, { role: "ghost" } as never)).toThrow(/registry/);
-  const unsupportedModel = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: { rejectedModels: [compat.modelRequirement(real("reviewer")).model] } });
+  const unsupportedModel = compat.rolePreflight(roles, { role: "code-reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: { rejectedModels: [compat.modelRequirement(real("code-reviewer")).model] } });
   expect(unsupportedModel.native.ok).toBe(true);
   expect(unsupportedModel.model.status).toBe("unsupported");
   // independence: native availability is unaffected by model evidence, and no input flips model verification or model-bound readiness
   expect(unsupportedModel).toMatchObject({ nativeDispatchReady: true, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
-  const req = compat.modelRequirement(real("reviewer"));
-  const adv = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: { advertisedModels: [req.model, req.fallbackModel] } });
+  const req = compat.modelRequirement(real("code-reviewer"));
+  const adv = compat.rolePreflight(roles, { role: "code-reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: { advertisedModels: [req.model, req.fallbackModel] } });
   expect(adv).toMatchObject({ nativeDispatchReady: true, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
-  for (const [ns, i, d] of [["probe", inv, "unverified"], ["probe", inv, "unsupported"], ["probe", inv, undefined], ["other", inv, "supported"], ["", inv, "supported"], ["probe", ["reviewer"], "supported"], ["probe", "probe:reviewer", "supported"]] as const) {
-    const bad = compat.rolePreflight(roles, { role: "reviewer", namespace: ns, inventory: i as never, dispatch: d as never, modelEvidence: { advertisedModels: [req.model] } });
+  for (const [ns, i, d] of [["probe", inv, "unverified"], ["probe", inv, "unsupported"], ["probe", inv, undefined], ["other", inv, "supported"], ["", inv, "supported"], ["probe", ["code-reviewer"], "supported"], ["probe", "probe:code-reviewer", "supported"]] as const) {
+    const bad = compat.rolePreflight(roles, { role: "code-reviewer", namespace: ns, inventory: i as never, dispatch: d as never, modelEvidence: { advertisedModels: [req.model] } });
     expect(bad, JSON.stringify([ns, d])).toMatchObject({ nativeDispatchReady: false, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
   }
   for (const evidence of [{ honored: true }, { ready: true }, { modelRequirementsVerified: true }, { status: "honored" }])
     for (const extra of [{}, { ready: true, nativeDispatchReady: false, modelRequirementsVerified: true, honored: true }]) {
-      const q = compat.rolePreflight(roles, { role: "reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: evidence as never, ...extra } as never);
+      const q = compat.rolePreflight(roles, { role: "code-reviewer", namespace: "probe", inventory: inv, dispatch: "supported", modelEvidence: evidence as never, ...extra } as never);
       expect(q).toMatchObject({ nativeDispatchReady: true, modelRequirementsVerified: false, modelBoundDelegation: "non-ready" });
       expect("ready" in q).toBe(false);
       expect(JSON.stringify(q)).not.toMatch(/"modelRequirementsVerified":true|honored":true/);
@@ -321,7 +321,7 @@ test("handoff needs the full packet: absolute candidate, task, expected behavior
 test("dense predicate does not allocate by length: a huge sparse array is refused quickly", () => {
   const huge: unknown[] = []; huge.length = 2 ** 32 - 1;
   const t = Date.now();
-  expect(compat.resolveRole("reviewer", huge as never, "supported").ok).toBe(false);
+  expect(compat.resolveRole("code-reviewer", huge as never, "supported").ok).toBe(false);
   expect(Date.now() - t).toBeLessThan(1000);
 });
 
@@ -361,10 +361,10 @@ test("observed finite sample: provenance, namespaced exact calls, refusal, overl
 });
 
 test("named-role CLI prints registry requirement and is non-ready/unverified without active evidence", () => {
-  const out = cli("--role", "reviewer");
+  const out = cli("--role", "code-reviewer");
   expect(out.status).toBe(2);
   const j = JSON.parse(out.stdout);
-  expect(j.requirement).toEqual(compat.modelRequirement(real("reviewer")));
+  expect(j.requirement).toEqual(compat.modelRequirement(real("code-reviewer")));
   expect("ready" in j).toBe(false);
   expect(j).toMatchObject({ nativeDispatchReady: false, modelRequirementsVerified: false, modelBoundDelegation: "non-ready", native: { ok: false }, model: { status: "unverified", ready: false } });
   expect(cli("--role", "ghost").status).toBe(1);
@@ -379,7 +379,7 @@ test("named-role CLI prints registry requirement and is non-ready/unverified wit
 });
 
 test("CLI refuses unsupported arguments; default metadata check unchanged", () => {
-  for (const a of [["--bogus"], ["extra"], ["--role", "reviewer", "--bogus"], ["--root"], ["--root", root, "--root", root], ["--role", "reviewer", "--role", "scout"], ["--check"]]) expect(cli(...a).status, a.join(" ")).toBe(1);
+  for (const a of [["--bogus"], ["extra"], ["--role", "code-reviewer", "--bogus"], ["--root"], ["--root", root, "--root", root], ["--role", "code-reviewer", "--role", "scout"], ["--check"]]) expect(cli(...a).status, a.join(" ")).toBe(1);
   expect(cli().status).toBe(0);
   expect(cli("--root", root).status).toBe(0);
 });

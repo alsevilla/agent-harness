@@ -12,7 +12,7 @@ Use the narrowest applicable skill and pass findings to the assigned role.
 | Keyboard, focus, ARIA, forms/errors, reduced motion | accessible-ui-patterns | ui-ux-specialist for judgment; frontend-worker for accepted behavior |
 | New visual direction | frontend-design OR ui-ux-pro-max | ui-ux-specialist |
 | Purposeful motion and transitions | design-motion-principles | ui-ux-specialist; frontend-worker implements accepted behavior |
-| Existing UI implementation audit | web-design-guidelines | ui-ux-specialist or explicitly selected reviewer |
+| Existing UI implementation audit | web-design-guidelines | ui-ux-specialist or explicitly selected code-reviewer |
 | Complex generics/type utilities | typescript-advanced-types | frontend-worker |
 
 Resolve material flow decisions before visual direction and affected implementation.

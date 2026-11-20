@@ -128,11 +128,11 @@
       "critical": true,
       "expect": {
         "routes": ["VERIFY_INDEPENDENT"],
-        "roles_required": ["test-engineer"],
-        "roles_allowed": ["test-engineer"],
+        "roles_required": ["qa-engineer"],
+        "roles_allowed": ["qa-engineer"],
         "skills_required": [],
         "skills_forbidden": [],
-        "model_tiers": {"test-engineer": ["capable"]}
+        "model_tiers": {"qa-engineer": ["capable"]}
       }
     },
     {
@@ -143,11 +143,11 @@
       "critical": true,
       "expect": {
         "routes": ["REVIEW"],
-        "roles_required": ["reviewer"],
-        "roles_allowed": ["reviewer"],
+        "roles_required": ["code-reviewer"],
+        "roles_allowed": ["code-reviewer"],
         "skills_required": [],
         "skills_forbidden": [],
-        "model_tiers": {"reviewer": ["capable"]}
+        "model_tiers": {"code-reviewer": ["capable"]}
       }
     },
     {

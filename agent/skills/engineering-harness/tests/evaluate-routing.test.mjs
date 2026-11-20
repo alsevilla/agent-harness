@@ -138,8 +138,8 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual(x("R07").routes, ["T1_WORKER"]);
 		assert.deepEqual(x("R07").roles_required, ["general-worker"]);
 		assert.deepEqual(x("R08").roles_required, ["general-worker"]);
-		assert.deepEqual(x("R09").roles_required, ["test-engineer"]);
-		assert.deepEqual(x("R10").roles_required, ["reviewer"]);
+		assert.deepEqual(x("R09").roles_required, ["qa-engineer"]);
+		assert.deepEqual(x("R10").roles_required, ["code-reviewer"]);
 		assert.deepEqual(x("R20").routes, ["BLOCKED_NO_AUTHORITY"]);
 		assert.deepEqual(x("R20").roles_allowed, []);
 		assert.deepEqual(x("R21").roles_required, ["release-engineer"]);
@@ -470,7 +470,7 @@ describe("ModelTierTests", () => {
 
 	it("six_difficult_roles_require_explicit_capable_and_controls_allow_economy", () => {
 		const c = byId(fx);
-		for (const [cid, role] of [["R18", "security-specialist"], ["R17", "concurrency-specialist"], ["R05", "debugger"], ["R10", "reviewer"], ["R02", "database-specialist"], ["R09", "test-engineer"]]) {
+		for (const [cid, role] of [["R18", "security-specialist"], ["R17", "concurrency-specialist"], ["R05", "debugger"], ["R10", "code-reviewer"], ["R02", "database-specialist"], ["R09", "qa-engineer"]]) {
 			assert.deepEqual(c[cid].expect.model_tiers[role], ["capable"], cid);
 			assert.equal(c[cid].critical, true, cid);
 		}
@@ -491,7 +491,7 @@ describe("ModelTierTests", () => {
 
 	it("wrong_tier_economy_for_difficult_role_is_critical", () => {
 		const rows = perfectPredictions(fx);
-		caseRow(rows, "R10").calls = [{ agent: "reviewer", task: "t", modelTier: "economy" }];
+		caseRow(rows, "R10").calls = [{ agent: "code-reviewer", task: "t", modelTier: "economy" }];
 		const rep = runRows(rows);
 		assert.equal(rep.violations.tier_wrong, 1);
 		assert.equal(rep.critical_failures, 1);
@@ -755,7 +755,7 @@ describe("NativeCallValidationTests", () => {
 	});
 
 	it("single_mode_needs_nonblank_agent_and_task", () => {
-		for (const call of [{ agent: "reviewer" }, { task: "t" }, { agent: "reviewer", task: "" }, { agent: "reviewer", task: 5 }, { agent: "", task: "t" }, { agent: null, task: "t" }]) rejected(call);
+		for (const call of [{ agent: "code-reviewer" }, { task: "t" }, { agent: "code-reviewer", task: "" }, { agent: "code-reviewer", task: 5 }, { agent: "", task: "t" }, { agent: null, task: "t" }]) rejected(call);
 	});
 
 	it("pr_base_accepted_per_entry_and_at_single_root", () => {

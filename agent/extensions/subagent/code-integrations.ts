@@ -172,7 +172,7 @@ function readIntegrationConfig(): IntegrationConfig {
   return JSON.parse(fs.readFileSync(new URL("./integrations.json", import.meta.url), "utf8")) as IntegrationConfig;
 }
 
-// Ponytail is required for every role except reviewer, where its extension and review skill are optional supplements.
+// Ponytail is required for every role except code-reviewer, where its extension and review skill are optional supplements.
 function ponytailIntegrations(): Integration[] {
   const ponytail = path.join(getAgentDir(), "npm", "node_modules", "@dietrichgebert", "ponytail");
   return [
@@ -195,7 +195,7 @@ function optionalIntegrations(qmdExtension: string, serenaSkill = SERENA_SKILL):
 /** Launch note naming optional integrations this launch lacks; empty when all are present or the role has none configured. */
 export function unavailableIntegrationGuidance(agentName: string, qmdExtension = QMD_EXTENSION, serenaSkill = SERENA_SKILL): string {
   if (!readIntegrationConfig().roles.includes(agentName)) return "";
-  const items = [...(agentName === "reviewer" ? ponytailIntegrations() : []), ...optionalIntegrations(qmdExtension, serenaSkill)];
+  const items = [...(agentName === "code-reviewer" ? ponytailIntegrations() : []), ...optionalIntegrations(qmdExtension, serenaSkill)];
   const missing = items.filter(item => !fs.existsSync(item.file)).map(item => item.label);
   if (!missing.length) return "";
   return `\n## Integrations not loaded in this launch\nNot loaded: ${missing.join(", ")}. The launch continued without them; any tools they would provide are not granted. Use the permitted read, grep and find fallback for the affected navigation; do not call them.\n`;
@@ -218,7 +218,7 @@ export function configureCodeIntegrations(args: string[], agent: AgentConfig, ex
     return false;
   }
   // Reviewer only: Ponytail is optional (extension and review skill load when present); every other role fails closed without it.
-  const optionalPonytail = agent.name === "reviewer";
+  const optionalPonytail = agent.name === "code-reviewer";
   const [ponytailExtension, ponytailSkill] = ponytailIntegrations();
   if (!optionalPonytail && !fs.existsSync(ponytailExtension.file)) throw new Error(`Code integration missing for ${agent.name}: ${ponytailExtension.file}. Install @dietrichgebert/ponytail through Pi.`);
   if (!optionalPonytail) args.push(ponytailExtension.flag, ponytailExtension.file);

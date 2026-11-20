@@ -14,7 +14,7 @@ test("T1 is one worker step with the packet as-is", () => {
 
 test("T2 runs debugger then worker; later steps get the previous report; test and review are optional", () => {
 	const chain = roles({ name: "T2", worker: "frontend-worker", packets: { debugger: "find cause", worker: "fix it", test: "verify", review: "review" }, cwd: "/w" });
-	assert.deepEqual(chain.map((s) => s.agent), ["debugger", "frontend-worker", "test-engineer", "reviewer"]);
+	assert.deepEqual(chain.map((s) => s.agent), ["debugger", "frontend-worker", "qa-engineer", "code-reviewer"]);
 	assert.equal(chain[0].task, "find cause");
 	assert.ok(chain.slice(1).every((s) => s.task.endsWith("Previous step report:\n{previous}")));
 	assert.ok(chain.every((s) => s.cwd === "/w"));
@@ -22,10 +22,10 @@ test("T2 runs debugger then worker; later steps get the previous report; test an
 	assert.ok(chain.every((s) => s.modelTier === undefined), "T2 keeps role defaults");
 });
 
-test("T3 order: economy system-architect, specialist, worker, capable test-engineer and reviewer", () => {
+test("T3 order: economy system-architect, specialist, worker, capable qa-engineer and reviewer", () => {
 	const chain = roles({ name: "T3", worker: "database-worker", specialist: "database-specialist", packets: { architect: "plan", specialist: "decide", worker: "build", test: "verify", review: "review" } });
-	assert.deepEqual(chain.map((s) => [s.agent, s.modelTier]), [["system-architect", "economy"], ["database-specialist", undefined], ["database-worker", undefined], ["test-engineer", "capable"], ["reviewer", "capable"]]);
-	assert.deepEqual(roles({ name: "T3", worker: "backend-worker", packets: { worker: "build", test: "verify" } }).map((s) => s.agent), ["backend-worker", "test-engineer"]);
+	assert.deepEqual(chain.map((s) => [s.agent, s.modelTier]), [["system-architect", "economy"], ["database-specialist", undefined], ["database-worker", undefined], ["qa-engineer", "capable"], ["code-reviewer", "capable"]]);
+	assert.deepEqual(roles({ name: "T3", worker: "backend-worker", packets: { worker: "build", test: "verify" } }).map((s) => s.agent), ["backend-worker", "qa-engineer"]);
 });
 
 test("a packet that already places {previous} is not given a second copy", () => {
@@ -44,7 +44,7 @@ test("invalid shapes are refused, never trimmed", () => {
 		[{ name: "T3", worker: "backend-worker", packets: { planner: "p", worker: "x", test: "t" } }, /"planner" is not part of T3/],
 		[{ name: "T3", worker: "backend-worker", packets: { worker: "x" } }, /needs a "test"/],
 		[{ name: "T3", worker: "backend-worker", specialist: "security-specialist", packets: { worker: "x", test: "t" } }, /go together/],
-		[{ name: "T3", worker: "backend-worker", specialist: "reviewer", packets: { worker: "x", test: "t", specialist: "s" } }, /\*-specialist/],
+		[{ name: "T3", worker: "backend-worker", specialist: "code-reviewer", packets: { worker: "x", test: "t", specialist: "s" } }, /\*-specialist/],
 		[{ name: "T3", worker: "backend-worker", packets: { worker: " ", test: "t" } }, /non-empty/],
 		[{ name: "T1", worker: "backend-worker", packets: { worker: "x", ship: "y" } }, /"ship" is not part of T1/],
 	];

@@ -190,7 +190,7 @@ test("a merged branch is finished: the next task starts on a new branch from the
 	assert.match(read("agent/extensions/subagent/index.ts"), /Fresh base: a branch whose PR is merged is finished\./);
 });
 
-// Field data (/subagent usage, one database task): planner, three test-engineer runs and an ordinary delivery ran on capable for $0.96
+// Field data (/subagent usage, one database task): planner, three qa-engineer runs and an ordinary delivery ran on capable for $0.96
 // of a $1.92 worker total; their economy defaults would have cost about $0.05.
 test("verification re-runs and ordinary delivery stay on the economy tier", () => {
 	const main = read("agent/extensions/subagent/index.ts");
@@ -297,7 +297,7 @@ test("implementation workers commit their unit locally and never push; delivery 
 		assert.ok(text.includes("the local commit SHA(s), or why you did not commit"), `${role}: REPORT carries the SHA`);
 		assert.ok(!text.includes("only if commit authority was"), `${role}: the old ban is gone`);
 	}
-	for (const role of ["technical-writer", "test-engineer", "reviewer", "system-architect"]) assert.ok(!read(`agent/agents/${role}.md`).includes("Local commit:"), `${role}: no local commits`);
+	for (const role of ["technical-writer", "qa-engineer", "code-reviewer", "system-architect"]) assert.ok(!read(`agent/agents/${role}.md`).includes("Local commit:"), `${role}: no local commits`);
 	assert.ok(flat(read("agent/agents/release-engineer.md")).includes("Implementation workers have usually committed their units locally already"));
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("Never squash, amend or rebase a worker's commits"));
 });

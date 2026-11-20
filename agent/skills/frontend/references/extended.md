@@ -121,7 +121,7 @@ but this skill does not create a second orchestrator.
 | `typescript-advanced-types` | Advanced TS type engineering | `frontend-worker` | Complex generics, conditional/mapped/template types, reusable type utilities, type-safe API/form/state work | `agent/skills/frontend/typescript-advanced-types/index.md` |
 | `ui-ux-pro-max` | Broad UI/UX design intelligence | `ui-ux-specialist` | Design system search, layout/color/typography/icons/charts/general UX guidance when no narrower skill fully owns the concern | `agent/skills/frontend/ui-ux-pro-max/index.md` |
 | `ux-flow-wireframer` | User-flow + low-fidelity structure | `ui-ux-specialist` | New or materially changed multi-step flows, dead-end/redundancy audit, branches/recovery, Mermaid flow map, text wireframes before visual design/code | `agent/skills/frontend/ux-flow-wireframer/index.md` |
-| `web-design-guidelines` | UI code/best-practice audit | `ui-ux-specialist` or `reviewer` when explicitly routed | Review existing UI implementation against current web interface guidelines | `agent/skills/frontend/web-design-guidelines/index.md` |
+| `web-design-guidelines` | UI code/best-practice audit | `ui-ux-specialist` or `code-reviewer` when explicitly routed | Review existing UI implementation against current web interface guidelines | `agent/skills/frontend/web-design-guidelines/index.md` |
 
 ---
 

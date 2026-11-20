@@ -81,7 +81,7 @@ test("artifact folder: created at grant time inside the placement; never without
 	assert.ok(!fs.existsSync(path.join(root, "proj", "elsewhere")), "nothing created outside the placement");
 });
 
-// Field report: a test-engineer finished a PR verification and could not save its assigned report in
+// Field report: a qa-engineer finished a PR verification and could not save its assigned report in
 // <parent>/worktrees/<repo>/_evidence/<task>/: "redirects output into the candidate checkout". Its protected root is its launch folder,
 // and main had launched it above the checkouts, so the artifact folder lay inside that root. Artifact folders outside every checkout
 // are writable from any launch folder; checkout files and look-alike folders inside a checkout stay refused.
@@ -141,13 +141,13 @@ test("report text survives a quoted heredoc exactly; inline interpreter code wri
 	assert.equal(fs.readFileSync(`${dir}/REPORT.md`, "utf8"), `${report}\n`);
 });
 
-// A human test engineer or reviewer writes a report of findings before handing back. test-engineer and reviewer now hold the write tool
+// A human test engineer or reviewer writes a report of findings before handing back. qa-engineer and reviewer now hold the write tool
 // for that, with no shell quoting in the way, and stay read-only: a role without edit is read-only, and the guard confines write.
-test("test-engineer and reviewer hold write for reports only: read-only by launch, evidence writable, candidate refused", () => {
+test("qa-engineer and reviewer hold write for reports only: read-only by launch, evidence writable, candidate refused", () => {
 	const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8")) as { name: string; tools: string }[];
 	for (const role of roles) {
 		const tools = role.tools.split(",").map((t) => t.trim());
-		if (role.name === "test-engineer" || role.name === "reviewer") assert.deepEqual(tools.slice(-1).concat(tools.includes("edit") ? ["edit"] : []), ["write"], role.name);
+		if (role.name === "qa-engineer" || role.name === "code-reviewer") assert.deepEqual(tools.slice(-1).concat(tools.includes("edit") ? ["edit"] : []), ["write"], role.name);
 		else if (role.name !== "release-engineer") assert.ok(!tools.includes("write"), `${role.name}: no write tool`);
 	}
 	const launcher = fs.readFileSync(new URL("../index.ts", import.meta.url), "utf8");
@@ -212,7 +212,7 @@ test("read-only role: writes into the candidate are refused (not grantable); rea
 	assert.equal(guardToolCall(writer, "bash", { command: "npm test > out.log" }, candidate), undefined, "a writing role is unaffected");
 });
 
-// Field report (bg-7@9d52a35084a7, test-engineer): read-only Betterwright verification was refused before it ran, and earlier read-only tasks
+// Field report (bg-7@9d52a35084a7, qa-engineer): read-only Betterwright verification was refused before it ran, and earlier read-only tasks
 // got "[READ_ONLY_ROLE] redirects output into the candidate checkout" for the sibling worktrees/<repo>/_scratch and _evidence folders.
 // PowerShell writers counted -Value script text, -ItemType Directory and -Encoding as paths resolved inside the candidate.
 test("read-only role: PowerShell and shell writes to the sibling worktrees _scratch/_evidence folders pass; the candidate stays protected", () => {
@@ -247,7 +247,7 @@ test("read-only role: PowerShell and shell writes to the sibling worktrees _scra
 	}
 });
 
-// Field report (refusals 2e15600798145446, 07c3231bac8764b9): a read-only test-engineer's
+// Field report (refusals 2e15600798145446, 07c3231bac8764b9): a read-only qa-engineer's
 //   cat > D:/work/RFID/worktrees/RFIDAttendance-Rust/_scratch/sim800c/run.js <<'EOF' … EOF
 // was refused as "redirects output into the candidate checkout ()": the heredoc body (JavaScript, "page.evaluate(() =>") was checked as
 // shell, and a line ending in "=>" looked like a redirect with no target. Windows paths are checked with Windows rules on every host.
@@ -279,7 +279,7 @@ test("read-only role, Windows paths: heredoc scripts to the sibling _scratch pas
 	assert.equal(readOnlyViolation("bash", { command: "echo x > ../worktrees/RFIDAttendance-Rust/_scratch/sim800c/r.txt" }, root, root), undefined, "a relative path that leaves the checkout");
 });
 
-// Field report (op 74876b9d82fc35d2): a read-only test-engineer created its browser script in the task _scratch folder, then could not
+// Field report (op 74876b9d82fc35d2): a read-only qa-engineer created its browser script in the task _scratch folder, then could not
 // fix a selector in it with sed -i: every in-place edit was refused whatever the file. sed -i and perl -i are judged by their files.
 test("read-only role: sed -i and perl -i edit files in the sibling _scratch; candidate files stay refused with destination and root", () => {
 	const root = "D:/work/RFID/RFIDAttendance-Rust";
@@ -456,7 +456,7 @@ test("gh release list and view pass the guard; create, delete, edit, upload and 
 	for (const c of ["gh release create v1.2.3 --repo acme/widgets --target abc --title x --generate-notes", "gh release delete v1.0.0 --repo a/b", "gh release edit v1 --notes x", "gh release upload v1 x.zip", "gh release list && gh release delete v1"]) assert.ok(run(c), c);
 });
 
-// Field report: a read-only test-engineer's `cat > _scratch/.../x.mjs <<'EOF'` was refused five times in a row, as SECRET (the script
+// Field report: a read-only qa-engineer's `cat > _scratch/.../x.mjs <<'EOF'` was refused five times in a row, as SECRET (the script
 // mentioned .env) or PROC_KILL (it contained Stop-Process): the risk rules read the body of a file being written. A body this command
 // only writes or prints is data; one a shell, an interpreter or a pipe reads still runs, so it stays checked.
 test("risk rules: text a command only writes to a file is data; heredocs a shell, interpreter or pipe runs stay checked", () => {
@@ -550,7 +550,7 @@ test("commit refusals name the condition that failed: folder, branch, detached H
 	} finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-// Field report (harness-block-triage): planner and test-engineer writes inside the checkout were refused, but a database-specialist's
+// Field report (harness-block-triage): planner and qa-engineer writes inside the checkout were refused, but a database-specialist's
 // report appeared there. Writes that use no redirect or listed command were not checked: .NET file methods, Tee-Object and Export-Csv,
 // Rename-Item, cmd /c, inline interpreter code, dd of=, and a move whose source is in the checkout. Each is refused into the checkout and
 // still allowed into the sibling evidence folder; reads stay allowed.
@@ -606,7 +606,7 @@ test("a READ_ONLY_ROLE refusal names the candidate's artifact folder by the work
 	assert.match(refuse("D:/work/RFID/worktrees/RFIDAttendance-Rust/sms-pacing"), /for this candidate: D:\/work\/RFID\/worktrees\/RFIDAttendance-Rust\/_evidence\/<task>\//);
 });
 
-// Field report (sms-live-test): a read-only test-engineer copying the built backend executable from the checkout to its _evidence folder
+// Field report (sms-live-test): a read-only qa-engineer copying the built backend executable from the checkout to its _evidence folder
 // was refused as "interpreter code writes into the candidate checkout": the copy's source was checked as a write target. A copy writes
 // only its destination; a move or rename changes both paths.
 test("read-only roles: copying out of the checkout is allowed, copying into it is refused, in every copy form", () => {

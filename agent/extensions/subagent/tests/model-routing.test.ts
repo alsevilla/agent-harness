@@ -12,7 +12,7 @@ test("all supported role tiers resolve exact same-tier pairs without mutating co
     "database-worker": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"] },
     "general-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
     "platform-worker": { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
-    "test-engineer": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
+    "qa-engineer": { economy: ["openai-codex/gpt-6-luna", "anthropic/claude-haiku-5-5"], capable: ["anthropic/claude-sonnet-5-5", "openai-codex/gpt-6.1-sol"] },
     scout: { economy: ["anthropic/claude-haiku-5-5", "openai-codex/gpt-6-luna"] },
   };
   for (const [name, tiers] of Object.entries(expected)) for (const [tier, [model, fallback]] of Object.entries(tiers)) {
@@ -30,7 +30,7 @@ test("all supported role tiers resolve exact same-tier pairs without mutating co
   const configuredScout = { ...agent("scout"), modelTiers: { economy: { model: "configured/economy", fallbackModel: [] }, capable: { model: "configured/capable", fallbackModel: [] } } };
   assert.equal(resolveModelTier(configuredScout, "economy").model, "configured/economy");
   assert.equal(resolveModelTier(configuredScout, "capable").model, "configured/capable");
-  for (const name of ["api-specialist", "reviewer"]) {
+  for (const name of ["api-specialist", "code-reviewer"]) {
     const configured = { ...agent(name), modelTiers: { capable: { model: "configured/specialist", fallbackModel: [] } } };
     assert.equal(resolveModelTier(configured, "capable").model, "configured/specialist");
     assert.throws(() => resolveModelTier({ ...agent(name), modelTiers: {} }, "capable"), /not supported/);

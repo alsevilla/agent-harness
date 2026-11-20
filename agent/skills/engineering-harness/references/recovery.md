@@ -64,14 +64,14 @@ handoff authorizing main-session implementation, diagnosis, or independent VERIF
 Split it by one behavior or failing target, with one bounded acceptance check;
 do not relaunch the unchanged oversized packet. Test implementation belongs to
 the appropriate backend-worker, frontend-worker or general-worker. Selected independent suite/baseline
-verification belongs to test-engineer, identified by exact candidate and contract.
+verification belongs to qa-engineer, identified by exact candidate and contract.
 Spot checks go to a read-only role and never substitute for these roles.
 
 After debugger evidence, route a material unresolved persistence/schema/migration
 choice to database-specialist (or the actual domain specialist needed). Do not
 summon a specialist solely because a test name mentions a database. Then send the
 accepted correction to the implementation worker and any selected independent
-verification to test-engineer. Preserve prior writes and candidate identity.
+verification to qa-engineer. Preserve prior writes and candidate identity.
 
 ## Observable escalation triggers
 Correct an incomplete task packet or missing evidence before changing models.
@@ -82,7 +82,7 @@ Report them; wait for recovery or use an explicitly supported, authorized profil
 Escalate coordination to a configured `capable` tier or specialist route when authoritative evidence conflicts,
 high-consequence decisions remain unresolved, or one clarified follow-up still
 returns incomplete/contradictory reasoning. Preserve the evidence and name the
-unresolved question. Do not use a reviewer to take over worker writes or skip the
+unresolved question. Do not use a code-reviewer to take over worker writes or skip the
 debugger role. A disputed diagnosis may receive read-only review of its evidence.
 
 After a fix fails with an unexplained cause, return to DEBUG immediately. After

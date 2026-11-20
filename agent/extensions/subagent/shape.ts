@@ -1,8 +1,8 @@
 // Fixed sequences for the common task shapes. Main names the shape, the worker role and one packet per step;
 // this module expands that into the existing `chain` mode with a fixed role order. No new runtime, no classifier.
 //   T1: <worker>
-//   T2: debugger -> <worker> [-> test-engineer] [-> reviewer]
-//   T3: [system-architect (economy)] -> [<specialist>] -> <worker> -> test-engineer (capable) [-> reviewer (capable)]
+//   T2: debugger -> <worker> [-> qa-engineer] [-> code-reviewer]
+//   T3: [system-architect (economy)] -> [<specialist>] -> <worker> -> qa-engineer (capable) [-> code-reviewer (capable)]
 // Delivery (release-engineer) is never part of a shape: main accepts the checks first, then delivers separately.
 // A shape step whose STATUS is not PASS stops the sequence and returns to main (see `shapeStepStop`).
 
@@ -68,8 +68,8 @@ export function expandShape(shape: ShapeRequest): { ok: true; chain: ShapeStep[]
 	add(shape.worker, "worker");
 	// T3 gates are independent VERIFY/REVIEW for material risk: explicit capable (both roles default to economy)
 	const gateTier = name === "T3" ? { modelTier: "capable" as const } : {};
-	if (packets.test) add("test-engineer", "test", { readOnly: true, ...gateTier });
-	if (packets.review) add("reviewer", "review", { readOnly: true, ...gateTier });
+	if (packets.test) add("qa-engineer", "test", { readOnly: true, ...gateTier });
+	if (packets.review) add("code-reviewer", "review", { readOnly: true, ...gateTier });
 	return { ok: true, chain: steps };
 }
 

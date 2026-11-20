@@ -14,8 +14,8 @@ they cannot add mandatory phases or override current global policy.
 Named procedure ownership in this profile:
 - DEBUG -> debugger -> engineering-harness/debug
 - DISCOVER reconnaissance -> scout -> engineering-harness/discover
-- VERIFY -> test-engineer -> engineering-harness/verify
-- REVIEW -> reviewer -> engineering-harness/review
+- VERIFY -> qa-engineer -> engineering-harness/verify
+- REVIEW -> code-reviewer -> engineering-harness/review
 - SHIP + LEARN -> release-engineer -> engineering-harness/ship and engineering-harness/learn
 - PLAN / DECISION / INTEGRATE -> main orchestrator; specialists feed constraints/evidence but do not own orchestration
 
@@ -30,12 +30,12 @@ justify both. Modules grant guidance, not design/implementation authority.
 load-resilience-testing lives under backend/<name>/index.md. Use it only when the task justifies it.
 Database roles use the project's own database guidance.
 
-`load-resilience-testing` remains conditional for performance, concurrency, database, reviewer, and verification work when burst/overload/resilience evidence is actually material. Do not preload it for ordinary hot-path profiling or localized performance questions.
+`load-resilience-testing` remains conditional for performance, concurrency, database, code review, and verification work when burst/overload/resilience evidence is actually material. Do not preload it for ordinary hot-path profiling or localized performance questions.
 
 ## Compatibility
 Pi's manual shortcuts live under ~/.pi/agent/prompts/. They expand instructions;
 they do not automatically fork agents. Required debug/verify/review routes use
-actual subagent calls to debugger, test-engineer or reviewer with task packets.
+actual subagent calls to debugger, qa-engineer or code-reviewer with task packets.
 SHIP/LEARN use the actual `release-engineer` role when those phases are selected.
 The parent skills select ordinary module indexes rather than registering each
 module as another skill. Restricting a shortcut does not prevent reference reads.

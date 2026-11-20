@@ -873,7 +873,7 @@ test("plain-branch cleanup: refused without a matching merge approval, a named a
 		assert.match(res.reason, why, JSON.stringify(o));
 	}
 	const owners = new S.OwnerTracker();
-	owners.begin({ workerId: "w9", role: "test-engineer", cwd: p.scratch, jobId: "bg-9" });
+	owners.begin({ workerId: "w9", role: "qa-engineer", cwd: p.scratch, jobId: "bg-9" });
 	assert.match(p.prepare({ owners }).reason, /still active/);
 	const bare = plainTask(false);
 	assert.match(bare.prepare().reason, /names no artifact directory/, "an approval without an artifact directory cleans nothing");

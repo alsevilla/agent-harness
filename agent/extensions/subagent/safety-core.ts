@@ -453,7 +453,7 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 	if (/\b(iex|invoke-expression)\b.*\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i.test(text)) add(out, "CURL_SHELL");
 }
 
-// Field report (sms-live-test): a read-only test-engineer's hardware smoke test started the backend from its _evidence folder, waited,
+// Field report (sms-live-test): a read-only qa-engineer's hardware smoke test started the backend from its _evidence folder, waited,
 // then stopped it, and the stop was refused as PROC_KILL although it ended only the process the same command had started. A stop is now
 // allowed when every process it targets is owned by the command: held in a variable assigned exactly once, from Start-Process -PassThru
 // (PowerShell) or $! after a background launch (Bash), or a Bash job spec (%1). Stopping by name, by a literal PID or through any other
@@ -2530,7 +2530,7 @@ export function misplacedArtifactPaths(packet: string, root: string): string | u
 	return `Not launched: this read-only worker may not write inside ${r}, and the packet assigns artifact path(s) there that every write would refuse: ${misplaced.map((p) => `${p} (use ${suggest(p)})`).join("; ")}. Put the packet's _scratch and _evidence paths in the external placement and launch again.`;
 }
 
-// Field report: a test-engineer could not save its assigned report in <parent>/worktrees/<repo>/_evidence/<task>/, refused as "into the
+// Field report: a qa-engineer could not save its assigned report in <parent>/worktrees/<repo>/_evidence/<task>/, refused as "into the
 // candidate checkout". The protected root is the folder the worker was launched in; when main launches it in a folder above the
 // checkouts (the project's parent, or the worktrees group), the artifact folders lie inside that root although they are in no checkout.
 // A target in the artifact placement is not a candidate write when no folder from it up to the protected root is a Git checkout.
@@ -2549,7 +2549,7 @@ function artifactOutsideCheckout(full: string, root: string): boolean {
 // no target. A heredoc body is data unless a shell reads it; PowerShell here-strings are string literals.
 const HEREDOC = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/g;
 const SHELL_NAME = "(?:\\S*[\\\\/])?(?:bash|sh|zsh|dash|ksh|pwsh|powershell)(?:\\.exe)?\\b";
-// Field report: a read-only test-engineer could create its _scratch browser script but not fix it with sed -i, because every in-place
+// Field report: a read-only qa-engineer could create its _scratch browser script but not fix it with sed -i, because every in-place
 // edit was refused whatever the file. sed -i and perl -i are now judged by the files they edit, like every other write.
 /** Whether sed/perl edits in place, and which files. Option values (-e script, -f file, -l N, -M module, -I dir) are not files. */
 export function inPlaceFiles(name: "sed" | "perl", args: string[]): { inPlace: boolean; files: string[] } {
@@ -2602,7 +2602,7 @@ export function withoutDataBodies(text: string): string {
 // For the risk rules (classifyShell): a heredoc body is data only when this command writes it to a file or prints it - `cat > f <<EOF`,
 // `cat <<EOF > f`, `tee f <<EOF`, `cat <<EOF` - and nothing is piped onward; likewise a PowerShell here-string piped straight to
 // Set-Content, Out-File or Add-Content, or redirected to a file. Bodies a shell, an interpreter (python -, node -) or a pipe reads stay
-// checked: they run. Field report: a read-only test-engineer's `cat > _scratch/.../x.mjs <<'EOF'` was refused five times in a row,
+// checked: they run. Field report: a read-only qa-engineer's `cat > _scratch/.../x.mjs <<'EOF'` was refused five times in a row,
 // as SECRET (the script mentioned .env) or PROC_KILL (it contained Stop-Process), though writing a file runs none of it.
 const FILE_READER = /^\s*(?:\S*[\\/])?(?:cat|tee)(?:\.exe)?(?:\s|$)/i;
 export function withoutFileBodies(text: string): string {
@@ -2623,7 +2623,7 @@ export function withoutFileBodies(text: string): string {
 	}
 	return out.join("\n");
 }
-// Field report: a read-only database-specialist's report appeared inside the checkout while planner and test-engineer writes there were
+// Field report: a read-only database-specialist's report appeared inside the checkout while planner and qa-engineer writes there were
 // refused. Writes that name no shell redirect or listed command went unchecked: .NET file methods in PowerShell, inline interpreter code
 // (python -c, python - <<EOF, node -e) and dd of=. Their path arguments are now checked like any other target; a path that is not a
 // plain string literal cannot be resolved here and is refused. Code run from a script file (python _scratch/x.py) is not inspected.

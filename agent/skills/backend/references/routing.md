@@ -21,7 +21,7 @@ provide decisions and evidence; touching their domain does not automatically req
 a call. Do not let storage types silently define a public API contract.
 
 For material burst, overload, dependency failure, recovery, or shutdown-under-load
-questions, the selected test-engineer/performance-specialist may use
+questions, the selected qa-engineer/performance-specialist may use
 load-resilience-testing against the exact candidate. This adds no production-load
 authorization or implementation authority. Larger pools/queues/retry counts are not
 evidence of improved performance.

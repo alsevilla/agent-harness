@@ -167,7 +167,7 @@ Coordinate through the orchestrator with:
 - `observability-specialist` for operational-dashboard telemetry semantics;
 - `security-specialist` for auth/security-sensitive UI;
 - `performance-specialist` for measured frontend performance problems;
-- `reviewer` / `test-engineer` for independent post-implementation challenge.
+- `code-reviewer` / `qa-engineer` for independent post-implementation challenge.
 
 Do not invent backend fields, permissions, or API behavior.
 

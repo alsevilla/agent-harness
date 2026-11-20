@@ -1181,18 +1181,18 @@ Do not turn Debug into architecture design merely because specialists exist.
 
 ---
 
-# Reviewer During Debug
+# Code Reviewer During Debug
 
-Reviewer is normally unnecessary during diagnosis.
+Code Reviewer is normally unnecessary during diagnosis.
 
-Use Reviewer when:
+Use Code Reviewer when:
 
 - root-cause conclusion has broad architectural consequences;
 - diagnosis contradicts previous review;
 - proposed correction crosses important boundaries;
 - high-risk reasoning needs independent challenge.
 
-Reviewer remains read-only.
+Code Reviewer remains read-only.
 
 ---
 

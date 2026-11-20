@@ -149,7 +149,7 @@ test("shared references loaded from profiles and the routing appendix do not har
 });
 
 test("read-only roles have no native edit tool in their headers, registry projection kept (execute retained)", () => {
-  const ro = roles.filter((r) => !/\bedit\b/.test(r.tools)); // reviewer and test-engineer hold write for reports only and stay read-only
+  const ro = roles.filter((r) => !/\bedit\b/.test(r.tools)); // reviewer and qa-engineer hold write for reports only and stay read-only
   expect(ro.length).toBe(14); // 14 read-only roles, system-architect among them
   for (const r of ro) {
     const header = read("agent", "agents", `${r.name}.md`).match(/^tools: (.*)$/m)![1];

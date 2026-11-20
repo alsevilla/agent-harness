@@ -1,6 +1,6 @@
 ---
-name: reviewer
-description: REQUIRED named role for REVIEW. Independently review an identified candidate and its evidence in the reviewer agent. Challenge correctness, safety, scope, authority and regressions; return a review disposition without modifying the candidate.
+name: code-reviewer
+description: REQUIRED named role for REVIEW. Independently review an identified candidate and its evidence in the code-reviewer agent. Challenge correctness, safety, scope, authority and regressions; return a review disposition without modifying the candidate.
 tools: read, search, execute
 ---
 

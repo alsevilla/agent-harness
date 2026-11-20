@@ -448,7 +448,7 @@ for tooling, scripts and config implementation.
 `frontend-worker`
 for frontend UI implementation.
 
-`reviewer`
+`code-reviewer`
 for high-risk production changes.
 
 ---

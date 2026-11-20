@@ -18,7 +18,7 @@ For "queue this", record the request and order, acknowledge briefly, and continu
 | Conflicting evidence / material choice | `knowledge/index.md` / `decision/index.md` | **main owns authorization** | Recorded decision or authority |
 | Necessary dependencies/migration/coordination plan | `plan/index.md` | `system-architect` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN** | READY FOR EXECUTION |
 | Authorized implementation | `execute/index.md` | `backend-worker` / `database-worker` / `frontend-worker` / `general-worker` / `platform-worker` | Focused RED/GREEN results in the worker REPORT |
-| Selected independent evidence | `verify/index.md` / `review/index.md` | `test-engineer` / `reviewer` | Result on the exact candidate identity |
+| Selected independent evidence | `verify/index.md` / `review/index.md` | `qa-engineer` / `code-reviewer` | Result on the exact candidate identity |
 | Requested isolation/integration | `worktree/index.md` / `integrate/index.md` | **main owns orchestration** | Candidate identity and one writer confirmed |
 | Requested delivery/release | `ship/index.md` | `release-engineer` | Authorized operation result on the verified candidate |
 | Useful durable learning | `learn/index.md` | `technical-writer` (record); `release-engineer` commits it | SAVED with readback, or NO LESSON |

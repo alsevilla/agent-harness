@@ -25,7 +25,7 @@ orchestrator substitution. A leaf subagent seeing this router follows only its
 assigned role and returns requests for other roles to the main conversation.
 # Execute
 
-> **Main-session dispatch boundary:** Any instruction in this skill to invoke a worker, test engineer, reviewer, debugger, specialist, or oracle is an instruction for the **main Pi conversation only**. If Execute is visible inside a custom subagent, that subagent must not call `Agent` / legacy `Task`; it must return a handoff request to the main conversation.
+> **Main-session dispatch boundary:** Any instruction in this skill to invoke a worker, QA engineer, code reviewer, debugger, specialist, or oracle is an instruction for the **main Pi conversation only**. If Execute is visible inside a custom subagent, that subagent must not call `Agent` / legacy `Task`; it must return a handoff request to the main conversation.
 
 
 Implement an approved Execution Plan safely and with evidence.
@@ -497,9 +497,9 @@ Specialists advise.
 
 Workers implement.
 
-Test Engineer independently verifies.
+QA Engineer independently verifies.
 
-Reviewer reviews.
+Code Reviewer reviews.
 
 Oracle adjudicates exceptional uncertainty.
 
@@ -512,11 +512,11 @@ The orchestrator coordinates and decides.
 Once a worker owns a logical change, that ownership normally persists through:
 
 - initial implementation;
-- legitimate Test Engineer corrections;
-- Reviewer-requested corrections;
+- legitimate QA Engineer corrections;
+- Code Reviewer-requested corrections;
 - focused regression fixes.
 
-If Reviewer or Test Engineer identifies a required code correction:
+If Code Reviewer or QA Engineer identifies a required code correction:
 
 return the correction to the owning worker.
 
@@ -539,7 +539,7 @@ For delegated non-trivial work, preserve worker ownership.
 
 # Non-Blocking Review Notes
 
-If Reviewer returns:
+If Code Reviewer returns:
 
 APPROVE WITH NOTES
 
@@ -743,7 +743,7 @@ Examples of completion requirements that survive adoption include:
 - accessibility checks;
 - typecheck/lint requirements;
 - independent verification;
-- reviewer requirements;
+- code reviewer requirements;
 - exact-candidate regression testing;
 - unresolved product/authority gates.
 
@@ -1238,7 +1238,7 @@ Use deterministic tests or repeated/stress verification when justified.
 
 If concurrency correctness remains uncertain:
 
-use `concurrency-specialist`, `debugger`, Reviewer, or Oracle according to established escalation policy.
+use `concurrency-specialist`, `debugger`, Code Reviewer, or Oracle according to established escalation policy.
 
 ---
 
@@ -1383,7 +1383,7 @@ Use:
 
 - debugger;
 - relevant specialist;
-- Reviewer;
+- Code Reviewer;
 - Oracle if established escalation criteria are met.
 
 Do not create worker-review-fix loops without limit.
@@ -1628,13 +1628,13 @@ Use established secret/configuration mechanisms.
 
 When the Plan says:
 
-Test Engineer: REQUIRED
+QA Engineer: REQUIRED
 
 worker completion does not complete execution.
 
 After worker implementation and regression:
 
-invoke `test-engineer`.
+invoke `qa-engineer`.
 
 Provide:
 
@@ -1647,13 +1647,13 @@ Provide:
 - known risks;
 - out-of-scope findings relevant to verification.
 
-The Test Engineer independently challenges the implementation.
+The QA Engineer independently challenges the implementation.
 
 ---
 
 # Independent Verification Ownership
 
-Test Engineer is not the production implementation owner.
+QA Engineer is not the production implementation owner.
 
 It may add independent verification tests when appropriate if the established harness allows test-writing verification.
 
@@ -1664,13 +1664,13 @@ However:
 - new tests that expose a defect become evidence for correction;
 - independent tests should remain clearly attributable to verification.
 
-Do not confuse Test Engineer-created tests with worker RED evidence.
+Do not confuse QA Engineer-created tests with worker RED evidence.
 
 A test written after GREEN cannot retroactively prove worker RED.
 
 ---
 
-# Test Engineer Outcomes
+# QA Engineer Outcomes
 
 Accept:
 
@@ -1709,15 +1709,15 @@ Escalate when risk justifies it.
 
 ---
 
-# Reviewer Gate
+# Code Reviewer Gate
 
 When:
 
-Reviewer: REQUIRED
+Code Reviewer: REQUIRED
 
 do not declare execution complete before review.
 
-Provide Reviewer:
+Provide Code Reviewer:
 
 - objective;
 - requirements;
@@ -1727,15 +1727,15 @@ Provide Reviewer:
 - changed files;
 - worker TDD evidence;
 - regression results;
-- Test Engineer findings when applicable;
+- QA Engineer findings when applicable;
 - relevant specialist findings;
 - known out-of-scope findings.
 
-Reviewer should remain independent.
+Code Reviewer should remain independent.
 
 ---
 
-# Reviewer Outcomes
+# Code Reviewer Outcomes
 
 Expected:
 
@@ -1774,7 +1774,7 @@ Run focused verification afterward.
 
 If the correction is behaviorally material:
 
-re-run the relevant Test Engineer and Reviewer checks.
+re-run the relevant QA Engineer and Code Reviewer checks.
 
 If purely mechanical:
 
@@ -1806,7 +1806,7 @@ Re-review the corrected area.
 
 Strong Oracle trigger.
 
-Do not let the worker simply overrule Reviewer on a high-risk dispute.
+Do not let the worker simply overrule Code Reviewer on a high-risk dispute.
 
 ---
 
@@ -1816,8 +1816,8 @@ Oracle is exceptional.
 
 Use Oracle when established escalation criteria are met, such as:
 
-- Reviewer returns ESCALATE;
-- worker and Reviewer materially disagree on high-risk correctness;
+- Code Reviewer returns ESCALATE;
+- worker and Code Reviewer materially disagree on high-risk correctness;
 - specialists conflict on high-consequence behavior;
 - potential data loss remains unresolved;
 - concurrency correctness remains uncertain;
@@ -1863,8 +1863,8 @@ Normal correction flow:
 
 worker
 → worker tests
-→ Test Engineer
-→ Reviewer
+→ QA Engineer
+→ Code Reviewer
 → finding
 → original owning worker
 → correction
@@ -1914,8 +1914,8 @@ A verification command must not unexpectedly become a write operation.
 
 If any source or test file changes after:
 
-- Test Engineer PASS;
-- Reviewer verdict;
+- QA Engineer PASS;
+- Code Reviewer verdict;
 - full regression run;
 
 then determine what verification became stale.
@@ -1942,11 +1942,11 @@ If code changes afterward, earlier evidence may become stale.
 
 Examples:
 
-Reviewer APPROVE
+Code Reviewer APPROVE
 → source changes
 → old approval may no longer cover final code.
 
-Test Engineer PASS
+QA Engineer PASS
 → behavioral change
 → old PASS may no longer cover final behavior.
 
@@ -1990,13 +1990,13 @@ Worker reported RED.
 
 Orchestrator independently confirmed GREEN/regression.
 
-Test Engineer independently added additional verification tests.
+QA Engineer independently added additional verification tests.
 
-Reviewer independently ran the full suite.
+Code Reviewer independently ran the full suite.
 
 Do not imply the orchestrator personally observed RED when it only received worker evidence.
 
-Do not imply Test Engineer tests were part of the original RED if they were created after implementation.
+Do not imply QA Engineer tests were part of the original RED if they were created after implementation.
 
 ---
 
@@ -2012,8 +2012,8 @@ Execution is COMPLETE only when all applicable conditions are true:
 - invariants preserved;
 - required TDD evidence exists;
 - relevant regressions pass;
-- Test Engineer PASS obtained when required;
-- Reviewer approval obtained when required;
+- QA Engineer PASS obtained when required;
+- Code Reviewer approval obtained when required;
 - legitimate required findings addressed;
 - final evidence covers the final code state;
 - no unresolved blocking contradiction remains;
@@ -2260,7 +2260,7 @@ When EXCEPTION:
 
 ## Independent Verification
 
-**Test Engineer:** REQUIRED / RECOMMENDED / NOT REQUIRED
+**QA Engineer:** REQUIRED / RECOMMENDED / NOT REQUIRED
 
 If performed:
 
@@ -2284,7 +2284,7 @@ Clearly distinguish independent verification tests from worker RED tests.
 
 ## Review
 
-**Reviewer:** REQUIRED / RECOMMENDED / NOT REQUIRED
+**Code Reviewer:** REQUIRED / RECOMMENDED / NOT REQUIRED
 
 If performed:
 
@@ -2521,8 +2521,8 @@ Never claim:
 - hardware was verified when it was not available;
 - concurrency is safe merely because one test passed;
 - migration rollback works when it was not established;
-- Reviewer approved final code if code materially changed afterward;
-- Test Engineer passed final behavior if behavior changed afterward;
+- Code Reviewer approved final code if code materially changed afterward;
+- QA Engineer passed final behavior if behavior changed afterward;
 - a security finding is verified when it is only agent-reported;
 - a bug is fixed without evidence.
 
@@ -2552,8 +2552,8 @@ Before completion, ask:
 
 1. Did RED genuinely precede GREEN where required?
 2. Does final regression evidence cover the final code?
-3. Did required Test Engineer verification occur?
-4. Did required Reviewer review occur?
+3. Did required QA Engineer verification occur?
+4. Did required Code Reviewer review occur?
 5. Were corrections returned to the owning worker?
 6. Did any code change after verification/review?
 7. Are serious out-of-scope findings accurately classified?

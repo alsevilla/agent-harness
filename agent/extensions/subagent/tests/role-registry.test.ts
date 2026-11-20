@@ -32,14 +32,15 @@ const approvedTier = (name: string, tier: string) => approved.roles.find((role) 
 const GENERIC_ROLES = [
   "api-specialist", "system-architect", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
   "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer",
-  "reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "test-engineer", "ui-ux-specialist", "platform-worker",
+  "code-reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "qa-engineer", "ui-ux-specialist", "platform-worker",
   "technical-writer",
 ];
 
 // User-approved 2026-11-20: planner and architecture-specialist merged into system-architect. The frozen 20-role fixtures keep the
 // old name; `current` maps it to the role that replaced it. system-architect keeps architecture-specialist's tiers, models and tools;
 // its economy tier runs at medium thinking (the planner's level, for routine unit proposals) and capable stays high.
-const RENAMED: Record<string, string> = { "architecture-specialist": "system-architect" };
+// User-approved 2026-11-20 as well: test-engineer is renamed qa-engineer and reviewer code-reviewer, with no other change.
+const RENAMED: Record<string, string> = { "architecture-specialist": "system-architect", "test-engineer": "qa-engineer", reviewer: "code-reviewer" };
 function current(name: string): string { return RENAMED[name] ?? name; }
 const APPROVED_THINKING: Record<string, string> = { "system-architect.economy": "medium" };
 // User-approved 2026-11-20 (agents-folder audit): api-specialist also checks existing APIs for problems, and performance-specialist
@@ -150,11 +151,11 @@ test("registry fields override annotations field-wise in real package discovery"
   }
 });
 
-test("registry registers exactly the 21 generic roles, unique, without statusline-setup, planner or architecture-specialist", () => {
+test("registry registers exactly the 21 generic roles, unique, without statusline-setup or the merged and renamed roles", () => {
   assert.equal(roles.length, 21);
   assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 21);
-  for (const gone of ["planner", "architecture-specialist"]) {
-    assert.ok(!roles.some((r: { name: string }) => r.name === gone), `${gone} merged into system-architect`);
+  for (const gone of ["planner", "architecture-specialist", "test-engineer", "reviewer"]) {
+    assert.ok(!roles.some((r: { name: string }) => r.name === gone), `${gone}: merged or renamed`);
     assert.ok(!fs.existsSync(new URL(`../../../agents/${gone}.md`, import.meta.url)), `${gone} definition removed`);
   }
   assert.deepEqual(roles.map((r: { name: string }) => r.name).sort(), [...GENERIC_ROLES].sort());
@@ -174,7 +175,7 @@ test("registry contains the approved tier pairs without changing default role fi
   // Which role/tier pairs exist is pinned here; their model and fallback come from the approved-preset fixture, compared against the committed roles.json.
   const expected: Record<string, string[]> = {
     "backend-worker": ["economy", "capable"], "frontend-worker": ["economy", "capable"], "database-worker": ["economy", "capable"],
-    "general-worker": ["economy", "capable"], "platform-worker": ["economy", "capable"], "test-engineer": ["economy", "capable"], scout: ["economy"],
+    "general-worker": ["economy", "capable"], "platform-worker": ["economy", "capable"], "qa-engineer": ["economy", "capable"], scout: ["economy"],
   };
   for (const [name, tiers] of Object.entries(expected)) {
     const role = roles.find((item: { name: string }) => item.name === name);
@@ -219,7 +220,7 @@ test("written tier scenarios resolve through the real package registry to the co
       ["frontend-worker", "economy"], // bounded presentational change
       ["database-worker", "capable"], // consequential migration
       ["platform-worker", "capable"], // consequential infrastructure
-      ["test-engineer", "capable"], // data-integrity verification
+      ["qa-engineer", "capable"], // data-integrity verification
       ["observability-specialist", "capable"], // capable tier added by the approved preset update
     ];
     for (const [name, tier] of scenarios) {
@@ -378,7 +379,7 @@ test("database-worker uses implementation-worker metadata and database ownership
 });
 
 // A checker on the same model family as the work it checks tends to share its blind spots. Implementation workers run Claude first;
-// the roles that check their work (reviewer, test-engineer) run GPT first on every tier, with the other family as fallback, and
+// the roles that check their work (reviewer, qa-engineer) run GPT first on every tier, with the other family as fallback, and
 // oracle's two passes use one model of each family.
 test("checkers run on the other model family from the implementation workers they check", () => {
   const family = (model: string) => model.split("/")[0] === "anthropic" ? "claude" : "gpt";
@@ -386,7 +387,7 @@ test("checkers run on the other model family from the implementation workers the
   for (const tier of ["economy", "capable"] as const) {
     const built = new Set(workers.map((name) => family(roles.find((r: { name: string }) => r.name === name).modelTiers[tier].model)));
     assert.equal(built.size, 1, `${tier}: implementation workers share one family`);
-    for (const checker of ["reviewer", "test-engineer"]) {
+    for (const checker of ["code-reviewer", "qa-engineer"]) {
       const cfg = roles.find((r: { name: string }) => r.name === checker).modelTiers[tier];
       assert.ok(!built.has(family(cfg.model)), `${checker}.${tier}: primary is the other family`);
       assert.ok(built.has(family(cfg.fallbackModel)), `${checker}.${tier}: fallback keeps the checker available on the workers' family`);
@@ -630,10 +631,11 @@ const approved = JSON.parse(fs.readFileSync(new URL("./fixtures/approved-user-pr
   roles: { name: string; defaultModelTier: "economy" | "capable"; tiers: Record<string, ApprovedTier>; tools: string[] }[];
 };
 // The one approved tool delta: release-engineer gains native write for named knowledge/release artifacts only (tools otherwise pinned; model tuples never change here).
-// write for release-engineer (knowledge and release files) and, approved 2026-11-14, for test-engineer and reviewer: they save their
+// write for release-engineer (knowledge and release files) and, approved 2026-11-14, for qa-engineer and reviewer: they save their
 // reports of findings with it and stay read-only for the candidate (no edit tool; the guard confines write to files outside it).
 const APPROVED_TOOL_DELTAS: Record<string, string[]> = {
   "release-engineer": ["read", "grep", "find", "ls", "bash", "powershell", "edit", "write"],
+  // Keyed by the fixture names; the roles are now qa-engineer and code-reviewer.
   "test-engineer": ["read", "grep", "find", "ls", "bash", "powershell", "write"],
   reviewer: ["read", "grep", "find", "ls", "bash", "powershell", "write"],
 };
@@ -842,7 +844,7 @@ test("approved preset update differs from the immutable baseline only by the rec
   assert.deepEqual(Object.keys(approved.roles.find((role) => role.name === "oracle")!.tiers), ["capable"]);
 });
 
-test("write is the one approved tool delta: release-engineer, test-engineer and reviewer gain it, each pinned to its baseline tools plus write", () => {
+test("write is the one approved tool delta: release-engineer, qa-engineer and reviewer gain it, each pinned to its baseline tools plus write", () => {
   const pinned = baseline.roles.find((role) => role.name === "release-engineer");
   assert.ok(pinned);
   assert.deepEqual(APPROVED_TOOL_DELTAS["release-engineer"], [...pinned.normal.tools, "write"]);
@@ -853,7 +855,7 @@ test("write is the one approved tool delta: release-engineer, test-engineer and 
   }
   assert.equal(Object.keys(APPROVED_TOOL_DELTAS).length, 3, "no other role has an approved tool delta");
   for (const role of RAW_ROLES()) {
-    if (!(role.name in APPROVED_TOOL_DELTAS)) assert.doesNotMatch(role.tools, /(^|,\s*)write(\s*,|$)/, `${role.name}: no write grant`);
+    if (!Object.keys(APPROVED_TOOL_DELTAS).map(current).includes(role.name)) assert.doesNotMatch(role.tools, /(^|,\s*)write(\s*,|$)/, `${role.name}: no write grant`);
   }
 });
 

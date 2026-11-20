@@ -177,7 +177,7 @@ Typical operations include:
 -   repository searches;
 -   history inspection.
 
-Class 1 is the default for Scout, Reviewer, Oracle, advisory
+Class 1 is the default for Scout, Code Reviewer, Oracle, advisory
 specialists, knowledge retrieval, decision analysis, read-only
 orchestration, and worktree inspection/status determination.
 
@@ -771,7 +771,7 @@ Inspection does not grant write ownership.
 Advisory agents do not become implementation writers merely because they
 find the fix.
 
-Reviewer, Oracle, Scout, Test Engineer, and advisory specialists remain
+Code Reviewer, Oracle, Scout, QA Engineer, and advisory specialists remain
 within their governing role unless the orchestrator explicitly
 establishes a new authorized implementation assignment.
 

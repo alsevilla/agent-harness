@@ -79,7 +79,7 @@ Read-only/domain specialists may participate when justified:
 - `performance-specialist` — measured throughput/latency/contention;
 - `observability-specialist` — runtime signals and diagnostics;
 - `security-specialist` — auth/security-sensitive backend behavior;
-- `reviewer` / `test-engineer` — independent post-implementation challenge.
+- `code-reviewer` / `qa-engineer` — independent post-implementation challenge.
 
 Do not create a second writer merely because several concerns are present.
 
@@ -87,7 +87,7 @@ Do not create a second writer merely because several concerns are present.
 
 | Skill | Primary use | Primary owner | Use when | Location |
 |---|---|---|---|---|
-| `load-resilience-testing` | Burst/load/resilience evidence | `test-engineer` / `performance-specialist` with domain specialists as needed | Arrival-rate workloads, overload/backpressure, DB contention, dependency failure, shutdown-under-load, restart/recovery, soak when justified | `agent/skills/backend/load-resilience-testing/index.md` |
+| `load-resilience-testing` | Burst/load/resilience evidence | `qa-engineer` / `performance-specialist` with domain specialists as needed | Arrival-rate workloads, overload/backpressure, DB contention, dependency failure, shutdown-under-load, restart/recovery, soak when justified | `agent/skills/backend/load-resilience-testing/index.md` |
 
 ## Routing Priority
 

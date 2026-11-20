@@ -15,11 +15,11 @@
     "performance-specialist",
     "platform-worker",
     "release-engineer",
-    "reviewer",
+    "code-reviewer",
     "scout",
     "security-specialist",
     "database-specialist",
-    "test-engineer",
+    "qa-engineer",
     "ui-ux-specialist"
   ],
   "readOnlyTools": [

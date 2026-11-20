@@ -664,7 +664,7 @@ A reusable preferred implementation/testing/operational approach.
 
 Examples:
 
--   use independent Test Engineer after worker TDD;
+-   use independent QA Engineer after worker TDD;
 -   use unique build directories for alternate worktrees.
 
 ## PITFALL
@@ -1746,7 +1746,7 @@ Learn should preserve successful patterns too.
 Examples:
 
 -   deterministic pure rule engine boundaries;
--   independent Reviewer checking authoritative sources;
+-   independent Code Reviewer checking authoritative sources;
 -   disposable counterfactual experiments during Debug.
 
 Do not make project memory exclusively a list of failures.
@@ -2007,7 +2007,7 @@ Learn cannot turn an observation into policy.
 
 Observation:
 
-> Reviewer found authoritative docs were missed.
+> Code Reviewer found authoritative docs were missed.
 
 Valid lesson:
 
@@ -2055,11 +2055,11 @@ Do not summon agents merely to approve memory wording.
 
 ------------------------------------------------------------------------
 
-# Reviewer Use
+# Code Reviewer Use
 
-Reviewer is not required for routine Learn.
+Code Reviewer is not required for routine Learn.
 
-Consider Reviewer when:
+Consider Code Reviewer when:
 
 -   a high-impact architectural decision is being recorded;
 -   multiple authoritative sources appear inconsistent;

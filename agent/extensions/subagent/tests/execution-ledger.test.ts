@@ -44,7 +44,7 @@ test("the state view: changed files, reads still current or changed since, and t
 	assert.doesNotMatch(l.view()!, /git status/, "inspection changes nothing");
 });
 
-// test-engineer and reviewer write their report with the write tool, last. That is not a change to what the checks tested.
+// qa-engineer and reviewer write their report with the write tool, last. That is not a change to what the checks tested.
 test("writing a report into the task's artifact folder does not mark the checks as outdated; writing a source file does", () => {
 	const l = createExecutionLedger();
 	l.onResult("read", { path: "src/main.rs" }, text(lines(40)), false, cwd);

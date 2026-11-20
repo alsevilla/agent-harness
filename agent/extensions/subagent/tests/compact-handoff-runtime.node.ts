@@ -574,8 +574,8 @@ test("foreground single: a normal report that quotes invoke markup in a fence is
 test("background list labels a requested-only worker and never presents the request as the observed model", async () => {
 	const host = fakePi();
 	const records = new Map<string, any>([
-		["1:1", { id: "1:1", name: "reviewer", model: "anthropic/asked", state: "running", activity: "x" }],
-		["1:2", { id: "1:2", name: "reviewer", model: "anthropic/asked", reportedModel: "partner/seen", observed: [{ provider: "partner", model: "seen" }], state: "running", activity: "x" }],
+		["1:1", { id: "1:1", name: "code-reviewer", model: "anthropic/asked", state: "running", activity: "x" }],
+		["1:2", { id: "1:2", name: "code-reviewer", model: "anthropic/asked", reportedModel: "partner/seen", observed: [{ provider: "partner", model: "seen" }], state: "running", activity: "x" }],
 	]);
 	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
 	const job = runtime.start(() => new Promise(() => {}));
@@ -597,8 +597,8 @@ test("background list: a served row beside an unknown or partial row is never se
 	const host = fakePi();
 	const served = { provider: "p", model: "asked", responseModel: "snap" };
 	const records = new Map<string, any>([
-		["1:1", { id: "1:1", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [served, {}], state: "running", activity: "x" }],
-		["1:2", { id: "1:2", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ model: "bare" }, served], state: "running", activity: "x" }],
+		["1:1", { id: "1:1", name: "code-reviewer", model: "p/asked", reportedModel: "p/snap", observed: [served, {}], state: "running", activity: "x" }],
+		["1:2", { id: "1:2", name: "code-reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ model: "bare" }, served], state: "running", activity: "x" }],
 	]);
 	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
 	const job = runtime.start(() => new Promise(() => {}));
@@ -612,7 +612,7 @@ test("background list: a served row beside an unknown or partial row is never se
 test("background list model is the effective served id and only a responseModel report counts as served-reported", async () => {
 	const host = fakePi();
 	const records = new Map<string, any>([
-		["1:1", { id: "1:1", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ provider: "p", model: "asked", responseModel: "snap" }], state: "running", activity: "x" }],
+		["1:1", { id: "1:1", name: "code-reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ provider: "p", model: "asked", responseModel: "snap" }], state: "running", activity: "x" }],
 	]);
 	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
 	const job = runtime.start(() => new Promise(() => {}));

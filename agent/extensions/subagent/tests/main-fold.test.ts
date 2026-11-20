@@ -323,7 +323,7 @@ test("finished work folds at half the threshold; an unfinished result keeps the 
 	const fail = (call: string): Msg => ({ role: "toolResult", toolName: "subagent", toolCallId: call, content: [{ type: "text", text: `STATUS: FAIL - A7 keyboard check failed\nNEXT: fix focus order\nRISKS: none\nEVIDENCE: _evidence/a7/REPORT.md\n${"r".repeat(9000)}` }], timestamp: ++clock });
 	const open: Msg[] = [];
 	for (let n = 1; n <= 6; n++) open.push(...turn(n));
-	open.push(user("check A7"), reply("Launching test-engineer.", "cf"), fail("cf"), reply("A7 failed."), user("ok"));
+	open.push(user("check A7"), reply("Launching qa-engineer.", "cf"), fail("cf"), reply("A7 failed."), user("ok"));
 	assert.ok(size(open) > 12_500 && size(open) < 25_000, `premise (${size(open)})`);
 	const waiting = await setup({ [MAIN_FOLD_ENV]: "25000" })(open);
 	assert.equal(waiting.some((m) => m.customType === CHECKPOINT_TYPE), false, "an unfinished result: no early fold");
@@ -387,7 +387,7 @@ test("foreground errors and failed or partial notices block early folding and su
 	const error = { ...result("failed", 8), isError: true, content: [{ type: "text", text: failure }] };
 	const notice = (state: string, text: string) => ({
 		role: "custom", customType: "subagent-completion", timestamp: ++clock,
-		content: formatCompletionNotice({ job: "bg-8", state, workers: ["test-engineer"], target: "bg-8@test", text }),
+		content: formatCompletionNotice({ job: "bg-8", state, workers: ["qa-engineer"], target: "bg-8@test", text }),
 	});
 	for (const message of [error, notice("failed", failure), notice("completed", failure + " details".repeat(1000))]) {
 		const request = setup({ [MAIN_FOLD_ENV]: "25000" });
