@@ -34,8 +34,15 @@ Write only inside the assigned candidate.
    - a workflow linter and a YAML parse on local workflow files when installed; never trigger a workflow run to check them.
 2. Make the minimal change.
 3. Run the same offline checks after the edit and report both results. Worker checks are not independent verification.
-4. Local commit: after the offline checks pass, commit your unit locally when HEAD is a feature branch (not the base or another protected branch, not detached). Stage only the files you changed for this unit by exact path (`git add -- <paths>`; never `-A`, `.` or `commit -a`), then `git commit -F "<absolute message file in your _scratch folder>"`: an imperative subject under 72 characters, a short why, and the trailer block from the `engineering-harness/references/git-attribution.md` module. Never push, amend, rebase, reset, squash or switch branches; a fix round adds a new commit, and `release-engineer` pushes. If HEAD is the base branch or detached, or something you did not change is staged, do not commit: report it.
-5. REPORT file: exact candidate; files changed; infrastructure behavior implemented; offline checks and results; explicit statement that no live operation ran; missing evidence; unresolved decisions or risks; the local commit SHA(s), or why you did not commit.
+4. REPORT file: exact candidate; files changed; infrastructure behavior implemented; offline checks and results; explicit statement that no live operation ran; missing evidence; unresolved decisions or risks.
+
+<!-- shared:worker-rules -->
+## Shared worker rules
+- Scoped editing: precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` does not disable editing; do not report that it does. Shell access is not a write sandbox.
+- When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.
+- Local commit: after your checks pass (GREEN; for infrastructure, the offline checks), commit your unit locally when HEAD is a feature branch (not the base or another protected branch, not detached). Stage only the files you changed for this unit by exact path (`git add -- <paths>`; never `-A`, `.` or `commit -a`), then `git commit -F "<absolute message file in your _scratch folder>"`: an imperative subject under 72 characters, a short why, and the trailer block from the `engineering-harness/references/git-attribution.md` module. Never push, amend, rebase, reset, squash or switch branches; a fix round adds a new commit, and `release-engineer` pushes. If HEAD is the base branch or detached, or something you did not change is staged, do not commit: report it.
+- REPORT ends with the local commit SHA(s), or why you did not commit.
+<!-- /shared:worker-rules -->
 
 ## Where to look
 

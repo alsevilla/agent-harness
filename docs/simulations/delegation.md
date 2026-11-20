@@ -75,7 +75,7 @@ Worker sizes were measured from the production prompt assembler at commit `1ab70
 | planner (now system-architect) | 14,298 | 15,327 |
 | test-engineer (now qa-engineer) | 17,463 | 18,492 |
 
-v1.23.0 changed four of these prompts and renamed `test-engineer` to `qa-engineer`. Each fixture is its value above plus the role's measured change against master, both measured 2026-11-20 the same way: backend-worker +585 (20,836 to 21,421; local commits), so 20,423; debugger −174, so 16,529; `qa-engineer` (`test-engineer` on master) −176, so 18,316; and `system-architect` (the merged `planner` and `architecture-specialist`) +1,516 over the planner (16,325 to 17,841), so 16,843.
+v1.23.0 changed four of these prompts and renamed `test-engineer` to `qa-engineer`. Each fixture is its value above plus the role's measured change against master, both measured 2026-11-20 the same way: backend-worker +739 (20,836 to 21,575; local commits and the shared worker rules block), so 20,577; debugger −174, so 16,529; `qa-engineer` (`test-engineer` on master) −176, so 18,316; and `system-architect` (the merged `planner` and `architecture-specialist`) +1,516 over the planner (16,325 to 17,841), so 16,843.
 
 Reproduce the measurement with `NATIVE_PROBE_HOST_MODULES=<installed Pi node_modules> node scripts/measure-child-prompt.mjs --label current --out /absolute/scratch/path`, then use the relevant rows for `CHILD_PROMPT`. These remain named, fixed fixture constants. The Pi prompt, tool-schema sizes, per-call output and pricing/cache assumptions are unchanged. The simulation includes lesson titles in startup text, but does not simulate reading lesson bodies or whether those lessons improve decisions.
 

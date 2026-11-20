@@ -205,14 +205,14 @@ Where the harness cost goes, for the whole session:
 
 | Main model | Main | Complex implementation (capable tier) | Economy-tier workers |
 | --- | --- | --- | --- |
-| Claude Fable 5.1 | $3.11 (68%) | $1.37 (30%) | $0.12 (3%) |
+| Claude Fable 5.1 | $3.11 (68%) | $1.37 (30%) | $0.13 (3%) |
 | Claude Opus 5.5 | $1.36 (48%) | $1.37 (48%) | $0.13 (4%) |
 | Claude Sonnet 5.5 | $0.80 (35%) | $1.37 (60%) | $0.12 (5%) |
-| Claude Haiku 5.5 | $0.04 (3%) | $1.37 (89%) | $0.12 (8%) |
-| GPT-6 Astra | $4.01 (77%) | $1.05 (20%) | $0.12 (2%) |
+| Claude Haiku 5.5 | $0.04 (3%) | $1.37 (89%) | $0.13 (8%) |
+| GPT-6 Astra | $4.01 (77%) | $1.05 (20%) | $0.13 (2%) |
 | GPT-6.1 Sol | $0.68 (37%) | $1.05 (57%) | $0.12 (7%) |
 | GPT-6.1 Terra | $0.34 (23%) | $1.05 (69%) | $0.12 (8%) |
-| GPT-6 Luna | $0.04 (3%) | $1.05 (86%) | $0.12 (10%) |
+| GPT-6 Luna | $0.04 (3%) | $1.05 (86%) | $0.13 (10%) |
 
 The economy-tier workers cost almost nothing. The bill is main reading results and writing packets on its own model, plus the three features on the capable tier, which cost the same whatever main is. A cheaper main, or a new main session between unrelated tasks, is what lowers it. Real sessions run above these figures: only 350 output tokens are counted per model call, so most thinking output is not priced, and code-reviewer, oracle and delivery runs are not part of the ten tasks.
 
@@ -220,7 +220,7 @@ Every model sends the same tokens: 47.3M (peak request 428k) for one agent in on
 
 Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 40-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
 
-The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 18% and 62%); under Sonnet 5.5 and Sol it is cheaper up to eight (7% and 6%) and more expensive at twelve (11% and 13%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 57% under Fable, 41% under Opus, 24% under Sonnet, 68% under Astra, 20% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
+The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 18% and 62%); under Sonnet 5.5 and Sol it is cheaper up to eight (6% and 6%) and more expensive at twelve (11% and 13%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 57% under Fable, 41% under Opus, 24% under Sonnet, 68% under Astra, 20% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 
 ### Offline replay at Claude prices
 

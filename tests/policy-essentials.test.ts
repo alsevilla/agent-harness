@@ -36,7 +36,7 @@ test("every role keeps the leaf boundary and states it once", () => {
 
 test("every code worker fixes a failing focused check in the same run, at most twice", () => {
 	const rule = "When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.";
-	for (const role of ["frontend-worker", "backend-worker", "database-worker", "general-worker"]) assert.equal(read(`agent/agents/${role}.md`).split(rule).length, 2, role);
+	for (const role of ["frontend-worker", "backend-worker", "database-worker", "general-worker", "platform-worker"]) assert.equal(read(`agent/agents/${role}.md`).split(rule).length, 2, role);
 });
 
 // Phase 4: every role lists the five shared sections in this order. release-engineer keeps its delivery/SHIP/LEARN layout (its merge and
@@ -300,4 +300,21 @@ test("implementation workers commit their unit locally and never push; delivery 
 	for (const role of ["technical-writer", "qa-engineer", "code-reviewer", "system-architect"]) assert.ok(!read(`agent/agents/${role}.md`).includes("Local commit:"), `${role}: no local commits`);
 	assert.ok(flat(read("agent/agents/release-engineer.md")).includes("Implementation workers have usually committed their units locally already"));
 	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("Never squash, amend or rebase a worker's commits"));
+});
+
+// One source for the rules every implementation worker shares (scoped editing, fix twice, local commit, the REPORT's commit line). The
+// Copilot plugin loads agent/agents/*.md directly, so each worker keeps a copy; npm run sync:worker-rules writes it, and this fails on drift.
+test("the five implementation workers carry the shared worker rules byte-for-byte, once, from agent/shared/worker-rules.md", async () => {
+	const { WORKERS, START, END, withRules } = await import("../scripts/sync-worker-rules.mjs");
+	const rules = read("agent/shared/worker-rules.md");
+	for (const name of WORKERS) {
+		const text = read(`agent/agents/${name}.md`);
+		assert.equal(text.split(START).length, 2, `${name}: one shared block`);
+		assert.equal(withRules(text, rules), text, `${name}: differs from agent/shared/worker-rules.md; run npm run sync:worker-rules`);
+		assert.ok(text.indexOf(END) < text.indexOf("## Where to look"), `${name}: block sits before Where to look`);
+		assert.doesNotMatch(text.replace(text.slice(text.indexOf(START), text.indexOf(END)), ""), /## Scoped editing|Local commit:|at most 2 tries/, `${name}: no second copy outside the block`);
+	}
+	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url))) {
+		if (!WORKERS.includes(file.replace(/\.md$/, ""))) assert.ok(!read(`agent/agents/${file}`).includes(START), `${file}: not an implementation worker`);
+	}
 });

@@ -4,9 +4,6 @@ description: Implements authorized frontend changes from an accepted design and 
 tools: read, search, execute, edit
 ---
 
-## Scoped editing
-Precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` does not disable editing; do not report that it does. Shell access is not a write sandbox.
-
 ## Assigned module
 Module paths written `agent/skills/...` resolve under the installed shared-source root (the absolute path from the subagentStart context, the parent handoff or the advertised installed skill), never the project cwd; never copy files, and if no verified root is available report BLOCKED for that read.
 
@@ -44,11 +41,17 @@ Then:
 1. RED: for meaningful behavior, run a focused test/check and establish the expected failure before production edits when feasible. An already-passing test is not RED evidence; investigate the mismatch.
 2. Implement only authorized frontend scope: follow existing component/project conventions and design-system authority, prefer reusable components when justified, keep business logic separate from presentation when practical, preserve accessibility, implement required loading/empty/error/success/busy/disabled/retry states and approved UX copy, and avoid unnecessary state and unrelated redesign/refactor.
 3. GREEN: rerun the focused check, then the relevant regression checks for your scope: unit/component tests, typecheck, lint/format check, and browser interaction, desktop/mobile responsive or keyboard/focus evidence when the task needs it. For behavioral frontend work, test the behavior/state transition rather than only snapshots/styles where practical.
-4. When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.
-5. Local commit: after GREEN, commit your unit locally when HEAD is a feature branch (not the base or another protected branch, not detached). Stage only the files you changed for this unit by exact path (`git add -- <paths>`; never `-A`, `.` or `commit -a`), then `git commit -F "<absolute message file in your _scratch folder>"`: an imperative subject under 72 characters, a short why, and the trailer block from the `engineering-harness/references/git-attribution.md` module. Never push, amend, rebase, reset, squash or switch branches; a fix round adds a new commit, and `release-engineer` pushes. If HEAD is the base branch or detached, or something you did not change is staged, do not commit: report it.
-6. REPORT file: exact candidate/worktree identity, files changed, behavior implemented, RED and GREEN commands/results with any justified exception and its replacement evidence, browser/accessibility evidence obtained, missing evidence, unresolved UX/API/product issues, and the local commit SHA(s), or why you did not commit.
+4. REPORT file: exact candidate/worktree identity, files changed, behavior implemented, RED and GREEN commands/results with any justified exception and its replacement evidence, browser/accessibility evidence obtained, missing evidence, unresolved UX/API/product issues.
 
 Worker checks can satisfy a localized T1 task. When current policy requires independent verification, they do not replace that separate named-role evidence. The orchestrator owns architecture, product decisions, lifecycle routing, and final delivery authority.
+
+<!-- shared:worker-rules -->
+## Shared worker rules
+- Scoped editing: precise `edit` remains permitted. Inspect the target before scoped edits and preserve unrelated code and tests. Missing `write` does not disable editing; do not report that it does. Shell access is not a write sandbox.
+- When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.
+- Local commit: after your checks pass (GREEN; for infrastructure, the offline checks), commit your unit locally when HEAD is a feature branch (not the base or another protected branch, not detached). Stage only the files you changed for this unit by exact path (`git add -- <paths>`; never `-A`, `.` or `commit -a`), then `git commit -F "<absolute message file in your _scratch folder>"`: an imperative subject under 72 characters, a short why, and the trailer block from the `engineering-harness/references/git-attribution.md` module. Never push, amend, rebase, reset, squash or switch branches; a fix round adds a new commit, and `release-engineer` pushes. If HEAD is the base branch or detached, or something you did not change is staged, do not commit: report it.
+- REPORT ends with the local commit SHA(s), or why you did not commit.
+<!-- /shared:worker-rules -->
 
 ## Where to look
 
