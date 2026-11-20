@@ -138,9 +138,9 @@ test("no environment variable or file changes the guard result (no override chan
 
 // Profiles: canonical repo-relative module paths (agent/skills/...); the portable root rule is pinned in tests/portable-module-paths.test.ts.
 const agentFiles = readdirSync(join(root, "agent", "agents")).filter((f) => f.endsWith(".md"));
-test("canonical profiles keep 20 roles (planner and architecture-specialist merged into system-architect) and name no user-home or <skills> module path", () => {
-  expect(agentFiles).toHaveLength(20);
-  expect(roles).toHaveLength(20);
+test("canonical profiles keep 21 roles (planner and architecture-specialist merged into system-architect; technical-writer added) and name no user-home or <skills> module path", () => {
+  expect(agentFiles).toHaveLength(21);
+  expect(roles).toHaveLength(21);
   for (const f of agentFiles) expect(read("agent", "agents", f)).not.toMatch(/~\/\.pi|<skills>/);
 });
 

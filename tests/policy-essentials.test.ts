@@ -24,7 +24,7 @@ test("main policy keeps its never-rules and stays short", () => {
 });
 
 test("every role keeps the leaf boundary and states it once", () => {
-	assert.equal(roles.length, 20);
+	assert.equal(roles.length, 21);
 	for (const role of roles) {
 		const text = read(`agent/agents/${role}.md`);
 		assert.match(text, /Never launch\/delegate\/supervise helpers/, role);
@@ -51,7 +51,7 @@ test("restructured roles use the five shared sections in order", () => {
 });
 
 test("release-engineer cleanup never forces a worktree removal in routine mode", () => {
-	const text = read("agent/agents/release-engineer.md");
+	const text = read("agent/skills/engineering-harness/worktree/cleanup.md");
 	assert.match(text, /git worktree remove/);
 	assert.match(text, /(?:without|no)\s+`?--force`?/);
 });
@@ -59,7 +59,7 @@ test("release-engineer cleanup never forces a worktree removal in routine mode",
 // Lessons live in one place: one file per lesson in docs/knowledge/, committed with the task's PR (the general/harness scopes and
 // the ignored local and private stores were retired as convoluted). A project may name another folder in its AGENTS.md.
 test("LEARN saves one file per lesson in docs/knowledge, committed with the PR, and the merge approval names the artifact directory", () => {
-	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md", "agent/agents/release-engineer.md"]) {
+	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md", "agent/agents/technical-writer.md"]) {
 		const text = flat(read(file));
 		assert.ok(text.includes("one small focused Markdown file per lesson at `docs/knowledge/<descriptive-slug>.md` in the candidate"), file);
 		assert.ok(text.includes("A project whose `AGENTS.md` names another knowledge folder uses that folder instead"), file);
@@ -245,7 +245,7 @@ test("main finishes the request: an actionable FAIL or gap is the next launch, n
 // Field report: after a merge, cleanup kept an evidence folder because an unrelated test server was running and its open files could not
 // be listed. No process referenced the folder. Use is now judged per exact target, and the removal itself reports a real lock.
 test("cleanup judges use per exact target: an unrelated process, or unlistable open files alone, does not retain a folder", () => {
-	for (const file of ["agent/skills/engineering-harness/worktree/index.md", "agent/agents/release-engineer.md"]) {
+	for (const file of ["agent/skills/engineering-harness/worktree/index.md", "agent/skills/engineering-harness/worktree/cleanup.md"]) {
 		const text = flat(read(file));
 		assert.ok(text.includes("A process blocks a target only on confirmed use: its working directory, its command line or a file it holds open lies inside that target."), file);
 		assert.ok(text.includes("such as an unrelated dev or test server, does not block, and is not stopped or restarted for the cleanup"), file);

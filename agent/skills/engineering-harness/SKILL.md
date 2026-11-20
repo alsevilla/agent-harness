@@ -21,7 +21,7 @@ For "queue this", record the request and order, acknowledge briefly, and continu
 | Selected independent evidence | `verify/index.md` / `review/index.md` | `test-engineer` / `reviewer` | Result on the exact candidate identity |
 | Requested isolation/integration | `worktree/index.md` / `integrate/index.md` | **main owns orchestration** | Candidate identity and one writer confirmed |
 | Requested delivery/release | `ship/index.md` | `release-engineer` | Authorized operation result on the verified candidate |
-| Useful durable learning | `learn/index.md` | `release-engineer` | SAVED with readback, or NO LESSON |
+| Useful durable learning | `learn/index.md` | `technical-writer` (record); `release-engineer` commits it | SAVED with readback, or NO LESSON |
 
 PLAN is not a system-architect procedure. The system architect supplies units, structural analysis and constraints; main incorporates them into PLAN and owns sequencing, writer ownership, gates and authorization.
 

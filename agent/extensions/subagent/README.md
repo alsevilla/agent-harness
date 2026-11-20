@@ -1,6 +1,6 @@
 # Pi subagent extension
 
-Run named specialists in isolated Pi subprocesses while keeping the main conversation available. This profile supports only the latest Pi release (see the [root README](../../../README.md#limits)) and uses the 20 definitions in `~/.pi/agent/agents/`; these are the installed roles, not the upstream example's planner/worker set. The release engineer owns only selected SHIP/LEARN work.
+Run named specialists in isolated Pi subprocesses while keeping the main conversation available. This profile supports only the latest Pi release (see the [root README](../../../README.md#limits)) and uses the 21 definitions in `~/.pi/agent/agents/`; these are the installed roles, not the upstream example's planner/worker set. The release engineer owns only selected SHIP work; the technical writer writes LEARN records and other docs.
 
 ## Dispatch and results
 

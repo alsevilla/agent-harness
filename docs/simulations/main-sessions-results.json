@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "sourceCommit": "1675d7ad323623191cbd07b1c543c1dbe33ce55e",
+  "sourceCommit": "81258d8326ab01735f7d5e9656935c629fec6bc7",
   "cacheModel": "Anthropic-style: 20-block lookback; Opus 5.5 cache read 0.05x, write 1.25x of input; characters / 4",
   "results": [
     {

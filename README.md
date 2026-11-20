@@ -30,7 +30,7 @@ These are offline Pi simulation estimates using cheaper workers for non-complex 
 | Policy | [`agent/AGENTS.md`](agent/AGENTS.md) | The 7-step protocol main follows on every task, plus a short Never list |
 | Skill: `engineering-harness` | [`agent/skills/engineering-harness/`](agent/skills/engineering-harness/SKILL.md) | Routing criteria and phase procedures (discover, plan, execute, verify, review, ship, learn, worktree), loaded only when needed |
 | Skill: `agent-creation` | [`agent/skills/agent-creation/`](agent/skills/agent-creation/SKILL.md) | Creating project-local roles |
-| Roles | [`agent/roles.json`](agent/roles.json), [`agent/agents/`](agent/agents/) | 20 named roles with models, tiers, tools and boundaries |
+| Roles | [`agent/roles.json`](agent/roles.json), [`agent/agents/`](agent/agents/) | 21 named roles with models, tiers, tools and boundaries |
 | Extension: `subagent` | [`agent/extensions/subagent/`](agent/extensions/subagent/README.md) | Launching and controlling workers, handoffs, the safety guard, cleanup, usage |
 | Extension: `ask-user` | [`agent/extensions/ask-user/`](agent/extensions/ask-user/README.md) | `ask_user` questions through Pi's native dialogs |
 | Copilot plugin | [`.github/plugin/`](.github/plugin/) | The same agents, skills and startup context for Copilot CLI (preview) |
@@ -110,7 +110,7 @@ The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/
 
 ## Roles
 
-The native package exposes these 20 generic roles:
+The native package exposes these 21 generic roles:
 
 | Kind | Roles |
 | --- | --- |
@@ -119,6 +119,7 @@ The native package exposes these 20 generic roles:
 | Planning and architecture (read-only proposal; main owns the plan) | `system-architect` |
 | Specialists (read-only advice) | `api-specialist`, `concurrency-specialist`, `database-specialist`, `devops-specialist`, `observability-specialist`, `performance-specialist`, `security-specialist`, `ui-ux-specialist` |
 | Escalation | `oracle` |
+| Documentation (writes docs and LEARN records in the checkout; never code) | `technical-writer` |
 | Delivery | `release-engineer` |
 
 Roles that check work run on a different model family from the roles that write it, so they are less likely to share its blind spots: implementation workers run Claude first, `reviewer` and `test-engineer` run GPT first, and `oracle` uses both. On Pi, `oracle` runs two passes on every launch: GPT-6.1 Sol answers, then Claude Opus 5.5 reviews that answer independently and gives the final one ([how](agent/extensions/subagent/README.md#two-pass-oracle)). Each role's model, `economy`/`capable` tiers and tools live in `agent/roles.json`; its prompt uses the same five sections (Knows/loads, Before starting, Workflow, Where to look, Common failures). User roles in your Pi agent directory and project roles in `.pi/agents/` override bundled ones (package < user < project).
@@ -181,7 +182,7 @@ The same ten-task session (four small fixes, three bug hunts, three features, tw
 | Claude Sonnet 5.5 | $11.18 | $3.34 | $2.29 | **31% cheaper** |
 | Claude Haiku 5.5 | $2.64 | $0.17 | $1.53 | 9.1x the cost |
 | GPT-6 Astra | $87.65 | $16.69 | $5.18 | **69% cheaper** |
-| GPT-6.1 Sol | $9.93 | $2.61 | $1.86 | **29% cheaper** |
+| GPT-6.1 Sol | $9.93 | $2.61 | $1.85 | **29% cheaper** |
 | GPT-6.1 Terra | $4.97 | $1.30 | $1.51 | 16% more expensive |
 | GPT-6 Luna | $0.88 | $0.17 | $1.21 | 7.3x the cost |
 

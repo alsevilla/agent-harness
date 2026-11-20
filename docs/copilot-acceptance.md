@@ -71,7 +71,7 @@ Each evidence directory must be new. The probes use isolated Copilot profiles an
 
 S3 uses the real TUI and terminal keystrokes, not fabricated tool results. The returned strings were `User responded: Alpha`, `User responded: Exact fixture text 42`, `User cancelled the request.`, and `User accepted but provided no values.` In `-p` mode, `ask_user` was absent from the advertised tools. Cancellation and empty submission returned to the provider; they did **not** automatically terminate the agent turn. The scripted continuation performed no dependent action. The harness still relies on its instructions for a real model to stop dependent work; no host-enforced authorization was established.
 
-These checks establish native dispatch, tool execution and question-result formats. They do not establish model judgment or compliance with negative packets, hosted authentication, all 20 roles, actual PowerShell execution, or strict filesystem isolation. The earlier authentication blocker remains; it was not probed again. The focused Copilot compatibility suites passed 79 checks, with 1 skipped because PowerShell is unavailable and 0 failures.
+These checks establish native dispatch, tool execution and question-result formats. They do not establish model judgment or compliance with negative packets, hosted authentication, all 21 roles, actual PowerShell execution, or strict filesystem isolation. The earlier authentication blocker remains; it was not probed again. The focused Copilot compatibility suites passed 79 checks, with 1 skipped because PowerShell is unavailable and 0 failures.
 
 ## Installed lookup backends
 

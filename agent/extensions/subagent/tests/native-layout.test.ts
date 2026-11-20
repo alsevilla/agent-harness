@@ -126,13 +126,13 @@ test("the trust-boundary scan checks single-quoted and double-quoted imports ali
 	assert.deepEqual(undeclaredImports(`import { z } from '@earendil-works/unlisted-host';`), ["@earendil-works/unlisted-host"]);
 });
 
-probeTest("a fresh isolated profile resolves the 20 bundled roles from the native package and writes nothing", () => {
+probeTest("a fresh isolated profile resolves the 21 bundled roles from the native package and writes nothing", () => {
 	const profile = tmp("native-profile-");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"));
 	assert.equal(found.error, null);
 	assert.equal(found.packageRoot, path.join(REPO, "agent"));
 	const roles = JSON.parse(fs.readFileSync(path.join(REPO, "agent", "roles.json"), "utf8")) as { name: string }[];
-	assert.equal(roles.length, 20);
+	assert.equal(roles.length, 21);
 	assert.deepEqual(found.agents.map((agent) => agent.name).sort(), roles.map((role) => role.name).sort());
 	for (const agent of found.agents) {
 		assert.equal(agent.source, "package", agent.name);
@@ -158,7 +158,7 @@ for (const layout of ["direct", "linked", ...(process.platform === "win32" ? ["c
 		for (const scope of ["user", "both"]) {
 			const found = discover(agentsTs, profile, cwd, scope);
 			assert.equal(found.error, null);
-			assert.equal(found.agents.length, 20);
+			assert.equal(found.agents.length, 21);
 			for (const agent of found.agents) {
 				assert.equal(agent.source, "package", `${layout}/${scope}/${agent.name}`);
 				assert.equal(agent.filePath, path.join(packageAgentDir, "agents", `${agent.name}.md`));
@@ -177,7 +177,7 @@ probeTest("a project-local role overrides the bundled role and private project r
 	assert.equal(found.error, null);
 	assert.equal(found.agents.find((agent) => agent.name === "reviewer")?.source, "project");
 	assert.equal(found.agents.find((agent) => agent.name === "private-domain-role")?.source, "project");
-	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 19);
+	assert.equal(found.agents.filter((agent) => agent.source === "package").length, 20);
 });
 
 probeTest("a renamed root manifest is inert: no package mode and no bundled roles", () => {
@@ -250,7 +250,7 @@ probeTest("a user agent file with a bundled role's name wins over the bundled de
 	fs.writeFileSync(path.join(profile, "agents", "general-worker.md"), "---\nname: general-worker\ndescription: user override\ntools: read\n---\nUser override body.\n");
 	const found = discover(AGENTS_TS, profile, tmp("native-cwd-"), "user");
 	assert.equal(found.error, null);
-	assert.equal(found.agents.length, 20);
+	assert.equal(found.agents.length, 21);
 	const general = found.agents.find((agent) => agent.name === "general-worker");
 	assert.equal(general?.source, "user");
 	assert.deepEqual(general?.tools, ["read"]);
@@ -356,7 +356,7 @@ const packageTuple = (root: string, name: string) => {
 };
 const assertAllCanonical = (found: Discovery, root: string, label: string) => {
 	assert.equal(found.error, null, label);
-	assert.equal(found.agents.length, 20, label);
+	assert.equal(found.agents.length, 21, label);
 	for (const agent of found.agents) {
 		assert.equal(agent.source, "package", `${label}/${agent.name}`);
 		assert.equal(agent.filePath, path.join(root, "agent", "agents", `${agent.name}.md`), `${label}/${agent.name}`);
@@ -427,7 +427,7 @@ probeTest("distinct external copies and custom definitions stay legacy while a s
 	fs.writeFileSync(path.join(dir, "custom.md"), "---\nname: custom\ndescription: custom\nmodel: external/custom-model\n---\nCustom body.\n");
 	const found = discover(agentsTsOf(root), tmp("native-profile-"), cwd, "both");
 	assert.equal(found.error, null);
-	assert.equal(found.agents.length, 21);
+	assert.equal(found.agents.length, 22);
 	assert.equal(found.agents.find((agent) => agent.name === "scout")?.source, "package");
 	const reviewer = found.agents.find((agent) => agent.name === "reviewer");
 	assert.equal(reviewer?.source, "project");

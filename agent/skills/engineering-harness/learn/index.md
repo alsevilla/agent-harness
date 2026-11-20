@@ -1,5 +1,5 @@
 ## LEARN procedure
-This procedure belongs to the `release-engineer` role when LEARN is selected by main.
+This procedure belongs to the `technical-writer` role when LEARN is selected by main. `release-engineer` commits the record with the task's delivery.
 
 Run only when durable knowledge is worth preserving.
 
@@ -11,7 +11,7 @@ Capture only stable, reusable truth:
 
 Do not summarize the session or store temporary state. Reconcile existing authoritative knowledge when needed, and use the narrowest authoritative destination.
 
-Writing durable knowledge requires explicit destination/mutation authority. `release-engineer` may make precise edits only to the authorized knowledge/release-owned artifact; it must not use LEARN to change product implementation or tests.
+Writing durable knowledge requires explicit destination/mutation authority. `technical-writer` may make precise edits only to the authorized knowledge artifact; it must not use LEARN to change product implementation or tests.
 
 ## Record, dedupe and destination
 Record fields follow `docs/knowledge/README.md`: Title and one-line claim; Source (repo-relative path or commit; do not duplicate the authoritative doc); Evidence status (verified or provisional); Context and date; Revalidate when (the condition that makes the record stale).
@@ -22,17 +22,17 @@ Dedupe before writing: check existing records for the same claim, and whether th
 
 Packet authority: the packet names the exact record path and gives mutation authority for it and for the README index line. A missing path or authority is BLOCKED with the exact gap; nothing is created by guess. Each record keeps only: Title and one-line claim, Source, Evidence status, Context and date, Revalidate when. No transcripts, session summaries, no automatic counters, no ledgers and no memory pipeline.
 
-Readback and SAVED: after writing, the release engineer reads back the exact record file and its README index line and confirms the record fields. SAVED is reported only after that readback, with both paths; the record then goes into the task's delivery commit like any other file. QMD refresh or embedding is separate and is not part of SAVED.
+Readback and SAVED: after writing, the technical writer reads back the exact record file and its README index line and confirms the record fields. SAVED is reported only after that readback, with both paths; the record then goes into the task's delivery commit like any other file. QMD refresh or embedding is separate and is not part of SAVED.
 
 Before recording, review the Verify evidence and root cause; record only what the evidence confirms. A lesson never substitutes for a root-cause fix or regression test: the fix and its test come first.
 
 Retrieve selectively: open only the QMD hits or files the decision needs. When an existing record covers the claim, update the canonical record (refine, correct or revalidate it) and do not add a duplicate. Keep each claim to one concise, actionable line with its source, verification, date and revalidation condition.
 
-Before the final commit or PR, main evaluates verified reusable lessons with bounded dedup and selects LEARN when warranted; this is a workflow checkpoint, not automatic logging. Only the release engineer writes the record and its index line, and reads both back. The terminal knowledge-disposition checkpoint is SAVED (exact record and index paths with readback evidence), NO LESSON (reason), or BLOCKED (specific evidence, destination, or authority gap). Archiving a report or fixture is evidence, not learning completion: record the focused lesson, not an archive; permanent raw logs are not a universal requirement. A BLOCKED checkpoint before the PR is an open gap for main, never reported as SAVED. Post-merge cleanup needs the checkpoint: its `cleanup` request carries `knowledge`, the exact text `NO LESSON` or the record's absolute path (committed in the merged PR head, or an existing file outside `_evidence` and `_scratch`).
+Before the final commit or PR, main evaluates verified reusable lessons with bounded dedup and selects LEARN when warranted; this is a workflow checkpoint, not automatic logging. Only the technical writer writes the record and its index line, and reads both back. The terminal knowledge-disposition checkpoint is SAVED (exact record and index paths with readback evidence), NO LESSON (reason), or BLOCKED (specific evidence, destination, or authority gap). Archiving a report or fixture is evidence, not learning completion: record the focused lesson, not an archive; permanent raw logs are not a universal requirement. A BLOCKED checkpoint before the PR is an open gap for main, never reported as SAVED. Post-merge cleanup needs the checkpoint: its `cleanup` request carries `knowledge`, the exact text `NO LESSON` or the record's absolute path (committed in the merged PR head, or an existing file outside `_evidence` and `_scratch`).
 Sources: Source fields cite repo-relative files or commits, which survive artifact disposal; `_scratch` and `_evidence` are never the only proof and never the record's location.
 Late lesson and merge: a lesson verified only after merge is saved the same way in a follow-up PR; until that PR merges it is not claimed as saved in the repository. A BLOCKED checkpoint after merge reports the concrete gap and retains the affected targets; it never rolls back the merge.
 
-Saving remains an explicitly authorized release-engineer action; main verifies the actual destination content after the child returns.
+Saving remains an explicitly authorized technical-writer action; main verifies the actual destination content after the child returns.
 
 ## Optional retrospective triggers
 Main may consider a LEARN review when a durable lesson may exist, for example:
@@ -42,8 +42,8 @@ Main may consider a LEARN review when a durable lesson may exist, for example:
 
 Three-incident rule: three distinct completed incidents sharing a confirmed root cause: trigger main LEARN review. Count distinct incidents, each backed by a completed Debug, Verify or worker REPORT that states the root cause as confirmed. Retries or attempts of the same task are one incident. Similar error symptoms alone do not establish recurrence; the root causes must match. Main notices recurrence from evidence already relevant to the current work; there is no mandatory history scan, and no counter, ledger or background pipeline. Three is a trigger for review, not a minimum: one critical, verified security or data-loss lesson may warrant preservation on its own.
 
-A trigger only prompts main to review whether a stable, confirmed lesson exists. It is not automatic logging, session dumping, helper invocation or a universal gate, and it is not run after every task. Record only a durable root cause or confirmed lesson with explicit destination authority. Only the `release-engineer` LEARN role, under existing policy, writes; general workers do not run LEARN automatically. User choices and task requirements take precedence.
+A trigger only prompts main to review whether a stable, confirmed lesson exists. It is not automatic logging, session dumping, helper invocation or a universal gate, and it is not run after every task. Record only a durable root cause or confirmed lesson with explicit destination authority. Only the `technical-writer` LEARN role, under existing policy, writes; general workers do not run LEARN automatically. User choices and task requirements take precedence.
 
 Load `references/extended.md` only for complex knowledge reconciliation.
 
-Resolve relative references from this module folder. This procedure supplies guidance; the selected `release-engineer` role still must actually run.
+Resolve relative references from this module folder. This procedure supplies guidance; the selected `technical-writer` role still must actually run.

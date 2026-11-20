@@ -29,7 +29,7 @@ export const ROLES = new Set([
 	"debugger", "devops-specialist", "frontend-worker", "general-worker",
 	"observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
 	"reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
-	"system-architect", "test-engineer", "ui-ux-specialist",
+	"system-architect", "technical-writer", "test-engineer", "ui-ux-specialist",
 ]);
 const set = (...items) => new Set(items);
 const KINDS = set("positive", "near_miss");

@@ -191,7 +191,7 @@ const MANIFEST: Record<string, Row[]> = {
 	"aa2c382cc284": [["M", "candidate identity."], ["C", "main history.", "Leaves lack main history"], ["M", "$"]],
 	"af003d42d21f": [["M", "$"]],
 	"f204cdb7ec3c": [["M", "speculative patches."], ["C", "approach remains.", "2 review cycles per candidate"], ["C", "a fresh count;", PROOF.freshCount], ["C", "approval gate.", "the cap is no refusal of authorized work"], ["M", "$"]],
-	"d6e51a5a30d3": [["M", "and name it."], ["C", "residual risk;", "Completion states changes, actual checks, missing evidence and residual risk"], ["M", "$"]],
+	"5cf93d9bf49b": [["M", "and name it."], ["C", "residual risk;", "Completion states changes, actual checks, missing evidence and residual risk"], ["M", "$"]],
 	"fdffa867e40f": [["H", "$"]],
 	"0e75dea22997": [["C", "shell commands.", "Never launch helpers or agents, including through shell commands"], ["C", "code/tests.", "read-only roles do not change candidate code or tests"], ["C", "explicit user reassignment.", "stay worker-owned until explicit user reassignment"], ["C", "$", "Preserve existing writes"]],
 	"5424a43ead7e": [["C", "project invariants.", "security and project invariants"], ["C", "$", "Readiness never grants commit, push, merge, publish, deploy or destructive-operation authority"]],
