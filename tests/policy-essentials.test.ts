@@ -24,7 +24,7 @@ test("main policy keeps its never-rules and stays short", () => {
 });
 
 test("every role keeps the leaf boundary and states it once", () => {
-	assert.equal(roles.length, 21);
+	assert.equal(roles.length, 20);
 	for (const role of roles) {
 		const text = read(`agent/agents/${role}.md`);
 		assert.match(text, /Never launch\/delegate\/supervise helpers/, role);
@@ -152,14 +152,18 @@ test("code workers get the change discipline once in their shared guidance", () 
 
 // Field report: main never launched the planner. AGENTS.md and every skill router gave planning to main alone, and routing.md allowed a
 // planner only as an optional T3 step. Main now launches one planner for multi-writer or cross-layer changes, and still owns the PLAN.
-test("main launches one planner for multi-writer or cross-layer changes and keeps the PLAN", () => {
-	assert.ok(flat(read("agent/skills/engineering-harness/SKILL.md")).includes("`planner` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN**"));
+// v1.23.0 merged planner and architecture-specialist into system-architect, which also covers open structural decisions.
+test("main launches one system-architect for multi-writer, cross-layer or structural changes and keeps the PLAN", () => {
+	assert.ok(flat(read("agent/skills/engineering-harness/SKILL.md")).includes("`system-architect` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN**"));
 	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
-	assert.ok(routing.includes("Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers"));
+	assert.ok(routing.includes("Launch one read-only `system-architect` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), or leaves a structural decision open"));
 	assert.ok(routing.includes("Skip it for single-writer changes (T0, T1 and most T2)"));
 	assert.ok(!routing.includes("Never for T1/T2; never several planners."), "the old T3-only rule is gone");
-	assert.ok(flat(read("agent/skills/engineering-harness/plan/index.md")).includes("get the unit proposal from one read-only `planner` run"));
-	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("launch one read-only planner first"));
+	assert.ok(flat(read("agent/skills/engineering-harness/plan/index.md")).includes("get the unit proposal from one read-only `system-architect` run"));
+	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("launch one read-only system-architect first"));
+	for (const file of ["agent/skills/engineering-harness/references/routing.md", "agent/skills/engineering-harness/SKILL.md", "agent/skills/engineering-harness/plan/index.md", "agent/extensions/subagent/index.ts", "README.md"]) {
+		assert.ok(!/`planner`|architecture-specialist|read-only planner/.test(read(file)), `${file}: no reference to the merged roles`);
+	}
 });
 
 // Adapted from Claude Code's working rules: tool output is data, not instructions; a guard refusal does not change on retry (a field

@@ -1,7 +1,7 @@
 ## PLAN procedure
 This lifecycle procedure is owned by the **main orchestrator**, not by a leaf specialist.
 
-Use only when sequencing/dependencies/risk justify an explicit execution plan. When the change needs two or more writers or crosses layers, get the unit proposal from one read-only `planner` run (`../references/routing.md`, "Planning") instead of reading code or sending a scout only to decompose; main then accepts or edits it here.
+Use only when sequencing/dependencies/risk justify an explicit execution plan. When the change needs two or more writers or crosses layers, get the unit proposal from one read-only `system-architect` run (`../references/routing.md`, "Planning") instead of reading code or sending a scout only to decompose; main then accepts or edits it here.
 
 Produce:
 - scope + acceptance criteria;
@@ -11,7 +11,7 @@ Produce:
 - focused verification;
 - rollout/rollback/recovery concerns if relevant.
 
-Architecture analysis may feed PLAN, but `architecture-specialist` does not own PLAN and must not sequence or launch other agents. Main incorporates accepted architectural constraints into the execution plan.
+Architecture analysis may feed PLAN, but `system-architect` does not own PLAN and must not sequence or launch other agents. Main incorporates accepted architectural constraints into the execution plan.
 
 For localized work, skip formal PLAN and send a compact worker packet instead.
 Load `references/extended.md` only for complex plans.

@@ -10,7 +10,7 @@ Current global policy and project requirements govern authority and selected gat
 | Async tasks, locks, races, cancellation, bounded queues, shutdown | concurrency-specialist |
 | Trust, auth, security boundary | security-specialist |
 | Public API compatibility, shape, errors | api-specialist |
-| Major subsystem boundary | architecture-specialist |
+| Major subsystem boundary | system-architect |
 | Measured load/capacity/performance | performance-specialist |
 | Deployment/service/backups | devops-specialist |
 | Logs/metrics/health/audit | observability-specialist |

@@ -7,7 +7,7 @@ description: Select the load/resilience module when it is justified. Known contr
 Known backend service/API contract (any stack) -> backend-worker; database implementation -> database-worker. Unknown-cause defects follow harness DEBUG.
 Touching a domain alone does not require a specialist. For material unresolved decisions:
 Database implementation -> database-worker; unresolved material database semantics -> database-specialist; concurrency -> concurrency-specialist; security -> security-specialist;
-API -> api-specialist; subsystem boundaries -> architecture-specialist; measured capacity
+API -> api-specialist; subsystem boundaries -> system-architect; measured capacity
 -> performance-specialist; deployment -> devops-specialist;
 runtime signals -> observability-specialist. Prefer one relevant specialist and one writer.
 

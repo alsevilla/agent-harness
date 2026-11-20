@@ -46,7 +46,9 @@ const ORIENT_SWEEP = [0, 1, 2, 4, 6, 8, 12], ECONOMY_X_SWEEP = [1, 1.5, 2, 3];
 const PI_SYSTEM = 7_271, MAIN_SYSTEM = 14_084 + readFileSync(new URL("../agent/AGENTS.md", import.meta.url), "utf8").length;
 // Re-measured 2026-11-13 on v1.20.1 with measure-child-prompt.mjs, live/profile-checkout shape:
 // includes this repository's four saved lesson titles; lesson-body reads are not modeled.
-const CHILD_PROMPT = { "backend-worker": 19_838, debugger: 16_703, planner: 15_327, "test-engineer": 18_492 };
+// system-architect (v1.23.0, planner merged with architecture-specialist): the planner figure plus the measured growth, 1,516 characters
+// (planner 16,325 on master, system-architect 17,841 on the candidate, both measured 2026-11-20 the same way).
+const CHILD_PROMPT = { "backend-worker": 19_838, debugger: 16_703, "system-architect": 16_843, "test-engineer": 18_492 };
 const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 // Per model call: assistant text kept in the history, and output tokens billed (text plus thinking, the same in every arm).
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;
@@ -184,7 +186,7 @@ function single(model, fresh) {
 	return contexts;
 }
 
-// The harness: main on mainModel delegates each phase to a role (debugger, planner, backend-worker, test-engineer) through the production
+// The harness: main on mainModel delegates each phase to a role (debugger, system-architect, backend-worker, test-engineer) through the production
 // main hook (older-result shortening and checkpoint folding). orient: extra reads each worker launch needs; economyX: call multiplier on
 // economy-tier roles. sameModel: every role on main's model, which separates the context effect from the model mix.
 function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFAULT, sameModel = false } = {}) {
@@ -222,7 +224,7 @@ function harness(mainModel, { orient = ORIENT_DEFAULT, economyX = ECONOMY_X_DEFA
 		}
 		const phase = (p) => steps.filter((s) => s.phase === p);
 		if (kind === "bug") { delegate("debugger", phase("diagnose"), k); delegate("backend-worker", phase("work"), k); }
-		else if (kind === "feature") { delegate("planner", phase("plan"), k); delegate("backend-worker", phase("work"), k); delegate("test-engineer", phase("verify"), k); }
+		else if (kind === "feature") { delegate("system-architect", phase("plan"), k); delegate("backend-worker", phase("work"), k); delegate("test-engineer", phase("verify"), k); }
 		else delegate("backend-worker", phase("work"), k);
 		mainRequest(REPLY_OUTPUT);
 		history.push({ role: "assistant", content: [{ type: "text", text: fill(`reply ${k}`, 600) }] });
@@ -257,7 +259,7 @@ try {
 		for (const economyX of ECONOMY_X_SWEEP) rows.push({ main: model, sweep: "economyX", value: economyX, cost: sum(harness(model, { economyX })).cost, singleFresh: fresh.cost });
 	}
 	console.log(JSON.stringify({ schema: 1, provider: PROVIDER, cacheModel: OPENAI ? "idealized warm complete-message prefixes; no expiry or cross-context reuse" : "system and last-message breakpoints; 20-block lookback",
-		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roleDefaults: Object.fromEntries(["backend-worker", "debugger", "planner", "test-engineer"].map((r) => [r, roleModel(r)])),
+		...(OPENAI ? { pricingDate: "2026-11-08", pricingURL: "https://developers.openai.com/api/docs/pricing" } : {}), sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), roleDefaults: Object.fromEntries(["backend-worker", "debugger", "system-architect", "test-engineer"].map((r) => [r, roleModel(r)])),
 		...({ implementationRouting: KINDS.map((kind, k) => ({ task: k + 1, kind, complexity: IMPLEMENTATION_COMPLEXITY[k], model: roleModel("backend-worker", implementationTier(IMPLEMENTATION_COMPLEXITY[k])),
 			...(FIX_ROUND.has(k) ? { retryComplexity: RETRY_COMPLEXITY, retryModel: roleModel("backend-worker", implementationTier(RETRY_COMPLEXITY)) } : {}) })) }),
 		prices: PRICES, assumptions: { IMPLEMENTATION_COMPLEXITY, RETRY_COMPLEXITY, CACHE_MIN_TOKENS, CHARS_PER_TOKEN, WRITE_X, CACHE_LOOKBACK_BLOCKS, PI_SYSTEM, MAIN_SYSTEM, CHILD_PROMPT, MAIN_FOLD_TOKENS, HANDOFF_WINDOW, SHELL_OUTPUT_CHARS, PACKET_CHARS, HANDOFF_FINDINGS_CHARS, ORIENT_SWEEP, ECONOMY_X_SWEEP, TOOL_SCHEMA_CHARS, SUBAGENT_SCHEMA_CHARS, SAY_CHARS, OUTPUT_PER_CALL, PACKET_OUTPUT, REPORT_OUTPUT, REPLY_OUTPUT, orientDefault: ORIENT_DEFAULT, economyXDefault: ECONOMY_X_DEFAULT }, baselines, sweeps: rows }, null, 2));

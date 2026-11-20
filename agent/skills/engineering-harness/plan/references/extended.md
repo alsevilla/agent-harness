@@ -487,7 +487,7 @@ Route first to:
 - `concurrency-specialist` for concurrency/backpressure/shutdown semantics;
 - `security-specialist` for trust/auth/secrets/security-sensitive behavior;
 - `api-specialist` for public contract changes;
-- `architecture-specialist` for material structural decisions;
+- `system-architect` for material structural decisions;
 - `concurrency-specialist` for device lifecycle/recovery race decisions;
 - `devops-specialist` for deployment/operations policy;
 - `observability-specialist` for telemetry/audit/health requirements;
@@ -518,7 +518,7 @@ with no design judgment, may skip this specialist.
 
 ### Architecture
 
-Use `architecture-specialist` for:
+Use `system-architect` for:
 
 - major subsystem changes;
 - new processing architecture;
@@ -734,7 +734,7 @@ RED should describe:
 - expected outcome;
 - relevant boundaries.
 
-Do not require the planner to write the full test implementation.
+Do not require the system-architect to write the full test implementation.
 
 The plan defines the behavioral contract.
 
@@ -1424,7 +1424,7 @@ NEEDS USER INPUT
 
 when the choice changes externally visible behavior, persistence semantics, reporting, compatibility, or product policy.
 
-Do not let the planner invent the meaning.
+Do not let the system-architect invent the meaning.
 
 ---
 
@@ -1438,7 +1438,7 @@ Return:
 
 NEEDS USER INPUT
 
-Do not let a specialist, worker, or planner invent the policy.
+Do not let a specialist, worker, or system-architect invent the policy.
 
 ---
 

@@ -229,8 +229,8 @@
       "critical": true,
       "expect": {
         "routes": ["T3_SPECIALIST_FIRST"],
-        "roles_required": ["architecture-specialist"],
-        "roles_allowed": ["architecture-specialist"],
+        "roles_required": ["system-architect"],
+        "roles_allowed": ["system-architect"],
         "skills_required": [],
         "skills_forbidden": []
       }

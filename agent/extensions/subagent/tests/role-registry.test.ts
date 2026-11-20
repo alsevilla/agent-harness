@@ -28,18 +28,20 @@ const roles = JSON.parse(fs.readFileSync(new URL("../../../roles.json", import.m
 // Non-oracle expectations that merely repeat the committed order read it from roles.json; the approved-preset fixture stays the hard-coded guard.
 const committedTier = (name: string, tier: string) => roles.find((role: { name: string }) => role.name === name).modelTiers[tier] as { model: string; fallbackModel: string | string[] };
 // Expected tier values of the contract tests below come from the approved-preset fixture (the single hard-coded snapshot); `approved` is initialised before any test runs.
-const approvedTier = (name: string, tier: string) => approved.roles.find((role) => role.name === name)!.tiers[tier]!;
+const approvedTier = (name: string, tier: string) => approved.roles.find((role) => current(role.name) === name)!.tiers[tier]!;
 const GENERIC_ROLES = [
-  "api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
-  "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "planner", "release-engineer",
+  "api-specialist", "system-architect", "backend-worker", "concurrency-specialist", "debugger", "devops-specialist",
+  "frontend-worker", "general-worker", "observability-specialist", "oracle", "performance-specialist", "release-engineer",
   "reviewer", "scout", "security-specialist", "database-specialist", "database-worker", "test-engineer", "ui-ux-specialist", "platform-worker",
 ];
 
-// Additive roles after the frozen 20-role baseline: name -> existing role whose validated tiers/tools it must mirror exactly. Baseline fixtures stay unchanged.
-const ADDED_ROLES: Record<string, string> = { planner: "architecture-specialist" };
-// User-approved 2026-11-05: planner runs at medium thinking on every tier; everything else still mirrors its source role.
-const ADDED_THINKING: Record<string, string> = { planner: "medium" };
-const BASELINE_ROLES = GENERIC_ROLES.filter((name) => !(name in ADDED_ROLES));
+// User-approved 2026-11-20: planner and architecture-specialist merged into system-architect. The frozen 20-role fixtures keep the
+// old name; `current` maps it to the role that replaced it. system-architect keeps architecture-specialist's tiers, models and tools;
+// its economy tier runs at medium thinking (the planner's level, for routine unit proposals) and capable stays high.
+const RENAMED: Record<string, string> = { "architecture-specialist": "system-architect" };
+function current(name: string): string { return RENAMED[name] ?? name; }
+const APPROVED_THINKING: Record<string, string> = { "system-architect.economy": "medium" };
+const approvedThinking = (fixtureName: string, tier: string, pinned: string) => APPROVED_THINKING[`${current(fixtureName)}.${tier}`] ?? pinned;
 
 // Canonical definitions carry no Pi settings: model, fallback, thinking and Pi tools come from roles.json; text is the definition file.
 function frontmatter(name: string) {
@@ -139,9 +141,13 @@ test("registry fields override annotations field-wise in real package discovery"
   }
 });
 
-test("registry registers exactly the 21 generic roles (20 baseline + additive planner), unique, without statusline-setup", () => {
-  assert.equal(roles.length, 21);
-  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 21);
+test("registry registers exactly the 20 generic roles, unique, without statusline-setup, planner or architecture-specialist", () => {
+  assert.equal(roles.length, 20);
+  assert.equal(new Set(roles.map((r: { name: string }) => r.name)).size, 20);
+  for (const gone of ["planner", "architecture-specialist"]) {
+    assert.ok(!roles.some((r: { name: string }) => r.name === gone), `${gone} merged into system-architect`);
+    assert.ok(!fs.existsSync(new URL(`../../../agents/${gone}.md`, import.meta.url)), `${gone} definition removed`);
+  }
   assert.deepEqual(roles.map((r: { name: string }) => r.name).sort(), [...GENERIC_ROLES].sort());
   assert.ok(!roles.some((r: { name: string }) => r.name === "statusline-setup"));
   assert.ok(!fs.existsSync(new URL("../../../agents/statusline-setup.md", import.meta.url)), "statusline-setup definition removed");
@@ -149,7 +155,7 @@ test("registry registers exactly the 21 generic roles (20 baseline + additive pl
 });
 
 test("every generic role receives standard code navigation integrations", () => {
-  assert.equal(integrations.roles.length, 21);
+  assert.equal(integrations.roles.length, 20);
   assert.ok(integrations.roles.includes("database-worker"));
   assert.ok(integrations.roles.includes("database-specialist"));
   assert.deepEqual([...integrations.roles].sort(), roles.map((r: { name: string }) => r.name).sort());
@@ -238,13 +244,13 @@ const headerRemoval = JSON.parse(fs.readFileSync(new URL("./fixtures/header-remo
   roles: { name: string; headLfSha256: string; nativeToolsLine: string; descriptionLine: string; removed: string[]; bodySha256: string; expectedAfterLfSha256: string }[];
 };
 test("every canonical definition is header-free: identity and native tools only, all Pi settings live in roles.json", () => {
-  assert.deepEqual(headerRemoval.roles.map((entry) => entry.name).sort(), [...BASELINE_ROLES].sort());
+  assert.deepEqual(headerRemoval.roles.map((entry) => current(entry.name)).sort(), [...GENERIC_ROLES].sort());
   for (const role of roles) {
     const text = fs.readFileSync(new URL(`../../../agents/${role.name}.md`, import.meta.url), "utf8");
     const { frontmatter: fm } = parseFrontmatter<Record<string, unknown>>(text);
     assert.equal(fm.name, role.name, `${role.name}: name`);
     assert.deepEqual(Object.keys(fm), ["name", "description", "tools"], `${role.name}: header keys`);
-    const native = headerRemoval.roles.find((entry) => entry.name === (ADDED_ROLES[role.name] ?? role.name))!; // an added role mirrors its source role native tools
+    const native = headerRemoval.roles.find((entry) => current(entry.name) === role.name)!; // a renamed role keeps its source role's native tools
     assert.equal(text.replace(/\r\n/g, "\n").split("\n").find((line) => line.startsWith("tools:")), native.nativeToolsLine, `${role.name}: native Copilot tools unchanged`);
     assert.ok(typeof role.tools === "string" && role.tools.trim(), `${role.name}: roles.json tools`);
     assert.ok(role.modelTiers[role.defaultModelTier].model, `${role.name}: roles.json default model`);
@@ -461,6 +467,21 @@ function discoverWithUserRoles(registry: unknown): { agents: import("../agents.t
 }
 
 const tierEntry = (model: unknown, fallbackModel: unknown, thinking: unknown) => ({ model, fallbackModel, thinking });
+
+// Upgrade from v1.22: a user roles.json may still hold overrides for the merged planner and architecture-specialist. Discovery must
+// not fail on them, and system-architect starts from the package defaults until the user re-applies settings under the new name.
+test("stale user overrides for planner and architecture-specialist do not break discovery; system-architect keeps package defaults", () => {
+  const tier = { model: "anthropic/claude-sonnet-5-5", fallbackModel: "openai-codex/gpt-6.1-sol", thinking: "xhigh" };
+  const stale = ["planner", "architecture-specialist"].map((name) => ({ name, defaultModelTier: "capable", modelTiers: { capable: tier }, tools: "read, grep" }));
+  const result = discoverWithUserRoles(stale);
+  assert.equal(result.error, undefined);
+  const architect = result.agents.find((agent) => agent.name === "system-architect");
+  assert.ok(architect);
+  assert.equal(architect.source, "package");
+  assert.equal(architect.defaultModelTier, "economy");
+  assert.equal(architect.thinking, "medium");
+  for (const gone of ["planner", "architecture-specialist"]) assert.ok(!result.agents.some((agent) => agent.name === gone && agent.source === "package"), `${gone}: no package role`);
+});
 const tierOnlyBackend = (overrides: Record<string, unknown> = {}) => ({
   name: "backend-worker",
   defaultModelTier: "capable",
@@ -644,20 +665,22 @@ const lfText = (file: URL) => fs.readFileSync(file).toString("latin1").replace(/
 const sha256Latin1 = (text: string) => createHash("sha256").update(Buffer.from(text, "latin1")).digest("hex");
 test("tier-only baseline pins the 20 shipped roles; header removal removed only the approved model and metadata lines", () => {
   assert.equal(baseline.roles.length, 20);
-  assert.deepEqual(baseline.roles.map((role) => role.name).sort(), [...BASELINE_ROLES].sort());
+  assert.deepEqual(baseline.roles.map((role) => current(role.name)).sort(), [...GENERIC_ROLES].sort());
   assert.equal(Object.keys(baseline.profileSha256).length, 20);
   assert.deepEqual(Object.keys(PROFILE_LF_SHA256).sort(), Object.keys(baseline.profileSha256).sort(), "LF pin set matches the fixture's 20 profiles");
   assert.equal(baseline.rolesJsonSha256, ORIGINAL_ROLES_SHA256, "fixture provenance: pinned roles.json is the pre-migration e2ddaed bytes");
   for (const [name, digest] of Object.entries(PROFILE_LF_SHA256)) {
     const entry = headerRemoval.roles.find((item) => item.name === name)!;
     assert.equal(entry.headLfSha256, APPROVED_PROFILE_DIGESTS[name] ?? digest, `${name}: historical pin and header-removal baseline agree`);
-    const text = lfText(new URL(`../../../agents/${name}.md`, import.meta.url));
+    const text = lfText(new URL(`../../../agents/${current(name)}.md`, import.meta.url));
     assert.equal(entry.removed.length, 6, `${name}: exactly model + metadata block removed`);
     assert.deepEqual(entry.removed.map((line) => line.split(":")[0].trim()), ["model", "metadata", "pi.model", "pi.fallbackModel", "pi.thinking", "pi.tools"], `${name}: removed field names`);
     const lines = text.split("\n");
     const at = lines.indexOf(entry.nativeToolsLine);
     assert.ok(at > 0, `${name}: native tools line preserved`);
-    assert.equal(lines[at - 1], entry.descriptionLine, `${name}: description line preserved`);
+    // A renamed role has a new description; every other role keeps its recorded one.
+    if (name in RENAMED) assert.match(lines[at - 1], /^description: \S/, `${name}: description line present`);
+    else assert.equal(lines[at - 1], entry.descriptionLine, `${name}: description line preserved`);
     // Role bodies are prompt text and may change freely; only the header shape is pinned here.
     for (const field of ["model", "fallbackModel", "thinking", "metadata", "pi."]) assert.ok(!text.slice(0, text.indexOf("\n---", 4)).split("\n").some((line) => line.trimStart().startsWith(field === "pi." ? field : `${field}:`)), `${name}: header carries no ${field}`);
   }
@@ -700,13 +723,13 @@ test("package discovery projects the approved presets: default tuple, tools and 
   assert.equal(result.error, undefined);
   assert.equal(approved.roles.length, 20);
   for (const expected of approved.roles) {
-    const agent = result.agents.find((item) => item.name === expected.name);
+    const agent = result.agents.find((item) => item.name === current(expected.name));
     assert.ok(agent, expected.name);
     const def = expected.tiers[expected.defaultModelTier];
     assert.equal(agent.defaultModelTier, expected.defaultModelTier, `${expected.name}: default tier`);
     assert.equal(agent.model, def.model, `${expected.name}: model`);
     assert.deepEqual(agent.fallbackModel, def.fallbackModel, `${expected.name}: fallbackModel`);
-    assert.equal(agent.thinking, def.thinking, `${expected.name}: thinking`);
+    assert.equal(agent.thinking, approvedThinking(expected.name, expected.defaultModelTier, def.thinking), `${expected.name}: thinking`);
     assert.deepEqual(agent.tools, expected.tools, `${expected.name}: tools`);
     assert.deepEqual(Object.keys(agent.modelTiers ?? {}).sort(), Object.keys(expected.tiers).sort(), `${expected.name}: tier set`);
     for (const [tier, pinned] of Object.entries(expected.tiers)) {
@@ -714,7 +737,7 @@ test("package discovery projects the approved presets: default tuple, tools and 
       assert.ok(configured, `${expected.name}.${tier}`);
       assert.equal(configured.model, pinned.model, `${expected.name}.${tier}: model`);
       assert.deepEqual(configured.fallbackModel, pinned.fallbackModel, `${expected.name}.${tier}: fallbackModel`);
-      assert.equal(configured.thinking ?? agent.thinking, pinned.thinking, `${expected.name}.${tier}: effort`);
+      assert.equal(configured.thinking ?? agent.thinking, approvedThinking(expected.name, tier, pinned.thinking), `${expected.name}.${tier}: effort`);
     }
   }
 });
@@ -722,7 +745,7 @@ test("package discovery projects the approved presets: default tuple, tools and 
 test("shipped roles.json is tier-only: exact entry keys, no root provider/model/fallbackModel/thinking, configured default tier", () => {
   const raw = fs.readFileSync(new URL("../../../roles.json", import.meta.url), "utf8");
   const roles = JSON.parse(raw) as Record<string, unknown>[];
-  assert.equal(roles.length, 21);
+  assert.equal(roles.length, 20);
   for (const entry of roles) {
     const name = String(entry.name);
     assert.deepEqual(Object.keys(entry).sort(), ["defaultModelTier", "modelTiers", "name", "tools"], `${name}: entry keys`);
@@ -742,9 +765,9 @@ test("shipped roles.json is tier-only: exact entry keys, no root provider/model/
 
 test("raw roles.json equals the approved preset oracle for every role: default tier, tiers, fallback order, thinking and tools", () => {
   const raw = RAW_ROLES();
-  assert.equal(raw.length, approved.roles.length + Object.keys(ADDED_ROLES).length, "approved oracle covers the baseline roles; added roles are checked below");
+  assert.equal(raw.length, approved.roles.length, "the approved oracle covers every role");
   for (const expected of approved.roles) {
-    const role = raw.find((item) => item.name === expected.name);
+    const role = raw.find((item) => item.name === current(expected.name));
     assert.ok(role, expected.name);
     assert.equal(role.defaultModelTier, expected.defaultModelTier, `${expected.name}: default tier`);
     assert.deepEqual(role.tools.split(",").map((tool) => tool.trim()), expected.tools, `${expected.name}: tools`);
@@ -754,28 +777,23 @@ test("raw roles.json equals the approved preset oracle for every role: default t
       assert.ok(cfg, `${expected.name}.${tier}`);
       assert.equal(cfg.model, pinned.model, `${expected.name}.${tier}: model`);
       assert.deepEqual(parseFallback(cfg.fallbackModel), pinned.fallbackModel, `${expected.name}.${tier}: fallback order`);
-      assert.equal(cfg.thinking, pinned.thinking, `${expected.name}.${tier}: thinking`);
+      assert.equal(cfg.thinking, approvedThinking(expected.name, tier, pinned.thinking), `${expected.name}.${tier}: thinking`);
     }
   }
 });
 
-test("additive planner mirrors architecture-specialist tiers, models and tools exactly (thinking per the approved exception), read-only, and no baseline role changed", () => {
-  const raw = RAW_ROLES();
-  for (const [added, source] of Object.entries(ADDED_ROLES)) {
-    const a = raw.find((item) => item.name === added)!;
-    const b = raw.find((item) => item.name === source)!;
-    assert.ok(a && b);
-    const thinking = ADDED_THINKING[added];
-    for (const tier of Object.values(a.modelTiers)) if (thinking) assert.equal(tier!.thinking, thinking, `${added}: approved thinking`);
-    const mirrored = thinking ? Object.fromEntries(Object.entries(a.modelTiers).map(([k, v]) => [k, { ...v!, thinking: b.modelTiers[k as "economy" | "capable"]!.thinking }])) : a.modelTiers;
-    assert.deepEqual({ ...a, name: source, modelTiers: mirrored }, b, `${added} copies ${source} registry settings (thinking aside)`);
-    assert.deepEqual(a.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool === "edit" || tool === "write"), [], `${added}: read-only tools`);
-    const text = fs.readFileSync(new URL(`../../../agents/${added}.md`, import.meta.url), "utf8");
-    assert.ok(text.split(String.fromCharCode(10)).map((line) => line.trim()).includes("tools: read, search, execute"), `${added}: native read-only tools line`);
-    assert.ok(text.includes("Never launch/delegate/supervise helpers"));
-    assert.match(text, /Main owns the governing PLAN/);
-  }
-  for (const entry of approved.roles) assert.ok(raw.find((item) => item.name === entry.name), `${entry.name} still present`);
+test("system-architect: read-only, both outputs (units and architecture analysis), main owns PLAN; only its economy thinking changed", () => {
+  const role = RAW_ROLES().find((item) => item.name === "system-architect")!;
+  assert.equal(role.modelTiers.economy!.thinking, "medium", "economy: routine unit proposals at the planner's level");
+  assert.equal(role.modelTiers.capable!.thinking, "high", "capable: structural decisions at the architecture level");
+  assert.deepEqual(Object.keys(APPROVED_THINKING), ["system-architect.economy"], "no other approved thinking change");
+  assert.deepEqual(role.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool === "edit" || tool === "write"), [], "read-only tools");
+  const text = fs.readFileSync(new URL("../../../agents/system-architect.md", import.meta.url), "utf8");
+  assert.ok(text.includes("Never launch/delegate/supervise helpers"));
+  assert.match(text, /Main owns the governing PLAN/);
+  assert.match(text, /units of work, each assigned to an existing implementation role .* so no file has two writers/);
+  assert.match(text, /When the task raises a structural decision, return this first:/);
+  assert.match(text, /candidate approaches with their tradeoffs/);
 });
 
 test("approved preset update differs from the immutable baseline only by the recorded ledger; permissions and the role set are unchanged", () => {
@@ -815,12 +833,12 @@ test("write is the one approved tool delta: release-engineer, test-engineer and 
 
 test("shipped tier census matches the approved data shape (informational; not a runtime eligibility gate)", () => {
   const roles = RAW_ROLES();
-  assert.equal(roles.length, 21); // 20 baseline + additive planner (economy default, both tiers)
+  assert.equal(roles.length, 20); // planner and architecture-specialist merged into system-architect (economy default, both tiers)
   const defaults = roles.map((role) => role.defaultModelTier);
-  assert.equal(defaults.filter((tier) => tier === "economy").length, 15);
+  assert.equal(defaults.filter((tier) => tier === "economy").length, 14);
   assert.equal(defaults.filter((tier) => tier === "capable").length, 6, "Oracle plus the five worker roles default to capable");
   const entries = roles.flatMap((role) => Object.keys(role.modelTiers));
-  assert.equal(entries.length, 40);
-  assert.equal(entries.filter((tier) => tier === "economy").length, 20);
-  assert.equal(entries.filter((tier) => tier === "capable").length, 20);
+  assert.equal(entries.length, 38);
+  assert.equal(entries.filter((tier) => tier === "economy").length, 19);
+  assert.equal(entries.filter((tier) => tier === "capable").length, 19);
 });

@@ -16,14 +16,14 @@ For "queue this", record the request and order, acknowledge briefly, and continu
 | Unknown location/dependencies | `discover/index.md` | `scout`, only when needed | Handoff with path:line evidence; no PASS accepted from a digest |
 | Unknown-cause failure | `debug/index.md` | `debugger` before speculative fixes | Cause established by evidence |
 | Conflicting evidence / material choice | `knowledge/index.md` / `decision/index.md` | **main owns authorization** | Recorded decision or authority |
-| Necessary dependencies/migration/coordination plan | `plan/index.md` | `planner` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN** | READY FOR EXECUTION |
+| Necessary dependencies/migration/coordination plan | `plan/index.md` | `system-architect` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN** | READY FOR EXECUTION |
 | Authorized implementation | `execute/index.md` | `backend-worker` / `database-worker` / `frontend-worker` / `general-worker` / `platform-worker` | Focused RED/GREEN results in the worker REPORT |
 | Selected independent evidence | `verify/index.md` / `review/index.md` | `test-engineer` / `reviewer` | Result on the exact candidate identity |
 | Requested isolation/integration | `worktree/index.md` / `integrate/index.md` | **main owns orchestration** | Candidate identity and one writer confirmed |
 | Requested delivery/release | `ship/index.md` | `release-engineer` | Authorized operation result on the verified candidate |
 | Useful durable learning | `learn/index.md` | `release-engineer` | SAVED with readback, or NO LESSON |
 
-PLAN is not an architecture-specialist procedure. The architecture specialist supplies structural analysis/constraints; main incorporates them into PLAN and owns sequencing, writer ownership, gates and authorization.
+PLAN is not a system-architect procedure. The system architect supplies units, structural analysis and constraints; main incorporates them into PLAN and owns sequencing, writer ownership, gates and authorization.
 
 Do not execute the whole lifecycle by default. Parent frontend/backend routers select domain modules; procedures do not launch roles by themselves. Use actual subagent calls with self-contained candidate/contract packets and await real evidence. Manual prompts are optional instruction shortcuts.
 

@@ -1,7 +1,7 @@
 {
   "roles": [
     "api-specialist",
-    "architecture-specialist",
+    "system-architect",
     "backend-worker",
     "database-worker",
     "concurrency-specialist",
@@ -12,7 +12,6 @@
     "observability-specialist",
     "oracle",
     "performance-specialist",
-    "planner",
     "platform-worker",
     "release-engineer",
     "reviewer",

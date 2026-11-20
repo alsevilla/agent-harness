@@ -31,7 +31,7 @@ Recommend a specialist only for a material unresolved decision; otherwise recomm
 
 - Known backend service/API work → `backend-worker`; database implementation, including queries/schema/migrations/indexes/ORM → `database-worker`; frontend implementation → `frontend-worker`.
 - Unresolved design, UX, layout, accessibility or visual-state decisions → `ui-ux-specialist` before `frontend-worker`, including redesign/polish requests.
-- Unresolved database semantics → `database-specialist`; concurrency/device lifecycle/serial or HID readers → `concurrency-specialist`; security → `security-specialist`; API contract → `api-specialist`; subsystem boundaries → `architecture-specialist`.
+- Unresolved database semantics → `database-specialist`; concurrency/device lifecycle/serial or HID readers → `concurrency-specialist`; security → `security-specialist`; API contract → `api-specialist`; subsystem boundaries → `system-architect`.
 - Unresolved deployment/services/backup-recovery decisions → `devops-specialist`; observability → `observability-specialist`; performance → `performance-specialist` when measured evidence or a concrete performance-sensitive path warrants it.
 
 Do not add specialists merely because their domain appears in the code. Preserve the packet's accepted routing and use the canonical routing reference when uncertain.

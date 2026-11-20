@@ -143,10 +143,10 @@ describe("FixtureSpecimenTests", () => {
 		assert.deepEqual(x("R20").routes, ["BLOCKED_NO_AUTHORITY"]);
 		assert.deepEqual(x("R20").roles_allowed, []);
 		assert.deepEqual(x("R21").roles_required, ["release-engineer"]);
-		assert.deepEqual(x("R16").roles_required, ["architecture-specialist"]);
+		assert.deepEqual(x("R16").roles_required, ["system-architect"]);
 		assert.deepEqual(x("R17").roles_required, ["concurrency-specialist"]);
 		assert.deepEqual(x("R18").roles_required, ["security-specialist"]);
-		assert.ok(!x("R15").roles_allowed.includes("architecture-specialist"));
+		assert.ok(!x("R15").roles_allowed.includes("system-architect"));
 		assert.deepEqual(x("R13").roles_required, ["scout"]);
 		assert.ok(!x("R14").roles_allowed.includes("scout"));
 		assert.deepEqual(x("R12").roles_required, ["oracle"]);
@@ -619,7 +619,7 @@ describe("ModelTierTests", () => {
 			{ name: "T2", worker: "frontend-worker", packets: { debugger: "d", worker: "w" } },
 			{ name: "T2", worker: "general-worker", packets: { debugger: "d", worker: "w", test: "t", review: "r" } },
 			{ name: "T3", worker: "database-worker", packets: { worker: "w", test: "t" } },
-			{ name: "T3", worker: "backend-worker", specialist: "security-specialist", packets: { planner: "p", specialist: "s", worker: "w", test: "t", review: "r" } },
+			{ name: "T3", worker: "backend-worker", specialist: "security-specialist", packets: { architect: "p", specialist: "s", worker: "w", test: "t", review: "r" } },
 		];
 		for (const shape of shapes) {
 			const out = native.expandShape(shape);

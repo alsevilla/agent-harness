@@ -395,7 +395,7 @@ Typical routing:
 - substantial UI workflow → `ui-ux-specialist`
 - deployment/platform behavior → `devops-specialist`
 - hot path/throughput → `performance-specialist`
-- cross-system structure → `architecture-specialist`
+- cross-system structure → `system-architect`
 - telemetry/health/auditability → `observability-specialist`
 
 The later planning or execution workflow decides which recommendations actually require invocation.

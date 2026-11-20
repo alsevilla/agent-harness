@@ -204,7 +204,7 @@ read-only specialist:
 - async concurrency/backpressure/shutdown -> `concurrency-specialist`
 - API contract -> `api-specialist`
 - security boundary -> `security-specialist`
-- architecture -> `architecture-specialist`
+- architecture -> `system-architect`
 - device integration -> `concurrency-specialist`
 - deployment/operations -> `devops-specialist`
 - observability contract -> `observability-specialist`

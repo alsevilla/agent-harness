@@ -30,7 +30,7 @@ These are offline Pi simulation estimates using cheaper workers for non-complex 
 | Policy | [`agent/AGENTS.md`](agent/AGENTS.md) | The 7-step protocol main follows on every task, plus a short Never list |
 | Skill: `engineering-harness` | [`agent/skills/engineering-harness/`](agent/skills/engineering-harness/SKILL.md) | Routing criteria and phase procedures (discover, plan, execute, verify, review, ship, learn, worktree), loaded only when needed |
 | Skill: `agent-creation` | [`agent/skills/agent-creation/`](agent/skills/agent-creation/SKILL.md) | Creating project-local roles |
-| Roles | [`agent/roles.json`](agent/roles.json), [`agent/agents/`](agent/agents/) | 21 named roles with models, tiers, tools and boundaries |
+| Roles | [`agent/roles.json`](agent/roles.json), [`agent/agents/`](agent/agents/) | 20 named roles with models, tiers, tools and boundaries |
 | Extension: `subagent` | [`agent/extensions/subagent/`](agent/extensions/subagent/README.md) | Launching and controlling workers, handoffs, the safety guard, cleanup, usage |
 | Extension: `ask-user` | [`agent/extensions/ask-user/`](agent/extensions/ask-user/README.md) | `ask_user` questions through Pi's native dialogs |
 | Copilot plugin | [`.github/plugin/`](.github/plugin/) | The same agents, skills and startup context for Copilot CLI (preview) |
@@ -45,7 +45,7 @@ Main follows a fixed protocol (full text: [`agent/AGENTS.md`](agent/AGENTS.md)):
 2. **Gather** at most three named files plus read-only git status; every other read goes to a read-only role.
 3. **Pick roles** by name (see [Roles](#roles)).
 4. **Write one packet:** task, candidate, contract, evidence paths, scope, checks. By default the candidate is a feature branch in your main checkout; a worktree is used only for parallel writers, uncommitted user work, a live process on the main checkout, or when main must stay on the base branch.
-5. **Delegate and wait.** Common sequences run as one fixed shape: T1 worker; T2 debugger → worker; T3 optional planner → optional specialist → worker → test-engineer, with an optional reviewer. A step that doesn't report `STATUS: PASS` stops the shape and returns to main.
+5. **Delegate and wait.** Common sequences run as one fixed shape: T1 worker; T2 debugger → worker; T3 optional system-architect → optional specialist → worker → test-engineer, with an optional reviewer. A step that doesn't report `STATUS: PASS` stops the shape and returns to main.
 6. **Accept on STATUS and EVIDENCE**, never by re-reading code; after two fix rounds on a task, main changes the cause, the packet or the role and continues.
 7. **Finish** when the request is done, not when its gaps are listed: a failed or unrun check main can still act on is the next launch. Main stops early only for a decision, credential or approval that only you can give. Then it reports changes, checks and residual risk, or delivers through `release-engineer`.
 
@@ -110,13 +110,14 @@ The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/
 
 ## Roles
 
-The native package exposes these 21 generic roles:
+The native package exposes these 20 generic roles:
 
 | Kind | Roles |
 | --- | --- |
 | Implementation (write code) | `backend-worker`, `frontend-worker`, `database-worker`, `platform-worker`, `general-worker` |
-| Diagnosis and checks (read-only for the code; `test-engineer` and `reviewer` write their report of findings with the `write` tool, outside the checkout) | `debugger`, `test-engineer`, `reviewer`, `scout`, `planner` |
-| Specialists (read-only advice) | `api-specialist`, `architecture-specialist`, `concurrency-specialist`, `database-specialist`, `devops-specialist`, `observability-specialist`, `performance-specialist`, `security-specialist`, `ui-ux-specialist` |
+| Diagnosis and checks (read-only for the code; `test-engineer` and `reviewer` write their report of findings with the `write` tool, outside the checkout) | `debugger`, `test-engineer`, `reviewer`, `scout` |
+| Planning and architecture (read-only proposal; main owns the plan) | `system-architect` |
+| Specialists (read-only advice) | `api-specialist`, `concurrency-specialist`, `database-specialist`, `devops-specialist`, `observability-specialist`, `performance-specialist`, `security-specialist`, `ui-ux-specialist` |
 | Escalation | `oracle` |
 | Delivery | `release-engineer` |
 
@@ -180,7 +181,7 @@ The same ten-task session (four small fixes, three bug hunts, three features, tw
 | Claude Sonnet 5.5 | $11.18 | $3.34 | $2.29 | **31% cheaper** |
 | Claude Haiku 5.5 | $2.64 | $0.17 | $1.53 | 9.1x the cost |
 | GPT-6 Astra | $87.65 | $16.69 | $5.18 | **69% cheaper** |
-| GPT-6.1 Sol | $9.93 | $2.61 | $1.85 | **29% cheaper** |
+| GPT-6.1 Sol | $9.93 | $2.61 | $1.86 | **29% cheaper** |
 | GPT-6.1 Terra | $4.97 | $1.30 | $1.51 | 16% more expensive |
 | GPT-6 Luna | $0.88 | $0.17 | $1.21 | 7.3x the cost |
 
@@ -204,8 +205,8 @@ Where the harness cost goes, for the whole session:
 | Main model | Main | Complex implementation (capable tier) | Economy-tier workers |
 | --- | --- | --- | --- |
 | Claude Fable 5.1 | $3.11 (68%) | $1.36 (30%) | $0.12 (3%) |
-| Claude Opus 5.5 | $1.36 (48%) | $1.36 (48%) | $0.12 (4%) |
-| Claude Sonnet 5.5 | $0.80 (35%) | $1.36 (60%) | $0.12 (5%) |
+| Claude Opus 5.5 | $1.37 (48%) | $1.36 (48%) | $0.12 (4%) |
+| Claude Sonnet 5.5 | $0.80 (35%) | $1.36 (59%) | $0.12 (5%) |
 | Claude Haiku 5.5 | $0.04 (3%) | $1.36 (89%) | $0.12 (8%) |
 | GPT-6 Astra | $4.01 (77%) | $1.05 (20%) | $0.12 (2%) |
 | GPT-6.1 Sol | $0.68 (37%) | $1.05 (56%) | $0.12 (7%) |
@@ -214,9 +215,9 @@ Where the harness cost goes, for the whole session:
 
 The economy-tier workers cost almost nothing. The bill is main reading results and writing packets on its own model, plus the three features on the capable tier, which cost the same whatever main is. A cheaper main, or a new main session between unrelated tasks, is what lowers it. Real sessions run above these figures: only 350 output tokens are counted per model call, so most thinking output is not priced, and reviewer, oracle and delivery runs are not part of the ten tasks.
 
-Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.4M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna (Haiku's long session pays its 5x price above 100k tokens).
+Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.5M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna (Haiku's long session pays its 5x price above 100k tokens).
 
-Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 39-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
+Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 40-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
 
 The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 18% and 62%); under Sonnet 5.5 and Sol it is cheaper up to eight (7% and 5%) and more expensive at twelve (11% and 13%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 57% under Fable, 41% under Opus, 24% under Sonnet, 68% under Astra, 20% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 
@@ -339,7 +340,7 @@ The plugin shares agents, skills and startup context with Pi. Copilot CLI 1.0.10
 
 | Asset | Status |
 | --- | --- |
-| Source release | v1.22.1 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
+| Source release | v1.23.0 ([alsevilla/agent-harness](https://github.com/alsevilla/agent-harness)) |
 | Copilot CLI | Latest release only; no older version is supported |
 | Agents and skills | Shared from `agent/`; Pi tiers and job controls are not emulated. Serena, Graphify and QMD work through their skills' shell commands |
 | Token and turn savings | Pi's request shaping (execution ledger, output cap, worker masking, duplicate-read notes, main checkpoints, cache health) is Pi-only: Copilot builds its own requests. Both Copilot hooks add the working rules that cut turns: the lookup order with the three helpers by path, calls batched in one turn, no retry of a repeated failure or guard refusal, and small diffs |

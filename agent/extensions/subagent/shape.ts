@@ -2,14 +2,14 @@
 // this module expands that into the existing `chain` mode with a fixed role order. No new runtime, no classifier.
 //   T1: <worker>
 //   T2: debugger -> <worker> [-> test-engineer] [-> reviewer]
-//   T3: [planner (economy)] -> [<specialist>] -> <worker> -> test-engineer (capable) [-> reviewer (capable)]
+//   T3: [system-architect (economy)] -> [<specialist>] -> <worker> -> test-engineer (capable) [-> reviewer (capable)]
 // Delivery (release-engineer) is never part of a shape: main accepts the checks first, then delivers separately.
 // A shape step whose STATUS is not PASS stops the sequence and returns to main (see `shapeStepStop`).
 
 export const SHAPE_NAMES = ["T1", "T2", "T3"] as const;
 export type ShapeName = (typeof SHAPE_NAMES)[number];
 export const SHAPE_WORKERS = ["backend-worker", "database-worker", "frontend-worker", "platform-worker", "general-worker"];
-const PACKET_KEYS = ["planner", "debugger", "specialist", "worker", "test", "review"] as const;
+const PACKET_KEYS = ["architect", "debugger", "specialist", "worker", "test", "review"] as const;
 type PacketKey = (typeof PACKET_KEYS)[number];
 
 export interface ShapeRequest {
@@ -32,7 +32,7 @@ export interface ShapeStep {
 const RULES: Record<ShapeName, { required: PacketKey[]; optional: PacketKey[] }> = {
 	T1: { required: ["worker"], optional: [] },
 	T2: { required: ["debugger", "worker"], optional: ["test", "review"] },
-	T3: { required: ["worker", "test"], optional: ["planner", "specialist", "review"] },
+	T3: { required: ["worker", "test"], optional: ["architect", "specialist", "review"] },
 };
 
 const PREVIOUS = "\n\nPrevious step report:\n{previous}";
@@ -62,7 +62,7 @@ export function expandShape(shape: ShapeRequest): { ok: true; chain: ShapeStep[]
 		const task = steps.length === 0 || text.includes("{previous}") ? text : text + PREVIOUS;
 		steps.push({ agent, task, ...(shape.cwd !== undefined ? { cwd: shape.cwd } : {}), ...extra });
 	};
-	if (packets.planner) add("planner", "planner", { readOnly: true, modelTier: "economy" });
+	if (packets.architect) add("system-architect", "architect", { readOnly: true, modelTier: "economy" });
 	if (packets.debugger) add("debugger", "debugger", { readOnly: true });
 	if (packets.specialist) add(shape.specialist!, "specialist", { readOnly: true });
 	add(shape.worker, "worker");

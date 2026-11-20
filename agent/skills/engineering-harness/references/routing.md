@@ -16,7 +16,7 @@ Debugger may be skipped when evidence already establishes the cause and the rema
 If a speculative fix fails or produces an unexplained regression, use debugger before another speculative patch.
 
 ## Optional roles
-Before launching an optional scout, planner, specialist, verifier or reviewer, name in its packet the uncertainty it will resolve and the decision that changes based on its answer. Skip the optional role when no such decision remains. Independent checks required for material risks remain required. This is packet guidance, not a new router or runtime gate.
+Before launching an optional scout, system-architect, specialist, verifier or reviewer, name in its packet the uncertainty it will resolve and the decision that changes based on its answer. Skip the optional role when no such decision remains. Independent checks required for material risks remain required. This is packet guidance, not a new router or runtime gate.
 
 ## Specialists
 Specialists are conditional. Do not summon a specialist merely because code touches that domain. Use one only when there is a material unresolved decision or risk that the worker should not decide alone.
@@ -26,7 +26,7 @@ Typical ownership:
 - async tasks/races/backpressure/shutdown -> `concurrency-specialist`
 - auth/secrets/trust/privilege -> `security-specialist`
 - public/typed API contract -> `api-specialist`
-- subsystem boundaries/major tradeoffs -> `architecture-specialist`
+- subsystem boundaries/major tradeoffs -> `system-architect`
 - measured performance/overload -> `performance-specialist`
 - domain state machines, event ordering or personal-data policy -> a project-local domain specialist when the project defines one (not part of this generic profile); otherwise return the decision to main
 - deployment/service/backups -> `devops-specialist`
@@ -112,7 +112,7 @@ Scenarios:
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.
 - Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. Each item's packet names its own unit id and owned files and states that sibling units are not its work. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.
-- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 debugger -> worker; T3 [planner] -> [specialist] -> worker -> test-engineer [-> reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
+- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 debugger -> worker; T3 [system-architect] -> [specialist] -> worker -> test-engineer [-> reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
 - Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `debugger` first. No automatic self-looping helpers, new modes or unbounded retries.
 
 ### Single versus parallel
@@ -130,9 +130,9 @@ When discovery or another prerequisite finding is needed, accept the discovery o
 ## Planning
 Do not create a formal multi-step plan for trivial/localized work. Use `plan` when dependencies, sequencing, rollout, migration, or cross-layer coordination make an explicit execution contract materially useful.
 
-Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), before any writer starts. In one run it reads the candidate and proposes the units, each unit's role and owned files, the interfaces between them, a safe order and the checks, so main neither reads code nor sends a scout only to decompose. Choose its tier at plan time: economy for a split inside one layer; capable when the change crosses layers or touches migrations, security or concurrency. Skip it for single-writer changes (T0, T1 and most T2), when an accepted plan already exists, or when main already knows the decomposition; never several planners. Main accepts, edits or rejects the proposal and owns the PLAN. The T3 shape keeps its optional `planner` packet.
+Launch one read-only `system-architect` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), or leaves a structural decision open (module boundaries, persistence, integration patterns), before any writer starts. In one run it reads the candidate and proposes the units, each unit's role and owned files, the interfaces between them, a safe order and the checks, so main neither reads code nor sends a scout only to decompose; when a structural decision is open it first returns the options, tradeoffs, recommendation and migration impact. Choose its tier at plan time: economy for a split inside one layer; capable when the change crosses layers, touches migrations, security or concurrency, or leaves a structural decision open. Skip it for single-writer changes (T0, T1 and most T2), when an accepted plan already exists, or when main already knows the decomposition; never several system-architect runs. Main accepts, edits or rejects the proposal and owns the PLAN. The T3 shape keeps it as the optional `architect` packet.
 
-PLAN is main-owned. `architecture-specialist` may supply architecture constraints/options before planning, but does not own worker sequencing, specialist gates, verification routing, or authorization. Use `decision` through main when an architectural choice itself requires explicit authorization.
+PLAN is main-owned. `system-architect` supplies units, architecture constraints and options, but does not own worker sequencing, specialist gates, verification routing, or authorization. Use `decision` through main when an architectural choice itself requires explicit authorization.
 
 ## Lifecycle
 Lifecycle: `DISCOVER -> PLAN -> EXECUTE -> VERIFY -> REVIEW -> INTEGRATE -> SHIP -> LEARN`

@@ -25,11 +25,11 @@ export const ROUTES = new Set([
 ]);
 // Mirrors agent/agents/*.md; tests/evaluate-routing.test.mjs checks the drift.
 export const ROLES = new Set([
-	"api-specialist", "architecture-specialist", "backend-worker", "concurrency-specialist",
+	"api-specialist", "backend-worker", "concurrency-specialist",
 	"debugger", "devops-specialist", "frontend-worker", "general-worker",
-	"observability-specialist", "oracle", "performance-specialist", "planner", "platform-worker", "release-engineer",
+	"observability-specialist", "oracle", "performance-specialist", "platform-worker", "release-engineer",
 	"reviewer", "scout", "security-specialist", "database-specialist", "database-worker",
-	"test-engineer", "ui-ux-specialist",
+	"system-architect", "test-engineer", "ui-ux-specialist",
 ]);
 const set = (...items) => new Set(items);
 const KINDS = set("positive", "near_miss");
@@ -56,7 +56,7 @@ const NATIVE_ROOT_KEYS = set("background", "noticeLimit", "modelTier", "modelSlo
 	"agentScope", "dag", "readOnly", "confirmProjectAgents", "cwd", "shape");
 // shape.ts mirror: a recorded `shape` call is the fixed-order chain it expands to (a parity test compares both).
 const SHAPE_WORKERS = set("backend-worker", "database-worker", "frontend-worker", "platform-worker", "general-worker");
-const SHAPE_PACKETS = { T1: [["worker"], []], T2: [["debugger", "worker"], ["test", "review"]], T3: [["worker", "test"], ["planner", "specialist", "review"]] };
+const SHAPE_PACKETS = { T1: [["worker"], []], T2: [["debugger", "worker"], ["test", "review"]], T3: [["worker", "test"], ["architect", "specialist", "review"]] };
 export const NATIVE_NOTICE_MIN = 868; // NOTICE_MIN in compact-handoff.ts (derived there from the worst-case notice skeleton; the parity test recomputes it)
 const NATIVE_CLEANUP_KEYS = set("checkout", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent", "knowledge"); // CLEANUP schema / CLEANUP_REQUEST_KEYS
 const NATIVE_ARTIFACT_CLEANUP_KEYS = set("task", "branch", "base", "pr", "headSha", "mergeCommit", "quiescent", "knowledge"); // plain-branch form / ARTIFACT_REQUEST_KEYS
@@ -475,7 +475,7 @@ export function shapeChain(shape, at) {
 	if (has(shape, "specialist") !== has(packets, "specialist")) throw fail(`${at}.specialist: specialist and its packet go together`);
 	const gate = shape.name === "T3" ? { modelTier: "capable" } : {};
 	const steps = [];
-	if (has(packets, "planner")) steps.push({ agent: "planner", modelTier: "economy" });
+	if (has(packets, "architect")) steps.push({ agent: "system-architect", modelTier: "economy" });
 	if (has(packets, "debugger")) steps.push({ agent: "debugger" });
 	if (has(packets, "specialist")) steps.push({ agent: shape.specialist });
 	steps.push({ agent: shape.worker });

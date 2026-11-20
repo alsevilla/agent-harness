@@ -1368,7 +1368,7 @@ Examples:
 - `security-specialist`;
 - `performance-specialist`;
 - `api-specialist`;
-- `architecture-specialist`;
+- `system-architect`;
 - `concurrency-specialist`;
 - `ui-ux-specialist`;
 - `observability-specialist`.
