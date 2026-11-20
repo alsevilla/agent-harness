@@ -110,7 +110,7 @@ The other prompts in [`agent/prompts/`](agent/prompts/) (`/debug`, `/verify`, `/
 
 ## Roles
 
-The native package exposes these 21 generic roles. Version 1.23.0 renamed several of them (see its release notes): move any `roles.json` overrides and direct calls to the names below. Shape packet keys are unchanged, except T3's first step, now `architect`.
+The native package exposes these 21 generic roles.
 
 | Kind | Roles |
 | --- | --- |

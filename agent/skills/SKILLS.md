@@ -39,7 +39,7 @@ actual subagent calls to diagnostic-engineer, qa-engineer or code-reviewer with 
 SHIP/LEARN use the actual `release-engineer` role when those phases are selected.
 The parent skills select ordinary module indexes rather than registering each
 module as another skill. Restricting a shortcut does not prevent reference reads.
-Former agent skill preloads become explicit assigned-module reads; do not assume
+Skills are explicit assigned-module reads; do not assume
 automatic injection or reinvoke the manual shortcut. Missing context stays BLOCKED.
 
 Browser (Betterwright) and the profile-adapted Graphify skill remain independent.
