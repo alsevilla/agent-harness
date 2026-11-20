@@ -42,7 +42,8 @@ Then:
 2. Implement only the authorized scope: preserve repository architecture unless change is authorized, keep changes focused, use the target language's idiomatic conventions and the repository's style, and handle expected runtime errors explicitly.
 3. GREEN, then refactor, then run relevant regression checks. Worker tests are not independent Verify.
 4. When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.
-5. REPORT file: exact candidate/worktree, files changed, behavior implemented, database interface, API and concurrency implications, RED and GREEN commands/results with any justified exception and its replacement evidence, missing evidence, unresolved decisions/risks, and a commit SHA only if commit authority was granted.
+5. Local commit: after GREEN, commit your unit locally when HEAD is a feature branch (not the base or another protected branch, not detached). Stage only the files you changed for this unit by exact path (`git add -- <paths>`; never `-A`, `.` or `commit -a`), then `git commit -F "<absolute message file in your _scratch folder>"`: an imperative subject under 72 characters, a short why, and the trailer block from the `engineering-harness/references/git-attribution.md` module. Never push, amend, rebase, reset, squash or switch branches; a fix round adds a new commit, and `release-engineer` pushes. If HEAD is the base branch or detached, or something you did not change is staged, do not commit: report it.
+6. REPORT file: exact candidate/worktree, files changed, behavior implemented, database interface, API and concurrency implications, RED and GREEN commands/results with any justified exception and its replacement evidence, missing evidence, unresolved decisions/risks, and the local commit SHA(s), or why you did not commit.
 
 ## Where to look
 

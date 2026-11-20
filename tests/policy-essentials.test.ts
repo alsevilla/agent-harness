@@ -285,3 +285,19 @@ test("specialists state what they return; generic roles name no single project's
 		assert.doesNotMatch(read(`agent/agents/${file}`), /\bRFID\b|\breader connected\b|\bdevice taps?\b|\bHID readers?\b/i, file);
 	}
 });
+
+// Owner request: implementation workers commit their own units locally (as engineers do); push and PR stay with the trusted
+// release-engineer. The guard already allowed a worker's local commit; only the role text forbade it.
+test("implementation workers commit their unit locally and never push; delivery expects their commits", () => {
+	for (const role of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) {
+		const text = flat(read(`agent/agents/${role}.md`));
+		assert.ok(text.includes("Local commit:") && text.includes("commit your unit locally when HEAD is a feature branch"), role);
+		assert.ok(text.includes("never `-A`, `.` or `commit -a`"), `${role}: exact paths only`);
+		assert.ok(text.includes("Never push, amend, rebase, reset, squash or switch branches"), `${role}: no publication or rewrite`);
+		assert.ok(text.includes("the local commit SHA(s), or why you did not commit"), `${role}: REPORT carries the SHA`);
+		assert.ok(!text.includes("only if commit authority was"), `${role}: the old ban is gone`);
+	}
+	for (const role of ["technical-writer", "test-engineer", "reviewer", "system-architect"]) assert.ok(!read(`agent/agents/${role}.md`).includes("Local commit:"), `${role}: no local commits`);
+	assert.ok(flat(read("agent/agents/release-engineer.md")).includes("Implementation workers have usually committed their units locally already"));
+	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("Never squash, amend or rebase a worker's commits"));
+});
