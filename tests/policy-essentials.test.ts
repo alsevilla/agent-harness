@@ -27,9 +27,10 @@ test("every role keeps the leaf boundary and states it once", () => {
 	assert.equal(roles.length, 21);
 	for (const role of roles) {
 		const text = read(`agent/agents/${role}.md`);
-		assert.match(text, /Never launch\/delegate\/supervise helpers/, role);
-		assert.match(text, /this leaf has no subagent tool/, role);
-		assert.match(text, /Do not use shell commands to launch Pi or other agents/, role);
+		assert.match(text, /Never launch\/delegate\/supervise helpers through subagent, Agent\/Task aliases or shell commands/, role);
+		// The "Pi runtime:" line repeated this boundary, named integrations Pi already lists (and Copilot never loads) and model
+		// settings a leaf cannot change; it was removed from every role.
+		assert.doesNotMatch(text, /^(Pi runtime|Runtime boundary):|this leaf has no subagent tool|Prompt shortcuts supply instructions|hardware-policy/m, role);
 		for (const restated of ["Never spawn another agent.", "Never spawn helpers."]) assert.ok(!text.includes(restated), `${role}: restates "${restated}"`);
 	}
 });

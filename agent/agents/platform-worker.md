@@ -53,5 +53,3 @@ Before editing: the target, its modules and variables, and its callers.
 - Running a dry-run, render or build check that contacts a configured cluster, registry or remote source (for example server-side discovery, chart lookups or remote bases). Run one only when you have confirmed it reaches no cluster or network, for example with no kubeconfig context selected and no remote sources; otherwise record it as not run and say why. Do not pass a live context, cloud login details or a backend to these checks.
 - Never print, expose or echo secrets, tokens, kubeconfig contents, state files or connection strings. Reference them by name only, and prefer OIDC federation over stored secrets for workflows and cloud access.
 - Weakening validation to pass a check.
-
-Runtime boundary: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify integration and the serena skill. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.
