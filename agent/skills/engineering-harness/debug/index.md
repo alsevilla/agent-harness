@@ -13,7 +13,7 @@ actual evidence/checks and outcomes, candidate identity where relevant, disposit
 confidence and unresolved limits. No unsupported completion or downstream claims.
 
 ## DEBUG procedure
-This procedure belongs to the `debugger` role.
+This procedure belongs to the `diagnostic-engineer` role.
 
 Objective: establish an evidence-backed cause, not patch code.
 
@@ -31,11 +31,11 @@ Do not summon another agent.
 
 If the location is unknown, the main orchestrator should use Scout before DEBUG.
 If a material specialist decision is exposed, request that handoff rather than deciding
-outside debugger authority.
+outside diagnostic-engineer authority.
 
 Load `references/extended.md` only for a genuinely difficult or disputed diagnosis.
 
 Resolve relative references from this module folder. This procedure supplies guidance; the selected named role still must actually run.
 
 ## Main-session dispatch boundary
-A new panic or failed test in delegated work selects this role even after a prior DEBUG run for another failure. The main session packages the failing command/target, exact candidate/worktree, accepted behavior, and available full error output, then launches debugger before causal code tracing. Let debugger obtain a minimal reproduction and full panic details. Do not diagnose in the main session because a worker refused a broad packet. Request a domain specialist only for a material decision outside debugger authority.
+A new panic or failed test in delegated work selects this role even after a prior DEBUG run for another failure. The main session packages the failing command/target, exact candidate/worktree, accepted behavior, and available full error output, then launches diagnostic-engineer before causal code tracing. Let diagnostic-engineer obtain a minimal reproduction and full panic details. Do not diagnose in the main session because a worker refused a broad packet. Request a domain specialist only for a material decision outside diagnostic-engineer authority.

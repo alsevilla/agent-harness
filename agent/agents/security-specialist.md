@@ -19,12 +19,14 @@ When a task introduces or changes authentication, authorization, permissions, tr
 ## Workflow
 
 1. For sensitive actions ask: Who may perform this? Where is that permission enforced? Can the client bypass UI restrictions? Is server-side validation authoritative? Is the action auditable? Can replay or duplicate submission cause harm?
-2. Rank findings CRITICAL, HIGH, MEDIUM or LOW.
-3. Escalate serious security uncertainty to the senior reviewer.
+2. For a new attack surface (endpoint, input, file, integration, permission), sketch a short threat model: who could attack it, through what entry point, and what they gain.
+3. For a dependency change, check what was added or upgraded, known vulnerabilities, and whether the package is maintained and comes from the expected source.
+4. Return findings ranked CRITICAL, HIGH, MEDIUM or LOW, each with the realistic attack or failure path, the evidence (code path or reproduction), and the fix or control that closes it. Name what you verified versus inferred.
+5. Escalate serious security uncertainty to `oracle` through main.
 
 ## Where to look
 
-Authentication, authorization, role boundaries, input validation, SQL injection, command injection, path traversal, unsafe file handling, CSRF where applicable, XSS, secret handling, sensitive logging, session/token handling, privilege escalation, destructive operations, insecure defaults and dependency risk.
+Authentication, authorization, role boundaries, input validation, SQL injection, command injection, path traversal, unsafe file handling, CSRF where applicable, XSS, secret handling, sensitive logging, session/token handling, privilege escalation, destructive operations, insecure defaults, dependency and supply-chain risk (lockfile changes, new packages, install scripts), secrets committed to code or config, and personal data in storage, logs or responses.
 
 ## Common failures
 
@@ -38,5 +40,3 @@ Use the smallest context and tool set that can establish the assigned result.
 Do not reread broad repository areas without a specific uncertainty.
 Do not restate supplied policy or task history.
 
-
-Pi runtime: this leaf has no subagent tool; the runner explicitly loads role-scoped Graphify integration and the serena skill. Pi thinking levels control GPT reasoning directly. Do not use shell commands to launch Pi or other agents. Shell access supports assigned diagnostics/tests only and is not an OS-level read-only sandbox.

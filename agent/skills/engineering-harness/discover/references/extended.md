@@ -395,7 +395,7 @@ Typical routing:
 - substantial UI workflow → `ui-ux-specialist`
 - deployment/platform behavior → `devops-specialist`
 - hot path/throughput → `performance-specialist`
-- cross-system structure → `architecture-specialist`
+- cross-system structure → `system-architect`
 - telemetry/health/auditability → `observability-specialist`
 
 The later planning or execution workflow decides which recommendations actually require invocation.
@@ -556,15 +556,15 @@ Invoke a specialist during discovery only when specialist analysis is necessary 
 
 Otherwise defer specialist consultation to planning.
 
-## Debugger
+## Diagnostic engineer
 
-For a bug where the failure itself is not understood, discovery may recommend or use `debugger` to establish reproducible evidence.
+For a bug where the failure itself is not understood, discovery may recommend or use `diagnostic-engineer` to establish reproducible evidence.
 
 Do not turn every feature discovery into debugging.
 
-## Reviewer
+## Code Reviewer
 
-Reviewer is normally not required during discovery.
+Code Reviewer is normally not required during discovery.
 
 ## Oracle
 

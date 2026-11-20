@@ -1,4 +1,4 @@
-// Field report (sms-live-retry): main approved a PowerShell backend cleanup for test-engineer. The first worker (bash) was refused for
+// Field report (sms-live-retry): main approved a PowerShell backend cleanup for qa-engineer. The first worker (bash) was refused for
 // syntax before it reached the approved command, but its launch had already claimed the approval; the PowerShell retry launched with
 // none and was refused as PROC_KILL. An approval a worker did not use now returns to main when that worker exits, and a launch that
 // gets nothing says whether another running worker holds it or an earlier one used it. Unapproved stops stay refused.
@@ -16,7 +16,7 @@ const agentDir = path.join(root, "agent");
 const guardFile = path.join(root, "guard.ts");
 fs.writeFileSync(guardFile, "");
 const STOP = "Get-Process rfid-attendance -ErrorAction SilentlyContinue | Stop-Process -Force";
-const ROLE = "test-engineer";
+const ROLE = "qa-engineer";
 
 type Store = ReturnType<typeof createGrantStore>;
 // One worker launch the way index.ts does it: claim at launch, lend to the holder, run the child guard, return unused at exit.
@@ -58,11 +58,11 @@ test("a launch that gets nothing says why: held by a running worker, or used by 
 	approve(store);
 	const first = launch(store, "bg-2");
 	const second = launch(store, "bg-3");
-	assert.match(second.run("powershell", STOP)?.reason ?? "", /held by another test-engineer worker that is still running; it returns to main if that worker exits without using it/);
+	assert.match(second.run("powershell", STOP)?.reason ?? "", /held by another qa-engineer worker that is still running; it returns to main if that worker exits without using it/);
 	assert.equal(first.run("powershell", STOP), undefined);
 	first.exit();
 	second.exit();
-	assert.match(launch(store, "bg-4").run("powershell", STOP)?.reason ?? "", /an earlier test-engineer worker in this folder used main's approval; approvals are single use/);
+	assert.match(launch(store, "bg-4").run("powershell", STOP)?.reason ?? "", /an earlier qa-engineer worker in this folder used main's approval; approvals are single use/);
 });
 
 test("an approval that expired while lent does not come back", () => {

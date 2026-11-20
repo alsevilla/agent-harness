@@ -174,7 +174,7 @@ test("unavailable integrations keep their fallback: named, read/grep/find fallba
 });
 
 test("reviewer launch without Ponytail gets no Ponytail navigation paragraph", () => {
-  const run = launch(role("reviewer"), { ponytail: false, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true });
+  const run = launch(role("code-reviewer"), { ponytail: false, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true });
   assert.equal(run.args.some(arg => /ponytail/i.test(arg)), false, run.args.join(" "));
   assert.equal(run.prompt.includes("When Ponytail's native extension is loaded in this launch"), false);
   for (const needle of Object.values(CORE)) assert.equal(count(run.prompt, needle), 1, needle);

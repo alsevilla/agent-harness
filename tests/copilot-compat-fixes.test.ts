@@ -138,7 +138,7 @@ test("no environment variable or file changes the guard result (no override chan
 
 // Profiles: canonical repo-relative module paths (agent/skills/...); the portable root rule is pinned in tests/portable-module-paths.test.ts.
 const agentFiles = readdirSync(join(root, "agent", "agents")).filter((f) => f.endsWith(".md"));
-test("canonical profiles keep 21 roles (20 baseline + additive planner) and name no user-home or <skills> module path", () => {
+test("canonical profiles keep 21 roles (planner and architecture-specialist merged into system-architect; technical-writer added) and name no user-home or <skills> module path", () => {
   expect(agentFiles).toHaveLength(21);
   expect(roles).toHaveLength(21);
   for (const f of agentFiles) expect(read("agent", "agents", f)).not.toMatch(/~\/\.pi|<skills>/);
@@ -149,8 +149,8 @@ test("shared references loaded from profiles and the routing appendix do not har
 });
 
 test("read-only roles have no native edit tool in their headers, registry projection kept (execute retained)", () => {
-  const ro = roles.filter((r) => !/\bedit\b/.test(r.tools)); // reviewer and test-engineer hold write for reports only and stay read-only
-  expect(ro.length).toBe(15); // 14 baseline read-only roles + additive planner
+  const ro = roles.filter((r) => !/\bedit\b/.test(r.tools)); // reviewer and qa-engineer hold write for reports only and stay read-only
+  expect(ro.length).toBe(14); // 14 read-only roles, system-architect among them
   for (const r of ro) {
     const header = read("agent", "agents", `${r.name}.md`).match(/^tools: (.*)$/m)![1];
     expect(header).toBe("read, search, execute");

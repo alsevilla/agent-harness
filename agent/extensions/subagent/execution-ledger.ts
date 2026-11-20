@@ -155,8 +155,8 @@ export function createExecutionLedger() {
 				if (isError) return undefined;
 				const f = fileFor(cwd, args.path);
 				f.edits++; f.lastEditStep = step;
-				// A report or evidence file in the task's artifact folder is not a change to what the checks tested: test-engineer and
-				// reviewer write their REPORT last, and that must not turn "no change since" into "files changed since".
+				// A report or evidence file in the task's artifact folder is not a change to what the checks tested: qa-engineer and
+				// code-reviewer write their REPORT last, and that must not turn "no change since" into "files changed since".
 				if (!/(^|[\\/])_(evidence|scratch)[\\/]/.test(args.path)) global++;
 				return undefined;
 			}

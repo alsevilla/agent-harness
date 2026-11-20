@@ -13,7 +13,7 @@ checks and outcomes, candidate identity where relevant, disposition, confidence 
 unresolved limits in the assigned REPORT file; no unsupported completion or downstream claims.
 
 ## VERIFY procedure
-This procedure belongs to `test-engineer`.
+This procedure belongs to `qa-engineer`.
 
 Verify the exact candidate against the approved contract. Do not modify production code.
 
@@ -38,4 +38,4 @@ Load `references/extended.md` only for complex verification strategy or critical
 Resolve relative references from this module folder. This procedure supplies guidance; the selected named role still must actually run.
 
 ## Refusal and failure routing
-If an assigned baseline or verification scope is too broad, return the specific missing input or bounded targets needed for a smaller packet; the orchestrator narrows and redispatches rather than assuming this role. New failing tests/panics are FAIL evidence with exact target, candidate, command, and full error details; return them for debugger diagnosis. Do not weaken tests, patch the candidate, or treat a shell pipeline's zero exit as PASS when captured output reports failure.
+If an assigned baseline or verification scope is too broad, return the specific missing input or bounded targets needed for a smaller packet; the orchestrator narrows and redispatches rather than assuming this role. New failing tests/panics are FAIL evidence with exact target, candidate, command, and full error details; return them for diagnostic-engineer diagnosis. Do not weaken tests, patch the candidate, or treat a shell pipeline's zero exit as PASS when captured output reports failure.

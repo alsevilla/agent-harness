@@ -163,9 +163,9 @@ Verify MUST NOT modify active-repository files merely to obtain evidence.
 This applies to:
 
 - orchestrator;
-- Test Engineer;
+- QA Engineer;
 - specialists;
-- Reviewer;
+- Code Reviewer;
 - Oracle.
 
 ---
@@ -195,7 +195,7 @@ Verify may safely perform read-only actions such as:
 - create disposable verification harnesses;
 - create disposable verification tests;
 - create isolated build artifacts;
-- invoke Test Engineer;
+- invoke QA Engineer;
 - invoke read-only specialists;
 - inspect runtime behavior in safe test environments.
 
@@ -359,13 +359,13 @@ Ask for or obtain proper workflow authorization before changing them.
 
 ---
 
-# Test Engineer Role
+# QA Engineer Role
 
-Test Engineer is an independent verifier.
+QA Engineer is an independent verifier.
 
-During Verify, Test Engineer is read-only toward the active repository by default.
+During Verify, QA Engineer is read-only toward the active repository by default.
 
-Test Engineer may:
+QA Engineer may:
 
 - inspect repository tests;
 - run tests;
@@ -376,13 +376,13 @@ Test Engineer may:
 - perform adversarial runtime checks;
 - report missing permanent regression tests.
 
-Test Engineer must not directly modify active production or test files during Verify.
+QA Engineer must not directly modify active production or test files during Verify.
 
 ---
 
-# Test Engineer Independence
+# QA Engineer Independence
 
-Do not ask Test Engineer merely to confirm the orchestrator's conclusion.
+Do not ask QA Engineer merely to confirm the orchestrator's conclusion.
 
 Good:
 
@@ -405,7 +405,7 @@ Do not provide the desired verdict.
 
 ---
 
-# Test Engineer Outcomes
+# QA Engineer Outcomes
 
 Accept:
 
@@ -423,7 +423,7 @@ Do not automatically retry until PASS appears.
 
 ---
 
-# Handling Test Engineer PASS
+# Handling QA Engineer PASS
 
 Verify the PASS is relevant.
 
@@ -441,9 +441,9 @@ use the evidence.
 
 ---
 
-# Handling Test Engineer FAIL
+# Handling QA Engineer FAIL
 
-A Test Engineer FAIL is evidence, not unquestionable authority.
+A QA Engineer FAIL is evidence, not unquestionable authority.
 
 Before accepting FAIL:
 
@@ -476,15 +476,15 @@ Verify must never create a new requirement and then fail implementation for viol
 Sources of accidental invented requirements include:
 
 - verifier prompts;
-- Test Engineer assumptions;
-- Reviewer preferences;
+- QA Engineer assumptions;
+- Code Reviewer preferences;
 - inferred conventions;
 - desired cleanup;
 - unrelated existing behavior.
 
 Example:
 
-Verifier tells Test Engineer:
+Verifier tells QA Engineer:
 
 > `late_minutes` should be populated for HALF_DAY.
 
@@ -500,7 +500,7 @@ Do not fail the change for it.
 
 ---
 
-# Handling Test Engineer INCONCLUSIVE
+# Handling QA Engineer INCONCLUSIVE
 
 INCONCLUSIVE means the available evidence did not establish correctness or incorrectness.
 
@@ -522,7 +522,7 @@ Then decide whether:
 - the item is non-blocking;
 - the overall verification must remain INCONCLUSIVE.
 
-Do not pressure the Test Engineer into reversing INCONCLUSIVE.
+Do not pressure the QA Engineer into reversing INCONCLUSIVE.
 
 ---
 
@@ -791,8 +791,8 @@ Examples:
 
 - worker;
 - orchestrator;
-- Test Engineer;
-- Reviewer;
+- QA Engineer;
+- Code Reviewer;
 - specialist;
 - physical device;
 - simulated integration;
@@ -1595,7 +1595,7 @@ It is not PASS.
 
 ---
 
-# Reviewer Relationship
+# Code Reviewer Relationship
 
 Verify is not Review.
 
@@ -1607,7 +1607,7 @@ Review asks:
 
 > What did implementation and verification miss?
 
-A previous Reviewer approval is evidence.
+A previous Code Reviewer approval is evidence.
 
 It does not replace Verify.
 
@@ -1640,7 +1640,7 @@ Consider Oracle when:
 - correctness cannot be resolved experimentally;
 - data-loss behavior remains disputed;
 - concurrency/security reasoning remains unresolved;
-- Reviewer escalated;
+- Code Reviewer escalated;
 - irreversible behavior remains uncertain.
 
 Do not invoke Oracle merely because Verify is difficult.
@@ -1656,7 +1656,7 @@ Reuse fresh trustworthy evidence.
 Do not:
 
 - rerun expensive suites repeatedly without reason;
-- reinvoke Test Engineer after an unchanged independent PASS for ceremony;
+- reinvoke QA Engineer after an unchanged independent PASS for ceremony;
 - reconstruct RED without benefit;
 - test unrelated subsystems;
 - invoke every specialist;
@@ -1850,7 +1850,7 @@ Only report actual or explicitly reused fresh evidence.
 
 ## Independent Verification
 
-**Test Engineer:**
+**QA Engineer:**
 
 NEW / REUSED / NOT USED
 
@@ -2108,7 +2108,7 @@ Before PASS ask:
 7. Is reused evidence still fresh?
 8. Did relevant implementation change after evidence collection?
 9. Did Verify modify the active repository?
-10. Did Test Engineer modify the active repository?
+10. Did QA Engineer modify the active repository?
 11. Are additional verification tests disposable?
 12. Did I isolate alternate-state builds?
 13. Did any environment incident contaminate evidence?

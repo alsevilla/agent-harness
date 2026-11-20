@@ -279,7 +279,7 @@ test("worker cap: the system prompt counts toward the trigger and the budget", (
 	assert.equal(capWorkerContext(mid, 80_000, 95_000, 25_000).step, "batch", "with a 25k system prompt it is over the trigger");
 });
 
-// Field report on v1.14.0: test-engineer peaked at 128,481 and debugger at 140,152 provider tokens against a 95k budget, because
+// Field report on v1.14.0: qa-engineer peaked at 128,481 and debugger at 140,152 provider tokens against a 95k budget, because
 // characters / 4 undercounts code and tool output. The estimate is now scaled by the provider-reported input of the latest request.
 import { requestScale } from "../handoff-window.ts";
 const withUsage = (messages: any[], real: number) => [...messages, { role: "assistant", content: [{ type: "text", text: "ok" }], usage: { input: 10, cacheRead: real - 10, cacheWrite: 0 } }];

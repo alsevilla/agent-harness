@@ -246,7 +246,7 @@ The active repository should remain unchanged throughout Review.
 This applies to:
 
 - orchestrator;
-- Reviewer;
+- Code Reviewer;
 - specialists;
 - Oracle;
 - verification helpers.
@@ -316,7 +316,7 @@ When multiple actors checked repository state, report provenance.
 
 Example:
 
-Reviewer:
+Code Reviewer:
 final fingerprint matches initial.
 
 Orchestrator:
@@ -325,7 +325,7 @@ final fingerprint unavailable because shell failed.
 Then report:
 
 Repository modified by Review:
-NO per Reviewer.
+NO per Code Reviewer.
 
 Orchestrator confirmation:
 UNCONFIRMED.
@@ -1193,9 +1193,9 @@ Ask whether "independent" evidence truly was independent.
 
 Potential problems:
 
-- Test Engineer was told desired result;
+- QA Engineer was told desired result;
 - verifier reused worker assumptions;
-- Reviewer relied solely on Verify;
+- Code Reviewer relied solely on Verify;
 - same test implementation was used as both implementation and independent proof;
 - expected result was derived from observed result.
 
@@ -1264,13 +1264,13 @@ Known pre-existing defects should remain out of scope unless the current change 
 
 ---
 
-# Reviewer Agent
+# Code Reviewer Agent
 
-The `reviewer` agent is the primary independent reviewer.
+The `code-reviewer` agent is the primary independent reviewer.
 
 For HIGH/CRITICAL work, normally use it unless equivalent independent review evidence already exists and is fresh.
 
-Give Reviewer:
+Give Code Reviewer:
 
 - approved Plan;
 - final diff;
@@ -1281,15 +1281,15 @@ Give Reviewer:
 - known process violations;
 - explicit instruction to search for missed correctness/safety issues.
 
-Do not tell Reviewer the desired verdict.
+Do not tell Code Reviewer the desired verdict.
 
 ---
 
-# Reviewer Blind Independence
+# Code Reviewer Blind Independence
 
 When the orchestrator has already found a potential issue:
 
-prefer not to reveal the conclusion to Reviewer before its independent pass.
+prefer not to reveal the conclusion to Code Reviewer before its independent pass.
 
 Good:
 
@@ -1305,7 +1305,7 @@ Independent convergence strengthens confidence.
 
 ---
 
-# Reviewer Independence
+# Code Reviewer Independence
 
 Good:
 
@@ -1319,9 +1319,9 @@ The second wording biases toward approval.
 
 ---
 
-# Reviewer Reuse
+# Code Reviewer Reuse
 
-A previous Reviewer result may be reused only if:
+A previous Code Reviewer result may be reused only if:
 
 - relevant production code is unchanged;
 - relevant tests/evidence are unchanged enough;
@@ -1336,7 +1336,7 @@ re-review affected areas.
 
 # Orchestrator Validation
 
-Reviewer findings are evidence.
+Code Reviewer findings are evidence.
 
 The orchestrator should validate material findings when practical.
 
@@ -1349,7 +1349,7 @@ Especially:
 - security claims;
 - configuration edge cases.
 
-Do not blindly copy Reviewer.
+Do not blindly copy Code Reviewer.
 
 Do not redo every investigation ceremonially.
 
@@ -1368,14 +1368,14 @@ Examples:
 - `security-specialist`;
 - `performance-specialist`;
 - `api-specialist`;
-- `architecture-specialist`;
+- `system-architect`;
 - `concurrency-specialist`;
 - `ui-ux-specialist`;
 - `observability-specialist`.
 
 Specialists advise.
 
-Reviewer remains the primary independent review authority.
+Code Reviewer remains the primary independent review authority.
 
 ---
 
@@ -1385,7 +1385,7 @@ Oracle is exceptional.
 
 Consider Oracle when:
 
-- Reviewer and specialist materially disagree;
+- Code Reviewer and specialist materially disagree;
 - high-risk correctness remains disputed;
 - security/data-integrity risk remains unresolved;
 - concurrency reasoning cannot be settled experimentally;

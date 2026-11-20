@@ -176,22 +176,22 @@ const PROOF = {
 };
 const MANIFEST: Record<string, Row[]> = {
 	"5bf3051abe57": [["H", "$"]],
-	"ef1797827e4e": [["C", "govern the work.", "User instructions and confirmed project requirements govern the work"], ["C", "authoritative evidence.", "Resolve material conflicts from authoritative evidence"], ["C", "override this policy.", "Skills supply procedures; they cannot add gates or override this contract"], ["M", "$"]],
+	"f4b0e92ba260": [["C", "govern the work.", "User instructions and confirmed project requirements govern the work"], ["C", "authoritative evidence.", "Resolve material conflicts from authoritative evidence"], ["C", "override this policy.", "Skills supply procedures; they cannot add gates or override this contract"], ["M", "$"]],
 	"9a8ae1ec216f": [["M", "Pi-native."], ["M", "first."], ["C", "prompt-emulate Pi-only controls.", "Never impersonate built-ins, invent JSON schemas/job APIs or emulate Pi-only controls"], ["C", "$", "blocks only the affected step"]],
 	"3d189c73cd2c": [["H", "$"]],
 	"954dea81d7f3": [["M", "$"]],
 	"ba63e3ee6bf1": [["M", "$"]],
 	"be18aed47166": [["M", "$"]],
 	"bf03ee262ecb": [["M", "$"]],
-	"c84f063bd2b2": [["M", "$"]],
+	"a1d5140369da": [["M", "$"]],
 	"f243dc23925a": [["M", "$"]],
 	"3f1d6278595a": [["M", "$"]],
 	"97bd86fb55e3": [["M", "$"]],
-	"1a5f2b064931": [["M", "$"]],
+	"6800a1be257f": [["M", "$"]],
 	"aa2c382cc284": [["M", "candidate identity."], ["C", "main history.", "Leaves lack main history"], ["M", "$"]],
 	"af003d42d21f": [["M", "$"]],
-	"f204cdb7ec3c": [["M", "speculative patches."], ["C", "approach remains.", "2 review cycles per candidate"], ["C", "a fresh count;", PROOF.freshCount], ["C", "approval gate.", "the cap is no refusal of authorized work"], ["M", "$"]],
-	"d6e51a5a30d3": [["M", "and name it."], ["C", "residual risk;", "Completion states changes, actual checks, missing evidence and residual risk"], ["M", "$"]],
+	"d7167604f116": [["M", "speculative patches."], ["C", "approach remains.", "2 review cycles per candidate"], ["C", "a fresh count;", PROOF.freshCount], ["C", "approval gate.", "the cap is no refusal of authorized work"], ["M", "$"]],
+	"5cf93d9bf49b": [["M", "and name it."], ["C", "residual risk;", "Completion states changes, actual checks, missing evidence and residual risk"], ["M", "$"]],
 	"fdffa867e40f": [["H", "$"]],
 	"0e75dea22997": [["C", "shell commands.", "Never launch helpers or agents, including through shell commands"], ["C", "code/tests.", "read-only roles do not change candidate code or tests"], ["C", "explicit user reassignment.", "stay worker-owned until explicit user reassignment"], ["C", "$", "Preserve existing writes"]],
 	"5424a43ead7e": [["C", "project invariants.", "security and project invariants"], ["C", "$", "Readiness never grants commit, push, merge, publish, deploy or destructive-operation authority"]],
@@ -319,7 +319,7 @@ test("assembled child prompts keep the existing shared guidance and gain the con
 			assert.ok(effective.includes(phrase), `${name}: ${phrase}`);
 		}
 		assert.equal(effective.split("# Pi leaf contract").length - 1, 1);
-		if (name === "general-worker.md" || name === "backend-worker.md" || name === "reviewer.md" || name === "test-engineer.md" || name === "architecture-specialist.md") {
+		if (name === "general-worker.md" || name === "backend-worker.md" || name === "reviewer.md" || name === "qa-engineer.md" || name === "system-architect.md") {
 			const before = Buffer.byteLength(prompt) + Buffer.byteLength(POLICY_LF);
 			const after = Buffer.byteLength(effective) - 1;
 			console.log(`child-context static subset ${name}: before=${before} after=${after} net=${before - after} (role+CORE+handoff+global; LF bytes; excludes base prompt, tool defs, integrations)`);

@@ -10,13 +10,13 @@ Scout answers **where / what is affected**, not **why it fails**.
 
 ## Debugging
 A request to fix an existing malfunction is a bug-fix incident.
-If root cause is not established by evidence: subagent `shape` T2 (`debugger -> worker`, optional test-engineer and reviewer).
+If root cause is not established by evidence: subagent `shape` T2 (`diagnostic-engineer -> worker`, optional qa-engineer and code-reviewer).
 Add Scout first only when location/blast radius is unknown. Add a specialist only when debugging exposes a material unresolved domain decision. Add independent verification/review only when risk warrants it.
-Debugger may be skipped when evidence already establishes the cause and the remaining work is implementation-only.
-If a speculative fix fails or produces an unexplained regression, use debugger before another speculative patch.
+Diagnostic engineer may be skipped when evidence already establishes the cause and the remaining work is implementation-only.
+If a speculative fix fails or produces an unexplained regression, use diagnostic-engineer before another speculative patch.
 
 ## Optional roles
-Before launching an optional scout, planner, specialist, verifier or reviewer, name in its packet the uncertainty it will resolve and the decision that changes based on its answer. Skip the optional role when no such decision remains. Independent checks required for material risks remain required. This is packet guidance, not a new router or runtime gate.
+Before launching an optional scout, system-architect, specialist, verifier or code-reviewer, name in its packet the uncertainty it will resolve and the decision that changes based on its answer. Skip the optional role when no such decision remains. Independent checks required for material risks remain required. This is packet guidance, not a new router or runtime gate.
 
 ## Specialists
 Specialists are conditional. Do not summon a specialist merely because code touches that domain. Use one only when there is a material unresolved decision or risk that the worker should not decide alone.
@@ -26,7 +26,7 @@ Typical ownership:
 - async tasks/races/backpressure/shutdown -> `concurrency-specialist`
 - auth/secrets/trust/privilege -> `security-specialist`
 - public/typed API contract -> `api-specialist`
-- subsystem boundaries/major tradeoffs -> `architecture-specialist`
+- subsystem boundaries/major tradeoffs -> `system-architect`
 - measured performance/overload -> `performance-specialist`
 - domain state machines, event ordering or personal-data policy -> a project-local domain specialist when the project defines one (not part of this generic profile); otherwise return the decision to main
 - deployment/service/backups -> `devops-specialist`
@@ -50,7 +50,7 @@ Dashboard, query, alert and service-mesh diagnosis -> `observability-specialist`
 
 ## Verification
 Workers must run focused tests/checks appropriate to their implementation.
-Use independent `test-engineer` only when one or more is true:
+Use independent `qa-engineer` only when one or more is true:
 - business-critical/state-machine/data-integrity behavior changed;
 - regression risk is material;
 - implementation spans multiple modules/layers;
@@ -62,9 +62,9 @@ Use independent `test-engineer` only when one or more is true:
 A normal localized T1 change does not require a separate test agent if the worker provides credible focused test evidence.
 
 ## Review
-Reviewer is **not automatic**.
-Use `reviewer` for materially risky changes such as security/auth, concurrency, migrations, state machines, destructive behavior, data integrity, cross-module refactors, public API compatibility, disputed findings, or high-impact business logic.
-Skip reviewer for routine localized changes that already have credible implementation and test evidence.
+Code Reviewer is **not automatic**.
+Use `code-reviewer` for materially risky changes such as security/auth, concurrency, migrations, state machines, destructive behavior, data integrity, cross-module refactors, public API compatibility, disputed findings, or high-impact business logic.
+Skip code-reviewer for routine localized changes that already have credible implementation and test evidence.
 
 ## Oracle
 Use `oracle` only when:
@@ -74,21 +74,21 @@ Use `oracle` only when:
 Never use Oracle as routine second opinion.
 
 ## Model families
-A checker on the same model family as the work it checks tends to share its blind spots. The shipped roles keep them apart: implementation workers run Claude first, `reviewer` and `test-engineer` run GPT first on both tiers, and Oracle's two passes use one of each. An explicit `modelSlot: "fallback"` on a checker moves it onto the workers' family, so use it for availability, not for review. On Pi, one Oracle launch runs two passes, GPT-6.1 Sol then Claude Opus 5.5 reviewing Sol's report, so it costs two full runs; its result is the second pass's answer.
+A checker on the same model family as the work it checks tends to share its blind spots. The shipped roles keep them apart: implementation workers run Claude first, `code-reviewer` and `qa-engineer` run GPT first on both tiers, and Oracle's two passes use one of each. An explicit `modelSlot: "fallback"` on a checker moves it onto the workers' family, so use it for availability, not for review. On Pi, one Oracle launch runs two passes, GPT-6.1 Sol then Claude Opus 5.5 reviewing Sol's report, so it costs two full runs; its result is the second pass's answer.
 
 ## Release / SHIP / LEARN
-Use `release-engineer` when the task actually enters SHIP or LEARN.
+Use `release-engineer` when the task actually enters SHIP, and `technical-writer` when it enters LEARN or needs documentation (READMEs, runbooks, upgrade notes, guides).
 
-SHIP remains conditional: ordinary coding completion is not a release. `release-engineer` reads `engineering-harness/ship/index.md`, validates exact candidate/version, fresh evidence, migrations/config/artifacts, destination and explicit authority, and performs only authorized release operations. Automatic PR delivery: when the task includes PR delivery and every required check passed on the exact candidate, main selects `release-engineer` for the task-owned commit, non-force feature push and PR create/update without an extra approval prompt; a local-only/no-publication instruction or a failed/blocked required check means no `release-engineer` launch (failing checks of unknown cause go to the debugger first). Merge and release each need their own explicit approval (merge: exact PR + approved candidate HEAD SHA; release: version + target SHA) and one never authorizes the other. This is an orchestration gate; the routing fixture cases R29-R32 check the expected selection offline and are not evidence of live autonomous delivery.
+SHIP remains conditional: ordinary coding completion is not a release. `release-engineer` reads `engineering-harness/ship/index.md`, validates exact candidate/version, fresh evidence, migrations/config/artifacts, destination and explicit authority, and performs only authorized release operations. Automatic PR delivery: when the task includes PR delivery and every required check passed on the exact candidate, main selects `release-engineer` for the task-owned commit, non-force feature push and PR create/update without an extra approval prompt; a local-only/no-publication instruction or a failed/blocked required check means no `release-engineer` launch (failing checks of unknown cause go to the diagnostic-engineer first). Merge and release each need their own explicit approval (merge: exact PR + approved candidate HEAD SHA; release: version + target SHA) and one never authorizes the other. This is an orchestration gate; the routing fixture cases R29-R32 check the expected selection offline and are not evidence of live autonomous delivery.
 
-LEARN is also conditional: `release-engineer` reads `engineering-harness/learn/index.md` only when stable reusable knowledge is worth preserving. Do not create session summaries as durable knowledge.
+LEARN is also conditional: `technical-writer` reads `engineering-harness/learn/index.md` only when stable reusable knowledge is worth preserving. Do not create session summaries as durable knowledge.
 
 `devops-specialist` owns unresolved deployment/service/backup design. `release-engineer` owns release readiness/execution against the resolved operational contract. Distinct questions may justify both; neither may launch the other.
 
 ## Explicit Pi model tier
 Pi-only, main-owned judgment. Set `modelTier: "economy"` on one task only for a bounded, known-contract backend or frontend implementation: the acceptance contract, file seam and focused checks are already declared, and no design, API, security, concurrency, persistence or cross-module decision remains open. The role must configure economy. Otherwise omit the field: the role's `defaultModelTier` runs unchanged, and omission never avoids economy when that default is economy. High-risk work on an economy-default role requests configured `capable` explicitly (omission would run economy); when that role does not configure `capable`, the selection is unresolved and goes to main, never economy by omission. Otherwise `capable` is chosen only when the task's own risk needs it; there is no automatic escalation or retry upgrade. Never economy for complex, unresolved, security-sensitive, concurrency, persistence or cross-layer work; that work stays on capable (the omitted default when it is capable, or explicit `capable` on an economy-default role) or a specialist route. Requests with unsupported tier names (for example `complex`, `fast` or `premium`) are refused before launch. This selection applies only the requested tier's configured model, fallback and thinking to that task; it changes no stored role default, preset or tools, and it measures no saving. Worker tier follows task risk, not the main model; choose tiers only via `modelTier` and `modelSlot`, never arbitrary model IDs. Explicit Pi `modelTier` selection is the narrow exception to preserving declared role models/effort and supported fallback safeguards: only a supported canonical package role's validated `roles.json` tier applies, tools, permissions and role owner stay unchanged, and there is no numeric tier policy; never silently upgrade models or replay after tools/abort.
 
-Choose tiers at plan time (after Planner-as-Router, arXiv 2609.32917: assigning each subtask's tier while planning, with the whole workflow visible, cut cost about 44% against all-frontier routing). When the plan splits work into tasks, decide each task's `modelTier` in the plan, before launching any: tasks that meet the economy rule above get explicit economy; the open decisions and the step whose result everything else depends on (the integration, one final verification of a complex change) keep capable. Every other test or check run, including a re-run after a fix round, is economy, and so is ordinary delivery by the `release-engineer` (commit, push, PR create or edit); a merge, a release or a LEARN record may use capable. Field data: in one database task, a planner, three test-engineer runs and an ordinary delivery ran on capable for $0.96, against about $0.05 on their economy defaults: the difference was 47% of that run's worker cost. Field data: small general-worker edits launched without a tier ran on capable at about $0.07 each, mostly the capable model's cache write.
+Choose tiers at plan time (after Planner-as-Router, arXiv 2609.32917: assigning each subtask's tier while planning, with the whole workflow visible, cut cost about 44% against all-frontier routing). When the plan splits work into tasks, decide each task's `modelTier` in the plan, before launching any: tasks that meet the economy rule above get explicit economy; the open decisions and the step whose result everything else depends on (the integration, one final verification of a complex change) keep capable. Every other test or check run, including a re-run after a fix round, is economy, and so is ordinary delivery by the `release-engineer` (commit, push, PR create or edit); a merge or a release may use capable. A `technical-writer` LEARN record or doc page is economy. Field data: in one database task, a planner, three qa-engineer runs and an ordinary delivery ran on capable for $0.96, against about $0.05 on their economy defaults: the difference was 47% of that run's worker cost. Field data: small general-worker edits launched without a tier ran on capable at about $0.07 each, mostly the capable model's cache write.
 
 Fix rounds start on the same tier (after CodeRescue, arXiv 2607.19338: with the execution feedback in hand, a cheap retry often fixes a failed coding attempt, and escalating only when needed reached the always-escalate solve rate at about a third of its cost). When a check fails, the fix round keeps the task's tier and passes the failed REPORT and the failing command output as they are. Choose `capable` explicitly for the next round only after a second failure on the same check, or when the failure shows the task carries a decision or risk the economy rule excludes. This is main's explicit choice per round, never an automatic upgrade.
 
@@ -98,22 +98,22 @@ Pi-only, main-owned judgment. Add `modelSlot: "fallback"` to one entry (with an 
 Scenarios:
 - backend-worker: add one validated field to an existing endpoint whose schema and focused tests are named in the packet -> explicit economy.
 - frontend-worker: adjust presentational state of an existing component whose design is already approved and whose focused tests are named -> explicit economy.
-- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> explicit economy; security-sensitive automation -> explicit `capable` (also its default).
+- general-worker: bounded config or script edit whose seam and focused checks are named in the packet -> explicit economy; security-sensitive automation -> explicit `capable` (also its default).
 - backend-worker: auth, secrets, migration or concurrency change -> no explicit economy; explicit `capable` (also its default, so omission runs capable too), the owning specialist first when a decision is open.
 - frontend-worker: UX or design choice without approved design -> ui-ux-specialist first, no explicit economy.
 - frontend-worker: layout, spacing, alignment, overflow or responsive fix judged by how it renders -> no explicit economy (its default capable tier), with browser evidence when the task needs it; a fix that cannot be seen rendered is INCONCLUSIVE, not PASS.
 - ui-ux-specialist: reviewing screenshots or deciding a layout -> explicit `capable` (its default is economy).
 - database-worker: consequential migration or persistence change -> explicit `capable` (also its default, so omission runs capable too).
 - platform-worker: consequential infrastructure change -> explicit `capable` (also its default).
-- test-engineer: data-integrity verification -> explicit `capable` (its default is economy).
-- reviewer or test-engineer: T3/T4 gate (mandatory independent VERIFY/REVIEW for material risk) -> explicit `capable` (their default is economy; omission would run economy).
+- qa-engineer: data-integrity verification -> explicit `capable` (its default is economy).
+- code-reviewer or qa-engineer: T3/T4 gate (mandatory independent VERIFY/REVIEW for material risk) -> explicit `capable` (their default is economy; omission would run economy).
 - scout (economy only): high-risk task -> unresolved, main decides or a specialist route; no capable tier exists and omission runs economy.
 
 ## Task shape
 Shape is orthogonal to the T0-T4 uncertainty/risk tier: it chooses how independent or dependent work is sequenced, not whether a role, specialist, tester or gate is needed. Shape never overrides user authorization, leaf/no-helper rules or lossless chain facts.
 - Enumerable independent batch (items, order and ownership known in advance; no back-and-forth): may run in parallel only within existing runtime limits (parallel <=8 tasks with <=4 concurrent; DAG <=8 nodes with <=4 running) and workspace admission, with disjoint ownership. Each item's packet names its own unit id and owned files and states that sibling units are not its work. A high-risk item keeps its tier; parallelism does not downgrade T3/T4 review or verification.
-- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 debugger -> worker; T3 [planner] -> [specialist] -> worker -> test-engineer [-> reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
-- Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `debugger` first. No automatic self-looping helpers, new modes or unbounded retries.
+- Ordered pipeline (stages known in advance, each needing the parent's actual result): for the common sequences use subagent `shape` (T1 worker; T2 diagnostic-engineer -> worker; T3 [system-architect] -> [specialist] -> worker -> qa-engineer [-> code-reviewer]); it runs as one chain and stops at the first step that does not report STATUS PASS. Delivery stays a separate launch after main accepts the checks. Otherwise use chain or DAG dependencies. Never parallelize dependent facts.
+- Feedback loop (the next step depends on the result): keep it bounded and main-owned: root cause -> focused check -> fresh worker packet. Unknown-cause failures go to `diagnostic-engineer` first. No automatic self-looping helpers, new modes or unbounded retries.
 
 ### Single versus parallel
 Decide per batch before dispatch by independence, task size, setup or context overhead and reconciliation cost. These are judgments; no runtime metric or saving is established by this rule.
@@ -122,7 +122,7 @@ Decide per batch before dispatch by independence, task size, setup or context ov
 - Parallel costs two hidden overheads (after SquidAgent, arXiv 2610.08647, where parallel agents often ran slower than one serial agent): re-exploration, siblings rediscovering what main already knows, and alignment, reconciling outputs made independently. Run a batch in parallel only when each item's expected output (the code it must change and its report, estimated in output size, which models judge better than duration) is large against both. Several small items go to one writer.
 - Every parallel packet starts with one shared block, identical text in every sibling: the decisions already made, conventions, the file map and the shared checks. The item's own part (its unit id, owned files and acceptance) follows. Siblings then build on main's knowledge instead of rediscovering it, and siblings with the same role, model and folder (for example parallel scouts or reviewers on one checkout) also share a cached prompt prefix; writers in separate worktrees have different system prompts, so for them the gain is the avoided re-exploration only.
 - Choosing single is not a bypass: it never removes a mandatory role, specialist gate, independent verification or review, or tier rule. Main still runs each required gate.
-- One investigation per unknown bug: several symptoms of one suspected cause, or one file's edits, go to one debugger or one writer, not one worker per symptom. Split only where causes or ownership are independent.
+- One investigation per unknown bug: several symptoms of one suspected cause, or one file's edits, go to one diagnostic-engineer or one writer, not one worker per symptom. Split only where causes or ownership are independent.
 
 ### Evidence before decomposition
 When discovery or another prerequisite finding is needed, accept the discovery or prerequisite evidence before any material downstream assignment. Decompose dependent downstream work only after the prerequisite result is accepted; each child brief then carries only the accepted decisions it needs. Already-known localized contracts do not require redundant discovery: assign directly. Parallelize only disjoint, independent assignments. This rule adds no universal chain or gate and removes no mandatory role.
@@ -130,15 +130,15 @@ When discovery or another prerequisite finding is needed, accept the discovery o
 ## Planning
 Do not create a formal multi-step plan for trivial/localized work. Use `plan` when dependencies, sequencing, rollout, migration, or cross-layer coordination make an explicit execution contract materially useful.
 
-Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), before any writer starts. In one run it reads the candidate and proposes the units, each unit's role and owned files, the interfaces between them, a safe order and the checks, so main neither reads code nor sends a scout only to decompose. Choose its tier at plan time: economy for a split inside one layer; capable when the change crosses layers or touches migrations, security or concurrency. Skip it for single-writer changes (T0, T1 and most T2), when an accepted plan already exists, or when main already knows the decomposition; never several planners. Main accepts, edits or rejects the proposal and owns the PLAN. The T3 shape keeps its optional `planner` packet.
+Launch one read-only `system-architect` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), or leaves a structural decision open (module boundaries, persistence, integration patterns), before any writer starts. In one run it reads the candidate and proposes the units, each unit's role and owned files, the interfaces between them, a safe order and the checks, so main neither reads code nor sends a scout only to decompose; when a structural decision is open it first returns the options, tradeoffs, recommendation and migration impact. Choose its tier at plan time: economy for a split inside one layer; capable when the change crosses layers, touches migrations, security or concurrency, or leaves a structural decision open. Skip it for single-writer changes (T0, T1 and most T2), when an accepted plan already exists, or when main already knows the decomposition; never several system-architect runs. Main accepts, edits or rejects the proposal and owns the PLAN. The T3 shape keeps it as the optional `architect` packet.
 
-PLAN is main-owned. `architecture-specialist` may supply architecture constraints/options before planning, but does not own worker sequencing, specialist gates, verification routing, or authorization. Use `decision` through main when an architectural choice itself requires explicit authorization.
+PLAN is main-owned. `system-architect` supplies units, architecture constraints and options, but does not own worker sequencing, specialist gates, verification routing, or authorization. Use `decision` through main when an architectural choice itself requires explicit authorization.
 
 ## Lifecycle
 Lifecycle: `DISCOVER -> PLAN -> EXECUTE -> VERIFY -> REVIEW -> INTEGRATE -> SHIP -> LEARN`
 This is a state model, not a mandatory list of model calls. Skip phases that are not needed. A small task may legitimately be `EXECUTE -> local verification -> done`. DEBUG is inserted when cause is unknown. INTEGRATE/SHIP/LEARN run only when the task actually requires them.
 
-When SHIP or LEARN is selected, the named owner is `release-engineer`.
+When SHIP is selected, the named owner is `release-engineer`; when LEARN is selected, it is `technical-writer`, and `release-engineer` commits the record with the delivery.
 
 ## Critical correctness invariants
 Preserve existing project invariants and user requirements.
@@ -167,9 +167,9 @@ Do not repeatedly relaunch expensive agents with unchanged prompts. Fix the bloc
 ## Context discipline
 Keep task packets concise. Prefer file paths + relevant snippets/evidence over full files.
 Default output targets:
-- Scout/specialist/debugger: concise handoff, normally <= 700 words.
+- Scout/specialist/diagnostic-engineer: concise handoff, normally <= 700 words.
 - Worker: concise completion + changed files + tests.
-- Tester/reviewer/release-engineer: findings/evidence only, normally <= 700 words.
+- QA engineer/code-reviewer/release-engineer: findings/evidence only, normally <= 700 words.
 Longer output is justified only when the evidence itself requires it.
 Do not load extended reference documents unless the compact skill says the task needs them.
 

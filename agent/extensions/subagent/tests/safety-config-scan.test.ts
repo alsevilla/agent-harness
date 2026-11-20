@@ -275,18 +275,24 @@ test("the retired role budget key is an unknown key for the manual scanner, not 
 
 // Golden: the declared default of every shipped role equals the independent approved-preset oracle (user-approved snapshot; tier-only-baseline.json stays immutable
 // and its delta to the oracle is pinned by role-registry.test.ts). Tool permissions are the baseline's plus the separately approved release-engineer write grant.
-test("candidate declared defaults equal the independent approved-preset oracle for all 20 baseline roles; the additive planner mirrors architecture-specialist (medium thinking)", () => {
+test("candidate declared defaults equal the independent approved-preset oracle for the 20 baseline roles; system-architect replaces architecture-specialist (economy at medium thinking); technical-writer is added", () => {
 	const golden = JSON.parse(fs.readFileSync(new URL("./fixtures/approved-user-presets.json", import.meta.url), "utf8")) as { roles: Array<{ name: string; defaultModelTier: string; tiers: Record<string, { model: string; fallbackModel: string[]; thinking: string }>; tools: string[] }> };
 	const registry = JSON.parse(fs.readFileSync(path.join(repo, "agent", "roles.json"), "utf8"));
 	const declared = (scanner as any).declaredDefaults(registry) as Map<string, { model: string; fallbackModel: string[]; thinking: string; tools: string }>;
 	assert.equal(golden.roles.length, 20);
 	assert.equal(declared.size, 21);
-	// User-approved 2026-11-05: planner runs at medium thinking; every other setting mirrors architecture-specialist.
-	assert.deepEqual(declared.get("planner"), { ...declared.get("architecture-specialist")!, thinking: "medium" }, "additive planner declares the architecture-specialist settings, at medium thinking");
+	// User-approved 2026-11-20: technical-writer is added after the frozen fixture; it declares its economy default.
+	const writer = declared.get("technical-writer")!;
+	assert.deepEqual({ model: writer.model, thinking: writer.thinking, tools: writer.tools }, { model: "anthropic/claude-haiku-5-5", thinking: "medium", tools: "read, grep, find, ls, bash, powershell, edit" }, "technical-writer default declaration");
+	// User-approved 2026-11-20: planner and architecture-specialist merged into system-architect; its default (economy) tier runs at
+	// medium thinking, the planner's level. The frozen fixture keeps the old name.
+	const renamed: Record<string, { name: string; thinking?: string }> = { "architecture-specialist": { name: "system-architect", thinking: "medium" }, "test-engineer": { name: "qa-engineer" }, reviewer: { name: "code-reviewer" }, debugger: { name: "diagnostic-engineer" } };
+	assert.ok(!declared.has("planner") && !declared.has("architecture-specialist"));
 	for (const role of golden.roles) {
-		const d = declared.get(role.name);
+		const d = declared.get(renamed[role.name]?.name ?? role.name);
 		assert.ok(d, role.name);
-		assert.deepEqual({ model: d.model, fallbackModel: d.fallbackModel, thinking: d.thinking, tools: d.tools.split(",").map((x) => x.trim()) }, { ...role.tiers[role.defaultModelTier], tools: role.tools }, role.name);
+		const def = role.tiers[role.defaultModelTier];
+		assert.deepEqual({ model: d.model, fallbackModel: d.fallbackModel, thinking: d.thinking, tools: d.tools.split(",").map((x) => x.trim()) }, { ...def, thinking: renamed[role.name]?.thinking ?? def.thinking, tools: role.tools }, role.name);
 	}
 });
 

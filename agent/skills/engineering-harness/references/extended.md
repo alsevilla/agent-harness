@@ -42,13 +42,13 @@ perform every engineering role itself.
 After choosing a phase, dispatch the dedicated role when that phase has one:
 
 - repository reconnaissance -> `scout` when needed;
-- unknown-cause defect -> `debugger` (mandatory);
+- unknown-cause defect -> `diagnostic-engineer` (mandatory);
 - non-trivial backend implementation -> `backend-worker`;
 - non-trivial frontend implementation -> `frontend-worker`;
 - non-trivial general implementation -> `general-worker`;
 - non-trivial infrastructure, GitOps or CI workflow file implementation -> `platform-worker`;
-- independent verification -> `test-engineer`;
-- adversarial review -> `reviewer`;
+- independent verification -> `qa-engineer`;
+- adversarial review -> `code-reviewer`;
 - unresolved specialist-domain decision -> the justified read-only specialist.
 
 The router and lifecycle skills define **how to route and what evidence is

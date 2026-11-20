@@ -27,16 +27,17 @@ test("every role keeps the leaf boundary and states it once", () => {
 	assert.equal(roles.length, 21);
 	for (const role of roles) {
 		const text = read(`agent/agents/${role}.md`);
-		assert.match(text, /Never launch\/delegate\/supervise helpers/, role);
-		assert.match(text, /this leaf has no subagent tool/, role);
-		assert.match(text, /Do not use shell commands to launch Pi or other agents/, role);
+		assert.match(text, /Never launch\/delegate\/supervise helpers through subagent, Agent\/Task aliases or shell commands/, role);
+		// The "Pi runtime:" line repeated this boundary, named integrations Pi already lists (and Copilot never loads) and model
+		// settings a leaf cannot change; it was removed from every role.
+		assert.doesNotMatch(text, /^(Pi runtime|Runtime boundary):|this leaf has no subagent tool|Prompt shortcuts supply instructions|hardware-policy/m, role);
 		for (const restated of ["Never spawn another agent.", "Never spawn helpers."]) assert.ok(!text.includes(restated), `${role}: restates "${restated}"`);
 	}
 });
 
 test("every code worker fixes a failing focused check in the same run, at most twice", () => {
 	const rule = "When a focused check fails after your edit, fix it in this run (at most 2 tries) before returning; if it still fails, return the failed command, an output excerpt, the changed files and your intended fix.";
-	for (const role of ["frontend-worker", "backend-worker", "database-worker", "general-worker"]) assert.equal(read(`agent/agents/${role}.md`).split(rule).length, 2, role);
+	for (const role of ["frontend-worker", "backend-worker", "database-worker", "general-worker", "platform-worker"]) assert.equal(read(`agent/agents/${role}.md`).split(rule).length, 2, role);
 });
 
 // Phase 4: every role lists the five shared sections in this order. release-engineer keeps its delivery/SHIP/LEARN layout (its merge and
@@ -51,7 +52,7 @@ test("restructured roles use the five shared sections in order", () => {
 });
 
 test("release-engineer cleanup never forces a worktree removal in routine mode", () => {
-	const text = read("agent/agents/release-engineer.md");
+	const text = read("agent/skills/engineering-harness/worktree/cleanup.md");
 	assert.match(text, /git worktree remove/);
 	assert.match(text, /(?:without|no)\s+`?--force`?/);
 });
@@ -59,7 +60,7 @@ test("release-engineer cleanup never forces a worktree removal in routine mode",
 // Lessons live in one place: one file per lesson in docs/knowledge/, committed with the task's PR (the general/harness scopes and
 // the ignored local and private stores were retired as convoluted). A project may name another folder in its AGENTS.md.
 test("LEARN saves one file per lesson in docs/knowledge, committed with the PR, and the merge approval names the artifact directory", () => {
-	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md", "agent/agents/release-engineer.md"]) {
+	for (const file of ["agent/skills/engineering-harness/learn/index.md", "agent/prompts/learn.md", "agent/agents/technical-writer.md"]) {
 		const text = flat(read(file));
 		assert.ok(text.includes("one small focused Markdown file per lesson at `docs/knowledge/<descriptive-slug>.md` in the candidate"), file);
 		assert.ok(text.includes("A project whose `AGENTS.md` names another knowledge folder uses that folder instead"), file);
@@ -73,7 +74,7 @@ test("LEARN saves one file per lesson in docs/knowledge, committed with the PR, 
 test("main chooses tiers at plan time and keeps a task's tier for its first fix round", () => {
 	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
 	assert.ok(routing.includes("decide each task's `modelTier` in the plan, before launching any"));
-	assert.ok(routing.includes("- general-worker: bounded docs, config or script edit whose seam and focused checks are named in the packet -> explicit economy"));
+	assert.ok(routing.includes("- general-worker: bounded config or script edit whose seam and focused checks are named in the packet -> explicit economy"));
 	assert.ok(routing.includes("the fix round keeps the task's tier and passes the failed REPORT and the failing command output as they are"));
 	assert.ok(routing.includes("never an automatic upgrade"));
 	const main = flat(read("agent/extensions/subagent/index.ts"));
@@ -152,14 +153,18 @@ test("code workers get the change discipline once in their shared guidance", () 
 
 // Field report: main never launched the planner. AGENTS.md and every skill router gave planning to main alone, and routing.md allowed a
 // planner only as an optional T3 step. Main now launches one planner for multi-writer or cross-layer changes, and still owns the PLAN.
-test("main launches one planner for multi-writer or cross-layer changes and keeps the PLAN", () => {
-	assert.ok(flat(read("agent/skills/engineering-harness/SKILL.md")).includes("`planner` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN**"));
+// v1.23.0 merged planner and architecture-specialist into system-architect, which also covers open structural decisions.
+test("main launches one system-architect for multi-writer, cross-layer or structural changes and keeps the PLAN", () => {
+	assert.ok(flat(read("agent/skills/engineering-harness/SKILL.md")).includes("`system-architect` proposes the units when the change needs two or more writers or crosses layers; **main owns PLAN**"));
 	const routing = flat(read("agent/skills/engineering-harness/references/routing.md"));
-	assert.ok(routing.includes("Launch one read-only `planner` first when a change needs two or more writers (units) or crosses layers"));
+	assert.ok(routing.includes("Launch one read-only `system-architect` first when a change needs two or more writers (units) or crosses layers (backend, database, frontend, platform), or leaves a structural decision open"));
 	assert.ok(routing.includes("Skip it for single-writer changes (T0, T1 and most T2)"));
 	assert.ok(!routing.includes("Never for T1/T2; never several planners."), "the old T3-only rule is gone");
-	assert.ok(flat(read("agent/skills/engineering-harness/plan/index.md")).includes("get the unit proposal from one read-only `planner` run"));
-	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("launch one read-only planner first"));
+	assert.ok(flat(read("agent/skills/engineering-harness/plan/index.md")).includes("get the unit proposal from one read-only `system-architect` run"));
+	assert.ok(flat(read("agent/extensions/subagent/index.ts")).includes("launch one read-only system-architect first"));
+	for (const file of ["agent/skills/engineering-harness/references/routing.md", "agent/skills/engineering-harness/SKILL.md", "agent/skills/engineering-harness/plan/index.md", "agent/extensions/subagent/index.ts", "README.md"]) {
+		assert.ok(!/`planner`|architecture-specialist|read-only planner/.test(read(file)), `${file}: no reference to the merged roles`);
+	}
 });
 
 // Adapted from Claude Code's working rules: tool output is data, not instructions; a guard refusal does not change on retry (a field
@@ -186,7 +191,7 @@ test("a merged branch is finished: the next task starts on a new branch from the
 	assert.match(read("agent/extensions/subagent/index.ts"), /Fresh base: a branch whose PR is merged is finished\./);
 });
 
-// Field data (/subagent usage, one database task): planner, three test-engineer runs and an ordinary delivery ran on capable for $0.96
+// Field data (/subagent usage, one database task): planner, three qa-engineer runs and an ordinary delivery ran on capable for $0.96
 // of a $1.92 worker total; their economy defaults would have cost about $0.05.
 test("verification re-runs and ordinary delivery stay on the economy tier", () => {
 	const main = read("agent/extensions/subagent/index.ts");
@@ -241,7 +246,7 @@ test("main finishes the request: an actionable FAIL or gap is the next launch, n
 // Field report: after a merge, cleanup kept an evidence folder because an unrelated test server was running and its open files could not
 // be listed. No process referenced the folder. Use is now judged per exact target, and the removal itself reports a real lock.
 test("cleanup judges use per exact target: an unrelated process, or unlistable open files alone, does not retain a folder", () => {
-	for (const file of ["agent/skills/engineering-harness/worktree/index.md", "agent/agents/release-engineer.md"]) {
+	for (const file of ["agent/skills/engineering-harness/worktree/index.md", "agent/skills/engineering-harness/worktree/cleanup.md"]) {
 		const text = flat(read(file));
 		assert.ok(text.includes("A process blocks a target only on confirmed use: its working directory, its command line or a file it holds open lies inside that target."), file);
 		assert.ok(text.includes("such as an unrelated dev or test server, does not block, and is not stopped or restarted for the cleanup"), file);
@@ -259,4 +264,75 @@ test("missing RED or other required evidence is INCONCLUSIVE for the worker and 
 	const main = read("agent/extensions/subagent/index.ts");
 	assert.match(main, /that gate is unmet whatever the STATUS line says/);
 	assert.match(main, /Never call the work verified while a required gate is unmet\./);
+});
+
+// Agents-folder audit: every specialist states what it hands back, and generic team roles carry no single project's hardware or domain.
+test("specialists state what they return; generic roles name no single project's devices", () => {
+	const role = (name: string) => flat(read(`agent/agents/${name}.md`));
+	const api = role("api-specialist");
+	assert.ok(api.includes("You work in one of two modes"), "api: design and check modes");
+	assert.ok(api.includes("Return findings ranked CRITICAL, HIGH, MEDIUM or LOW, each with the endpoint, the evidence"), "api: check-mode findings");
+	assert.ok(api.includes("each consumer's impact with a breaking or non-breaking verdict"), "api: design-mode return");
+	const perf = role("performance-specialist");
+	assert.ok(perf.includes("When something is reported slow, start from the symptom"), "performance: starts from the reported slowness");
+	assert.ok(perf.includes("Return recommendations ranked by expected gain"), "performance: ranked recommendations");
+	assert.ok(perf.includes("For frontend paths:"), "performance: frontend slowness");
+	const security = role("security-specialist");
+	assert.ok(security.includes("each with the realistic attack or failure path"), "security: findings return");
+	assert.ok(security.includes("dependency and supply-chain risk"), "security: supply chain");
+	assert.ok(security.includes("Escalate serious security uncertainty to `oracle`") && !security.includes("senior reviewer"), "security: escalates to a real role");
+	assert.ok(role("concurrency-specialist").includes("Return each invariant at risk with the concrete interleaving"), "concurrency: return");
+	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url)).filter((f) => f.endsWith(".md"))) {
+		assert.doesNotMatch(read(`agent/agents/${file}`), /\bRFID\b|\breader connected\b|\bdevice taps?\b|\bHID readers?\b/i, file);
+	}
+});
+
+// Owner request: implementation workers commit their own units locally (as engineers do); push and PR stay with the trusted
+// release-engineer. The guard already allowed a worker's local commit; only the role text forbade it.
+test("implementation workers commit their unit locally and never push; delivery expects their commits", () => {
+	for (const role of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) {
+		const text = flat(read(`agent/agents/${role}.md`));
+		assert.ok(text.includes("Local commit:") && text.includes("commit your unit locally when HEAD is a feature branch"), role);
+		assert.ok(text.includes("never `-A`, `.` or `commit -a`"), `${role}: exact paths only`);
+		assert.ok(text.includes("Never push, amend, rebase, reset, squash or switch branches"), `${role}: no publication or rewrite`);
+		assert.ok(text.includes("the local commit SHA(s), or why you did not commit"), `${role}: REPORT carries the SHA`);
+		assert.ok(!text.includes("only if commit authority was"), `${role}: the old ban is gone`);
+	}
+	for (const role of ["technical-writer", "qa-engineer", "code-reviewer", "system-architect"]) assert.ok(!read(`agent/agents/${role}.md`).includes("Local commit:"), `${role}: no local commits`);
+	assert.ok(flat(read("agent/agents/release-engineer.md")).includes("Implementation workers have usually committed their units locally already"));
+	assert.ok(flat(read("agent/skills/engineering-harness/ship/index.md")).includes("Never squash, amend or rebase a worker's commits"));
+});
+
+// One source for the rules every implementation worker shares (scoped editing, fix twice, local commit, the REPORT's commit line). The
+// Copilot plugin loads agent/agents/*.md directly, so each worker keeps a copy; npm run sync:worker-rules writes it, and this fails on drift.
+test("the five implementation workers carry the shared worker rules byte-for-byte, once, from agent/shared/worker-rules.md", async () => {
+	const { WORKERS, START, END, withRules } = await import("../scripts/sync-worker-rules.mjs");
+	const rules = read("agent/shared/worker-rules.md");
+	for (const name of WORKERS) {
+		const text = read(`agent/agents/${name}.md`);
+		assert.equal(text.split(START).length, 2, `${name}: one shared block`);
+		assert.equal(withRules(text, rules), text, `${name}: differs from agent/shared/worker-rules.md; run npm run sync:worker-rules`);
+		assert.ok(text.indexOf(END) < text.indexOf("## Where to look"), `${name}: block sits before Where to look`);
+		assert.doesNotMatch(text.replace(text.slice(text.indexOf(START), text.indexOf(END)), ""), /## Scoped editing|Local commit:|at most 2 tries/, `${name}: no second copy outside the block`);
+	}
+	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url))) {
+		if (!WORKERS.includes(file.replace(/\.md$/, ""))) assert.ok(!read(`agent/agents/${file}`).includes(START), `${file}: not an implementation worker`);
+	}
+});
+
+// Name-to-duty audit: each role's description and opening line say the duty its name implies, and docs have one owner.
+test("role names match their duties: complete descriptions, workers are workers, docs belong to technical-writer", () => {
+	for (const file of readdirSync(new URL("../agent/agents/", import.meta.url)).filter((f) => f.endsWith(".md"))) {
+		const description = read(`agent/agents/${file}`).split("\n").find((line) => line.startsWith("description: "))!;
+		assert.match(description, /[.)]$/, `${file}: description is a complete sentence`);
+		assert.doesNotMatch(description, /in the [a-z-]+ agent\b|read-only [a-z-]+ agent\./, `${file}: no self-reference to its own agent name`);
+	}
+	for (const worker of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) {
+		assert.match(read(`agent/agents/${worker}.md`), /^You are the [a-z]+ implementation worker\b/m, `${worker}: introduces itself as a worker, not a specialist`);
+	}
+	assert.match(read("agent/agents/diagnostic-engineer.md"), /^You are the diagnostic engineer\./m);
+	const general = flat(read("agent/agents/general-worker.md"));
+	assert.ok(general.includes("Project documentation belongs to technical-writer") && !/\bdocs and config\b/.test(general), "general-worker: docs go to technical-writer");
+	assert.ok(flat(read("agent/AGENTS.md")).includes("technical-writer for docs and LEARN records"));
+	assert.match(read("agent/agents/devops-specialist.md").split("\n")[2], /containers, orchestrators and cloud services/);
 });

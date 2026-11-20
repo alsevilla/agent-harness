@@ -13,7 +13,7 @@ actual evidence/checks and outcomes, candidate identity where relevant, disposit
 confidence and unresolved limits. No unsupported completion or downstream claims.
 
 ## REVIEW procedure
-This procedure belongs to `reviewer`.
+This procedure belongs to `code-reviewer`.
 
 Review only the identified candidate and supplied/accessible evidence.
 Prioritize correctness, regressions, safety, scope, data integrity, concurrency,

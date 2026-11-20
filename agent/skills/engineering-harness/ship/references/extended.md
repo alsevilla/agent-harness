@@ -476,7 +476,7 @@ Continuity cannot be established.
 
 Ship must establish that the exact candidate artifact is the artifact whose Verify and Review gates passed.
 
-A user's statement that Verify passed or Reviewer approved may establish workflow intent, but it does not by itself prove artifact identity.
+A user's statement that Verify passed or Code Reviewer approved may establish workflow intent, but it does not by itself prove artifact identity.
 
 Acceptable continuity evidence includes one or more of:
 
@@ -1276,9 +1276,9 @@ Run additional commands when they answer shipping-specific questions such as:
 
 ---
 
-# Reviewer at Ship
+# Code Reviewer at Ship
 
-Do not automatically invoke Reviewer again.
+Do not automatically invoke Code Reviewer again.
 
 Review is already a gate.
 
@@ -1293,9 +1293,9 @@ A fresh Review used for continuity must evaluate the exact candidate artifact th
 
 ---
 
-# Test Engineer at Ship
+# QA Engineer at Ship
 
-Do not automatically invoke Test Engineer.
+Do not automatically invoke QA Engineer.
 
 Use Verify for behavioral evidence.
 

@@ -275,8 +275,8 @@ test("parallel: an exit 0 length child fails the batch as INCOMPLETE and keeps i
 	assert.match(result.content[0].text, /### \[cut-off\] INCOMPLETE \(length\)\n\npartial CHECKS: pending/);
 });
 
-test("shape T2: debugger PASS hands its report to the worker; a non-PASS debugger stops before the worker launches", async () => {
-	const root = setupRoles({ "debugger": "You are debugger.", "backend-worker": "You are backend-worker." });
+test("shape T2: diagnostic-engineer PASS hands its report to the worker; a non-PASS diagnostic-engineer stops before the worker launches", async () => {
+	const root = setupRoles({ "diagnostic-engineer": "You are diagnostic-engineer.", "backend-worker": "You are backend-worker." });
 	const shape = { name: "T2", worker: "backend-worker", packets: { debugger: "find cause", worker: "fix it" } };
 	spawnPlan = (task) => ({ events: [reply([task.includes("find cause") ? "STATUS: PASS cause is X" : "STATUS: PASS fixed"])], exitCode: 0 });
 	const ok = await tool!.execute("call-shape-ok", { shape, background: false }, undefined, undefined, context(root));
@@ -288,11 +288,11 @@ test("shape T2: debugger PASS hands its report to the worker; a non-PASS debugge
 	spawnPlan = () => ({ events: [reply(["STATUS: BLOCKED cannot reproduce"])], exitCode: 0 });
 	const stopped = await tool!.execute("call-shape-stop", { shape, background: false }, undefined, undefined, context(root));
 	assert.equal(stopped.isError, true);
-	assert.match(stopped.content[0].text, /^Shape T2 stopped after step 1 \(debugger\): STATUS BLOCKED cannot reproduce; later steps did not run/);
+	assert.match(stopped.content[0].text, /^Shape T2 stopped after step 1 \(diagnostic-engineer\): STATUS BLOCKED cannot reproduce; later steps did not run/);
 	assert.equal(spawnLog.length, 1);
 
 	spawnLog = [];
-	const both = await tool!.execute("call-shape-both", { shape, chain: [{ agent: "debugger", task: "x" }], background: false }, undefined, undefined, context(root));
+	const both = await tool!.execute("call-shape-both", { shape, chain: [{ agent: "diagnostic-engineer", task: "x" }], background: false }, undefined, undefined, context(root));
 	assert.equal(both.isError, true);
 	assert.match(both.content[0].text, /shape already is a chain/);
 	assert.equal(spawnLog.length, 0);
@@ -404,12 +404,12 @@ test("explicit result reports a failed child as FAILED/STOPPED with its error an
 	const job = runtime.start(async () => ({
 		isError: true,
 		content: [{ type: "text", text: "Agent error: 503" }],
-		details: { results: [{ agent: "debugger", exitCode: 1, stopReason: "error", errorMessage: "503 provider unavailable", messages: [] }] },
+		details: { results: [{ agent: "diagnostic-engineer", exitCode: 1, stopReason: "error", errorMessage: "503 provider unavailable", messages: [] }] },
 	}));
 	await waitFor(() => pi.sent.length === 1);
 	const result = runtime.result(job.id);
 	assert.equal(result.isError, true);
-	assert.match(result.content[0].text, /### debugger \u2014 FAILED\/STOPPED\nERROR: 503 provider unavailable/);
+	assert.match(result.content[0].text, /### diagnostic-engineer \u2014 FAILED\/STOPPED\nERROR: 503 provider unavailable/);
 });
 
 test("launch errors and running jobs keep their existing explicit result shape", async () => {
@@ -574,8 +574,8 @@ test("foreground single: a normal report that quotes invoke markup in a fence is
 test("background list labels a requested-only worker and never presents the request as the observed model", async () => {
 	const host = fakePi();
 	const records = new Map<string, any>([
-		["1:1", { id: "1:1", name: "reviewer", model: "anthropic/asked", state: "running", activity: "x" }],
-		["1:2", { id: "1:2", name: "reviewer", model: "anthropic/asked", reportedModel: "partner/seen", observed: [{ provider: "partner", model: "seen" }], state: "running", activity: "x" }],
+		["1:1", { id: "1:1", name: "code-reviewer", model: "anthropic/asked", state: "running", activity: "x" }],
+		["1:2", { id: "1:2", name: "code-reviewer", model: "anthropic/asked", reportedModel: "partner/seen", observed: [{ provider: "partner", model: "seen" }], state: "running", activity: "x" }],
 	]);
 	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
 	const job = runtime.start(() => new Promise(() => {}));
@@ -597,8 +597,8 @@ test("background list: a served row beside an unknown or partial row is never se
 	const host = fakePi();
 	const served = { provider: "p", model: "asked", responseModel: "snap" };
 	const records = new Map<string, any>([
-		["1:1", { id: "1:1", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [served, {}], state: "running", activity: "x" }],
-		["1:2", { id: "1:2", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ model: "bare" }, served], state: "running", activity: "x" }],
+		["1:1", { id: "1:1", name: "code-reviewer", model: "p/asked", reportedModel: "p/snap", observed: [served, {}], state: "running", activity: "x" }],
+		["1:2", { id: "1:2", name: "code-reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ model: "bare" }, served], state: "running", activity: "x" }],
 	]);
 	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
 	const job = runtime.start(() => new Promise(() => {}));
@@ -612,7 +612,7 @@ test("background list: a served row beside an unknown or partial row is never se
 test("background list model is the effective served id and only a responseModel report counts as served-reported", async () => {
 	const host = fakePi();
 	const records = new Map<string, any>([
-		["1:1", { id: "1:1", name: "reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ provider: "p", model: "asked", responseModel: "snap" }], state: "running", activity: "x" }],
+		["1:1", { id: "1:1", name: "code-reviewer", model: "p/asked", reportedModel: "p/snap", observed: [{ provider: "p", model: "asked", responseModel: "snap" }], state: "running", activity: "x" }],
 	]);
 	const runtime = new BackgroundWorkers(host as never, { store: { records, changed() {} } } as never);
 	const job = runtime.start(() => new Promise(() => {}));

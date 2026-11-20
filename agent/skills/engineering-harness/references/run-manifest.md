@@ -133,9 +133,9 @@ Reject CSV exports whose header row is missing the `record_id` column. Acceptanc
 | Stage | Job / task | Role | Status | Check result | Evidence path |
 |---|---|---|---|---|---|
 | S1 | header check in exporter | general-worker | PASS | unit test: 1 passed (synthetic) | C:/synthetic/worktrees/_evidence/sample/S1.txt |
-| S2 | independent verify | test-engineer | FAIL | edge case: header with BOM is rejected (synthetic) | C:/synthetic/worktrees/_evidence/sample/S2.txt |
+| S2 | independent verify | qa-engineer | FAIL | edge case: header with BOM is rejected (synthetic) | C:/synthetic/worktrees/_evidence/sample/S2.txt |
 | S3 | repair BOM handling | general-worker | PASS | unit test: 2 passed (synthetic) | C:/synthetic/worktrees/_evidence/sample/S3.txt |
-| S4 | re-verify after repair | test-engineer | LAUNCHED | receipt only; no result yet | none |
+| S4 | re-verify after repair | qa-engineer | LAUNCHED | receipt only; no result yet | none |
 
 ## Open items
 - S4 LAUNCHED: no result recovered. Aggregate is not PASS until its real result is read.

@@ -1,4 +1,4 @@
-// Field report (sms-live-test): a read-only test-engineer's hardware smoke test started the backend from its _evidence folder, waited,
+// Field report (sms-live-test): a read-only qa-engineer's hardware smoke test started the backend from its _evidence folder, waited,
 // then stopped it; the stop was refused as PROC_KILL although it ended only the process the same command had started. A stop is allowed
 // when every process it targets is owned by the command (Start-Process -PassThru or $! held in a variable assigned once, or a Bash job
 // spec); stopping by name, by a literal PID or through any other variable stays PROC_KILL. .Kill() is now classified at all.

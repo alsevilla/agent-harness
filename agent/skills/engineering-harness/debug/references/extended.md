@@ -1086,9 +1086,9 @@ This prevents thrashing.
 
 ---
 
-# Debugger Agent
+# Diagnostic engineer
 
-Use `debugger` when:
+Use `diagnostic-engineer` when:
 
 - reproduction is non-trivial;
 - multiple layers are involved;
@@ -1117,9 +1117,9 @@ Ask:
 
 ---
 
-# Debugger Agent Independence
+# Independent diagnosis
 
-The debugger agent's report is evidence.
+The diagnostic engineer's report is evidence.
 
 Do not blindly accept it.
 
@@ -1181,18 +1181,18 @@ Do not turn Debug into architecture design merely because specialists exist.
 
 ---
 
-# Reviewer During Debug
+# Code Reviewer During Debug
 
-Reviewer is normally unnecessary during diagnosis.
+Code Reviewer is normally unnecessary during diagnosis.
 
-Use Reviewer when:
+Use Code Reviewer when:
 
 - root-cause conclusion has broad architectural consequences;
 - diagnosis contradicts previous review;
 - proposed correction crosses important boundaries;
 - high-risk reasoning needs independent challenge.
 
-Reviewer remains read-only.
+Code Reviewer remains read-only.
 
 ---
 

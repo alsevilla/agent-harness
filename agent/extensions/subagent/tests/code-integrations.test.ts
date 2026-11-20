@@ -131,7 +131,7 @@ function withAgentDir<T>(present: Present, run: (dir: string, qmdExtension?: str
 test("reviewer launches with Ponytail absent: normal reviewer integrations and no Ponytail grant", () => {
   withAgentDir({}, () => {
     const args: string[] = [];
-    assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
+    assert.equal(configureCodeIntegrations(args, role("code-reviewer")), true);
     assert.ok(!args.some(arg => /ponytail/i.test(arg)), args.join(" "));
     assert.equal(args.filter(arg => arg === "--extension").length, 1, "the qmd extension only; pi-serena and graphify-pi are never loaded");
     assert.ok(!args.some(arg => /graphify-pi/i.test(arg)), args.join(" "));
@@ -142,7 +142,7 @@ test("reviewer launches with Ponytail absent: normal reviewer integrations and n
 test("reviewer with Ponytail extension and review skill loads both for supplemental guidance", () => {
   withAgentDir({ ponytailExtension: true, ponytailSkill: true }, dir => {
     const args: string[] = [];
-    assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
+    assert.equal(configureCodeIntegrations(args, role("code-reviewer")), true);
     for (const [flag, file] of [["--extension", ponytailExtensionPath(dir)], ["--skill", ponytailSkillPath(dir)]]) {
       const index = args.indexOf(file);
       assert.ok(index > 0 && args[index - 1] === flag, `${flag} ${file} missing`);
@@ -152,7 +152,7 @@ test("reviewer with Ponytail extension and review skill loads both for supplemen
 test("reviewer with Ponytail extension but no review skill still launches with the extension", () => {
   withAgentDir({ ponytailExtension: true }, dir => {
     const args: string[] = [];
-    assert.equal(configureCodeIntegrations(args, role("reviewer")), true);
+    assert.equal(configureCodeIntegrations(args, role("code-reviewer")), true);
     assert.ok(args.includes(ponytailExtensionPath(dir)));
     assert.ok(!args.includes(ponytailSkillPath(dir)));
   });
@@ -165,7 +165,7 @@ for (const name of ["general-worker", "scout"]) {
   });
 }
 test("reviewer with the serena skill absent launches with QMD and Graphify", () => {
-  const run = launch("reviewer", { ponytailExtension: true, ponytailSkill: true, serena: false });
+  const run = launch("code-reviewer", { ponytailExtension: true, ponytailSkill: true, serena: false });
   assert.equal(run.enabled, true);
   assert.equal(loaded.serena(run), false);
   assert.equal(loaded.qmd(run), true);
@@ -174,7 +174,7 @@ test("reviewer with the serena skill absent launches with QMD and Graphify", () 
 });
 test("reviewer keeps read-only tools and excludes edit, write and Serena mutations with Ponytail absent", () => {
   withAgentDir({}, () => {
-    const tools = effectiveTools(role("reviewer"));
+    const tools = effectiveTools(role("code-reviewer"));
     assert.ok(!tools.includes("edit") && !tools.includes("write"));
     for (const tool of unsafeMutations) assert.ok(!tools.includes(tool), tool);
     for (const tool of config.readOnlyTools) assert.ok(tools.includes(tool), `read-only integration lost: ${tool}`);
@@ -189,7 +189,7 @@ test("code-leaf guidance makes Ponytail conditional on the loaded extension", ()
   assert.equal(unloaded.includes("When Ponytail's native extension is loaded"), false);
 });
 test("reviewer keeps its verdict contract; Ponytail review skill is optional supplemental guidance", () => {
-  const content = fs.readFileSync(new URL("../../../agents/reviewer.md", import.meta.url), "utf8");
+  const content = fs.readFileSync(new URL("../../../agents/code-reviewer.md", import.meta.url), "utf8");
   for (const verdict of ["APPROVE", "APPROVE WITH NOTES", "REQUEST CHANGES", "ESCALATE"]) assert.match(content, new RegExp(`^${verdict}$`, "m"));
   assert.match(content, /ponytail-review/);
   assert.match(content, /optional/i);
@@ -227,8 +227,8 @@ test("general-worker with QMD, serena and Graphify all absent: Ponytail still lo
   assert.deepEqual(sorted(run.tools), sorted(agent.tools));
 });
 test("reviewer with Ponytail absent and all three optional integrations absent: reviewer tools only", () => {
-  const agent = role("reviewer");
-  const run = launch("reviewer", { ponytailExtension: false, ponytailSkill: false, qmd: false, serena: false, graphifyExtension: false, graphifySkill: false });
+  const agent = role("code-reviewer");
+  const run = launch("code-reviewer", { ponytailExtension: false, ponytailSkill: false, qmd: false, serena: false, graphifyExtension: false, graphifySkill: false });
   assert.equal(run.enabled, true);
   assert.deepEqual(run.extensions, []);
   assert.deepEqual(run.skills, []);
@@ -269,7 +269,7 @@ test("unavailable integrations are named with fallback guidance; present ones ar
     assert.doesNotMatch(note, /name the skipped integration/);
   });
   withAgentDir({ qmd: false }, (_dir, qmdExtension) => assert.match(unavailableIntegrationGuidance("general-worker", qmdExtension), /QMD/));
-  withAgentDir({ ponytailExtension: false, ponytailSkill: false }, () => assert.match(unavailableIntegrationGuidance("reviewer"), /Ponytail.*ponytail-review/s));
+  withAgentDir({ ponytailExtension: false, ponytailSkill: false }, () => assert.match(unavailableIntegrationGuidance("code-reviewer"), /Ponytail.*ponytail-review/s));
   withAgentDir({ ponytailExtension: true, serena: true, qmd: true, graphifyExtension: true, graphifySkill: true }, () => assert.equal(unavailableIntegrationGuidance("general-worker"), ""));
 });
 test("shared guidance: a failing integration is reported once, not retried, and presence is not health", () => {
@@ -396,14 +396,14 @@ test("the Graphify skill loads only for a launch folder with a graph", async () 
   withAgentDir({}, (_dir, qmd, serena) => {
     const graphSkill = (args: string[]) => args.some(arg => /[\\/]graphify[\\/]SKILL\.md$/.test(arg));
     const none: string[] = [];
-    configureCodeIntegrations(none, role("reviewer"), [], qmd, serena, bare);
+    configureCodeIntegrations(none, role("code-reviewer"), [], qmd, serena, bare);
     assert.equal(graphSkill(none), false, none.join(" "));
     assert.deepEqual(launchedIntegrations(none), ["serena", "qmd"]);
     const some: string[] = [];
-    configureCodeIntegrations(some, role("reviewer"), [], qmd, serena, withGraph);
+    configureCodeIntegrations(some, role("code-reviewer"), [], qmd, serena, withGraph);
     assert.equal(graphSkill(some), true, some.join(" "));
     const unspecified: string[] = [];
-    configureCodeIntegrations(unspecified, role("reviewer"), [], qmd, serena);
+    configureCodeIntegrations(unspecified, role("code-reviewer"), [], qmd, serena);
     assert.equal(graphSkill(unspecified), true, "without a launch folder the skill loads as before");
   });
 });
@@ -422,7 +422,7 @@ test("saved lessons: a worker's prompt lists the project's lesson titles, bounde
   assert.match(text, /Before you diagnose a failure, choose an approach or repeat a step in an area one of these titles names, read that file first/);
   assert.match(text, /- Modem needs a 2 s pause after AT\+CMGS \(modem-pause\.md\)\n- Backups lock the WAL \(backup-wal\.md\)\n$/);
   assert.doesNotMatch(text, /secret|other\.md/, "only index lines naming a file in the folder");
-  const prompt = assembleChildSystemPrompt({ name: "debugger", systemPrompt: "ROLE" }, { cwd: join(project, "docs"), codeIntegrationsEnabled: false } as any);
+  const prompt = assembleChildSystemPrompt({ name: "diagnostic-engineer", systemPrompt: "ROLE" }, { cwd: join(project, "docs"), codeIntegrationsEnabled: false } as any);
   assert.ok(prompt.includes("- Backups lock the WAL (backup-wal.md)"), "every role, found from a subfolder of the candidate");
   fs.writeFileSync(join(project, "docs", "knowledge", "README.md"), Array.from({ length: 60 }, (_, i) => `- [Lesson ${i}](l-${i}.md)`).join("\n"));
   const many = savedLessonsGuidance(project);

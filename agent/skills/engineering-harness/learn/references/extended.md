@@ -86,7 +86,7 @@ Preserve knowledge, not history.
 
 Bad project memory:
 
-> We ran the tests, then the debugger found a problem, then the
+> We ran the tests, then the diagnostic-engineer found a problem, then the
 > reviewer looked at three files.
 
 Useful project memory:
@@ -175,7 +175,7 @@ Examples of temporary active work:
 
 Bad:
 
-> Fix the flaky scan test, delete the debugger worktree, rerun Verify,
+> Fix the flaky scan test, delete the diagnostic-engineer worktree, rerun Verify,
 > then Review.
 
 Bad:
@@ -664,7 +664,7 @@ A reusable preferred implementation/testing/operational approach.
 
 Examples:
 
--   use independent Test Engineer after worker TDD;
+-   use independent QA Engineer after worker TDD;
 -   use unique build directories for alternate worktrees.
 
 ## PITFALL
@@ -1746,7 +1746,7 @@ Learn should preserve successful patterns too.
 Examples:
 
 -   deterministic pure rule engine boundaries;
--   independent Reviewer checking authoritative sources;
+-   independent Code Reviewer checking authoritative sources;
 -   disposable counterfactual experiments during Debug.
 
 Do not make project memory exclusively a list of failures.
@@ -1924,7 +1924,7 @@ Before writing, internally or visibly construct:
   baseline/RED                                                    EVIDENCE NOT
   worktrees                                                       RETRIEVED
 
-  temp debugger    ---                  ---       current run     ESTABLISHED   no            yes         ---         DISCARD
+  temp diagnostic-engineer    ---                  ---       current run     ESTABLISHED   no            yes         ---         DISCARD
   worktree
 
   unresolved       PROCESS/constraint   PROJECT   confirmed       ESTABLISHED   maybe         partially   maybe       REPORT ONLY
@@ -2007,7 +2007,7 @@ Learn cannot turn an observation into policy.
 
 Observation:
 
-> Reviewer found authoritative docs were missed.
+> Code Reviewer found authoritative docs were missed.
 
 Valid lesson:
 
@@ -2055,11 +2055,11 @@ Do not summon agents merely to approve memory wording.
 
 ------------------------------------------------------------------------
 
-# Reviewer Use
+# Code Reviewer Use
 
-Reviewer is not required for routine Learn.
+Code Reviewer is not required for routine Learn.
 
-Consider Reviewer when:
+Consider Code Reviewer when:
 
 -   a high-impact architectural decision is being recorded;
 -   multiple authoritative sources appear inconsistent;

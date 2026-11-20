@@ -236,17 +236,17 @@ test("extractFinalText skips an empty or whitespace-only latest assistant block 
 });
 
 test("retained diagnostics never present a request as the observed identity and keep partial, mixed and per-attempt provenance", () => {
-	const base = { agent: "reviewer", modelTier: "capable", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))] };
+	const base = { agent: "code-reviewer", modelTier: "capable", exitCode: 0, stopReason: "stop", messages: [assistant(text("report"))] };
 	const heading = (entry: object) => retainedEntryBlock({ ...base, ...entry }).split("\n")[0];
-	assert.equal(heading({ model: "partner/observed", requestedModel: "anthropic/asked", modelSource: "observed", observed: [{ provider: "partner", model: "observed" }] }), "### reviewer · tier: capable · model: partner/observed (observed; MISMATCH, requested anthropic/asked; served UNVERIFIED) — completed");
-	assert.equal(heading({ model: "p/m", requestedModel: "p/m", modelSource: "observed", observed: [{ provider: "p", model: "m" }] }), "### reviewer · tier: capable · model: p/m (observed; served UNVERIFIED) — completed");
-	assert.equal(heading({ model: "p/m", requestedModel: "p/m", modelSource: "requested", observed: [{ model: "m" }] }), '### reviewer · tier: capable · model: p/m (requested-only; partial report "m" UNVERIFIED) — completed');
-	assert.equal(heading({ model: "b/2", requestedModel: "a/1", modelSource: "observed", observed: [{ provider: "a", model: "1" }, { provider: "b", model: "2" }] }), "### reviewer · tier: capable · model: a/1 + b/2 (observed, MIXED; MISMATCH, requested a/1; served UNVERIFIED) — completed");
+	assert.equal(heading({ model: "partner/observed", requestedModel: "anthropic/asked", modelSource: "observed", observed: [{ provider: "partner", model: "observed" }] }), "### code-reviewer · tier: capable · model: partner/observed (observed; MISMATCH, requested anthropic/asked; served UNVERIFIED) — completed");
+	assert.equal(heading({ model: "p/m", requestedModel: "p/m", modelSource: "observed", observed: [{ provider: "p", model: "m" }] }), "### code-reviewer · tier: capable · model: p/m (observed; served UNVERIFIED) — completed");
+	assert.equal(heading({ model: "p/m", requestedModel: "p/m", modelSource: "requested", observed: [{ model: "m" }] }), '### code-reviewer · tier: capable · model: p/m (requested-only; partial report "m" UNVERIFIED) — completed');
+	assert.equal(heading({ model: "b/2", requestedModel: "a/1", modelSource: "observed", observed: [{ provider: "a", model: "1" }, { provider: "b", model: "2" }] }), "### code-reviewer · tier: capable · model: a/1 + b/2 (observed, MIXED; MISMATCH, requested a/1; served UNVERIFIED) — completed");
 	assert.match(heading({ model: "p/m", requestedModel: "p/m", modelSource: "requested", observed: [], attempts: [{ requestedModel: "x/1", observed: [{ provider: "y", model: "2" }] }, { requestedModel: "p/m", observed: [] }] }), /attempts: x\/1 -> y\/2 \(served UNVERIFIED\); p\/m -> unobserved/);
 	const earlier = heading({ model: "b/s", requestedModel: "b/y", modelSource: "observed", observed: [{ provider: "b", model: "y", responseModel: "s" }], attempts: [{ requestedModel: "a/x", observed: [{ provider: "a", model: "x" }, { model: "p" }] }, { requestedModel: "b/y", observed: [{ provider: "b", model: "y", responseModel: "s" }] }] });
 	assert.match(earlier, /a\/x -> a\/x \(partial UNVERIFIED; served UNVERIFIED\); b\/y -> b\/s/, "a verified final attempt must not hide an earlier unverified one");
 	assert.equal(retainedEntryBlock({ agent: "w", exitCode: 0, stopReason: "stop", messages: [assistant(text("r"))], observed: [{ provider: "p", model: "m" }], model: "p/m", requestedModel: "p/m", modelSource: "observed" }).split("\n")[0], "### w · model: p/m (observed; served UNVERIFIED) — completed");
-	assert.equal(heading({ model: "p/snap", requestedModel: "p/m", modelSource: "observed", observed: [{ provider: "p", model: "m", responseModel: "snap" }] }), "### reviewer · tier: capable · model: p/snap [response id; sent m] (observed; MISMATCH, requested p/m) — completed");
+	assert.equal(heading({ model: "p/snap", requestedModel: "p/m", modelSource: "observed", observed: [{ provider: "p", model: "m", responseModel: "snap" }] }), "### code-reviewer · tier: capable · model: p/snap [response id; sent m] (observed; MISMATCH, requested p/m) — completed");
 });
 
 test("extractFinalText keeps every block and the original spacing of the selected meaningful message", () => {
@@ -270,16 +270,16 @@ test("expandRetainedResult returns a long completed child report in full", () =>
 
 test("expandRetainedResult keeps every text block and the tool-call-only tail case", () => {
 	const expanded = expandRetainedResult({
-		details: { results: [{ agent: "reviewer", exitCode: 0, stopReason: "stop", messages: [assistant(text("part A"), text("part B")), toolCallOnly] }] },
+		details: { results: [{ agent: "code-reviewer", exitCode: 0, stopReason: "stop", messages: [assistant(text("part A"), text("part B")), toolCallOnly] }] },
 	});
-	assert.equal(expanded, "### reviewer — completed\npart A\npart B");
+	assert.equal(expanded, "### code-reviewer — completed\npart A\npart B");
 });
 
 test("expandRetainedResult reports failed or aborted children as failures with the exact error text", () => {
 	const failed = expandRetainedResult({
-		details: { results: [{ agent: "debugger", exitCode: 1, stopReason: "error", errorMessage: "503 provider unavailable", messages: [] }] },
+		details: { results: [{ agent: "diagnostic-engineer", exitCode: 1, stopReason: "error", errorMessage: "503 provider unavailable", messages: [] }] },
 	});
-	assert.equal(failed, "### debugger — FAILED/STOPPED\nERROR: 503 provider unavailable\n(no final assistant output)");
+	assert.equal(failed, "### diagnostic-engineer — FAILED/STOPPED\nERROR: 503 provider unavailable\n(no final assistant output)");
 	const aborted = expandRetainedResult({
 		details: { results: [{ agent: "worker", exitCode: 0, stopReason: "aborted", stderr: "killed", messages: [] }] },
 	});
@@ -302,8 +302,8 @@ test("expandRetainedResult labels exit 0 without a terminal stop as INCOMPLETE a
 	const report = "detail line\n".repeat(600) + "CHECKS: npm test PASS";
 	const cut = expandRetainedResult({ details: { results: [{ agent: "backend-worker", exitCode: 0, stopReason: "length", messages: [assistant(text(report))] }] } });
 	assert.equal(cut, "### backend-worker \u2014 INCOMPLETE (length)\n" + report);
-	const toolUse = expandRetainedResult({ details: { results: [{ agent: "reviewer", exitCode: 0, stopReason: "toolUse", messages: [assistant(text("partial"))] }] } });
-	assert.equal(toolUse, "### reviewer \u2014 INCOMPLETE (toolUse)\npartial");
+	const toolUse = expandRetainedResult({ details: { results: [{ agent: "code-reviewer", exitCode: 0, stopReason: "toolUse", messages: [assistant(text("partial"))] }] } });
+	assert.equal(toolUse, "### code-reviewer \u2014 INCOMPLETE (toolUse)\npartial");
 	const silent = expandRetainedResult({ details: { results: [{ agent: "worker", exitCode: 0, messages: [] }] } });
 	assert.equal(silent, "### worker \u2014 INCOMPLETE (no terminal stopReason)\n(no final assistant output)");
 });
@@ -314,18 +314,18 @@ test("expandRetainedResult keeps the terminal stderr of an INCOMPLETE child even
 });
 
 test("expandRetainedResult keeps partial text together with the errorMessage and stderr of an INCOMPLETE child", () => {
-	const expanded = expandRetainedResult({ details: { results: [{ agent: "reviewer", exitCode: 0, stopReason: "length", errorMessage: "terminal diagnostic", stderr: "transport warning", messages: [assistant(text("partial report"))] }] } });
-	assert.equal(expanded, "### reviewer \u2014 INCOMPLETE (length)\npartial report\n\nERROR: terminal diagnostic\n\nSTDERR: transport warning");
+	const expanded = expandRetainedResult({ details: { results: [{ agent: "code-reviewer", exitCode: 0, stopReason: "length", errorMessage: "terminal diagnostic", stderr: "transport warning", messages: [assistant(text("partial report"))] }] } });
+	assert.equal(expanded, "### code-reviewer \u2014 INCOMPLETE (length)\npartial report\n\nERROR: terminal diagnostic\n\nSTDERR: transport warning");
 });
 
 test("expandRetainedResult does not repeat a terminal diagnostic already carried as a canonical ERROR block", () => {
-	const expanded = expandRetainedResult({ details: { results: [{ agent: "reviewer", exitCode: 0, stopReason: "length", errorMessage: "terminal diagnostic", messages: [assistant(text("partial report\nERROR: terminal diagnostic"))] }] } });
-	assert.equal(expanded, "### reviewer \u2014 INCOMPLETE (length)\npartial report\nERROR: terminal diagnostic");
+	const expanded = expandRetainedResult({ details: { results: [{ agent: "code-reviewer", exitCode: 0, stopReason: "length", errorMessage: "terminal diagnostic", messages: [assistant(text("partial report\nERROR: terminal diagnostic"))] }] } });
+	assert.equal(expanded, "### code-reviewer \u2014 INCOMPLETE (length)\npartial report\nERROR: terminal diagnostic");
 });
 
 test("expandRetainedResult appends a terminal diagnostic that earlier prose only mentions", () => {
-	const expanded = expandRetainedResult({ details: { results: [{ agent: "reviewer", exitCode: 0, stopReason: "length", errorMessage: "Connection closed", messages: [assistant(text("Recovered from earlier Connection closed; remaining checks pending."))] }] } });
-	assert.equal(expanded, "### reviewer \u2014 INCOMPLETE (length)\nRecovered from earlier Connection closed; remaining checks pending.\n\nERROR: Connection closed");
+	const expanded = expandRetainedResult({ details: { results: [{ agent: "code-reviewer", exitCode: 0, stopReason: "length", errorMessage: "Connection closed", messages: [assistant(text("Recovered from earlier Connection closed; remaining checks pending."))] }] } });
+	assert.equal(expanded, "### code-reviewer \u2014 INCOMPLETE (length)\nRecovered from earlier Connection closed; remaining checks pending.\n\nERROR: Connection closed");
 });
 
 test("withTerminalDiagnostics suppresses only a canonical labelled block at a line boundary, per field", () => {

@@ -320,12 +320,12 @@ Do not convert INCONCLUSIVE into PASS.
 ## Agent Routing
 
 This skill may be used by:
-- `test-engineer` — independent scenario execution/verdict;
+- `qa-engineer` — independent scenario execution/verdict;
 - `performance-specialist` — workload modeling and bottleneck measurement;
 - `concurrency-specialist` — backpressure/task/channel/cancellation analysis;
 - `database-specialist` — material unresolved contention/pool/transaction semantics; `database-worker` — authorized database implementation;
 - `observability-specialist` — required runtime signals;
-- `reviewer` — challenge unsupported capacity/resilience claims.
+- `code-reviewer` — challenge unsupported capacity/resilience claims.
 
 `backend-worker` implements separately authorized fixes. This skill itself does not
 grant source mutation.

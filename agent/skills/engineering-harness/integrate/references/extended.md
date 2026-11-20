@@ -531,7 +531,7 @@ Possible levels:
 1. identity continuity only;
 2. targeted integration verification;
 3. full relevant verification;
-4. critical integration verification with independent Test Engineer and any
+4. critical integration verification with independent QA Engineer and any
    justified specialists.
 
 A successful Git operation is not verification.
@@ -572,7 +572,7 @@ candidate.
 
 ## Independent Verification
 
-The Test Engineer verifies a specific candidate.
+The QA Engineer verifies a specific candidate.
 
 Provide the exact result candidate identity.
 
@@ -583,15 +583,15 @@ If the candidate changes:
 
 re-evaluate verification.
 
-The Test Engineer does not become the integration correction writer.
+The QA Engineer does not become the integration correction writer.
 
-## Reviewer
+## Code Reviewer
 
-Reviewer remains read-only.
+Code Reviewer remains read-only.
 
-Reviewer evaluates the exact candidate presented for review.
+Code Reviewer evaluates the exact candidate presented for review.
 
-Reviewer does not:
+Code Reviewer does not:
 
 - resolve merge conflicts;
 - modify integration results;
