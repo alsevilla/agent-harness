@@ -3,7 +3,7 @@ import { registerHooks } from "node:module";
 import { after, test } from "node:test";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 let agentDir = fileURLToPath(new URL("../../../", import.meta.url));
@@ -89,9 +89,14 @@ test("worktree policy permits safe relocation without a known restart configurat
 });
 test("package resource guidance states precedence and empty outside the package", () => {
   assert.equal(packageResourceGuidance(null), "");
-  const note = packageResourceGuidance("C:\\pkg");
-  assert.match(note, /Precedence: these bundled paths take effect over any profile path/);
-  assert.match(note, /Backend, frontend, graphify and browser skill catalogs are not bundled/);
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const note = packageResourceGuidance(root);
+  const skills = join(root, "skills");
+  assert.ok(note.includes(`resolve agent/skills/ paths under ${skills.split(sep).join("/")}/`));
+  for (const catalog of ["backend", "frontend", "graphify", "browser"]) {
+    assert.ok(fs.existsSync(join(skills, catalog, "SKILL.md")), catalog);
+  }
+  assert.match(note, /installed root takes precedence/);
   assert.match(note, /Roles not bundled in this package are unavailable and are never dispatched\./);
 });
 test("database-specialist remains read-only with no precise-edit or write grant", () => {
