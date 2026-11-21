@@ -49,7 +49,7 @@ const APPROVED_THINKING: Record<string, string> = { "system-architect.economy": 
 // The 2026-11-20 name-to-duty audit: database-specialist's description was cut off mid-sentence, general-worker hands docs to
 // technical-writer, devops-specialist covers containers, orchestrators, CI/CD and cloud as well as hosts.
 // RENAMED covers description changes for renamed roles.
-const APPROVED_DESCRIPTION_CHANGES = new Set(["api-specialist", "performance-specialist", "observability-specialist", "release-engineer", "database-specialist", "general-worker", "devops-specialist"]);
+const APPROVED_DESCRIPTION_CHANGES = new Set(["scout", "api-specialist", "performance-specialist", "observability-specialist", "release-engineer", "database-specialist", "general-worker", "devops-specialist"]);
 // User-approved 2026-11-20: technical-writer is added after the frozen baseline (it takes LEARN from release-engineer). It has no fixture
 // entry; it carries general-worker's native tools line and writing tools, and its settings are pinned in its own test below.
 const ADDED_ROLES: Record<string, string> = { "technical-writer": "general-worker" };
@@ -805,7 +805,7 @@ test("system-architect: read-only, both outputs (units and architecture analysis
   const text = fs.readFileSync(new URL("../../../agents/system-architect.md", import.meta.url), "utf8");
   assert.ok(text.includes("Never launch/delegate/supervise helpers"));
   assert.match(text, /Main owns the governing PLAN/);
-  assert.match(text, /units of work, each assigned to an existing implementation role .* so no file has two writers/);
+  assert.match(text, /units of work with one owner per file: assign code to .*project documentation to `technical-writer`/);
   assert.match(text, /When the task raises a structural decision, return this first:/);
   assert.match(text, /candidate approaches with their tradeoffs/);
 });

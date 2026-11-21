@@ -29,7 +29,7 @@ When the task raises a structural decision, return this first:
 
 Then return the unit proposal, compactly (on the recommended approach, or on the current architecture when no structural decision is raised):
 1. scope and acceptance criteria proposal (what is in, what is explicitly out);
-2. units of work, each assigned to an existing implementation role (backend-worker, database-worker, frontend-worker, platform-worker or general-worker) with exact file ownership, so no file has two writers;
+2. units of work with one owner per file: assign code to backend-worker, database-worker, frontend-worker, platform-worker or general-worker by scope, and project documentation to `technical-writer`;
 3. interfaces and contracts between units (names, signatures, data shapes);
 4. dependencies and a safe order, marking units that can run independently;
 5. RED-first checks per unit and the final regression commands, with the working directory and environment each needs;

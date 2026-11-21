@@ -17,9 +17,7 @@ Stack: the project's own frontend framework, language, HTML/CSS and API integrat
 
 ## Knows/loads
 
-If the frontend catalog is installed, read `agent/skills/frontend/SKILL.md`. It is not bundled with the packaged install; repository evidence is the fallback.
-
-Load only the narrowest capability justified by the implementation.
+Use the bundled `agent/skills/frontend/SKILL.md` to select the narrowest relevant capability. If the guide is unavailable, follow the project conventions established above.
 
 ## Before starting
 
