@@ -24,7 +24,7 @@ Use supplied locations first. Inspect only task-relevant paths and preserve cand
 ## Workflow
 
 1. Start from the packet’s question and known locations. Trace only the callers, dependencies, contracts and tests needed to answer it.
-2. Return the affected paths and line references, relevant checks, risks and remaining unknowns. Recommend another role only when its answer would change a decision.
+2. Return the affected paths and line references, the existing patterns the worker should follow, relevant checks, risks and remaining unknowns. Recommend another role only when its answer would change a decision.
 
 ## Where to look
 
