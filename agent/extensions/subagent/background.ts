@@ -355,6 +355,12 @@ export class BackgroundWorkers {
   }
   steeringFor(workerId: string) { return this.steering.get(workerId) ?? []; }
   detach(workerId: string) { this.settleDecisions(this.decisions.settleWorker(workerId, "worker-exited")); this.clients.get(workerId)?.close(); this.clients.delete(workerId); this.controllers.delete(workerId); }
+  // A job target is bg-N or the exact bg-N@epoch from a notice or list; another runtime's epoch never selects this runtime's bg-N.
+  private job(target: string): Job | undefined {
+    const qualified = /^(bg-\d+)@(.+)$/.exec(target);
+    if (qualified && qualified[2] !== this.epoch) throw new Error(`${target} names another Pi runtime (epoch mismatch); use subagent_control list for this runtime's job and worker IDs`);
+    return this.jobs.get(qualified ? qualified[1] : target);
+  }
   private worker(target: string): string | undefined {
     if (this.clients.has(target)) return target;
     const number = target.replace(/^#/, "");
@@ -368,7 +374,7 @@ export class BackgroundWorkers {
     if (signal?.aborted) throw new Error("Subagent was aborted");
   }
   pause(target: string, paused = true) {
-    const job = this.jobs.get(target);
+    const job = this.job(target);
     if (job && job.state !== "running") throw new Error("Job has already finished");
     const ids = job ? job.workerIds.filter(id => this.clients.has(id)) : [this.worker(target)].filter(Boolean) as string[];
     if (!job && !ids.length) throw new Error("No active worker matches " + target);
@@ -384,19 +390,20 @@ export class BackgroundWorkers {
   }
   async steer(target: string, message: string) {
     if (/^\s*(?:please\s+)?(?:stop for a bit|pause(?: for a bit)?|hold on|wait for (?:me|my instructions))\s*[.!]?\s*$/i.test(message)) return this.pause(target);
-    const job = this.jobs.get(target);
+    const job = this.job(target);
     if (job && job.state !== "running") throw new Error("Job has already finished");
     const active = job?.workerIds.filter(id => this.clients.has(id)) ?? [];
     if (active.length > 1) throw new Error("Job has multiple active workers; select a worker ID: " + active.join(", "));
     if (job && active.length === 0) { job.pendingSteers.push(message); return "Queued until the next worker starts; not acknowledged yet"; }
     const id = active[0] ?? this.worker(target); const client = id ? this.clients.get(id) : undefined;
-    if (!client) throw new Error("Worker is not ready or has finished; use subagent_control list to find active worker IDs");
+    if (!client) throw new Error(/^bg-\d+(@|$)/.test(target) ? `No running job ${target} in this runtime; use subagent_control list for active job and worker IDs`
+      : id ? `Worker ${id} has finished; use subagent_control list for active worker IDs` : `No active worker matches ${target}; use subagent_control list for active worker IDs`);
     const acknowledgement = await client.send("steer", message);
     this.recordSteer(id!, message);
     return `Worker ${id}: ${acknowledgement.disposition ?? "acknowledged"}. Instruction will apply between tool turns.`;
   }
   cancel(target: string) {
-    const job = this.jobs.get(target);
+    const job = this.job(target);
     if (job) { if (job.state !== "running") throw new Error("Job has already finished"); this.settleDecisions(this.decisions.settleJob(target, "cancelled")); job.controller.abort(); return "Stopping job " + target; }
     const id = this.worker(target), controller = id ? this.controllers.get(id) : undefined;
     if (!controller) throw new Error("No active worker matches " + target);
