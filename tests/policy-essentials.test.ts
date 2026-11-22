@@ -353,3 +353,14 @@ test("main's guidance orders a delivered task: LEARN before the final delivery, 
 	const note = formatCleanupPending([{ state: "PENDING_UNVERIFIED" } as never]);
 	assert.match(note, /after the LEARN checkpoint is settled \(a technical-writer launch for a warranted lesson, otherwise NO LESSON;/);
 });
+
+// Field report: QA logs were left in _evidence outside the task folder after cleanup, which removes only _evidence/<task> and
+// _scratch/<task>. Workers are told to keep every file inside those two folders, and why.
+test("workers keep every file inside the task's own _evidence and _scratch folders, which cleanup removes", () => {
+	const shared = flat(read("agent/extensions/subagent/code-integrations.ts"));
+	assert.ok(shared.includes("Every file you create outside the candidate stays inside those two task folders, never directly in _evidence or _scratch or in another task's folder: post-merge cleanup removes only _evidence/<task> and _scratch/<task>"));
+	for (const role of ["qa-engineer", "code-reviewer"]) {
+		const text = flat(read(`agent/agents/${role}.md`));
+		assert.ok(text.includes("in its `_evidence/<task>` or `_scratch/<task>` folder before you hand back, and keep logs, fixtures and screenshots inside those two folders too (cleanup removes only them)"), role);
+	}
+});
