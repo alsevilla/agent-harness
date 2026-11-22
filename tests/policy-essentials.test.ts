@@ -338,3 +338,18 @@ test("role names match their duties: complete descriptions, workers are workers,
 	assert.ok(flat(read("agent/AGENTS.md")).includes("technical-writer for docs and LEARN records"));
 	assert.match(read("agent/agents/devops-specialist.md").split("\n")[2], /containers, orchestrators and cloud services/);
 });
+
+// Field report after a squash merge: no LEARN ran and the task's _scratch and _evidence folders were left. Since LEARN moved from the
+// delivery launch to its own technical-writer launch, only the ship procedure said when to run it; main's always-present guidance
+// did not, and the cleanup needs the LEARN checkpoint (a record path or NO LESSON) before it can start.
+test("main's guidance orders a delivered task: LEARN before the final delivery, cleanup with its checkpoint after the merge", async () => {
+	const index = flat(read("agent/extensions/subagent/index.ts"));
+	const step = index.slice(index.indexOf("Finish a delivered task in order."));
+	assert.ok(step.startsWith("Finish a delivered task in order."), "main has the sequence in its tool guidance");
+	const at = (text: string) => { const i = step.indexOf(text); assert.ok(i >= 0, text); return i; };
+	assert.ok(at("Before launching the release-engineer for the final commit or PR, settle LEARN") < at("launch one technical-writer for a verified reusable lesson"));
+	assert.ok(at("or decide NO LESSON") < at("After the merge, launch the cleanup release-engineer (subagent cleanup option, cwd = the primary checkout) with knowledge = that record path or NO LESSON, before the completion report"));
+	const { formatCleanupPending } = await import("../agent/extensions/subagent/safety-core.ts");
+	const note = formatCleanupPending([{ state: "PENDING_UNVERIFIED" } as never]);
+	assert.match(note, /after the LEARN checkpoint is settled \(a technical-writer launch for a warranted lesson, otherwise NO LESSON;/);
+});
