@@ -756,7 +756,7 @@ function withArtifacts(t: Task) {
 	for (const dir of [t.evidence, t.scratch]) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(`${dir}/REPORT.md`, "evidence\n"); }
 }
 
-test("artifact folders: denied while the checkout exists; after its removal each exact form is allowed once from the primary", () => {
+test("artifact folders: denied while the checkout exists; after its removal each exact form is allowed from the primary", () => {
 	const s = setup();
 	withArtifacts(s.t);
 	const g = guardOf(s.child, live(view(s.t)));
@@ -768,7 +768,7 @@ test("artifact folders: denied while the checkout exists; after its removal each
 	assert.ok(blocked(run(g, RM(s.t.evidence), s.t.evidence)), "cwd inside the folder");
 	assert.ok(blocked(run(g, RM(s.t.evidence), PROJ)), "cwd is not the primary");
 	assert.equal(run(g, RM(s.t.evidence)), undefined, "bash form allowed after refused attempts consumed nothing");
-	assert.ok(blocked(run(g, RM(s.t.evidence))), "replay");
+	assert.equal(run(g, RM(s.t.evidence)), undefined, "the folder is still there, so the unfinished removal may run again");
 	assert.equal(C.guardToolCall(g, "powershell", { command: PS_RM(s.t.scratch) }, PRIMARY, C.livePushUrl), undefined, "PowerShell form");
 	assert.ok(blocked(run(g, RM(`${WT}/_evidence/other-task`))), "another task's folder is never covered");
 });
@@ -805,7 +805,7 @@ function plainTask(withDir = true) {
 	return { task, branch, head, evidence, scratch, store, pr, prepare };
 }
 
-test("plain-branch cleanup: the task form mints from the merge approval and allows each artifact folder once from the primary", () => {
+test("plain-branch cleanup: the task form mints from the merge approval and allows each artifact folder from the primary", () => {
 	const p = plainTask();
 	const res = p.prepare();
 	assert.equal(res.ok, true, JSON.stringify(res));
@@ -813,7 +813,7 @@ test("plain-branch cleanup: the task form mints from the merge approval and allo
 	const { child } = childFrom(res.grant);
 	const g = guardOf(child, live(p.pr));
 	assert.equal(run(g, `rm -rf ${q(p.evidence)}`), undefined, "no checkout to remove first");
-	assert.ok(blocked(run(g, `rm -rf ${q(p.evidence)}`)), "replay");
+	assert.equal(run(g, `rm -rf ${q(p.evidence)}`), undefined, "the same folder is still there: the unfinished removal may run again");
 	assert.equal(C.guardToolCall(g, "powershell", { command: `Remove-Item -LiteralPath ${q(p.scratch)} -Recurse -Force` }, PRIMARY, C.livePushUrl), undefined);
 	assert.ok(blocked(run(g, `git worktree remove ${q(PRIMARY)}`)), "the primary checkout is never a target");
 	assert.ok(blocked(run(g, `rm -rf ${q(`${WT}/_evidence/other`)}`)), "another task's folder");
@@ -840,7 +840,9 @@ test("plain-branch cleanup: folders with build output are removable; every refus
 	assert.match(reason(`rm -rf ${q(`${WT}/_evidence/other`)}`), /the approved cleanup covers only .*_evidence\/plain-[^ ]* and .*_scratch\/plain-[^ ]*; this folder is not one of them/);
 	assert.equal(reason(`rm -rf ${q(p.evidence)}`), "", "the approved exact form is allowed");
 	assert.equal(reason(`rm -rf ${q(p.scratch)}`), "", "a build-output folder with a hard link and 25,000 files is removable");
-	assert.match(reason(`rm -rf ${q(p.scratch)}`), /this folder's cleanup was already used/, "a replay says so");
+	assert.equal(reason(`rm -rf ${q(p.scratch)}`), "", "second attempt: the same folder is still there");
+	assert.equal(reason(`rm -rf ${q(p.scratch)}`), "", "third attempt");
+	assert.match(reason(`rm -rf ${q(p.scratch)}`), /the approved removal ran 3 times and the folder is still there; it is not tried again \(report it RETAINED/, "a fourth attempt says how often it ran");
 	assert.ok(fs.existsSync(p.scratch), "the guard decides only");
 	// A link inside still refuses, with its reason; expiry says so too.
 	const p3 = plainTask();
@@ -900,4 +902,32 @@ test("artifact cleanup diagnostics preserve an independent operator allow rule",
 		fs.writeFileSync(path.join(agentDir, C.PERMISSIONS_FILE), JSON.stringify({ allow: [command] }));
 		assert.equal(check(), undefined);
 	} finally { fs.rmSync(agentDir, { recursive: true, force: true }); }
+});
+
+// Field report (RFIDAttendance-Rust PR #76, merged as 11126ed): a bound plain-branch cleanup left _evidence/<task> in place and a retry
+// was refused as "this folder's cleanup was already used". The use was recorded when the removal was allowed, before it ran, so a
+// removal that did not finish consumed the approval, and a missing folder read as "state could not be read".
+test("cleanup retry: an unfinished removal is retryable, a removed folder is ABSENT, and a recreated folder or another path is refused", () => {
+	const p = plainTask();
+	const res = p.prepare();
+	assert.equal(res.ok, true, JSON.stringify(res));
+	const g = guardOf(childFrom(res.grant).child, live(p.pr));
+	const reason = (command: string) => (C.guardToolCall(g, "bash", { command }, PRIMARY, C.livePushUrl) as { reason: string } | undefined)?.reason ?? "";
+	// A failed preflight (a worker that exits after a refused or wrong command) consumes nothing.
+	assert.match(reason(`rm -rf '${p.evidence}'`), /not in an accepted form/);
+	assert.equal(reason(`rm -rf ${q(p.evidence)}`), "", "the exact form is still allowed");
+	// The removal did not run (or failed partway): the same directory is still there, so a retry is allowed.
+	assert.equal(reason(`rm -rf ${q(p.evidence)}`), "", "retry of an unfinished removal");
+	// The removal ran: the folder is gone, and any further attempt is reported ABSENT, not as a failure.
+	fs.rmSync(p.evidence, { recursive: true, force: true });
+	assert.match(reason(`rm -rf ${q(p.evidence)}`), /the folder is gone: ABSENT, the approved removal is done/);
+	// Recreated after the removal: a new directory at the same path is never removed under the old approval.
+	fs.mkdirSync(p.evidence, { recursive: true });
+	fs.writeFileSync(`${p.evidence}/new.txt`, "new\n");
+	assert.match(reason(`rm -rf ${q(p.evidence)}`), /this folder was recreated after the approved removal; it is not removed again/);
+	// Another path stays outside the approval, retry or not.
+	assert.match(reason(`rm -rf ${q(`${WT}/_evidence/other`)}`), /the approved cleanup covers only/);
+	// A folder already gone before the first attempt is ABSENT too.
+	fs.rmSync(p.scratch, { recursive: true, force: true });
+	assert.match(reason(`rm -rf ${q(p.scratch)}`), /the folder does not exist: ABSENT, nothing to remove/);
 });

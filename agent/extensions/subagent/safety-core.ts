@@ -692,8 +692,9 @@ export interface GrantStore {
 	cleanupCount(): number;
 	addArtifactCleanup(entries: ArtifactCleanup[]): void;
 	/** Every artifact folder this store was ever offered, live or not, so a refusal can say why (expired, used, out of scope). */
-	artifactScope?(): { path: string; primary: string; used: boolean }[];
-	markArtifactUsed?(path: string): void;
+	artifactScope?(): ArtifactOffer[];
+	/** Record an allowed removal and the folder's identity, so a retry can tell an unfinished removal from a recreated folder. */
+	markArtifactUsed?(path: string, identity?: string): void;
 	takeArtifactCleanup(target: string): ArtifactCleanup | undefined;
 }
 
@@ -717,8 +718,8 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 	let delivery: DeliveryGrant[] = [];
 	let cleanup: CleanupGrant[] = [];
 	let artifacts: ArtifactCleanup[] = [];
-	const offered = new Map<string, { path: string; primary: string; used: boolean }>();
-	const offer = (a: ArtifactCleanup) => { if (!offered.has(normPath(a.path))) offered.set(normPath(a.path), { path: a.path, primary: a.primary, used: false }); };
+	const offered = new Map<string, ArtifactOffer>();
+	const offer = (a: ArtifactCleanup) => { if (!offered.has(normPath(a.path))) offered.set(normPath(a.path), { path: a.path, primary: a.primary, issuedAt: a.issuedAt, used: false, attempts: 0 }); };
 	const live = () => {
 		const t = now();
 		records = records.filter((r) => r.expiresAt > t);
@@ -782,9 +783,9 @@ export function createGrantStore(now: () => number = () => Date.now()): GrantSto
 		artifactScope() {
 			return [...offered.values()].map((a) => ({ ...a }));
 		},
-		markArtifactUsed(target) {
+		markArtifactUsed(target, identity) {
 			const a = offered.get(normPath(target));
-			if (a) a.used = true;
+			if (a) { a.used = true; a.attempts += 1; if (identity !== undefined) a.identity = identity; }
 		},
 		takeArtifactCleanup(target) {
 			live();
@@ -2015,6 +2016,19 @@ function cleanupAllows(store: GrantStore, decision: Extract<Decision, { action: 
 // folders, <worktrees>/<repo>/_evidence/<task> and _scratch/<task>, with one exact removal each. A folder is removable only once the checkout
 // and its registration are gone, from the primary as cwd, and only when it is a plain directory holding no links, hard links or special files.
 export interface ArtifactCleanup { path: string; candidate?: string; primary: string; issuedAt: number } // no candidate: plain-branch task, nothing to remove first
+/** A folder a store was offered: its approval time, whether a removal was allowed, how often, and the folder's identity then. */
+export interface ArtifactOffer { path: string; primary: string; issuedAt: number; used: boolean; attempts: number; identity?: string }
+/** How many times one approved folder may be removed when the earlier removal left the same directory behind. */
+export const ARTIFACT_REMOVAL_ATTEMPTS = 3;
+/** Device, inode and creation time of a directory: the same folder keeps all three across a partly failed removal. A recreated folder
+ *  can reuse the inode (Linux hands a freed one out again), but not the creation time. No creation time recorded: unverifiable. */
+function folderIdentity(p: string): string | undefined {
+	try {
+		const st = fs.lstatSync(p, { bigint: true });
+		return st.isDirectory() && st.birthtimeNs > 0n ? `${st.dev}:${st.ino}:${st.birthtimeNs}` : undefined;
+	} catch { return undefined; }
+}
+const absent = (p: string) => { try { fs.lstatSync(p); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; } };
 
 /** The two artifact folders of a task checkout `<group>/<task>`: `<group>/_evidence/<task>` and `<group>/_scratch/<task>`. */
 export function artifactFolders(candidate: string): string[] {
@@ -2070,19 +2084,29 @@ function artifactCleanupDecision(store: GrantStore, decision: Extract<Decision, 
 		return named ? { allowed: false, reason: `this removes an artifact folder of the approved cleanup, but not in an accepted form: run exactly rm -rf "${named.path}" (bash) or Remove-Item -LiteralPath "${named.path}" -Recurse -Force (PowerShell), one folder per command, with cwd = ${named.primary}` } : { allowed: false };
 	}
 	try {
-		const entry = store.takeArtifactCleanup(target);
+		const known = scoped.find((a) => normPath(a.path) === normPath(target));
+		if (!known) return { allowed: false, reason: `the approved cleanup covers only ${scoped.map((a) => a.path).join(" and ")}; this folder is not one of them` };
+		const expired = `the cleanup approval for this folder expired (${CLEANUP_TTL_MS / 60_000} minutes after main approved it); ask main to launch the cleanup again`;
+		// Field report: the folder stayed and a retry was refused as "already used". The use was recorded when the removal was
+		// allowed, before it ran, so a removal that failed partway (a held file on Windows) left the folder and consumed the approval.
+		if (absent(target)) return { allowed: false, reason: known.used ? "the folder is gone: ABSENT, the approved removal is done" : "the folder does not exist: ABSENT, nothing to remove" };
+		let entry = store.takeArtifactCleanup(target);
 		if (!entry) {
-			const known = scoped.find((a) => normPath(a.path) === normPath(target));
-			if (!known) return { allowed: false, reason: `the approved cleanup covers only ${scoped.map((a) => a.path).join(" and ")}; this folder is not one of them` };
-			return { allowed: false, reason: known.used ? "this folder's cleanup was already used" : `the cleanup approval for this folder expired (${CLEANUP_TTL_MS / 60_000} minutes after main approved it); ask main to launch the cleanup again` };
+			if (!known.used) return { allowed: false, reason: expired };
+			const now = folderIdentity(target);
+			if (known.identity === undefined || now === undefined) return { allowed: false, reason: "an earlier approved removal ran, and whether this is the same folder cannot be verified; the folder was not removed (report it RETAINED)" };
+			if (now !== known.identity) return { allowed: false, reason: "this folder was recreated after the approved removal; it is not removed again (report it RETAINED; main can approve a new cleanup)" };
+			if (known.attempts >= ARTIFACT_REMOVAL_ATTEMPTS) return { allowed: false, reason: `the approved removal ran ${known.attempts} times and the folder is still there; it is not tried again (report it RETAINED with the error each removal printed)` };
+			// The same directory is still there: the earlier removal did not finish. Retry it under the same approval and live checks.
+			entry = { path: known.path, primary: known.primary, issuedAt: known.issuedAt };
 		}
 		const fresh = (live.now?.() ?? Date.now()) - entry.issuedAt <= CLEANUP_TTL_MS;
 		const placed = normPath(decision.op.cwd) === normPath(entry.primary) && !overlaps(decision.op.cwd, entry.path);
-		const why = !fresh ? `the cleanup approval for this folder expired (${CLEANUP_TTL_MS / 60_000} minutes after main approved it); ask main to launch the cleanup again`
+		const why = !fresh ? expired
 			: !placed ? `run it with cwd = the primary checkout ${entry.primary}, outside the folder`
 			: verifyArtifactCleanup(entry);
-		if (why === undefined) { store.markArtifactUsed?.(target); return { allowed: true }; }
-		store.addArtifactCleanup([entry]); // a refused attempt consumes nothing
+		if (why === undefined) { store.markArtifactUsed?.(target, folderIdentity(target)); return { allowed: true }; }
+		if (!known.used) store.addArtifactCleanup([entry]); // a refused first attempt consumes nothing
 		return { allowed: false, reason: `${why}; the folder was not removed` };
 	} catch {
 		return { allowed: false, reason: "the folder's state could not be read; the folder was not removed" };

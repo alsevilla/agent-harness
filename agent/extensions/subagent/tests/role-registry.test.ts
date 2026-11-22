@@ -824,7 +824,9 @@ test("technical-writer: general-worker's models and writing tools at an economy 
   const release = fs.readFileSync(new URL("../../../agents/release-engineer.md", import.meta.url), "utf8");
   assert.match(release, /`technical-writer` writes LEARN records/);
   assert.match(release, /You do not write records\./);
-  assert.match(release, /first read the absolute `worktree\/cleanup\.md` module path/);
+  // Field report (PR #76): the cleanup worker read the procedure from a wrong packet path (ENOENT) and stopped; the role names it itself.
+  assert.match(release, /first read `agent\/skills\/engineering-harness\/worktree\/cleanup\.md` and follow it exactly/);
+  assert.ok(fs.existsSync(new URL("../../../skills/engineering-harness/worktree/cleanup.md", import.meta.url)), "the named procedure exists");
 });
 
 test("approved preset update differs from the immutable baseline only by the recorded ledger; permissions and the role set are unchanged", () => {
