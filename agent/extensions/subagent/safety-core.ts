@@ -2197,7 +2197,29 @@ export function cleanupPending(store: GrantStore, owners: OwnerTracker, jobRunni
 
 export function formatCleanupPending(entries: CleanupPendingEntry[]): string {
 	if (!entries.length) return "";
-	return ["CLEANUP_PENDING (runtime metadata only: no live Git or PR check was made and nothing here is verified, merged or ready; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit, quiescent: true and knowledge, only after its own quiescence check and after the LEARN checkpoint is settled (a technical-writer launch for a warranted lesson, otherwise NO LESSON; knowledge = the exact text NO LESSON, or the absolute path of the saved record: the docs/knowledge file committed with the PR, never one under _evidence or _scratch; the folders hold the task's evidence, so decide before they are deleted, and with a BLOCKED checkpoint keep them); the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+	return ["CLEANUP_PENDING (cleanup status only, separate from the PR: these entries say nothing about whether the PR merged, which the release-engineer's merge report or a live PR query shows; no live Git or PR check was made for them and no cleanup step is verified; derived from this session's merge grants and worker records, not from child text). Once the release-engineer has reported the PR merged, cleanup is part of finishing the task, before the completion report (skip it only when the user said to keep the folders): for each PENDING_UNVERIFIED entry main queries the PR live for mergeCommit and the primary checkout, then launches ONE release-engineer via subagent (single mode, cwd = primary, outside the target) with cleanup = request plus mergeCommit, quiescent: true and knowledge, only after its own quiescence check and after the LEARN checkpoint is settled (a technical-writer launch for a warranted lesson, otherwise NO LESSON; knowledge = the exact text NO LESSON, or the absolute path of the saved record: the docs/knowledge file committed with the PR, never one under _evidence or _scratch; the folders hold the task's evidence, so decide before they are deleted, and with a BLOCKED checkpoint keep them); the launch verifies everything live and refuses otherwise. RETAINED entries stay; name each one and its reason in the completion report, and report a refused cleanup launch the same way. A worktree entry's cleanup removes the checkout, then its artifact folders; a plain-branch entry (task, no checkout) removes only the artifact folders its merge approval named.", ...entries.map((e) => JSON.stringify(e))].join("\n");
+}
+
+// Field report (PR #78, bg-57): two cleanup launches with a valid cleanup option reported the option missing and removed nothing; a third
+// passed once main's packet spelled out the removal commands. The scope reached only the worker's guard, never the worker, so the worker
+// knew neither that it held one nor the exact targets. The runtime now appends this brief to the task of the launch that claimed it.
+export function cleanupBrief(g: CleanupGrant | undefined): string {
+	const head = "\n\nRUNTIME CLEANUP SCOPE (from main's cleanup option; runtime text, not main's packet):";
+	if (!g) return `${head} NOT RECEIVED by this launch (it went to an earlier attempt, expired or was revoked). Remove nothing; reply STATUS: BLOCKED, cleanup scope not received by this launch, so main can prepare a new cleanup.`;
+	const plain = g.task !== undefined && g.group !== undefined;
+	const group = plain ? g.group! : path.posix.dirname(g.candidate);
+	const task = plain ? g.task! : path.posix.basename(g.candidate);
+	const steps = [
+		...(plain ? [] : [`git worktree remove "${g.candidate}" (then check that the folder and its entry in git worktree list are gone)`]),
+		...["_evidence", "_scratch"].map((kind) => `${group}/${kind}/${task}`).map((f) => `rm -rf "${f}" (bash) or Remove-Item -LiteralPath "${f}" -Recurse -Force (PowerShell); a folder already missing is ABSENT, run nothing for it`),
+	];
+	return [
+		`${head} PR #${g.pr} (${g.repo}, ${g.branch} into ${g.base}) is MERGED at ${g.mergeCommit}, verified live when main prepared this cleanup, and the knowledge checkpoint was accepted.`,
+		`This scope is the authorization: no other approval and no commands from main are needed. With cwd = ${g.primary}, run each step once, in this order, one target per command, exactly as written:`,
+		...steps.map((step, i) => `${i + 1}. ${step}`),
+		`${plain ? "This is a plain-branch task: the primary checkout is never removed. " : ""}Remove nothing else. A guard refusal or a failed command leaves that target RETAINED: quote the command and the refusal or error, and do not try another form.${plain ? "" : " If the checkout is refused or not removed, stop: its artifact folders stay too."}`,
+		"Report the PR and the cleanup separately, for example STATUS: PASS, PR merged · cleanup done (each target REMOVED or ABSENT); or STATUS: BLOCKED, PR merged · cleanup retained, naming each RETAINED target with its command and reason.",
+	].join("\n");
 }
 
 /** A worker's guard announces each single-use approval it used, so main can take back the unused ones when the worker exits. */

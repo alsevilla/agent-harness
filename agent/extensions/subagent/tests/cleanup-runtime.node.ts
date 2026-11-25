@@ -363,7 +363,7 @@ test("real main session: cleanup refusals fail closed before any launch and a me
 		const r = await s.run();
 		assert.equal(r[0].isError, false, r[0].text);
 		assert.match(r[1].text, /^\[\]/, "the job list stays a JSON array first");
-		assert.match(r[1].text, /CLEANUP_PENDING \(runtime metadata only/);
+		assert.match(r[1].text, /CLEANUP_PENDING \(cleanup status only, separate from the PR/);
 		assert.match(r[1].text, /"state":"RETAINED"/);
 		assert.match(r[1].text, /no known owner/, "a merged PR alone is not enough: unknown ownership retains");
 		assert.doesNotMatch(r[1].text, /"state":"READY"|"state":"PENDING_UNVERIFIED"/, "unknown ownership is never pending-unverified, let alone ready");

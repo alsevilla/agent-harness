@@ -355,8 +355,11 @@ test("pending discovery is a cheap runtime-metadata projection: 4 merge grants, 
 	assert.match((byDir.get(tasks[2].dir) as any).reason, /no known owner/, "unknown ownership retains");
 	for (const e of entries as any[]) for (const k of ["mergeCommit", "launchCwd"]) assert.ok(!(k in e) && !(e.request && k in e.request), `${k} is omitted`);
 	const text = C.formatCleanupPending(entries);
-	assert.match(text, /^CLEANUP_PENDING \(runtime metadata only/);
+	assert.match(text, /^CLEANUP_PENDING \(cleanup status only, separate from the PR/);
 	assert.match(text, /"state":"PENDING_UNVERIFIED"/);
+	// Field report (PR #78): cleanup status must never read as the merge still pending.
+	assert.match(text, /these entries say nothing about whether the PR merged, which the release-engineer's merge report or a live PR query shows/);
+	assert.doesNotMatch(text, /nothing here is verified, merged/);
 	assert.doesNotMatch(text, /"state":"READY"|"MERGED"|mergeCommit"|launchCwd/);
 	assert.deepEqual(C.cleanupPending(C.createGrantStore(), owners, () => false), [], "no runtime delivery record, no pending");
 	const nonMerge = C.createGrantStore();
@@ -930,4 +933,36 @@ test("cleanup retry: an unfinished removal is retryable, a removed folder is ABS
 	// A folder already gone before the first attempt is ABSENT too.
 	fs.rmSync(p.scratch, { recursive: true, force: true });
 	assert.match(reason(`rm -rf ${q(p.scratch)}`), /the folder does not exist: ABSENT, nothing to remove/);
+});
+
+// Field report (PR #78, bg-57): two cleanup launches with a valid cleanup option reported it missing; a third passed only once main's
+// packet spelled out the removal commands. The worker now gets the claimed scope's targets and commands from the runtime.
+test("cleanupBrief: the worker gets the exact targets, order and guard-accepted commands, and reports PR and cleanup separately", () => {
+	const common = { id: "id", role: "release-engineer", primary: "/w/app", pushUrl: GH_URL, repo: "acme/widgets", branch: "feat/x", base: "main", pr: 78, headSha: "a".repeat(40), mergeCommit: "b".repeat(40), issuedAt: 0 };
+	const plain = C.cleanupBrief({ ...common, candidate: "/w/app", task: "fix-login", group: "/w/worktrees/app" });
+	assert.match(plain, /^\n\nRUNTIME CLEANUP SCOPE \(from main's cleanup option; runtime text, not main's packet\): PR #78 \(acme\/widgets, feat\/x into main\) is MERGED at b{40}, verified live/);
+	assert.match(plain, /This scope is the authorization: no other approval and no commands from main are needed\. With cwd = \/w\/app, run each step once, in this order/);
+	assert.doesNotMatch(plain, /git worktree remove/, "a plain-branch task removes no checkout");
+	assert.match(plain, /the primary checkout is never removed/);
+	const steps = plain.split("\n").filter((l) => /^\d\. /.test(l));
+	assert.equal(steps.length, 2);
+	for (const [i, kind] of ["_evidence", "_scratch"].entries()) {
+		const folder = `/w/worktrees/app/${kind}/fix-login`;
+		const [bash, ps] = [/^\d\. (rm -rf "[^"]+")/.exec(steps[i])![1], /or (Remove-Item -LiteralPath "[^"]+" -Recurse -Force)/.exec(steps[i])![1]];
+		assert.equal(C.parseArtifactRemoval(bash), folder, "the bash form is the one the guard accepts");
+		assert.equal(C.parseArtifactRemoval(ps), folder, "the PowerShell form is the one the guard accepts");
+		assert.match(steps[i], /a folder already missing is ABSENT, run nothing for it/);
+	}
+	assert.match(plain, /A guard refusal or a failed command leaves that target RETAINED: quote the command and the refusal or error/);
+	assert.match(plain, /STATUS: PASS, PR merged · cleanup done .*STATUS: BLOCKED, PR merged · cleanup retained/s);
+
+	const worktree = C.cleanupBrief({ ...common, candidate: "/w/worktrees/app/fix-login" });
+	const first = worktree.split("\n").find((l) => l.startsWith("1. "))!;
+	assert.equal(C.parseCleanupCommand(/^1\. (git worktree remove "[^"]+")/.exec(first)![1]), "/w/worktrees/app/fix-login", "the checkout comes first, in the guard's form");
+	assert.match(worktree, /2\. rm -rf "\/w\/worktrees\/app\/_evidence\/fix-login"/);
+	assert.match(worktree, /3\. rm -rf "\/w\/worktrees\/app\/_scratch\/fix-login"/);
+	assert.match(worktree, /If the checkout is refused or not removed, stop: its artifact folders stay too\./);
+
+	const none = C.cleanupBrief(undefined);
+	assert.match(none, /NOT RECEIVED by this launch .* Remove nothing; reply STATUS: BLOCKED, cleanup scope not received by this launch/);
 });

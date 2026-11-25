@@ -50,7 +50,7 @@ import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, 
 import { createSecretRedactor } from "./secret-redact.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
 import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV, GRANT_USED_PREFIX, misplacedArtifactPaths, credentialFinding } from "./safety-core.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, cleanupBrief, CHILD_READONLY_ENV, GRANT_USED_PREFIX, misplacedArtifactPaths, credentialFinding } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -461,6 +461,7 @@ async function runAgentAttempt(
 		// Guard entry is always injected after pause-gate/relay; a missing guard file throws (fail closed). Grants are claimed only by the job's first actual spawn (grantWindow).
 		// Ownership is recorded before the spawn and ended only after the process closed (finally): any gap reads as active, never idle.
 		owners.begin({ workerId: ownerId, role: agent.source === "user" || agent.source === "package" ? agentName : `untrusted:${agentName}`, cwd: canonicalCwd(cwd ?? defaultCwd), jobId: dispatchDefaults.jobId });
+		const cleanupScope = dispatchDefaults.cleanupId ? safetyGrants.peekCleanup(dispatchDefaults.cleanupId) : undefined;
 		const guard = claimChildGuard(safetyGrants, agentName, canonicalCwd(cwd ?? defaultCwd), path.join(extensionDir, "safety-guard-entry.ts"), grantWindow, agent?.source === "user" || agent?.source === "package", dispatchDefaults.prBase, dispatchDefaults.cleanupId);
 		if (guard.claimed.length) safetyGrants.lend?.(ownerId, guard.claimed);
 		args.push("--extension", guard.entry);
@@ -468,6 +469,7 @@ async function runAgentAttempt(
 		// A write tool alone keeps a role read-only: qa-engineer and code-reviewer have it to save their reports outside the candidate.
 		const readOnlyRoot = lease?.access === "read" || (agent.tools !== undefined && !agent.tools.includes("edit")) ? canonicalCwd(cwd ?? defaultCwd) : undefined;
 		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
+		if (dispatchDefaults.cleanupId) task += cleanupBrief(guard.cleanupCount > 0 ? cleanupScope : undefined);
 		let wasAborted = false;
 		// Durable per-worker trace of tool calls and guard results (worker-trace.ts): workers keep no session file of their own.
 		const trace: WorkerTrace | undefined = createWorkerTrace(getAgentDir(), { role: agentName, model, cwd: canonicalCwd(cwd ?? defaultCwd), readOnlyRoot, jobId: dispatchDefaults.jobId, workerId: worker?.id, task });
