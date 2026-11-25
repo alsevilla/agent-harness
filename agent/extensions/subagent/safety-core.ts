@@ -288,6 +288,37 @@ export function isSecretBasename(name: string): boolean {
 	return !SECRET_SAFE_NAMES.has(lower) && SECRET_BASENAME.test(lower);
 }
 
+// Field report: direct access to .env was refused, but a broad search over *.env* put a protected value in the session. A search or
+// listing whose glob can match a protected name reads that file, so it is a SECRET read like naming the file. A bare `*` or `**` is
+// not: it names nothing, and the output redaction (secret-redact.ts) covers what a broad search returns.
+// [name, the fragment the glob must spell out]: auth.json and credentials.json share .json with ordinary files, so *.json alone (a search
+// of package.json) is not a secret read; *auth*.json or *cred* is.
+const SECRET_SAMPLES: [string, string?][] = [[".env"], [".env.local"], [".env.production"], ["auth.json", "auth"], [".npmrc"], [".netrc"], [".pypirc"], [".git-credentials"], ["id_rsa"], ["id_ed25519"], ["id_ecdsa"], ["credentials", "cred"], ["credentials.json", "cred"], ["server.pem"], ["server.key"], ["cert.p12"], ["cert.pfx"]];
+/** Whether a search/list glob (rg, grep --include, find -name, PowerShell -Filter, Pi's grep glob or find pattern) can match a protected file name. */
+export function globTargetsSecret(glob: string): boolean {
+	const text = String(glob ?? "").trim();
+	if (!text || text.startsWith("!") || !/[*?[]/.test(text)) return false;
+	const base = text.split(/[\\/]/).pop() ?? "";
+	if (base.replace(/[*?[\]{},!]/g, "").length < 2) return false;
+	let source = "";
+	for (let i = 0; i < base.length; i++) {
+		const c = base[i];
+		if (c === "*") source += ".*";
+		else if (c === "?") source += ".";
+		else if (c === "{") source += "(?:";
+		else if (c === "}") source += ")";
+		else if (c === "," && source.includes("(?:")) source += "|";
+		else if (c === "[") { const end = base.indexOf("]", i); if (end < 0) source += "\\["; else { source += `[${base.slice(i + 1, end).replace(/^!/, "^").replace(/\\/g, "\\\\")}]`; i = end; } }
+		else source += c.replace(/[.+^$()|\\]/g, "\\$&");
+	}
+	let re: RegExp;
+	try { re = new RegExp(`^${source}$`, "i"); } catch { return false; }
+	const literal = base.toLowerCase();
+	return SECRET_SAMPLES.some(([name, fragment]) => re.test(name) && isSecretBasename(name) && (fragment === undefined || literal.includes(fragment)));
+}
+/** A shell token's glob part: the value of --include=, --glob=, -g=, -Filter: and the like, or the token itself. */
+const globOf = (token: string) => (/^-{1,2}[A-Za-z-]+[=:]/.test(token) ? token.slice(token.search(/[=:]/) + 1) : token);
+
 function isConfigToken(token: string): boolean {
 	const norm = token.toLowerCase().replace(/\\/g, "/");
 	return basenameOf(norm) === "settings.json" || basenameOf(norm) === PERMISSIONS_FILE || /(^|\/)\.git\/(hooks\/|config$)/.test(norm);
@@ -447,7 +478,7 @@ function classifyText(text: string, out: Set<RiskRule>, depth: number): void {
 		classifySegment(words, out, depth);
 		if (tokens.length && (WRITE_CMDS.has(commandName(words[0] ?? "")) || raw.includes(">")) && tokens.some((t) => isConfigToken(t.text))) add(out, "CONFIG_WRITE");
 	}
-	if (allTokens.some((t) => isSecretBasename(basenameOf(t)))) add(out, "SECRET");
+	if (allTokens.some((t) => isSecretBasename(basenameOf(t)) || globTargetsSecret(globOf(t)))) add(out, "SECRET");
 	if (/\.Kill\s*\(/i.test(text)) add(out, "PROC_KILL"); // System.Diagnostics.Process.Kill(), which names no kill command
 	if (/\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|;&\n]*\|\s*(sh|bash|zsh|dash|iex|invoke-expression|pwsh|powershell|cmd)\b/i.test(text)) add(out, "CURL_SHELL");
 	if (/\b(iex|invoke-expression)\b.*\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i.test(text)) add(out, "CURL_SHELL");
@@ -616,6 +647,8 @@ export function decideToolCall(toolName: string, input: Record<string, unknown>,
 		const canon = canonicalPath(target, cwd);
 		if (canon.ambiguous) return block(["PATH_AMBIGUOUS"], { kind: "read", path: path.resolve(cwd, piPathInput(target)) });
 		if (isSecretPath(canon.path)) return block(["SECRET"], { kind: "read", path: canon.path });
+		const glob = toolName === "grep" ? input.glob : toolName === "find" ? input.pattern : undefined;
+		if (typeof glob === "string" && globTargetsSecret(glob)) return block(["SECRET"], { kind: "read", path: canon.path });
 	}
 	return { action: "allow" };
 }
@@ -2906,7 +2939,7 @@ export function permissionMatches(pattern: string, command: string): boolean {
 // ever help, and the exact next step.
 const COMMIT_FORMS = 'not a normal commit form: use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" (double quotes, one command, cwd = candidate root); the -m text is 1-200 characters of ASCII letters, digits, space and . , : _ / # ( ) + - on one line (anything else goes in a -F file), the -F file lives in the task\'s _evidence or _scratch folder, and these forms need no grant';
 const RULE_ADVICE: Partial<Record<RiskRule, string>> = {
-	SECRET: `agents never read or write secret files (.env*, keys, credentials, .ssh/.aws/.gnupg) or name them in a command; to check .env settings run node "${REDACTED_ENV_SCRIPT}" "<absolute .env path>" (secret-like values hidden); .env.example, .env.sample and .env.template are ordinary files when named alone`,
+	SECRET: `agents never read or write secret files (.env*, keys, credentials, .ssh/.aws/.gnupg), name them in a command, or search or list them with a glob that matches them (*.env*, *.key, id_*); to check .env settings run node "${REDACTED_ENV_SCRIPT}" "<absolute .env path>" (secret-like values hidden); .env.example, .env.sample and .env.template are ordinary files when named alone`,
 	OPAQUE_UNPARSEABLE: "the guard cannot parse this command (inline scripts with nested quotes, eval, encoded or deeply nested commands); write the script to a file in the task's _scratch folder and run it by path or pipe it on stdin (for example betterwright run < \"<absolute file>\")",
 	PI_PACKAGE: "this changes your installed Pi packages or settings (install, update, remove, config), which loads new code into later sessions; the operator can also run it directly in a terminal outside Pi",
 	PATH_AMBIGUOUS: "use an exact absolute path without aliases, links or 8.3 short names; a delete never takes a variable, substitution, root, home, '.', '..' or bare glob target",

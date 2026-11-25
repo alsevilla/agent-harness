@@ -9,6 +9,7 @@ import { capShellOutput, outputCapFromEnv } from "./output-cap.ts";
 import * as path from "node:path";
 import { createLookupNudge, launchLookupTools } from "./lookup-nudge.ts";
 import { capWorkerContext, workerMaskPolicy } from "./handoff-window.ts";
+import { createSecretRedactor } from "./secret-redact.ts";
 
 export default function safetyGuardEntry(pi: ExtensionAPI): void {
 	const raw = process.env[CHILD_GRANT_ENV];
@@ -81,6 +82,12 @@ export default function safetyGuardEntry(pi: ExtensionAPI): void {
 		// Nothing is appended here: a message added to every request would hold Pi's cache breakpoint and change each time, so no cache
 		// entry would ever match the next request. The ledger's view travels in a tool result instead (the last tool_result handler).
 		return result.messages ? { messages: result.messages } : undefined;
+	});
+	// First of all tool_result handlers: values from protected files never reach the ledger, the output cap's log on disk or the session.
+	const redactor = createSecretRedactor();
+	pi.on("tool_result", (event, ctx) => {
+		const content = redactor.onResult(event.content, ctx.cwd);
+		return content ? { content: content as typeof event.content } : undefined;
 	});
 	// Registered before the duplicate-read handler, so the ledger records each read's own output (Pi chains tool_result handlers).
 	pi.on("tool_result", (event, ctx) => {

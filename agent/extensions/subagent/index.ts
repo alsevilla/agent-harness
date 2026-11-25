@@ -46,6 +46,7 @@ import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics,
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
+import { createSecretRedactor } from "./secret-redact.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
 import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
 import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV, GRANT_USED_PREFIX, misplacedArtifactPaths } from "./safety-core.ts";
@@ -961,6 +962,9 @@ export default function (pi: ExtensionAPI) {
 	// plus a one-line runtime state card while jobs run or decisions wait.
 	registerHandoffWindow(pi, process.env, () => runtimeRef ? stateCard(runtimeRef.list(), runtimeRef.epoch, decisionsRef?.list().filter((d) => d.state === "announced" || d.state === "open").length ?? 0, runtimeRef.stoppedEarlier) : undefined);
 	pi.on("tool_call", (event, ctx) => guardToolCall({ scope: "main", store: safetyGrants, agentDir: getAgentDir() }, event.toolName, event.input, ctx.cwd));
+	// Main's own results get the same redaction as a worker's: no value from a protected file under main's folder enters the session.
+	const mainRedactor = createSecretRedactor();
+	pi.on("tool_result", (event, ctx) => { const content = mainRedactor.onResult(event.content, ctx.cwd); return content ? { content: content as typeof event.content } : undefined; });
 	// Abort: unclaimed cleanup scopes are revoked and their reservations released; live cleanup launches are cancelled through the existing job signal (best-effort SIGTERM, then a forced kill). A claimed scope keeps its reservation until the child's close is confirmed. Seen at settle time, not at the instant of abort; a command already running is not recalled.
 	pi.on("agent_settled", (event) => {
 		if (!event.aborted) return;
