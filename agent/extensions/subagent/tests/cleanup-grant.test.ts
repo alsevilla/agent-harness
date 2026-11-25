@@ -264,9 +264,13 @@ test("store and launch: revoke clears, claim is single, cleanup launch runs outs
 	assert.equal(parsed.deliveryActions, undefined, "a cleanup child carries no delivery or push scope");
 	assert.equal(parsed.leases, undefined);
 	assert.throws(() => C.claimChildGuard(store, "release-engineer", PRIMARY, GUARD_FILE, undefined, true, undefined, res.grant.id), "replay of the id");
+	// A fallback spawn gets the scope only when main handed it back, which it does only for an attempt that ran no tool (its guard
+	// allowed nothing): the store's single take is the gate, not the claim window. Field report: RFIDAttendance-Rust PR #79.
 	store.addCleanupGrant(res.grant);
 	const fb = C.claimChildGuard(store, "release-engineer", PRIMARY, GUARD_FILE, { open: false }, true, undefined, res.grant.id);
-	assert.equal(JSON.parse(fb.childEnv({})[C.CHILD_GRANT_ENV] ?? "{}").cleanupActions, undefined, "a fallback spawn never gets the scope");
+	assert.equal(JSON.parse(fb.childEnv({})[C.CHILD_GRANT_ENV] ?? "{}").cleanupActions?.length, 1, "a handed-back scope reaches the fallback spawn");
+	assert.equal(store.cleanupCount(), 0, "and is taken once");
+	assert.throws(() => C.claimChildGuard(store, "release-engineer", PRIMARY, GUARD_FILE, { open: false }, true, undefined, res.grant.id), /revoked|missing|expired/, "a scope not handed back is never claimed again");
 	const ordinary = C.claimChildGuard(store, "release-engineer", t.dir, GUARD_FILE, undefined, true);
 	assert.equal(JSON.parse(ordinary.childEnv({})[C.CHILD_GRANT_ENV] ?? "{}").cleanupActions, undefined, "an ordinary launch of the target carries no cleanup");
 });

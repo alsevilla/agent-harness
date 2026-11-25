@@ -346,3 +346,33 @@ test("retired lifecycle/disposal: unknown fields are rejected (not ignored) with
 	assert.equal(s.host.sent.filter((m) => m.customType === "subagent-lifecycle").length, 0);
 	assert.equal(fs.existsSync(`${WT}/_receipts`), false, "no receipt is written");
 });
+
+// Field report (RFIDAttendance-Rust PR #79): the worker said it never received the RUNTIME CLEANUP SCOPE block. One way that happened in
+// code: the first attempt claimed the single-use scope, failed at the provider before running any tool, and its fallback attempt found
+// no scope (and got a copy of the first attempt's brief). An unused scope now goes back for the fallback, which builds its own brief.
+test("a provider failure before any tool hands the unused cleanup scope to the fallback attempt, with one brief", { timeout: 60_000 }, async () => {
+	const s = await readySession();
+	const role = path.join(userDir, "agents", "release-engineer.md");
+	const original = fs.readFileSync(role, "utf8");
+	fs.writeFileSync(role, "---\nname: release-engineer\ndescription: release-engineer\nmodel: openai/primary-test\nfallbackModel: openai/backup-test\n---\n");
+	try {
+		const base = children().length;
+		const started = await s.launch();
+		assert.match(text(started), /Cleanup scope attached: the worker's task will carry the RUNTIME CLEANUP SCOPE block for .+ \(PR #12\)\./, text(started));
+		await waitFor(() => children().length === base + 1, "first attempt spawns");
+		const first = children()[base];
+		assert.equal(JSON.parse(String(first.env?.[CHILD_GRANT_ENV])).cleanupActions?.length, 1, "the first attempt claims the scope");
+		first.emitLine({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "429 Too Many Requests: rate limit exceeded", usage } });
+		first.exit(1);
+		await waitFor(() => children().length === base + 2, "the fallback attempt spawns");
+		const second = children()[base + 1];
+		assert.ok(second.args.includes("openai/backup-test"), "the fallback runs on the fallback model");
+		assert.equal(JSON.parse(String(second.env?.[CHILD_GRANT_ENV])).cleanupActions?.length, 1, "the fallback attempt receives the unused scope");
+		await waitFor(() => second.received.some((m: any) => m.type === "prompt"), "fallback prompt sent");
+		const prompt = JSON.stringify(second.received.find((m: any) => m.type === "prompt"));
+		assert.equal(prompt.split("RUNTIME CLEANUP SCOPE").length - 1, 1, "exactly one brief, not a copy of the first attempt's");
+		assert.doesNotMatch(prompt, /NOT RECEIVED/);
+		assert.match(prompt, /git worktree remove/);
+		finish(second);
+	} finally { fs.writeFileSync(role, original); }
+});
