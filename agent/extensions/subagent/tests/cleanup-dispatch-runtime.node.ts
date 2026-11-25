@@ -190,6 +190,12 @@ test("F4 production chain: real tracked delivery owner, metadata-only PENDING_UN
 	assert.deepEqual({ candidate: scope.candidate, branch: scope.branch, base: scope.base, pr: scope.pr, headSha: scope.headSha, mergeCommit: scope.mergeCommit, role: scope.role }, { candidate: s.t.dir, branch: s.t.branch, base: "main", pr: 12, headSha: s.t.head, mergeCommit: MERGE_C, role: "release-engineer" });
 	assert.equal(envelope.deliveryActions, undefined, "a cleanup launch never carries delivery grants");
 	assert.ok(child.args.some((a) => a.endsWith("safety-guard-entry.ts")), "the child guard entry is loaded");
+	// Field report (PR #78, bg-57): the worker reported the cleanup option missing unless main's packet spelled out the commands. The
+	// task main sent is only "cleanup"; the runtime adds the claimed scope's exact targets and commands to the worker's prompt.
+	await waitFor(() => child.received.some((m: any) => m.type === "prompt"), "cleanup prompt sent");
+	const prompt = JSON.stringify(child.received.find((m: any) => m.type === "prompt"));
+	const group = fwd(path.dirname(s.t.dir)), task = path.basename(s.t.dir);
+	for (const part of ["RUNTIME CLEANUP SCOPE", `PR #12 (`, `is MERGED at ${MERGE_C}`, `1. git worktree remove \\"${s.t.dir}\\"`, `2. rm -rf \\"${group}/_evidence/${task}\\" (bash) or Remove-Item -LiteralPath \\"${group}/_evidence/${task}\\" -Recurse -Force (PowerShell)`, `3. rm -rf \\"${group}/_scratch/${task}\\"`, "PR merged · cleanup done"]) assert.ok(prompt.includes(part), `${part} in ${prompt}`);
 	// replay: while the claimed child lives, no second scope for the same checkout and no writer in it.
 	const again = await s.launch();
 	assert.equal(again.isError, true, text(again));
@@ -274,12 +280,12 @@ test("unrelated background completion and list run ZERO Git/gh/subprocess calls 
 		await waitFor(() => host.sent.slice(sentBefore).some((m) => m.customType === "subagent-completion"), "the completion message is still delivered");
 		const note = host.sent.slice(sentBefore).find((m) => m.customType === "subagent-cleanup-pending");
 		assert.ok(note, "positive control: non-empty pending metadata is surfaced (not a vacuous fail-closed empty)");
-		assert.match(note!.content, /runtime metadata only/);
+		assert.match(note!.content, /cleanup status only, separate from the PR/);
 		assert.match(note!.content, /"PENDING_UNVERIFIED"|"RETAINED"/);
 		assert.doesNotMatch(note!.content.split("\n").filter((l) => l.startsWith("{")).join("\n"), /"READY"|"MERGED"|mergeCommit|launchCwd/);
 		const list = text(await host.tools.get("subagent_control")!.execute("list", { action: "list" }));
 		assert.match(list, /^\[/, "the job list stays a JSON array first");
-		assert.match(list, /CLEANUP_PENDING \(runtime metadata only/);
+		assert.match(list, /CLEANUP_PENDING \(cleanup status only, separate from the PR/);
 		assert.deepEqual(EXT.slice(mark), [], "completion and list ran no Git, gh or other subprocess");
 		assert.deepEqual(reached, [], "the blocking gh double was never called");
 	} finally { cp.execFileSync = realExec; }
