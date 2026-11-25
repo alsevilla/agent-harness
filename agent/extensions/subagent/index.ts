@@ -45,6 +45,7 @@ import { assembleChildSystemPrompt, configureCodeIntegrations, launchedIntegrati
 import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge, blockedHandoffNote } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
+import { approve } from "./approval-prompt.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { createSecretRedactor } from "./secret-redact.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
@@ -839,7 +840,7 @@ async function authorizePushBranch(params: { role?: string; ttl_minutes?: number
 	const scope = request.commits ? `normal push and normal commits on this branch (git commit -m, or -F ${artifactDir ?? "no artifact directory"}; no amend, signing, hooks, pathspec or other commit options)` : "normal push of this branch";
 	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nBranch: ${target.branch}\nPush URL: ${target.pushUrl}\nScope: this session only; ${scope} (no tags, force, delete, mirror or other refs). /revoke-authorization or session end withdraws it.`;
 	const title = request.commits ? "Authorize release-engineer branch pushes and commits?" : "Authorize release-engineer branch pushes?";
-	const approved = await ctx.ui.confirm(title, text, { timeout: 120_000 });
+	const approved = await approve(ctx, title, text, { timeout: 120_000 });
 	if (!approved) return fail("Not authorized by the operator; no lease minted.");
 	let again: ReturnType<typeof pushBranchTarget>;
 	try {
@@ -913,7 +914,7 @@ async function authorizeDelivery(params: { role?: string; ttl_minutes?: number; 
 		? `Action: MERGE (squash, --match-head-commit <live PR head>). Bound candidate state: HEAD ${bound?.head} on ${bound?.ref}; fingerprint ${bound?.fingerprint}; excluded paths: ${bound?.exclude.join(", ") || "none"}${superseded?.bound ? `; replaces bound state ${superseded.bound.head.slice(0, 7)}` : ""}. Follows the PR: later commits on top of ${d.sha.slice(0, 7)} (fix rounds) merge without a new approval when the clean local candidate equals the live PR head. Refused if a check failed or is still running, the history was rewritten, or the candidate (HEAD, branch, staged, unstaged or untracked files) differs. Ignored files are outside the fingerprint; not race-free.${release ? `\nAlso RELEASE: tag ${release.version}${release.latest ? " as latest" : ""} at the merge commit of PR #${d.pr}, after the merge; refused if the tag already exists.` : " This does not approve any release."}`
 		: `Action: RELEASE only: tag ${d.version}${d.latest ? " as latest" : ""} at target ${d.sha} (the merge commit of PR #${d.pr}); refused if the tag already exists. This does not approve any merge.`;
 	const text = `Role: ${LEASE_ROLE}\nCandidate: ${target.candidate}\nPush URL: ${target.pushUrl}\n${identity}\n${detail}\nArtifact directory: ${artifactDir ?? "none (no --body-file or --notes-file)"}${artifactDir === undefined ? "" : "\nArtifact files: *.md or *.txt regular files, 1 byte to 64 KiB, credential-scanned, directly inside that directory (no links, hard links or dot segments)"}\nScope: this PI session (no time expiry). No push, PR create/edit, other tags, force, delete, other refs, npm, deploy or API. Abort keeps it; /revoke-authorization or session end withdraws it. Running children keep their copy until they exit.`;
-	const approved = await ctx.ui.confirm(release ? "Authorize PR merge and release?" : merging ? "Authorize PR merge?" : "Authorize release creation?", text, { timeout: 120_000 });
+	const approved = await approve(ctx, release ? "Authorize PR merge and release?" : merging ? "Authorize PR merge?" : "Authorize release creation?", text, { timeout: 120_000 });
 	if (!approved) return fail("Not authorized by the operator; no delivery grant minted.");
 	let again: ReturnType<typeof pushBranchTarget>;
 	try {
@@ -1165,7 +1166,7 @@ export default function (pi: ExtensionAPI) {
 				if (projectAgentsRequested.length > 0) {
 					const names = projectAgentsRequested.map((a) => a.name).join(", ");
 					const dir = discovery.projectAgentsDir ?? "(unknown)";
-					const ok = await ctx.ui.confirm(
+					const ok = await approve(ctx, 
 						"Run project-local agents?",
 						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
 					);
@@ -1481,7 +1482,7 @@ export default function (pi: ExtensionAPI) {
             try { ops = params.operations.map((o) => authorizableOp(o.kind, o.value, candidate, getAgentDir(), role === LEASE_ROLE)); assertBatchDisplayable(ops); } catch (error) { return denied(`${(error as Error).message}; no grant minted.`); }
             const ttlMs = Math.min(GRANT_TTL_MAX_MS, Math.max(1, params.ttl_minutes ?? GRANT_TTL_DEFAULT_MS / 60_000) * 60_000);
             const list = ops.map((op, i) => `${i + 1}. ${describeOp(op)}`).join("\n");
-            const approved = await ctx.ui.confirm("Authorize exact risky operations?", `Role: ${role ?? "main"}\nFolder (the worker's launch cwd): ${candidate}\nTTL: ${ttlMs / 60_000} min, each single use\n${list}`, { timeout: 120_000 });
+            const approved = await approve(ctx, "Authorize exact risky operations?", `Role: ${role ?? "main"}\nFolder (the worker's launch cwd): ${candidate}\nTTL: ${ttlMs / 60_000} min, each single use\n${list}`, { timeout: 120_000 });
             if (!approved) return denied("Not authorized by the operator; no grant minted.");
             const minted = safetyGrants.mint({ role, candidate, ops, ttlMs });
             return { content: [{ type: "text" as const, text: `Authorized ${minted.length} single-use operation(s) for ${role ?? "main"} in ${candidate}; they expire in ${ttlMs / 60_000} min.${role === null ? "" : ` Launch the ${role} worker with cwd ${candidate}: a worker in any other folder does not receive them.`}` }], details: { count: minted.length } };
