@@ -2276,7 +2276,9 @@ export function claimChildGuard(store: GrantStore, role: string, candidate: stri
 	const grantNote = claimed.length ? undefined : !mayClaim && (window.claimed ?? 0) > 0
 		? "this is a retry or fallback attempt of the job, and its single-use approvals went to the first attempt; an approval it did not use returns to main when it exits, so ask main to launch again (or request the approval again if it was used)"
 		: mayClaim ? store.claimHint?.(role, canonicalCwd(candidate)) : undefined;
-	const cleanup = mayClaim && cleanupId !== undefined ? [store.claimCleanup(cleanupId)].filter((c): c is CleanupGrant => c !== undefined) : [];
+	// The scope is single-use by the store itself: any attempt of this launch may take it while it is there (a fallback after an attempt that
+	// never used it, see the fallback path in index.ts); once taken it is gone.
+	const cleanup = cleanupId !== undefined ? [store.claimCleanup(cleanupId)].filter((c): c is CleanupGrant => c !== undefined) : [];
 	const value = claimed.length || leases.length || delivery.length || cleanup.length || gateCommits ? serializeGrants(claimed, leases, delivery, gateCommits, pushTarget, cleanup) : undefined;
 	return {
 		entry: guardFile,

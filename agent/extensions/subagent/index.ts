@@ -469,10 +469,11 @@ async function runAgentAttempt(
 		// A write tool alone keeps a role read-only: qa-engineer and code-reviewer have it to save their reports outside the candidate.
 		const readOnlyRoot = lease?.access === "read" || (agent.tools !== undefined && !agent.tools.includes("edit")) ? canonicalCwd(cwd ?? defaultCwd) : undefined;
 		if (dispatchDefaults.cleanupId && guard.cleanupCount > 0) { claimedCleanup = dispatchDefaults.cleanupId; owners.markClaimed(claimedCleanup); }
-		if (dispatchDefaults.cleanupId) task += cleanupBrief(guard.cleanupCount > 0 ? cleanupScope : undefined);
+		// The brief goes only into this attempt's prompt: a fallback attempt builds its own from what it claims, never a copy of this one.
+		const prompt = dispatchDefaults.cleanupId ? task + cleanupBrief(guard.cleanupCount > 0 ? cleanupScope : undefined) : task;
 		let wasAborted = false;
 		// Durable per-worker trace of tool calls and guard results (worker-trace.ts): workers keep no session file of their own.
-		const trace: WorkerTrace | undefined = createWorkerTrace(getAgentDir(), { role: agentName, model, cwd: canonicalCwd(cwd ?? defaultCwd), readOnlyRoot, jobId: dispatchDefaults.jobId, workerId: worker?.id, task });
+		const trace: WorkerTrace | undefined = createWorkerTrace(getAgentDir(), { role: agentName, model, cwd: canonicalCwd(cwd ?? defaultCwd), readOnlyRoot, jobId: dispatchDefaults.jobId, workerId: worker?.id, task: prompt });
 		if (trace) currentResult.traceLog = trace.file;
 
 		let removeAbort = () => {};
@@ -494,7 +495,7 @@ async function runAgentAttempt(
             proc.on("spawn", () => {
                 if (worker) { worker.ponytail = args.some((arg) => /[\\/]@dietrichgebert[\\/]ponytail[\\/]/.test(arg)); worker.loaded = launchedIntegrations(args); dispatchDefaults.monitor?.store.started(worker.id); }
                 if (client) {
-                    void client.send("prompt", "Task: " + task).catch(error => {
+                    void client.send("prompt", "Task: " + prompt).catch(error => {
                         if (client.closed && currentResult.messages.length) return;
                         currentResult.stopReason = "error"; currentResult.errorMessage = error.message;
                         proc.stdin?.end();
@@ -624,6 +625,9 @@ async function runAgentAttempt(
 		const guardRefused = !wasAborted && !retryResult.toolActivity && retryResult.stopReason === "error" && model !== undefined && await guardRefusalReplayable(model, retryResult.errorMessage);
 		const nextModel = guardRefused ? remainingFallbacks[0] : nextFallbackModel(retryResult, remainingFallbacks, wasAborted);
 		if (nextModel) {
+			// A claimed cleanup scope this attempt never used (no tool ran, so its guard allowed nothing) goes back for the fallback attempt;
+			// otherwise the fallback finds no scope and the cleanup is lost to a provider error.
+			if (claimedCleanup && cleanupScope && !retryResult.toolActivity) safetyGrants.addCleanupGrant(cleanupScope);
 			const primaryError = getResultOutput(currentResult);
             const updates = worker ? dispatchDefaults.runtime?.steeringFor(worker.id) ?? [] : [];
 			const fallbackResult = await runAgentAttempt(
@@ -1203,7 +1207,8 @@ export default function (pi: ExtensionAPI) {
                 if (signal?.aborted) throw new Error("Dispatch was aborted");
                 const job = runtime.start((jobSignal, jobId) => subagentTool.execute(_toolCallId, {...params, background: false, confirmProjectAgents: false}, jobSignal, undefined, {...ctx, subagentJobId: jobId} as any, { discovery, selected, cleanupId: dispatchDefaults.cleanupId }), {noticeLimit: noticeLimit.ok ? noticeLimit.value : undefined});
                 if (dispatchDefaults.cleanupId) cleanupJobs.set(dispatchDefaults.cleanupId, job.id);
-                return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + ". This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop."}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
+                const scope = dispatchDefaults.cleanupId ? safetyGrants.peekCleanup(dispatchDefaults.cleanupId) : undefined;
+                return {content: [{type: "text", text: "Started background job " + job.id + ". Roles: " + requests.map(t => t.agent).join(", ") + "." + (scope ? ` Cleanup scope attached: the worker's task will carry the RUNTIME CLEANUP SCOPE block for ${cleanupTargets(scope).join(", ")}${scope.task === undefined ? " and its artifact folders" : ""} (PR #${scope.pr}).` : "") + " This is a launch acknowledgement, not a completed task. Continue responding or doing independent work; completion will arrive automatically. Use subagent_control list to obtain worker IDs, steer to change direction, or cancel to stop."}], details: {...makeDetails(mode)([]), jobId: job.id, background: true}};
             }
 
 			if (dagNodes) {
