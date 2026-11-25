@@ -455,3 +455,19 @@ test("protected, force and destructive Git operations stay denied in the trusted
 	for (const command of denied) assert.ok(blocked(run(g, command)), command);
 	assert.ok(blocked(run(trusted(), `${GP} origin feat/x`, path.join(REPO, "sub"))), "push from a subdirectory");
 });
+
+// Field report (PR #77): `git show … && git push origin <branch>` in one shell call was refused as "git show". The refusal now names
+// the push segment and says to split; the same commands as separate calls run without a grant.
+test("a read-only verification and a push in one call: refused for the push segment; separate calls need no grant", () => {
+	const g = trusted();
+	for (const command of [`git show --stat HEAD && ${PUSH}`, `git log --oneline -3; git status && ${GP} -u origin feat/x`, `git rev-parse HEAD && ${GP} origin HEAD:feat/x`]) {
+		const r = run(g, command) as { reason: string };
+		assert.ok(blocked(r), command);
+		assert.match(r.reason, /^Blocked by harness safety guard \[GIT_PUBLISH\] op [0-9a-f]{16}: git push, combined with other commands in one call; a push is automatic only as its own call: run the verification commands first as separate calls, then git push origin <branch> alone/, command);
+		assert.doesNotMatch(r.reason, /git show|git log|git rev-parse|grantable/, command);
+	}
+	// A compound with a push that is never automatic still names the push segment, not the first program.
+	const forced = run(g, `git show --stat HEAD && ${GP} --force origin feat/x`) as { reason: string };
+	assert.match(forced.reason, /: git push, in a call that also runs other commands; grantable/);
+	for (const command of ["git show --stat HEAD", "git log --oneline -3", PUSH]) assert.equal(run(g, command), undefined, command);
+});

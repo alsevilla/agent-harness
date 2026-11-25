@@ -2966,8 +2966,19 @@ function programOf(op: GuardOp): string {
 	const name = path.basename(words[0] ?? "").replace(/\.(exe|cmd|bat)$/i, "");
 	return ["git", "gh", "npm", "pnpm", "yarn"].includes(name.toLowerCase()) && /^[a-z][a-z-]*$/.test(words[1] ?? "") ? `${name} ${words[1]}` : name || "(empty)";
 }
+// In a compound call, the segment that carries a refused rule: the refusal names it, not the call's first program (field report:
+// `git show … && git push origin <branch>` was refused as "git show").
+function ruleSegment(op: GuardOp, rules: RiskRule[], gateCommits: boolean): string | undefined {
+	if (op.kind !== "shell") return undefined;
+	const segments = splitSegments(op.command).map((s) => s.trim()).filter(Boolean);
+	return segments.length < 2 ? undefined : segments.find((s) => classifyShell(s, gateCommits).rules.some((r) => rules.includes(r)));
+}
 export function blockReason(decision: Extract<Decision, { action: "block" }>, scope: GuardScope, gateCommits: boolean, commitWhy?: string): string {
 	const head = `Blocked by harness safety guard [${decision.rules.join(", ")}] op ${decision.digest}: `;
+	const segment = ruleSegment(decision.op, decision.rules, gateCommits);
+	if (segment !== undefined && scope === "child" && gateCommits && decision.rules.length === 1 && decision.rules[0] === "GIT_PUBLISH" && parseNormalPush(segment, true) !== undefined) {
+		return `${head}git push, combined with other commands in one call; a push is automatic only as its own call: run the verification commands first as separate calls, then git push origin <branch> alone, with cwd = the candidate root on that feature branch (no grant is needed).`;
+	}
 	if (scope === "child" && gateCommits && decision.rules.length === 1 && decision.rules[0] === "GIT_COMMIT" && decision.op.kind === "shell") {
 		const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
 		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}; here ${commitFormMismatch(decision.op.command)}.`;
@@ -2990,7 +3001,8 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		: scope === "main"
 			? "grantable: the operator can approve this exact operation with request_authorization; the approval must name this folder and the exact command text, and is used once"
 			: `grantable: a worker receives only grants requested for its role and its launch folder before it was launched, with the exact command text; ask main to request one with role and cwd ${decision.op.kind === "shell" ? decision.op.cwd : "set to this folder"} and relaunch the worker in that folder, or have the operator run it`;
-	return `${head}${programOf(decision.op)}; ${how}${advice.length ? `; ${advice.join("; ")}` : ""}.`;
+	const program = segment !== undefined && decision.op.kind === "shell" ? `${programOf({ ...decision.op, command: segment })}, in a call that also runs other commands` : programOf(decision.op);
+	return `${head}${program}; ${how}${advice.length ? `; ${advice.join("; ")}` : ""}.`;
 }
 
 // Shared hook logic for main and child: allow, consume one exact grant, use a live child lease, or block with rule ids and a digest only (no raw command).
