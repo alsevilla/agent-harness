@@ -377,12 +377,34 @@ test("H1b a refused commit form names the part that failed, without echoing the 
 	assert.equal(run(g, 'git commit -m "fix(guard): name the failing part, #42"'), undefined, "the documented -m form still passes");
 });
 
-test("H2 hint absent for amend, no-verify, -a, other flags and non-commit blocks; quoted forms unaffected", () => {
+// Field ticket (PR #77): a trusted release-engineer commit in an unsupported shape was refused with "need an operator grant" as the
+// only way out; a standalone commit then passed. The refusal now names the unsupported part and the valid form.
+test("H2 an unsupported commit shape names the part and the valid alternative, not only a grant", () => {
 	const g = trusted();
-	for (const command of ['git commit --amend -m "x"', 'git commit --no-verify -m "x"', 'git commit -a -m "x"', 'git commit -am "x"', 'git commit -m "x" --amend', "git commit --amend", `${GP} origin main`]) {
+	const cases: Array<[string, RegExp]> = [
+		['git add -A && git commit -m "SECRETWORD"', /here the commit is combined with other commands in one call; run each step \(git add, checks, push\) as its own call and the commit alone\./],
+		['git status; git commit -m "SECRETWORD"', /combined with other commands/],
+		['git commit -am "SECRETWORD"', /here -am \(stage all\) is not accepted; stage with a separate git add call first\./],
+		['git commit -a -m "SECRETWORD"', /here -a \(stage all\)/],
+		['git commit -m "SECRETWORD" -m "more"', /here it has more than one -m or -F; put a multi-line message in one -F file\./],
+		['git commit --message="SECRETWORD"', /here --message is not accepted; use -m followed by a space/],
+		["git commit", /here it has no -m or -F message\./],
+		['git -C /tmp/SECRETWORD commit -m "x"', /here git -C is not accepted; set cwd to the candidate root instead\./],
+		['git commit --no-verify -m "SECRETWORD"', /here --no-verify is never automatic \(only an operator grant for the exact command allows it\); for a new commit, drop it\./],
+		['git commit -m "SECRETWORD" --signoff', /here --signoff is not accepted; drop it\./],
+	];
+	for (const [command, expected] of cases) {
 		const r = run(g, command) as { reason: string };
 		assert.ok(blocked(r), command);
-		assert.ok(!/not a normal commit form/.test(r.reason), command);
+		assert.match(r.reason, /^Blocked by harness safety guard \[GIT_COMMIT\] op [0-9a-f]{16}: git commit; not an automatic commit form: here /, command);
+		assert.match(r.reason, expected, command);
+		assert.match(r.reason, /Use git commit -m "<text>" or git commit -F "<absolute \.md\/\.txt file>" alone in one call, with cwd = the candidate root; these need no grant\.$/, command);
+		assert.ok(!r.reason.includes("SECRETWORD"), `no message or path echo: ${command}`);
+	}
+	for (const command of ['git commit --amend -m "x"', 'git commit -m "x" --amend', "git commit --amend", `${GP} origin main`]) {
+		const r = run(g, command) as { reason: string };
+		assert.ok(blocked(r), command);
+		assert.ok(!/not a normal commit form|not an automatic commit form/.test(r.reason), command);
 	}
 	assert.equal(run(g, 'git commit -m "x"'), undefined);
 	const drift = run(g, 'git commit -m "x"', path.join(REPO, "sub")) as { reason: string };
