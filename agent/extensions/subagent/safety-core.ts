@@ -1056,6 +1056,22 @@ export function commitFormMismatch(command: string): string {
 	if (badSegments(text)) return "the -F path has an empty, '.', '..' or trailing dot or space segment";
 	return "the -F argument is not accepted";
 }
+/** Which part of a git commit call keeps it out of the two automatic forms, for the refusal. Names options only, never the message or path. */
+export function commitShapeWhy(command: string): string {
+	const bare = String(command ?? "").replace(/"[^"]*"|'[^']*'/g, "Q").trim();
+	if (/[;&|\r\n]/.test(bare)) return "the commit is combined with other commands in one call; run each step (git add, checks, push) as its own call and the commit alone";
+	if (/^git -C /.test(bare)) return "git -C is not accepted; set cwd to the candidate root instead";
+	if (!/^git commit( |$)/.test(bare)) return "the call does not start with git commit; run the commit alone, with cwd = the candidate root";
+	const options = bare.slice("git commit".length).trim().split(/\s+/).filter((w) => w.startsWith("-"));
+	const other = options.find((o) => !/^-[mF]$/.test(o)) ?? "";
+	const name = /^-{1,2}[A-Za-z][A-Za-z-]*$/.test(other.split("=")[0]) ? other.split("=")[0] : "an option";
+	if (/^(-[A-Za-z]*a[A-Za-z]*|--all)$/.test(name)) return `${name} (stage all) is not accepted; stage with a separate git add call first`;
+	if (["--message", "--file"].includes(name)) return `${name} is not accepted; use ${name === "--file" ? "-F" : "-m"} followed by a space and the quoted argument`;
+	if (!options.some((o) => /^-[mF]$/.test(o))) return "it has no -m or -F message";
+	if (options.filter((o) => /^-[mF]$/.test(o)).length > 1) return "it has more than one -m or -F; put a multi-line message in one -F file";
+	if (["--amend", "--no-verify", "-n", "--fixup", "--squash", "--allow-empty", "--no-edit", "--author", "--date", "--reset-author"].includes(name)) return `${name} is never automatic (only an operator grant for the exact command allows it); for a new commit, drop it`;
+	return `${name} is not accepted; drop it`;
+}
 export function parseNormalCommit(command: string): { message?: string; file?: string } | undefined {
 	const text = String(command ?? "");
 	if (!/^[\x20-\x7e]+$/.test(text)) return undefined;
@@ -2923,7 +2939,7 @@ export function blockReason(decision: Extract<Decision, { action: "block" }>, sc
 		const bare = decision.op.command.replace(/"[^"]*"|'[^']*'/g, "Q");
 		if (parseNormalCommit(decision.op.command) === undefined && /^git commit -[mF] \S+$/.test(bare)) return `${head}${COMMIT_FORMS}; here ${commitFormMismatch(decision.op.command)}.`;
 		if (parseNormalCommit(decision.op.command) !== undefined) return commitWhy ? `${head}git commit; not automatic here: ${commitWhy}.` : `${head}git commit; a normal commit is automatic only with cwd = the candidate root on its feature branch; run it there (no grant is needed).`;
-		return `${head}git commit; only plain git commit -m/-F forms are automatic: amend, --no-verify, -a and other flags are not, and need an operator grant for the exact command.`;
+		return `${head}git commit; not an automatic commit form: here ${commitShapeWhy(decision.op.command)}. Use git commit -m "<text>" or git commit -F "<absolute .md/.txt file>" alone in one call, with cwd = the candidate root; these need no grant.`;
 	}
 	// A trusted release-engineer push in a form that is never automatic: name the accepted forms instead of pointing at approvals.
 	if (scope === "child" && gateCommits && decision.op.kind === "shell" && decision.rules.length === 1 && decision.rules[0] === "GIT_PUBLISH" && /^git push( |$)/.test(decision.op.command) && parseNormalPush(decision.op.command, true) === undefined) {
