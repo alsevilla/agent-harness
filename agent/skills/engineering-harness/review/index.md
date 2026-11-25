@@ -30,7 +30,7 @@ Adapted from [Codex's review rubric](https://github.com/openai/codex/blob/4980f9
 
 Return:
 - APPROVE, APPROVE WITH NOTES, REQUEST CHANGES, or ESCALATE;
-- a coverage receipt of a few lines, not a file-by-file transcript: candidate identity (plus the fingerprint reference when the review is snapshot-bound); Inspected scope; Not inspected important scope; actual checks run versus reused evidence;
+- a coverage receipt of a few lines, not a file-by-file transcript: candidate identity (plus the fingerprint, by the procedure in `../verify/index.md` "Candidate fingerprint", when the review is snapshot-bound); Inspected scope; Not inspected important scope; actual checks run versus reused evidence;
 - only material findings, with evidence/location;
 - residual risks and any verification needed.
 
