@@ -12,7 +12,7 @@ NEXT: done, or one justified next action
 RISKS: material blockers, limits and unknowns for the assigned contract, or none
 EVIDENCE: one primary absolute path to your assigned REPORT when it exists, otherwise existing exact path(s), or none
 Keep the whole reply under 3,000 characters: a background notice carries about 4,000 including its fields and cuts the rest, which costs main an extra result fetch. Full detail goes to the assigned REPORT file, not the reply: hashes, counts, manifests and logs, changed files, commands with exit codes, candidate identity, complete warnings. Name the file; do not paste its contents, whole logs, stack traces or diffs unless they are the evidence itself.
-Verdicts: a required check not run is INCONCLUSIVE; an actual failure is FAIL. Required evidence you did not capture counts as a check not run, even when the change works: for example the failing test before the fix (RED) when tests were written after the code. Then STATUS is INCONCLUSIVE and names the missing evidence; it is PASS only when the packet allowed that exception, and STATUS names the exception, its reason and the replacement evidence. A check outside your assignment (for example browser or live behavior not assigned) is NOT ASSESSED: name it in RISKS only when material to interpreting the result. It does not lower an automated-only PASS and creates no approval gate.
+Verdicts: a required check not run is INCONCLUSIVE; an actual failure is FAIL. BLOCKED names the step that failed, its exact command and error when there is one, and what is needed to continue; a check that simply did not run is NOT RUN with its reason, not BLOCKED. Required evidence you did not capture counts as a check not run, even when the change works: for example the failing test before the fix (RED) when tests were written after the code. Then STATUS is INCONCLUSIVE and names the missing evidence; it is PASS only when the packet allowed that exception, and STATUS names the exception, its reason and the replacement evidence. A check outside your assignment (for example browser or live behavior not assigned) is NOT ASSESSED: name it in RISKS only when material to interpreting the result. It does not lower an automated-only PASS and creates no approval gate.
 This format takes precedence over any longer "Return:" list or word limit in your role prompt; that list belongs in the REPORT file.
 This is guidance only: full details requested by the user or needed for correctness take precedence.
 Do not conceal failed checks, security/data risks, blockers, or unresolved questions. Material UNKNOWN, security and data risks stay explicit even when they exceed the size budget.
@@ -243,6 +243,35 @@ export function unopenedImages(task: string, messages: readonly unknown[]): stri
 		for (const part of (m as any).content) if (part?.type === "toolCall" && part.name === "read" && typeof part.arguments?.path === "string") opened.add(foldImage(part.arguments.path));
 	}
 	return named.filter((p) => !opened.has(foldImage(p)));
+}
+
+// BLOCKED check (field report: a release worker returned BLOCKED with no failed command, guard refusal or missing input; a retry pushed).
+// A BLOCKED final reply whose STATUS, NEXT, RISKS and BLOCKERS lines name no blocker is flagged as incomplete, and the guard refusals
+// the worker met are carried with their command, so main can recover without re-running the worker to find out.
+const BLOCKER = /`[^`]+`|Blocked by harness safety guard|\b(?:refus\w*|denied|error\w*|fail\w*|exit(?:ed)?(?: code)? \d+|missing|not found|needs?|requires?|waiting|unavailable|timed? ?out|conflict\w*|rejected|no (?:access|permission|credential|approval|grant)|HTTP [45]\d\d)\b/i;
+const GUARD_PREFIX = "Blocked by harness safety guard";
+const textParts = (m: any) => (Array.isArray(m?.content) ? m.content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n") : String(m?.content ?? ""));
+export function blockedHandoffNote(messages: readonly unknown[], withhold: (command: string) => boolean = () => false): string {
+	const all = [...(messages ?? [])] as any[];
+	const last = [...all].reverse().find((m) => m?.role === "assistant" && textParts(m).trim());
+	const text = last ? textParts(last) : "";
+	if (!/^\s*STATUS\s*:\s*BLOCKED\b/im.test(text)) return "";
+	const fields = text.split(/\r?\n/).filter((l) => /^\s*(?:STATUS|NEXT|RISKS?|BLOCKERS?)\s*:/i.test(l)).join("\n").replace(/\bBLOCKED\b/g, "");
+	const calls = new Map<string, any>();
+	for (const m of all) if (m?.role === "assistant" && Array.isArray(m.content)) for (const p of m.content) if (p?.type === "toolCall" && typeof p.id === "string") calls.set(p.id, p);
+	const refusals = all.filter((m) => m?.role === "toolResult" && textParts(m).trimStart().startsWith(GUARD_PREFIX)).slice(-3).map((m) => {
+		const call = calls.get(m.toolCallId);
+		const args = call?.arguments ?? {};
+		const raw = typeof args.command === "string" ? args.command : typeof args.path === "string" ? `${call.name} ${args.path}` : String(call?.name ?? m.toolName ?? "tool");
+		const command = withhold(raw) ? "(command withheld: it carries a credential-like literal)" : `\`${raw.replace(/\s+/g, " ").trim().slice(0, 300)}\``;
+		return `- ${command}: ${textParts(m).trim().replace(/\s+/g, " ").slice(0, 500)}`;
+	});
+	const named = BLOCKER.test(fields);
+	if (named && !refusals.length) return "";
+	const lines = ["", "", "RUNTIME CHECK (not worker text):"];
+	if (!named) lines.push("INCOMPLETE HANDOFF: STATUS is BLOCKED but names no blocker (the step that failed, its exact command and error, or the input needed to continue). Do not treat it as a real blocker: ask the worker or relaunch it with the step named; a check that simply did not run is NOT RUN with its reason.");
+	if (refusals.length) lines.push(`Guard refusals in this run, latest last (attempted command: refusal):`, ...refusals);
+	return lines.join("\n");
 }
 
 // Handoff check: a worker that settles normally without a STATUS line gets one follow-up prompt asking for the four-line handoff,
