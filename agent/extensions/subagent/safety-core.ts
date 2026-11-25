@@ -2537,7 +2537,9 @@ function resolveTarget(cwd: string, target: string): string {
 }
 const protectedRoot = (root: string) => slashed(DRIVE.test(root) ? path.win32.resolve(root) : path.resolve(root)).replace(/\/+$/, "");
 /** Why a write target is refused: inside the candidate, not resolvable here, or missing; undefined when allowed. Names the resolved destination and the protected root. */
+let collectedTargets: string[] | undefined; // set only while tempFileWrite gathers write targets through the read-only walk
 function roTarget(what: string, target: string, cwd: string, root: string): string | undefined {
+	if (collectedTargets) { if (target !== "" && !/[$`%]/.test(target)) collectedTargets.push(target); return undefined; }
 	if (target === "") return `${what} with no target the guard can read; write to the literal absolute _scratch or _evidence path from the packet (protected root ${protectedRoot(root)})`;
 	if (/[$`%]/.test(target) && !/^(\$null)$/i.test(target)) return `${what} to a target with a variable or substitution the guard cannot resolve (${shownTarget(target)}); use the literal absolute _scratch or _evidence path from the packet`;
 	return insideRoot(target, cwd, root) ? `${what} into the candidate checkout (${shownTarget(target)} resolves to ${shownTarget(resolveTarget(cwd, target))}, inside protected root ${protectedRoot(root)})` : undefined;
@@ -2878,6 +2880,21 @@ export function readOnlyViolation(toolName: string, input: Record<string, unknow
 	return readOnlyShell(shell, cwd, root);
 }
 
+// Field report: a documentation worker wrote .block_tmp_check.txt in the checkout root and was interrupted; the file stayed untracked and
+// the deletion guard (as designed) refused the cleanup. A temporary-named file written into the candidate is refused for every worker,
+// with the task's _scratch folder to use instead, so an interrupted run leaves it there for cleanup and not in the checkout.
+const TEMP_NAME = /^\.?(?:tmp|temp)(?:[._-]|$)|[._-](?:tmp|temp)(?:[._-]|$)|\.(?:bak|orig|swp)$|~$/i;
+export function tempFileWrite(toolName: string, input: Record<string, unknown>, cwd: string, root: string): string | undefined {
+	let targets: string[] = [];
+	if (toolName === "write") targets = typeof input?.path === "string" ? [input.path] : [];
+	else if (toolName === "bash" || toolName === "powershell") {
+		collectedTargets = [];
+		try { readOnlyViolation(toolName, input, cwd, root); targets = collectedTargets; } finally { collectedTargets = undefined; }
+	}
+	const hit = targets.find((t) => TEMP_NAME.test(path.basename(slashed(t))) && insideRoot(t, cwd, root));
+	return hit === undefined ? undefined : `writes a temporary file into the candidate checkout (${shownTarget(hit)}), which an interrupted run would leave behind as an untracked file; write it in the task's _scratch folder by its literal absolute path (for this candidate: ${artifactGroupHint(root)}/_scratch/<task>/)`;
+}
+
 // Field report: a read-only debugger's PowerShell `$R='C:\...\_scratch\sms-test\r1-compile-debug'` followed by
 // `cargo check ... *> "$R\check-fixed.log"` was refused: the target holds a variable the guard cannot resolve, although the same command
 // assigned it a literal _scratch path two lines earlier. A variable is replaced by its value only when that is certain: assigned exactly
@@ -3013,6 +3030,13 @@ export function guardToolCall(guard: { scope: GuardScope; store: GrantStore; age
 		if (why) {
 			const digest = createHash("sha256").update(`${toolName}\0${JSON.stringify(input ?? {})}`).digest("hex").slice(0, 16);
 			return { block: true, reason: `Blocked by harness safety guard [READ_ONLY_ROLE] op ${digest}: ${why}; not grantable: this role is read-only for its candidate, so write REPORT and evidence files to the packet's _evidence or _scratch paths (for this candidate: ${artifactGroupHint(guard.readOnlyRoot)}/_evidence/<task>/ or _scratch/<task>/) and return code or config changes to main for the owning worker.` };
+		}
+	}
+	if (guard.scope === "child") {
+		const why = tempFileWrite(toolName, input, cwd, guard.readOnlyRoot ?? cwd);
+		if (why) {
+			const digest = createHash("sha256").update(`${toolName}\0${JSON.stringify(input ?? {})}`).digest("hex").slice(0, 16);
+			return { block: true, reason: `Blocked by harness safety guard [TEMP_IN_CANDIDATE] op ${digest}: ${why}; not grantable: change the path and run it again.` };
 		}
 	}
 	if ((toolName === "bash" || toolName === "powershell") && typeof input?.command === "string") {
