@@ -42,7 +42,11 @@ or rebase a worker's commits; a squash merge combines them.
   - The attribution lines.
   One point per bullet, short sentences, tables over prose for comparisons, no claim beyond the evidence. Refer to issues and PRs as `owner/repo#<n>` or a full URL, never a bare `#<n>`. When later commits change the PR, rewrite the body to describe the whole PR as it now stands, not the latest commit.
 - Title: imperative and specific, under 72 characters, within the guard's title characters.
-- After `gh pr create`, wait for the PR's checks with `gh pr checks <n> --repo <owner/repo> --watch --interval 30`, bounded by the shell tool's timeout (at most 20 minutes), and report each check's final state. For a failing check, report its name and the failing excerpt (`gh run view <id> --repo <owner/repo> --log-failed`); main routes the fix. A repository without checks is reported as "no checks configured". Never report a PR ready for merge while a check is failing or still running.
+- After `gh pr create`, wait for the PR's checks:
+  - Right after create, GitHub may not have registered them yet, so an empty first answer ("no checks reported on the '<branch>' branch", exit 1) is provisional. Run `gh pr checks <n> --repo <owner/repo>` again after `sleep 15`, as separate calls, up to 8 times (about 2 minutes).
+  - Once checks appear, watch them with `gh pr checks <n> --repo <owner/repo> --watch --interval 30`, bounded by the shell tool's timeout (at most 20 minutes), and report each check's final state. For a failing check, report its name and the failing excerpt (`gh run view <id> --repo <owner/repo> --log-failed`); main routes the fix.
+  - If none appear within that window, report "no checks observed within the wait window", never "no checks configured": a check may still register later.
+  - An authentication or network error (for example "authentication", "HTTP 401" or "HTTP 403", "could not resolve host", a timeout or a connection error) is reported as that error, quoted, not as missing checks, and is not retried as an empty answer. Never report a PR ready for merge while a check is failing or still running.
 
 ## Release notes
 When main asks for a release, draft the notes before the release approval:
