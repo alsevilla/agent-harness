@@ -364,3 +364,18 @@ test("workers keep every file inside the task's own _evidence and _scratch folde
 		assert.ok(text.includes("in its `_evidence/<task>` or `_scratch/<task>` folder before you hand back, and keep logs, fixtures and screenshots inside those two folders too (cleanup removes only them)"), role);
 	}
 });
+
+// Field report (PR #77): right after gh pr create, gh pr checks reported no checks and exited 1; GitGuardian had in fact run and passed.
+// An empty first answer is provisional: bounded retries, then actual states, or "no checks observed within the wait window"; and
+// authentication or network errors are reported as errors.
+test("PR check wait: an empty first answer is retried within a bound, and errors are not missing checks", () => {
+	const ship = flat(read("agent/skills/engineering-harness/ship/index.md"));
+	const step = ship.slice(ship.indexOf("After `gh pr create`, wait for the PR's checks"));
+	const at = (text: string) => { const i = step.indexOf(text); assert.ok(i >= 0, text); return i; };
+	assert.ok(at("an empty first answer (\"no checks reported on the '<branch>' branch\", exit 1) is provisional") < at("again after `sleep 15`, as separate calls, up to 8 times (about 2 minutes)"));
+	assert.ok(at("up to 8 times") < at("Once checks appear, watch them with `gh pr checks <n> --repo <owner/repo> --watch --interval 30`"));
+	at("report \"no checks observed within the wait window\", never \"no checks configured\"");
+	at("An authentication or network error");
+	at("is reported as that error, quoted, not as missing checks, and is not retried as an empty answer");
+	assert.ok(!ship.includes('A repository without checks is reported as "no checks configured"'), "the old verdict is gone");
+});
