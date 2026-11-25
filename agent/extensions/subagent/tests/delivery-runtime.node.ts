@@ -198,7 +198,9 @@ async function openMain(steps: SdkStep[], opts: { ui?: { confirm: (...a: any[]) 
 	await resourceLoader.reload();
 	const { session } = await pi.createAgentSession({ cwd, agentDir: agentDirMain, settingsManager, resourceLoader, model: core.models[0], sessionManager: pi.SessionManager.inMemory(cwd) });
 	const confirms: any[][] = [];
-	const uiContext = opts.ui ? { notify() {}, setStatus() {}, setWidget() {}, confirm: (...a: any[]) => { confirms.push(a); return opts.ui!.confirm(...a); } } : undefined;
+	const uiContext = opts.ui ? { notify() {}, setStatus() {}, setWidget() {}, confirm: (...a: any[]) => { confirms.push(a); return opts.ui!.confirm(...a); },
+		// Harness approvals are a No/Yes select (approval-prompt.ts); the scripted operator answers it like a confirm, recorded as one.
+		select: async (title: string, options: string[], o?: unknown) => { if (options.join() !== "No,Yes") return undefined; const cut = title.indexOf("\n"); const a = [title.slice(0, cut), title.slice(cut + 1), o]; confirms.push(a); return (await opts.ui!.confirm(...a)) ? "Yes" : "No"; } } : undefined;
 	await session.bindExtensions({ uiContext, mode: opts.mode ?? "tui" });
 	const results = () => session.messages.filter((m: any) => m.role === "toolResult").map((m: any) => ({ tool: m.toolName, isError: m.isError === true, text: textOf(m.content) }));
 	const run = async (prompt = "probe") => { await session.prompt(prompt); return results(); };
