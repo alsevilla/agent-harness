@@ -42,14 +42,14 @@ import { STOPPED_JOBS_DIR } from "./stopped-jobs.ts";
 import { sandboxInvocation } from "./sandbox.ts";
 import { childContextEligible } from "./child-context.ts";
 import { assembleChildSystemPrompt, configureCodeIntegrations, launchedIntegrations } from "./code-integrations.ts";
-import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge } from "./compact-handoff.ts";
+import { NOTICE_MIN, PRINTED_MARKUP_LABEL, extractFinalText, failureDiagnostics, incompleteLabel, isIncompleteStop, markupNotice, printedToolMarkup, retainedEntryBlock, validateNoticeLimit, withTerminalDiagnostics, unopenedImages, HANDOFF_NUDGE, needsHandoffNudge, blockedHandoffNote } from "./compact-handoff.ts";
 import { appendParentReports, runDag, validateDag, type DagNodeSpec, type DagStatus } from "./dag.ts";
 import { DECISION_RECORD_PREFIX, DECISION_RELAY_ENV, DECISION_TOOL, DecisionRelay } from "./decision-relay-state.ts";
 import { guardRefusalReplayable, providerLaunchState, registerProviderCooldown, runProviderCooldownCommand } from "./provider-cooldown-entry.ts";
 import { createSecretRedactor } from "./secret-redact.ts";
 import { OwnerTracker } from "./cleanup-state.ts";
 import { expandShape, SHAPE_NAMES, SHAPE_WORKERS, shapeStepStop } from "./shape.ts";
-import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV, GRANT_USED_PREFIX, misplacedArtifactPaths } from "./safety-core.ts";
+import { CLEANUP_TTL_MS, cleanupPending, formatCleanupPending, prepareCleanup, cleanupTargets, assertBatchDisplayable, authorizableOp, bindDelivery, descendsFrom, type BoundState, canonicalCwd, checkPrBase, claimChildGuard, createGrantStore, describeOp, GRANT_TTL_DEFAULT_MS, GRANT_TTL_MAX_MS, guardToolCall, LEASE_ROLE, MAX_DELIVERY_GRANTS, MAX_GRANT_OPS, parseRepoFromPushUrl, planPushRequest, authorizationStatus, pushBranchTarget, type ClaimWindow, type DeliveryBinding, type GuardOp, validateArtifactDir, verifyDeliveryTarget, CHILD_READONLY_ENV, GRANT_USED_PREFIX, misplacedArtifactPaths, credentialFinding } from "./safety-core.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -121,13 +121,17 @@ function imageNote(result: SingleResult): string {
 	return missing.length ? `\n\nRUNTIME CHECK (not worker text): the worker never opened ${missing.length === 1 ? "this image" : "these images"} named in its task: ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? ", ..." : ""}. Treat its visual claims as unverified.` : "";
 }
 
+function runtimeNotes(result: SingleResult): string {
+	return imageNote(result) + blockedHandoffNote(result.messages, (command) => credentialFinding(command) !== undefined);
+}
+
 function getResultOutput(result: SingleResult): string {
 	// INCOMPLETE keeps every text block of the final message plus its terminal diagnostics: the partial report is the evidence.
-	if (isIncompleteStop(result)) return (markupNotice(withTerminalDiagnostics(extractFinalText(result.messages), result), result) || "(no output)") + imageNote(result);
+	if (isIncompleteStop(result)) return (markupNotice(withTerminalDiagnostics(extractFinalText(result.messages), result), result) || "(no output)") + runtimeNotes(result);
 	if (isFailedResult(result)) {
-		return ([...failureDiagnostics(result).map((d, i) => (i === 0 ? d.value : `${d.label}: ${d.value}`)), getFinalOutput(result.messages)].filter(Boolean).join("\n\n") || "(no output)") + imageNote(result);
+		return ([...failureDiagnostics(result).map((d, i) => (i === 0 ? d.value : `${d.label}: ${d.value}`)), getFinalOutput(result.messages)].filter(Boolean).join("\n\n") || "(no output)") + runtimeNotes(result);
 	}
-	return (markupNotice(getFinalOutput(result.messages), result) || "(no output)") + imageNote(result);
+	return (markupNotice(getFinalOutput(result.messages), result) || "(no output)") + runtimeNotes(result);
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(

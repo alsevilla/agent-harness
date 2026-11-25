@@ -564,3 +564,39 @@ test("selected docs describe the JSON completion notice, noticeLimit, qualified 
 	assert.match(docs.tokens, /no (?:measured )?(?:token|speed)/i);
 	assert.match(docs.upgrade, /noticeLimit/);
 });
+
+// Field report (PR #77): a release worker returned BLOCKED before verifying the PR head, with no failed command, guard refusal or
+// missing input; a retry pushed. A BLOCKED reply that names no blocker is flagged; a real guard refusal keeps its command and reason.
+test("blockedHandoffNote: a BLOCKED reply with no blocker is flagged; guard refusals keep their command and reason", async () => {
+	const { blockedHandoffNote } = await import("../compact-handoff.ts");
+	const reply = (text: string) => ({ role: "assistant", stopReason: "stop", content: [{ type: "text", text }] });
+	const call = (id: string, command: string) => ({ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id, name: "bash", arguments: { command } }] });
+	const result = (id: string, text: string) => ({ role: "toolResult", toolCallId: id, toolName: "bash", isError: true, content: [{ type: "text", text }] });
+	const vague = reply("STATUS: BLOCKED. Could not complete the update.\nNEXT: retry\nRISKS: none\nEVIDENCE: none");
+	const note = blockedHandoffNote([vague]);
+	assert.match(note, /RUNTIME CHECK \(not worker text\):\nINCOMPLETE HANDOFF: STATUS is BLOCKED but names no blocker/);
+	assert.match(note, /a check that simply did not run is NOT RUN with its reason/);
+
+	const refusal = "Blocked by harness safety guard [GIT_PUBLISH] op 0123456789abcdef: git push, combined with other commands in one call; ...";
+	const run = [call("c1", "git show --stat HEAD && git push origin feat/x"), result("c1", refusal), vague];
+	const withRefusal = blockedHandoffNote(run);
+	assert.match(withRefusal, /INCOMPLETE HANDOFF/);
+	assert.match(withRefusal, /Guard refusals in this run, latest last \(attempted command: refusal\):\n- `git show --stat HEAD && git push origin feat\/x`: Blocked by harness safety guard \[GIT_PUBLISH\] op 0123456789abcdef: git push, combined/);
+
+	// A named blocker passes without the flag; its refusal is still carried for recovery.
+	const named = reply("STATUS: BLOCKED. git push was refused by the guard (GIT_PUBLISH).\nNEXT: run the push alone\nRISKS: none\nEVIDENCE: none");
+	assert.equal(blockedHandoffNote([named]), "");
+	const carried = blockedHandoffNote([call("c1", "git show --stat HEAD && git push origin feat/x"), result("c1", refusal), named]);
+	assert.doesNotMatch(carried, /INCOMPLETE HANDOFF/);
+	assert.match(carried, /- `git show --stat HEAD && git push origin feat\/x`: Blocked by harness safety guard/);
+	for (const text of ["STATUS: BLOCKED. Missing input: the PR number.", "STATUS: BLOCKED\nRISKS: `gh pr view 77` exited 1: HTTP 404"]) assert.equal(blockedHandoffNote([reply(text)]), "", text);
+
+	// A withheld command is not echoed; other statuses get no note.
+	assert.match(blockedHandoffNote([call("c2", "curl -H 'Authorization: Bearer SECRETVALUE' x"), result("c2", refusal), vague], (c) => c.includes("Bearer")), /- \(command withheld: it carries a credential-like literal\): Blocked/);
+	assert.doesNotMatch(blockedHandoffNote([call("c2", "curl -H 'Authorization: Bearer SECRETVALUE' x"), result("c2", refusal), vague], (c) => c.includes("Bearer")), /SECRETVALUE/);
+	for (const text of ["STATUS: PASS. Pushed.", "STATUS: FAIL. Tests failed.", "STATUS: INCONCLUSIVE. Check NOT RUN."]) assert.equal(blockedHandoffNote([call("c1", "git push origin feat/x"), result("c1", refusal), reply(text)]), "", text);
+});
+
+test("guidance: BLOCKED names the failed step, command, error and what is needed; an unrun check is NOT RUN", () => {
+	assert.match(COMPACT_HANDOFF_INSTRUCTIONS, /BLOCKED names the step that failed, its exact command and error when there is one, and what is needed to continue; a check that simply did not run is NOT RUN with its reason, not BLOCKED\./);
+});
