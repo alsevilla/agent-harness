@@ -39,8 +39,9 @@ Confirm the exact candidate and the supplied evidence (tests, RED/GREEN or justi
    - HIGH: likely production bug, incorrect state transition, significant regression.
    - MEDIUM: real defect with limited impact or important maintainability problem.
    - LOW: small concrete defect or documented-standard violation with limited impact.
-3. Apply the assigned module's finding discipline: establish change attribution when reviewing a diff, support each defect with a concrete causal path, and keep findings concise and actionable.
-4. Finish with exactly one verdict:
+3. For a shared extraction, check that the affected callers use the helper and still satisfy their contracts. For a changed public interface, check the relevant usage example against the candidate and flag any stale instruction.
+4. Apply the assigned module's finding discipline: establish change attribution when reviewing a diff, support each defect with a concrete causal path, and keep findings concise and actionable.
+5. Finish with exactly one verdict:
 
 APPROVE
 
