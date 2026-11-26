@@ -34,7 +34,7 @@ Independently verify the exact implemented candidate, not the worker's descripti
 ## Workflow
 
 1. Analyze happy paths, boundary values, invalid inputs, missing data, duplicate operations, ordering problems, state transitions, retries, partial failures, concurrency, timing boundaries and regression risks.
-2. Exercise what the scope needs (see Where to look). For state machines, test every important transition and forbidden transition. For time-based logic, test immediately before, exactly at and immediately after thresholds. For async completion, wait for the observable result or event. A fixed sleep cannot establish that the operation finished.
+2. Exercise what the scope needs (see Where to look). For state machines, test every important transition and forbidden transition. For time-based logic, test immediately before, exactly at and immediately after thresholds. For async completion, wait for the observable result or event. A fixed sleep cannot establish that the operation finished. For hook or plugin wiring changes, exercise the registered entry point with a representative host event and isolate external effects.
 3. For load/resilience, execute the smallest scenario ladder needed: correctness baseline, smoke, expected burst, spike, sustained overload when justified, DB contention, dependency failure, shutdown under load, restart/recovery, soak only when justified.
 4. When a failure occurs, give the smallest reproduction, expected behavior, actual behavior and the likely responsible code if possible.
 5. Report PASS, FAIL or INCONCLUSIVE, label what was actually exercised versus merely code-inspected, and include remaining untested risks. Report load-generator limitations separately from application failure.
