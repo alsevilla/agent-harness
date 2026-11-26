@@ -1,6 +1,6 @@
 # Engineering Harness
 
-A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 72% less, and a ten-task session costs 59% less with Claude Fable 5.1 as main, 45% less with Claude Opus 5.5, 69% less with GPT-6 Astra, and 29% less with GPT-6.1 Sol than one agent on the corresponding model working alone in fresh sessions per task ([Token savings](#token-savings)).
+A skill, a Pi extension and a GitHub Copilot CLI plugin that turn one coding agent into a small engineering team. A thin orchestrator (main) classifies each task, delegates it to named roles with a compact packet, accepts work only on reported evidence, and delivers through a trusted release role. A runtime safety guard and a few deterministic context rules keep long sessions cheap and safe: in our simulations a heavy worker task sends 49% fewer tokens and costs 73% less on Claude Haiku 5.5, a long main session costs up to 72% less, and a ten-task session costs 59% less with Claude Fable 5.1 as main, 45% less with Claude Opus 5.5, 69% less with GPT-6 Astra, and 28% less with GPT-6.1 Sol than one agent on the corresponding model working alone in fresh sessions per task ([Token savings](#token-savings)).
 
 These are offline Pi simulation estimates using cheaper workers for non-complex tasks, not live billing or task-quality benchmarks. Savings depend on workload and routing; the ten-task harness costs more with Terra or Luna as main. Copilot is measured separately.
 
@@ -202,16 +202,16 @@ The same ten-task session (four small fixes, three bug hunts, three features, tw
 
 | Main / single-agent model | One agent, one session | One agent, a new session per task | Harness | Harness against one agent with a new session per task |
 | --- | --- | --- | --- | --- |
-| Claude Fable 5.1 | $20.73 | $11.20 | $4.60 | **59% cheaper** |
-| Claude Opus 5.5 | $12.98 | $5.21 | $2.86 | **45% cheaper** |
-| Claude Sonnet 5.5 | $11.18 | $3.34 | $2.29 | **31% cheaper** |
-| Claude Haiku 5.5 | $2.64 | $0.17 | $1.53 | 9.2x the cost |
-| GPT-6 Astra | $87.65 | $16.69 | $5.19 | **69% cheaper** |
-| GPT-6.1 Sol | $9.93 | $2.61 | $1.86 | **29% cheaper** |
-| GPT-6.1 Terra | $4.97 | $1.30 | $1.52 | 16% more expensive |
-| GPT-6 Luna | $0.88 | $0.17 | $1.21 | 7.3x the cost |
+| Claude Fable 5.1 | $20.73 | $11.20 | $4.61 | **59% cheaper** |
+| Claude Opus 5.5 | $12.98 | $5.21 | $2.87 | **45% cheaper** |
+| Claude Sonnet 5.5 | $11.18 | $3.34 | $2.30 | **31% cheaper** |
+| Claude Haiku 5.5 | $2.64 | $0.17 | $1.54 | 9.2x the cost |
+| GPT-6 Astra | $87.65 | $16.69 | $5.20 | **69% cheaper** |
+| GPT-6.1 Sol | $9.93 | $2.61 | $1.87 | **28% cheaper** |
+| GPT-6.1 Terra | $4.97 | $1.30 | $1.52 | 17% more expensive |
+| GPT-6 Luna | $0.88 | $0.17 | $1.22 | 7.3x the cost |
 
-Rerun on 2026-11-19 with the early fold of finished work (below); the worker-prompt sizes are the 2026-11-13 measurement on v1.20.1, including this project's four saved lesson titles. Lesson-body reads and their effect on agent behavior are not modeled. The fixture treats its synthetic reports as persisted. Both delegation comparisons reproduced identical results across two runs.
+Rerun on 2026-11-26 with the measured changes to all four worker prompts. The [method](docs/simulations/delegation.md) records the base and updated sizes. Lesson-body reads and their effect on agent behavior are not modeled. The fixture treats its synthetic reports as persisted. Both delegation comparisons reproduced identical results across two runs.
 
 Average modeled cost per scripted task, calculated by dividing each session total by ten:
 
@@ -230,22 +230,22 @@ Where the harness cost goes, for the whole session:
 
 | Main model | Main | Complex implementation (capable tier) | Economy-tier workers |
 | --- | --- | --- | --- |
-| Claude Fable 5.1 | $3.11 (68%) | $1.36 (30%) | $0.12 (3%) |
-| Claude Opus 5.5 | $1.37 (48%) | $1.36 (48%) | $0.12 (4%) |
-| Claude Sonnet 5.5 | $0.80 (35%) | $1.36 (60%) | $0.12 (5%) |
-| Claude Haiku 5.5 | $0.04 (3%) | $1.36 (89%) | $0.12 (8%) |
-| GPT-6 Astra | $4.01 (77%) | $1.05 (20%) | $0.12 (2%) |
-| GPT-6.1 Sol | $0.68 (37%) | $1.05 (57%) | $0.12 (7%) |
-| GPT-6.1 Terra | $0.34 (23%) | $1.05 (69%) | $0.12 (8%) |
-| GPT-6 Luna | $0.04 (3%) | $1.05 (86%) | $0.12 (10%) |
+| Claude Fable 5.1 | $3.11 (67%) | $1.38 (30%) | $0.13 (3%) |
+| Claude Opus 5.5 | $1.37 (48%) | $1.38 (48%) | $0.13 (4%) |
+| Claude Sonnet 5.5 | $0.80 (35%) | $1.38 (60%) | $0.13 (5%) |
+| Claude Haiku 5.5 | $0.04 (3%) | $1.38 (89%) | $0.13 (8%) |
+| GPT-6 Astra | $4.01 (77%) | $1.06 (20%) | $0.13 (2%) |
+| GPT-6.1 Sol | $0.68 (37%) | $1.06 (57%) | $0.13 (7%) |
+| GPT-6.1 Terra | $0.34 (22%) | $1.06 (69%) | $0.13 (8%) |
+| GPT-6 Luna | $0.04 (3%) | $1.06 (86%) | $0.13 (10%) |
 
 The economy-tier workers cost almost nothing. The bill is main reading results and writing packets on its own model, plus the three features on the capable tier, which cost the same whatever main is. A cheaper main, or a new main session between unrelated tasks, is what lowers it. Real sessions run above these figures: only 350 output tokens are counted per model call, so most thinking output is not priced, and code-reviewer, oracle and delivery runs are not part of the ten tasks.
 
 Every model sends the same tokens: 47.3M (peak request 428k) for one agent in one session, 7.8M (peak 82k) with a new session per task, and 8.5M (peak 62k) for the harness, in 294 requests instead of 211. Against one agent kept in one long session, the more common habit, the harness is cheaper on every model except Luna (Haiku's long session pays its 5x price above 100k tokens).
 
-Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 40-57% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
+Where the saving comes from: delegation itself is not cheaper. With every role on main's model, the harness costs 41–58% more than a single agent with a new session per task, because 22 contexts each send their own system prompt, main reads files to write each packet, and every worker writes a report. The saving comes from what delegation allows: most of the reading and editing runs on cheaper models in small contexts. So it pays when main runs on a strong model. On a model as cheap as the economy tier (Haiku, Terra, Luna), there is nothing cheaper to delegate to, and sending the three features up to Sonnet or Sol buys capability, not savings.
 
-The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 18% and 62%); under Sonnet 5.5 and Sol it is cheaper up to eight (7% and 6%) and more expensive at twelve (11% and 13%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 57% under Fable, 41% under Opus, 24% under Sonnet, 68% under Astra, 20% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
+The break-even is how much a worker has to re-read to get its bearings, which the single agent already has in context; the table assumes one extra read per worker. Under Fable 5.1, Opus 5.5 and Astra the harness is still cheaper at twelve extra reads (46%, 18% and 62%); under Sonnet 5.5 and Sol it is cheaper up to eight (6% and 3%) and more expensive at twelve (11% and 13%). Under Haiku, Terra and Luna it is more expensive across the whole range. Three times the reads and checks on every economy-tier worker still leaves it cheaper: 57% under Fable, 41% under Opus, 24% under Sonnet, 68% under Astra, 20% under Sol. Not modelled: whether each approach finishes the task correctly (an economy-tier worker on a simple fix included), which is what cost per completed task depends on and what only a [live benchmark](agent/skills/engineering-harness/references/token-efficiency.md#benchmark-procedure-only-when-authorized-paid-runs-are-not-part-of-this-repository) can measure.
 
 ### Offline replay at Claude prices
 
@@ -304,7 +304,7 @@ For Copilot, the [native request-size estimate](#copilot-cli-request-size-estima
 Request shaping below runs in Pi, including workers served through its OpenAI/Codex connector. It applies to Claude and OpenAI models; it does not establish equivalent behavior or savings in the standalone Codex app/CLI or Copilot CLI, which construct their own requests.
 
 - **Claude models and routing.** Workers on Claude Haiku 5.5 are masked from 90k tokens (95k budget), because Haiku charges 5x for input beyond 100k. Fable 5.1, Opus 5.5 and Sonnet 5.5 have no long-request surcharge, so their workers are masked only from 200k, as a guard on request size. Workers and specialists run on Claude first, with the matching GPT model as fallback: non-complex implementation uses the economy tier (Haiku 5.5, fallback Luna); complex implementation uses the capable tier (Sonnet 5.5, fallback Sol). In the [ten-task simulation](#the-harness-against-a-single-agent), this saves 59% with Fable 5.1 as main, 45% with Opus 5.5 and 31% with Sonnet 5.5 versus fresh single-agent task sessions, but costs 9.2x as much with Haiku 5.5. These are offline API estimates, not Claude subscription charges or measured task quality.
-- **OpenAI models and routing.** GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra and GPT-6 Luna use the default 80k worker masking trigger and 95k budget. These are conservative context limits, not the API's 272k long-request pricing boundary. `code-reviewer` and `qa-engineer` run on GPT first (a different model family from the Claude workers they check), as does the release engineer; the oracle's first pass runs on Sol. Every other role falls back to GPT: economy tier Luna, capable tier Sol. In the same simulation, the harness saves 69% with Astra as main and 29% with Sol versus fresh single-agent task sessions, but costs 16% more with Terra and 7.3x as much with Luna. These are offline API estimates, not Codex subscription charges or measured task quality.
+- **OpenAI models and routing.** GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra and GPT-6 Luna use the default 80k worker masking trigger and 95k budget. These are conservative context limits, not the API's 272k long-request pricing boundary. `code-reviewer` and `qa-engineer` run on GPT first (a different model family from the Claude workers they check), as does the release engineer; the oracle's first pass runs on Sol. Every other role falls back to GPT: economy tier Luna, capable tier Sol. In the same simulation, the harness saves 69% with Astra as main and 28% with Sol versus fresh single-agent task sessions, but costs 17% more with Terra and 7.3x as much with Luna. These are offline API estimates, not Codex subscription charges or measured task quality.
 - **Provider cache versus local files.** OpenAI and Anthropic prompt caches are provider-side; they do not fill your PC's disk. Local shell-output logs have a separate retention policy described below. Cache reuse matters on both providers: shortening a small context can cost more when it rewrites a cached prefix.
 - **Old results collapse.** Below 25k estimated history tokens, main leaves old results intact to preserve cache reuse. Above that floor, in main's requests, the newest ten subagent results stay word for word and older settled PASS results become one line each, in batches of ten, so the cached prefix rarely changes. Main's own old large file and command outputs are masked the same way. `PI_SUBAGENT_HANDOFF_WINDOW=0` turns both off.
 - **Main checkpoints.** At an idle boundary on a new user turn, main folds earlier exchanges at `PI_SUBAGENT_MAIN_FOLD_TOKENS` (default 50k, `0` off). It can fold at half that threshold when every worker result since the previous fold is a complete PASS with explicit `RISKS: none` and an absolute path to an existing report file in an `_evidence` folder (`REPORT.md`, or a name such as `REPORT-backend.md` or `PR69-VERIFICATION-REPORT.md`; a file in `_scratch` does not count), whose resolved location is in `_evidence` and whose modification time falls between launch and the recorded completion. The early fold defers if it would cut a user message for the first time; messages already cut by an earlier fold do not count. Regular and manual folds keep unfinished worker output, failed or partial completion notices, and reported risks outside the notes cap (each unfinished output whole up to 12,000 characters, otherwise its first 8,000 and last 2,000). They retain older user messages separately, keeping the first 2,000 and last 800 text characters of messages over 3,000 characters. Native compaction restores user messages from the selected session branch with the same limit. This can omit requirements in the middle of a long paste. The saved transcript remains available, and `/subagent fold` requests a fold at the next idle user turn. In the long-session fixture, early folding lowers modeled main cost by 26–39% compared with folding at 50k only. The fixture uses short user messages and finished results with modeled persisted reports. See [the simulation method](docs/simulations/pi-shaping.md#long-main-sessions) and the research on [CWL](https://arxiv.org/abs/2606.11213) and [Spine](https://arxiv.org/abs/2610.37224). The [DACS](https://arxiv.org/abs/2604.07911) focus experiment increased modeled cost by 35–47% because its per-turn rewrites shortened the reusable cache prefix.
