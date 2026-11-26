@@ -57,6 +57,12 @@ Implementation workers look for an existing implementation first. When a change 
 
 The threshold follows the rule of three in Fowler’s *Refactoring*. Clone studies inform when to apply it. Juergens et al. found faults caused by inconsistent edits to copies. Kim et al. observed that some copies diverged quickly, which limits the value of extracting them early. [Refactoring](https://martinfowler.com/books/refactoring.html) · [Do Code Clones Matter?](https://portal.fis.tum.de/en/publications/do-code-clones-matter/) · [An Empirical Study of Code Clone Genealogies](https://web.cs.ucla.edu/~miryung/Publications/esecfse05-clonegenealogy.pdf)
 
+Three disciplines guide implementation when the corresponding code changes:
+
+- **Hide the shared decision.** The Copilot hooks share a reader that owns the byte limit and JSON parsing. Each hook still decides which fields it requires and which exit code it returns. This applies Parnas’s criterion for separating modules around decisions that can change independently. [Parnas, CACM 1972](https://doi.org/10.1145/361598.361623)
+- **Exercise the failure path.** When changing recovery or error handling, trigger the failure and check what the caller observes and what state it leaves behind. For example, after a failed save, verify that the previous value is still readable if the contract promises that. Yuan et al. traced many severe failures in the distributed systems they studied to error handling that simple tests could have exercised. [Yuan et al., OSDI 2014](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan)
+- **Read yesterday’s data.** When changing a stored format, run the current reader or migration on a fixture produced by a supported earlier version. A round trip using only the current writer and reader can miss an upgrade regression. This adapts a finding from distributed-system upgrade research, where testing consecutive versions exposed many failures. [Understanding and Detecting Software Upgrade Failures in Distributed Systems, SOSP 2021](https://yonglezh-purdue.github.io/files/sosp21-upgrade.pdf)
+
 ## Install
 
 Prerequisites: the latest Pi release (or GitHub Copilot CLI for the preview), Node.js 22.19.0 or newer, and your own Claude and/or ChatGPT/Codex sign-in. No credentials are included.
