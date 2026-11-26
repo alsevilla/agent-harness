@@ -609,6 +609,34 @@
         "skills_required": [],
         "skills_forbidden": []
       }
+    },
+    {
+      "id": "R43",
+      "kind": "positive",
+      "question": "Finish the CLI change locally, including any affected user instructions.",
+      "context": "The implementation and checks are complete. The worker verified the renamed --output flag and identified a README example using the removed --out flag. Main has the exact page, replacement and evidence. Only the documentation edit remains.",
+      "critical": false,
+      "expect": {
+        "routes": ["T1_WORKER"],
+        "roles_required": ["technical-writer"],
+        "roles_allowed": ["technical-writer"],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
+    },
+    {
+      "id": "R44",
+      "kind": "near_miss",
+      "question": "Finish the CLI change locally, including any affected user instructions.",
+      "context": "The implementation and checks are complete. Only a private flag-parsing helper was renamed. The worker verified that the public --out flag and README example still match. There are no remaining edits or delivery steps.",
+      "critical": false,
+      "expect": {
+        "routes": ["LOCAL_DONE"],
+        "roles_required": [],
+        "roles_allowed": [],
+        "skills_required": [],
+        "skills_forbidden": []
+      }
     }
   ]
 }
