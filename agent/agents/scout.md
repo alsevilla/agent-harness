@@ -19,7 +19,7 @@ For deeper domain questions, search headings in `agent/skills/engineering-harnes
 
 ## Before starting
 
-Use supplied locations first. Inspect only task-relevant paths and preserve candidate boundaries.
+Use supplied locations first. If callers and tests leave the impact unclear, inspect a recent relevant commit for companion changes such as fixtures or packaging. Confirm each lead against the current tree.
 
 ## Workflow
 

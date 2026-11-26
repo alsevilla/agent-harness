@@ -66,6 +66,12 @@ These disciplines guide implementation when the corresponding code changes:
 
 A preprint studying 29,669 AI-generated PRs found that 63.2% changed code without editing a documentation file. File co-change alone cannot establish which PRs needed an edit. A separate study traced references to removed code elements in repository docs and found that stale references often survived for years. These findings motivate checking the specific instructions a change could invalidate. [Documentation Drift in AI-Generated Pull Requests](https://arxiv.org/abs/2610.27381) · [Detecting outdated code element references in software repository documentation](https://doi.org/10.1007/s10664-023-10397-6)
 
+### Repository layout and change history
+
+- **Place files by responsibility.** Follow the owning module’s existing layout for implementation, tests and fixtures. For example, the three Copilot hooks use `.github/plugin/shared/read-hook-input.mjs` because the plugin owns their input format and all three can import it without a cycle. Paixão et al. studied 233 releases of ten systems and evaluated the disruption of reorganizing modules alongside cohesion and coupling. [Study of cohesion, coupling and disruption](https://discovery.ucl.ac.uk/id/eprint/1576532/)
+- **Use history to find missed companions.** When the current callers and tests leave an impact question open, Scout can inspect a similar commit for a packaging manifest, fixture or migration that also changed. It checks that the dependency still exists before recommending an edit. Zimmermann et al. found that version histories could predict some additional locations a change would affect. [Mining Version Histories to Guide Software Changes](https://www.st.cs.uni-saarland.de/papers/icse2004/)
+- **Give each commit one reviewable purpose.** Keep a fix with its regression test. If a task also requires an independently testable file move, commit the move separately so reviewers can see what changed behavior. Herzig and Zeller found that commits combining unrelated changes obscured which files belonged to a bug fix. [The Impact of Tangled Code Changes](https://www.microsoft.com/en-us/research/publication/the-impact-of-tangled-code-changes/)
+
 ## Install
 
 Prerequisites: the latest Pi release (or GitHub Copilot CLI for the preview), Node.js 22.19.0 or newer, and your own Claude and/or ChatGPT/Codex sign-in. No credentials are included.
