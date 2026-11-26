@@ -254,6 +254,20 @@ test("reported risks survive repeated folds even when old checkpoint notes excee
 	}
 });
 
+test("a required writer handoff survives when older exchange notes are discarded", async () => {
+	const request = setup({});
+	const [launch, report] = launched("docs", 1);
+	const next = "NEXT: technical-writer update README.md to use --output";
+	report.content[0].text = `STATUS: BLOCKED - code checks passed\n${next}\nRISKS: none\nEVIDENCE: /w/_evidence/t1/REPORT.md`;
+	const history = [user("Change the CLI."), launch, report];
+	for (let n = 0; n < 110; n++) history.push(user("Continue."), reply("notes ".repeat(100)));
+	history.push(user("Finish."));
+	requestMainFold();
+	const checkpoint = (await request(history)).find((m) => m.customType === CHECKPOINT_TYPE);
+	assert.ok(checkpoint?.content.includes("notes folded"));
+	assert.ok(checkpoint.content.includes(next));
+});
+
 // Pi also writes a branchSummary after /tree navigation with a summary; like a compaction summary, a fold must not drop it.
 test("a branch summary survives repeated folds, and a new summary resets the fold", () => {
 	const handlers = new Map<string, (event: any, ctx?: any) => any>();

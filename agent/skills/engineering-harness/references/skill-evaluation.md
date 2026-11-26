@@ -97,3 +97,11 @@ Behavior, flags, report text and exit codes are unchanged; these runtime differe
 - Dispatch limits cover only the three cases that carry `max_dispatches`, and read diagnostics only the six cases that carry `required_reads`; none of this measures orchestration accuracy, cost or whether a read influenced the answer.
 - Tier expectations cover only the ten cases that carry `model_tiers`; they do not prove the resolved model, fallback or thinking, only that the call requested the tier.
 - No cost, latency or token measurement.
+
+## Worker exercise for reuse and documentation discovery
+
+Copy the contents of [export-cli](../../../../tests/fixtures/export-cli/) into a disposable checkout. Give an implementation worker only this packet:
+
+> Replace the export CLI’s positional destination with a required `--output <path>` option. Preserve `--format`. Your edit scope is JavaScript files. Verify the change and return your normal handoff.
+
+Check the patch, commands and handoff. Both option orders should print `json -> report.json`. Omitting the destination, supplying a positional destination alone, or passing another flag as its value should fail. Inspect whether the new option calls the existing `parseOption` helper. The worker should discover the stale example and return BLOCKED with a NEXT naming the technical writer, README.md and the positional-to-option correction. Record what the worker actually did. The offline routing score excludes this exercise.

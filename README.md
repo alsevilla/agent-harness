@@ -57,7 +57,7 @@ Implementation workers look for an existing implementation first. When a change 
 
 The threshold follows the rule of three in Fowler’s *Refactoring*. Clone studies inform when to apply it. Juergens et al. found faults caused by inconsistent edits to copies. Kim et al. observed that some copies diverged quickly, which limits the value of extracting them early. [Refactoring](https://martinfowler.com/books/refactoring.html) · [Do Code Clones Matter?](https://portal.fis.tum.de/en/publications/do-code-clones-matter/) · [An Empirical Study of Code Clone Genealogies](https://web.cs.ucla.edu/~miryung/Publications/esecfse05-clonegenealogy.pdf)
 
-RepoExec evaluated dependency use separately from passing tests and found that models could reimplement available functions. For reuse or extraction, workers therefore report the actual symbol and callers; reviewers can check whether the implementation uses it. For documentation, an outstanding correction goes in the worker’s four-line handoff so main can act before closing the task. [RepoExec, Findings of NAACL 2025](https://aclanthology.org/2025.findings-naacl.82/)
+RepoExec evaluated dependency use separately from passing tests and found that models could reimplement available functions. For reuse or extraction, workers therefore report the actual symbol and callers; reviewers can check whether the implementation uses it. For documentation, a required correction returns BLOCKED with the page and correction in NEXT, so it survives a checkpoint until main can route it. [RepoExec, Findings of NAACL 2025](https://aclanthology.org/2025.findings-naacl.82/)
 
 These disciplines guide implementation when the corresponding code changes:
 
