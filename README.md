@@ -51,6 +51,12 @@ Main follows a fixed protocol (full text: [`agent/AGENTS.md`](agent/AGENTS.md)):
 
 Workers reply in four lines (STATUS, NEXT, RISKS, EVIDENCE) and put detail in a REPORT file. Routing and evidence rules are instructions the model follows; the runtime enforces only what [Safety and delivery](#safety-and-delivery) and [Context and cost](#context-and-cost) describe.
 
+### Reuse before copying
+
+Implementation workers look for an existing implementation first. When a change creates or touches a third copy of behavior that must stay in sync, workers extract it into the nearest shared folder, migrate the callers in scope, and check each caller’s contract. Code with independent requirements can evolve separately.
+
+The threshold follows the rule of three in Fowler’s *Refactoring*. Clone studies inform when to apply it. Juergens et al. found faults caused by inconsistent edits to copies. Kim et al. observed that some copies diverged quickly, which limits the value of extracting them early. [Refactoring](https://martinfowler.com/books/refactoring.html) · [Do Code Clones Matter?](https://portal.fis.tum.de/en/publications/do-code-clones-matter/) · [An Empirical Study of Code Clone Genealogies](https://web.cs.ucla.edu/~miryung/Publications/esecfse05-clonegenealogy.pdf)
+
 ## Install
 
 Prerequisites: the latest Pi release (or GitHub Copilot CLI for the preview), Node.js 22.19.0 or newer, and your own Claude and/or ChatGPT/Codex sign-in. No credentials are included.
