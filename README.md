@@ -59,6 +59,8 @@ The threshold follows the rule of three in Fowler’s *Refactoring*. Clone studi
 
 RepoExec evaluated dependency use separately from passing tests and found that models could reimplement available functions. For reuse or extraction, workers therefore report the actual symbol and callers; reviewers can check whether the implementation uses it. For documentation, a required correction returns BLOCKED with the page and correction in NEXT, so it survives a checkpoint until main can route it. [RepoExec, Findings of NAACL 2025](https://aclanthology.org/2025.findings-naacl.82/)
 
+Main passes a verified finding to the worker who will use it. For example, a scout can identify an option parser and one caller so the implementer can go straight to both. Selective sharing reduced runtime in parallel teams on AssistantBench and GAIA. Its effect on this harness’s cost and task completion remains unmeasured. [Learning to Share, ICML 2026](https://proceedings.mlr.press/v306/fioresi26a.html)
+
 These disciplines guide implementation when the corresponding code changes:
 
 - **Hide the shared decision.** The Copilot hooks share a reader that owns the byte limit and JSON parsing. Each hook still decides which fields it requires and which exit code it returns. This applies Parnas’s criterion for separating modules around decisions that can change independently. [Parnas, CACM 1972](https://doi.org/10.1145/361598.361623)

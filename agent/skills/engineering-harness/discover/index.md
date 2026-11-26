@@ -3,7 +3,7 @@ Use only when requirements, existing behavior, or change surface are not suffici
 
 Produce a compact Discovery Brief:
 - goal and confirmed requirements;
-- relevant components/files;
+- relevant components/files, including a verified helper and one caller when reuse answers the assigned question;
 - existing behavior/invariants;
 - key unknowns/risks;
 - recommended next phase.
