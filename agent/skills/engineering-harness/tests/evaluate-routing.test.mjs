@@ -85,14 +85,14 @@ function writeTmp(name, content) {
 }
 
 describe("FixtureSpecimenTests", () => {
-	it("forty_two_unique_cases_with_24_positive_and_18_near_miss", () => {
+	it("forty_four_unique_cases_with_25_positive_and_19_near_miss", () => {
 		const ids = loadFixture().cases.map((c) => c.id);
-		assert.equal(ids.length, 42);
-		assert.equal(new Set(ids).size, 42);
+		assert.equal(ids.length, 44);
+		assert.equal(new Set(ids).size, 44);
 		const kinds = loadFixture().cases.map((c) => c.kind);
 		assert.ok(kinds.filter((k) => k === "near_miss").length >= 3);
-		assert.equal(kinds.filter((k) => k === "positive").length, 24);
-		assert.equal(kinds.filter((k) => k === "near_miss").length, 18);
+		assert.equal(kinds.filter((k) => k === "positive").length, 25);
+		assert.equal(kinds.filter((k) => k === "near_miss").length, 19);
 	});
 
 	it("main_read_carve_out_cases_R41_R42_launch_no_scout", () => {
@@ -229,9 +229,17 @@ describe("EvaluatorTests", () => {
 	it("perfect_predictions_pass", () => {
 		const rep = evaluateRows(perfectPredictions(loadFixture()));
 		assert.equal(rep.ok, true);
-		assert.equal(rep.matched, 42);
+		assert.equal(rep.matched, 44);
 		assert.equal(rep.accuracy, 1.0);
 		assert.equal(rep.critical_failures, 0);
+	});
+
+	it("scores a missed documentation handoff and an unnecessary one as routing errors", () => {
+		const fx = loadFixture();
+		for (const [id, roles] of [["R43", []], ["R44", ["technical-writer"]]]) {
+			const result = evaluateRows(setRow(perfectPredictions(fx), id, { roles }), fx);
+			assert.equal(result.matched, fx.cases.length - 1);
+		}
 	});
 
 	it("wrong_role_on_critical_case_fails", () => {
@@ -263,7 +271,7 @@ describe("EvaluatorTests", () => {
 	it("single_critical_miss_not_hidden_by_high_aggregate", () => {
 		const fx = loadFixture();
 		const rep = evaluateRows(setRow(perfectPredictions(fx), "R05", { route: "T1_WORKER", roles: ["backend-worker"] }), fx);
-		assert.equal(rep.matched, 41);
+		assert.equal(rep.matched, fx.cases.length - 1);
 		assert.ok(rep.accuracy > 0.95);
 		assert.equal(rep.critical_failures, 1);
 		assert.equal(rep.ok, false);
@@ -348,7 +356,7 @@ describe("InputValidationTests", () => {
 	const assertInvalid = (text, label) => rejects(() => ev.parsePredictions(text, ids), label);
 	const textWith = (cid, changes) => { const rows = perfectPredictions(fx); setRow(rows, cid, changes); return toJsonl(rows); };
 
-	it("good_text_parses", () => { assert.equal(Object.keys(ev.parsePredictions(good, ids)).length, 42); });
+	it("good_text_parses", () => { assert.equal(Object.keys(ev.parsePredictions(good, ids)).length, 44); });
 	it("malformed_json_line", () => assertInvalid(good.slice(0, -2) + "\n"));
 	it("missing_case", () => assertInvalid(goodLines.slice(0, -1).join("\n") + "\n"));
 	it("duplicate_case", () => assertInvalid([...goodLines, goodLines[0]].join("\n") + "\n"));
@@ -1261,7 +1269,7 @@ describe("CliTests", () => {
 	it("perfect_predictions_exit_zero", () => {
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("pred.jsonl", toJsonl(perfectPredictions(fx))));
 		assert.equal(r.status, 0, r.stderr);
-		assert.ok(r.stdout.includes("matched: 42/42"));
+		assert.ok(r.stdout.includes("matched: 44/44"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 		assert.ok(r.stdout.includes("does NOT prove runtime skill activation"));
 	});
@@ -1312,7 +1320,7 @@ describe("CliTests", () => {
 		const r = runCli("--cases", CASES, "--predictions", writeTmp("crlf.jsonl", raw));
 		assert.equal(r.status, 0, r.stderr);
 		assert.ok(r.stdout.includes("sha256=" + crypto.createHash("sha256").update(raw).digest("hex")));
-		assert.ok(r.stdout.includes("matched: 42/42"));
+		assert.ok(r.stdout.includes("matched: 44/44"));
 	});
 
 	it("utf8_bom_and_invalid_utf8_predictions_exit_two", () => {
@@ -1353,7 +1361,7 @@ describe("CliTests", () => {
 		const r = runCli("--cases", optionalRoleFixture(1), "--self-check");
 		assert.equal(r.status, 0, r.stderr);
 		assert.ok(noTrace(r.stderr));
-		assert.ok(r.stdout.includes("matched: 42/42"));
+		assert.ok(r.stdout.includes("matched: 44/44"));
 		assert.ok(r.stdout.includes("RESULT: PASS"));
 	});
 

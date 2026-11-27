@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { workingRules } from "./working-rules.mjs";
+import { readHookInput } from "./shared/read-hook-input.mjs";
 
-const MAX_INPUT_BYTES = 64 * 1024;
 const MAX_FILE_BYTES = 1024 * 1024;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const policyPaths = [resolve(root, "agent/AGENTS.md"), resolve(root, "agent/skills/SKILLS.md")];
@@ -16,19 +16,7 @@ function fail(message) {
 }
 
 try {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of process.stdin) {
-    size += chunk.length;
-    if (size > MAX_INPUT_BYTES) fail("hook input exceeds 64 KiB");
-    chunks.push(chunk);
-  }
-  let input;
-  try {
-    input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    fail("malformed hook input JSON");
-  }
+  const input = await readHookInput(fail);
   if (!input || typeof input !== "object" || Array.isArray(input) ||
       typeof input.sessionId !== "string" || !input.sessionId ||
       typeof input.timestamp !== "number" || !Number.isFinite(input.timestamp) ||

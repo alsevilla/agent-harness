@@ -1,0 +1,29 @@
+# Runs the whole suite on every pull request and on master, with a Pi host installed so the suites that load it run instead of being
+# skipped (PR #141 merged with 27 of them failing because no local run had a host). Bump PI_VERSION with the Pi release the harness supports.
+name: test
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PI_VERSION: 1.6.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install the Pi host the runtime suites load
+        run: |
+          mkdir -p "$RUNNER_TEMP/pi-host"
+          cd "$RUNNER_TEMP/pi-host"
+          echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund "@earendil-works/pi-coding-agent@$PI_VERSION"
+          echo "NATIVE_PROBE_HOST_MODULES=$RUNNER_TEMP/pi-host/node_modules" >> "$GITHUB_ENV"
+      - name: Test
+        run: npm test

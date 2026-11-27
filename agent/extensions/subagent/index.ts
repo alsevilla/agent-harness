@@ -529,7 +529,7 @@ async function runAgentAttempt(
                     currentResult.stderr += `Worker dialog canceled: ${event.method} ${event.title ?? ""}\n`;
                 }
                 if (event.type === "tool_execution_start") currentResult.toolActivity = true;
-                // One handoff nudge: a worker that settled without its STATUS line is asked once for the four-line handoff before it closes.
+                // One handoff nudge: a worker that settled without a recognized STATUS verdict or an EVIDENCE field is asked once for the four-line handoff before it closes.
                 if (event.type === "agent_settled" && client && !nudged && !event.aborted && !signal?.aborted && needsHandoffNudge(currentResult.messages)) {
                     nudged = true;
                     void client.send("prompt", HANDOFF_NUDGE).catch(() => { client.close(); proc.stdin?.end(); if (worker) dispatchDefaults.runtime?.detach(worker.id); });

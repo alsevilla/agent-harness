@@ -379,3 +379,37 @@ test("PR check wait: an empty first answer is retried within a bound, and errors
 	at("is reported as that error, quoted, not as missing checks, and is not retried as an empty answer");
 	assert.ok(!ship.includes('A repository without checks is reported as "no checks configured"'), "the old verdict is gone");
 });
+
+// Review of the reuse PR: a stale README is a docs handoff, not a blocker. A non-PASS STATUS stops a shape chain (shape.ts) before QA
+// and review run, so the worker keeps its code verdict and names the technical-writer correction in NEXT.
+test("stale docs keep the code verdict and go to technical-writer through NEXT; scout keeps its scope limit", () => {
+	const rules = flat(read("agent/shared/worker-rules.md"));
+	assert.ok(rules.includes("For stale or missing instructions, keep the STATUS your code checks support and put `technical-writer`, the page and the correction in NEXT; main routes it before delivery"));
+	assert.ok(!/stale or missing instructions, return BLOCKED/.test(rules));
+	for (const role of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) assert.ok(flat(read(`agent/agents/${role}.md`)).includes("keep the STATUS your code checks support"), role);
+	assert.ok(flat(read("agent/agents/scout.md")).includes("Inspect only task-relevant paths and preserve candidate boundaries."));
+});
+
+// Review of the reuse PR: an out-of-scope caller is a follow-up for main, not a blocker, and a partial extraction is refused; the
+// general "create no file" rule names the extraction's shared module as needed, so the two rules do not conflict.
+test("rule of three: out-of-scope callers go to NEXT, no partial extraction, and the shared module counts as needed", () => {
+	const rules = flat(read("agent/shared/worker-rules.md"));
+	assert.ok(rules.includes("When a caller that would need migrating is outside your scope, do not extract part of the way (that leaves one more variant): finish your change in scope, keep the STATUS your checks support, and put the proposed helper and the out-of-scope callers in NEXT for main."));
+	assert.ok(!/required migration outside scope, return BLOCKED/.test(rules));
+	assert.ok(flat(read("agent/extensions/subagent/code-integrations.ts")).includes("prefer editing existing files. A shared module that an extraction under your worker rules requires is needed."));
+});
+
+// Adapted from Claude Code's public mods guide: one owner per shared contract (callers import, never copy, and the typecheck catches
+// drift), test doubles that fail on an unscripted call naming it, and the suite run on every pull request with the host installed.
+test("one owner per shared module, loud test doubles, and CI runs the suite with a Pi host", () => {
+	const rules = flat(read("agent/shared/worker-rules.md"));
+	assert.ok(rules.includes("Give the shared module one owner: callers import it and never copy it, and where the project has a typecheck or lint, let it catch drift."));
+	const loud = "Make test doubles fail, naming the call, on any call the test does not script: a default answer hides a changed interaction.";
+	assert.ok(rules.includes(loud));
+	assert.ok(flat(read("agent/agents/qa-engineer.md")).includes(loud));
+	const ci = read(".github/workflows/test.yml");
+	assert.match(ci, /^\s+pull_request:/m);
+	assert.match(ci, /NATIVE_PROBE_HOST_MODULES=\$RUNNER_TEMP\/pi-host\/node_modules/);
+	assert.match(ci, /run: npm test/);
+	for (const suite of ["delivery-runtime", "safety-guard-runtime", "cleanup-runtime"]) assert.match(read(`agent/extensions/subagent/tests/${suite}.node.ts`), /throw new Error\(`unscripted ui\.select: /, suite);
+});

@@ -3,7 +3,7 @@
 Read only when measuring or changing routing/skill-selection guidance. This is an optional offline check: it is not a gate, not a runtime hook and not a model caller.
 
 ## Components
-- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 42 synthetic cases, 24 positive and 18 near-miss. R41 (a user-named file goes to one worker with no scout) and R42 (a HEAD SHA question is answered by main with a read-only git check, no launch) pin the main read carve-out. R37-R40 state that the frontend, backend, browser and graphify catalogs are all discoverable and expect the narrow route (they are offline policy labels; passing them is not observed live catalog-interference evidence, and the evaluator never calls a model). Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
+- Fixture: `examples/routing-cases.json` (schema `engineering-harness/routing-cases/v1`): 44 synthetic cases, 25 positive and 19 near-miss. R43 and R44 test the same completion request with different evidence: a stale public CLI example requires a technical writer; a private rename with a verified current example needs no launch. R41 (a user-named file goes to one worker with no scout) and R42 (a HEAD SHA question is answered by main with a read-only git check, no launch) pin the main read carve-out. R37-R40 state that the frontend, backend, browser and graphify catalogs are all discoverable and expect the narrow route (they are offline policy labels; passing them is not observed live catalog-interference evidence, and the evaluator never calls a model). Expected labels come from the current policy in `agent/AGENTS.md`, `SKILL.md`, `references/routing.md`, and the frontend and backend routers when relevant.
 - Evaluator: `scripts/evaluate-routing.mjs` (Node built-ins only, no dependency and no interpreter other than Node; no network, no model calls). Importing it runs nothing; the CLI starts only when the file is executed.
 - Tests: `tests/evaluate-routing.test.mjs` (`node:test`, deterministic unit checks; found by the canonical runner `scripts/run-node-tests.mjs`).
 
@@ -97,3 +97,15 @@ Behavior, flags, report text and exit codes are unchanged; these runtime differe
 - Dispatch limits cover only the three cases that carry `max_dispatches`, and read diagnostics only the six cases that carry `required_reads`; none of this measures orchestration accuracy, cost or whether a read influenced the answer.
 - Tier expectations cover only the ten cases that carry `model_tiers`; they do not prove the resolved model, fallback or thinking, only that the call requested the tier.
 - No cost, latency or token measurement.
+
+## Worker exercise for reuse and documentation discovery
+
+Copy the contents of [export-cli](../../../../tests/fixtures/export-cli/) into a disposable checkout. Give an implementation worker only this packet:
+
+> Replace the export CLI’s positional destination with a required `--output <path>` option. Preserve `--format`. Your edit scope is JavaScript files. Verify the change and return your normal handoff.
+
+Check the patch, commands and handoff. Both option orders should print `json -> report.json`. Omitting the destination, supplying a positional destination alone, or passing another flag as its value should fail. Inspect whether the new option calls the existing `parseOption` helper. The worker should discover the stale example, report the STATUS its code checks support, and give a NEXT naming the technical writer, README.md and the positional-to-option correction. Record what the worker actually did. The offline routing score excludes this exercise.
+
+To test the effect of sharing, run the same packet in two fresh copies with the same worker model and settings. In the second packet append only this verified finding: “`options.mjs` exports `parseOption`. In `cli.mjs` the `--format` option already calls it.” Keep the README finding undisclosed in both runs. Score helper use and documentation discovery separately, count repeated searches, and compare total billed tokens, including any scout used to obtain the hint. If the operator supplies the hint, report worker-only usage. With unavailable billing or search traces, record the metric as unknown.
+
+In a live GPT-6 Luna retest, both CLI workers reused the parser and returned PASS with the README correction assigned to `technical-writer`. A third worker asked to align returns labels with orders and invoices extracted the repeated normalization into one helper used by all three public exports. All 24 independent behavior checks passed. The third worker labeled its report path `Report:`, which Pi’s one-time handoff nudge now catches. Each worker read the role directly in Codex. These three runs exercised neither host dispatch nor billed savings.

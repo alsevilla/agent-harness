@@ -23,7 +23,7 @@ The two harness rows separate the two effects: separate contexts alone (same mod
 
 ## Sizes and prices
 
-- System prompts, measured: Pi's own 7.3k characters (recorded runs); main's 14.1k with the subagent extension (recorded) plus `agent/AGENTS.md`; each role's assembled child prompt (15.3-19.8k characters, re-measured with `scripts/measure-child-prompt.mjs` on 2026-11-13) on top of Pi's. Tool definitions are not in the recordings: 6k characters are assumed for every context, plus 4k for main's subagent tools.
+- System prompts, measured: Pi's own 7.3k characters (recorded runs); main's 14.1k with the subagent extension (recorded) plus `agent/AGENTS.md`; each role's assembled child prompt (15.9–22.3k characters after the adjustments below) on top of Pi's. Tool definitions are not in the recordings: 6k characters are assumed for every context, plus 4k for main's subagent tools.
 - Per model call: 300 characters of assistant text kept in the history and 350 output tokens billed (text and thinking, the same in every arm); 900 output tokens for main's packet, 500 for a worker's report, 300 for a reply to the user.
 - Prices, USD per million tokens (Anthropic first-party list prices): Claude Fable 5.1 $10 input, $50 output, $0.25 cache read; Claude Opus 5.5 $4 input, $20 output, $0.20 cache read; Claude Sonnet 5.5 $2, $10, $0.20; Claude Haiku 5.5 $0.10, $0.50 and 5x above 100k input tokens. Cache writes (5-minute) are 1.25x input. Haiku's cache-read price is not listed: 0.1x input is assumed.
 - Cache model is selected per serving model, including mixed-family runs. Claude uses one breakpoint on the system block and one on the last message; a request reads the longest earlier-written prefix ending within 20 blocks of its breakpoint and writes the rest. Each context, and each model, has its own cache. GPT requests use the idealized warm-prefix cache described below. Sizes are characters / 4.
@@ -76,6 +76,15 @@ Worker sizes were measured from the production prompt assembler at commit `1ab70
 | test-engineer (now qa-engineer) | 17,463 | 18,492 |
 
 Since v1.23.0 (which renamed `debugger`, `planner` and `test-engineer`), each fixture is its value above plus the role's measured change against the v1.22.1 prompt, both measured the same way, the latest on 2026-11-22: backend-worker +580 (20,836 to 21,416), so 20,418; `diagnostic-engineer` −717 (17,701 to 16,984), so 15,986; `qa-engineer` −243 (19,878 to 19,635), so 18,249; and `system-architect` +1,430 over the planner (16,325 to 17,755), so 16,757.
+
+On 2026-11-26 we applied the same delta method against PR #146’s base (`2d6e002`). Both measurements used the same Pi installation and equal-length checkout and fixture paths.
+
+| Role | Base characters | PR characters | Change | Simulation characters |
+| --- | ---: | ---: | ---: | ---: |
+| backend-worker | 21,702 | 23,575 | +1,873 | 22,291 |
+| diagnostic-engineer | 17,270 | 17,194 | −76 | 15,910 |
+| system-architect | 18,041 | 17,965 | −76 | 16,681 |
+| qa-engineer | 19,921 | 20,380 | +459 | 18,708 |
 
 Reproduce the measurement with `NATIVE_PROBE_HOST_MODULES=<installed Pi node_modules> node scripts/measure-child-prompt.mjs --label current --out /absolute/scratch/path`, then use the relevant rows for `CHILD_PROMPT`. These remain named, fixed fixture constants. The Pi prompt, tool-schema sizes, per-call output and pricing/cache assumptions are unchanged. The simulation includes lesson titles in startup text, but does not simulate reading lesson bodies or whether those lessons improve decisions.
 

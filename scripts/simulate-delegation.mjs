@@ -44,12 +44,8 @@ const ORIENT_SWEEP = [0, 1, 2, 4, 6, 8, 12], ECONOMY_X_SWEEP = [1, 1.5, 2, 3];
 // agent/AGENTS.md, and each role's assembled child prompt (scripts/measure-child-prompt.mjs), on top of Pi's. Tool definitions are not in
 // the recordings: TOOL_SCHEMA_CHARS is assumed for every context, plus SUBAGENT_SCHEMA_CHARS for main's subagent tools.
 const PI_SYSTEM = 7_271, MAIN_SYSTEM = 14_084 + readFileSync(new URL("../agent/AGENTS.md", import.meta.url), "utf8").length;
-// Re-measured 2026-11-13 on v1.20.1 with measure-child-prompt.mjs, live/profile-checkout shape:
-// includes this repository's four saved lesson titles; lesson-body reads are not modeled.
-// Since v1.23.0: each figure plus that role's measured change against the v1.22.1 prompts (backend-worker 20,836, debugger 17,701,
-// test-engineer 19,878, planner 16,325), measured the same way on 2026-11-22: backend-worker 21,416 (+580), diagnostic-engineer
-// 16,984 (-717), qa-engineer 19,635 (-243) and system-architect 17,755 (+1,430).
-const CHILD_PROMPT = { "backend-worker": 20_418, "diagnostic-engineer": 15_986, "system-architect": 16_757, "qa-engineer": 18_249 };
+// Historic normalized fixture plus the measured PR deltas; see docs/simulations/delegation.md.
+const CHILD_PROMPT = { "backend-worker": 22_291, "diagnostic-engineer": 15_910, "system-architect": 16_681, "qa-engineer": 18_708 };
 const TOOL_SCHEMA_CHARS = 6_000, SUBAGENT_SCHEMA_CHARS = 4_000;
 // Per model call: assistant text kept in the history, and output tokens billed (text plus thinking, the same in every arm).
 const SAY_CHARS = 300, OUTPUT_PER_CALL = 350, PACKET_OUTPUT = 900, REPORT_OUTPUT = 500, REPLY_OUTPUT = 300;

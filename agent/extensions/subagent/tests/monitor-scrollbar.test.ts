@@ -514,7 +514,10 @@ async function runNodeSuite() {
 
 	test("the wheel over the worker list changes the selected worker; over the transcript it scrolls", () => {
 		const store = new monitor.WorkerStore();
-		const ids = ["first", "second", "third"].map((task) => { const r = store.begin("worker", task, "provider/model", "high"); store.started(r.id); return r.id; });
+		// The list shows the newest start first; distinct start times keep it first, second, third on any machine (on a slower CI runner
+		// the three begin() calls landed in different milliseconds and reversed the order the test assumed).
+		const ids = ["first", "second", "third"].map((task, i) => { const r = store.begin("worker", task, "provider/model", "high"); store.started(r.id); r.startedAt = 3_000 - i; return r.id; });
+		assert.deepEqual(store.list().map((r) => r.id), ids);
 		const host = { terminal: { rows: 40 }, requestRender() {} };
 		const view = new monitor.WorkerInspector(store, host, theme, () => {}, ids[0], new Map(), () => "auto");
 		view.render(40);

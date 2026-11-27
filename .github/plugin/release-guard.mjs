@@ -2,7 +2,8 @@
 // guard's never-run rules (secret files, unparseable commands, curl-to-shell, privilege, config writes, package auth); see the end of this file.
 // Not authorization: it never allows or asks, has no env/file override, and cannot see through obfuscation, scripts or direct API clients.
 // A hook timeout fails open and plugin hooks can be disabled; the real boundary is user-owned branch protection/rulesets and token scope.
-const MAX_INPUT_BYTES = 64 * 1024;
+import { readHookInput } from "./shared/read-hook-input.mjs";
+
 const REASON = "Merge/release is unsupported on Copilot in this harness: no trusted operator approval exists. Do it outside the agent session.";
 
 function fail(message) {
@@ -10,15 +11,7 @@ function fail(message) {
   process.exit(2);
 }
 
-const chunks = [];
-let size = 0;
-for await (const chunk of process.stdin) {
-  size += chunk.length;
-  if (size > MAX_INPUT_BYTES) fail("hook input exceeds 64 KiB");
-  chunks.push(chunk);
-}
-let input;
-try { input = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { fail("malformed hook input JSON"); }
+const input = await readHookInput(fail);
 if (!input || typeof input !== "object" || Array.isArray(input) || typeof input.toolName !== "string") fail("invalid preToolUse input");
 if (!["bash", "powershell"].includes(input.toolName.toLowerCase())) process.exit(0);
 

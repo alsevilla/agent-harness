@@ -340,7 +340,7 @@ test("subagentStart advertised root joins canonical profile module paths to real
   const cwd = mkdtempSync(join(tmpdir(), "unrelated cwd "));
   try {
     const mods = ["agent/skills/backend/SKILL.md", "agent/skills/engineering-harness/review/index.md"];
-    for (const m of [...mods, ".github/plugin/agent-context.mjs", ".github/plugin/working-rules.mjs"]) {
+    for (const m of [...mods, ".github/plugin/shared/read-hook-input.mjs", ".github/plugin/agent-context.mjs", ".github/plugin/working-rules.mjs"]) {
       mkdirSync(dirname(join(inst, m)), { recursive: true });
       copyFileSync(join(root, m), join(inst, m));
     }
