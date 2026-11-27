@@ -34,10 +34,17 @@ test("shared guidance: act on packet facts, main-owned files, open named images;
 });
 
 import { HANDOFF_NUDGE, needsHandoffNudge } from "../compact-handoff.ts";
-test("handoff check: one nudge only for a normal final reply without a STATUS line", () => {
+test("handoff check: one nudge only for a normal final reply missing its verdict or evidence field", () => {
 	const reply = (text: string, stopReason = "stop") => ({ role: "assistant", stopReason, content: [{ type: "text", text }] });
 	assert.equal(needsHandoffNudge([reply("Done. I changed the button.")]), true);
 	assert.equal(needsHandoffNudge([reply("STATUS: PASS fixed\nNEXT: done\nRISKS: none\nEVIDENCE: /w/_evidence/t/REPORT.md")]), false);
+	for (const status of ["DONE", "Updated cli.mjs", "", "\nPASS"]) {
+		assert.equal(needsHandoffNudge([reply(`STATUS: ${status}\nNEXT: update README.md\nEVIDENCE: REPORT.md`)]), true);
+	}
+	assert.equal(needsHandoffNudge([reply("STATUS: PASS\nReport: /tmp/REPORT.md")]), true);
+	for (const status of ["FAIL", "INCONCLUSIVE", "BLOCKED", "ESCALATE"]) {
+		assert.equal(needsHandoffNudge([reply(`STATUS: ${status} — see report\nEVIDENCE: none`)]), false);
+	}
 	assert.equal(needsHandoffNudge([reply("partial", "length")]), false, "a length cut-off is reported as INCOMPLETE instead");
 	assert.equal(needsHandoffNudge([reply("x", "error")]), false);
 	assert.equal(needsHandoffNudge([]), false);

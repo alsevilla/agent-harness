@@ -830,7 +830,7 @@ test("noticeLimit: the public validator never rewrites a raw value, and every in
 test("noticeLimit: a valid value survives the validator unchanged and applies to single, parallel, chain and dag background jobs; absent means 4000; explicit foreground is refused", async () => {
 	const root = setupRoles({ "lim": "You are lim." });
 	const sdk = await import(piAiUrl);
-	const big = "detail line that repeats\n".repeat(400) + "STATUS: FAIL final gate";
+	const big = "detail line that repeats\n".repeat(400) + "STATUS: FAIL final gate\nNEXT: fix gate\nRISKS: none\nEVIDENCE: none";
 	spawnPlan = () => ({ events: [{ type: "response", id: "control-1", success: true, data: { disposition: "started" } }, reply([big]), { type: "agent_settled", aborted: false }], exitCode: 0 });
 	const modes: Array<[string, Record<string, unknown>]> = [["single", { agent: "lim", task: "t" }], ["parallel", { tasks: [{ agent: "lim", task: "t" }] }], ["chain", { chain: [{ agent: "lim", task: "t" }] }], ["dag", { dag: [{ id: "a", agent: "lim", task: "t" }] }]];
 	for (const [modeName, mode] of modes) {

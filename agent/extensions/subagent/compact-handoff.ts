@@ -274,12 +274,13 @@ export function blockedHandoffNote(messages: readonly unknown[], withhold: (comm
 	return lines.join("\n");
 }
 
-// Handoff check: a worker that settles normally without a STATUS line gets one follow-up prompt asking for the four-line handoff,
+// Handoff check: a worker that settles normally without a recognized STATUS verdict or an EVIDENCE field gets one follow-up prompt asking for the four-line handoff,
 // so main does not have to re-ask or re-fetch. Runtime decision from the worker's own final message; at most one nudge per worker.
-export const HANDOFF_NUDGE = "Your reply ended without the final handoff to main. If your details are not in a REPORT file yet, write them to the REPORT path your packet names (or its _evidence folder) first. Then reply with only the four lines: STATUS, NEXT, RISKS, EVIDENCE. Do not start new work.";
+export const HANDOFF_NUDGE = "Your reply ended without the final handoff to main. If your details are not in a REPORT file yet, write them to the REPORT path your packet names (or its _evidence folder) first. Then reply with only the four lines: STATUS, NEXT, RISKS, EVIDENCE. Start STATUS with PASS, FAIL, INCONCLUSIVE, BLOCKED or ESCALATE. Do not start new work.";
 export function needsHandoffNudge(messages: readonly unknown[]): boolean {
 	const last = [...(messages ?? [])].reverse().find((m: any) => m?.role === "assistant") as any;
 	if (!last || last.stopReason !== "stop") return false; // errors, aborts, length cut-offs and tool turns are handled elsewhere
 	const text = Array.isArray(last.content) ? last.content.filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "")).join("\n") : String(last.content ?? "");
-	return !/^\s*STATUS\s*:/im.test(text);
+	return !/^[ \t]*STATUS[ \t]*:[ \t]*(?:PASS|FAIL|INCONCLUSIVE|BLOCKED|ESCALATE)\b/im.test(text)
+		|| !/^[ \t]*EVIDENCE[ \t]*:[ \t]*\S/im.test(text);
 }
