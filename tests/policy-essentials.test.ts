@@ -389,3 +389,12 @@ test("stale docs keep the code verdict and go to technical-writer through NEXT; 
 	for (const role of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) assert.ok(flat(read(`agent/agents/${role}.md`)).includes("keep the STATUS your code checks support"), role);
 	assert.ok(flat(read("agent/agents/scout.md")).includes("Inspect only task-relevant paths and preserve candidate boundaries."));
 });
+
+// Review of the reuse PR: an out-of-scope caller is a follow-up for main, not a blocker, and a partial extraction is refused; the
+// general "create no file" rule names the extraction's shared module as needed, so the two rules do not conflict.
+test("rule of three: out-of-scope callers go to NEXT, no partial extraction, and the shared module counts as needed", () => {
+	const rules = flat(read("agent/shared/worker-rules.md"));
+	assert.ok(rules.includes("When a caller that would need migrating is outside your scope, do not extract part of the way (that leaves one more variant): finish your change in scope, keep the STATUS your checks support, and put the proposed helper and the out-of-scope callers in NEXT for main."));
+	assert.ok(!/required migration outside scope, return BLOCKED/.test(rules));
+	assert.ok(flat(read("agent/extensions/subagent/code-integrations.ts")).includes("prefer editing existing files. A shared module that an extraction under your worker rules requires is needed."));
+});
