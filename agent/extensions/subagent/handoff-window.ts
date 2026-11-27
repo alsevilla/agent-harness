@@ -475,8 +475,10 @@ function renderCheckpoint(entries: string[]): string {
 	const kept = entries.slice();
 	let text = [CHECKPOINT_HEAD, ...kept].join("\n");
 	// Over the cap: discard the oldest observations first. User messages are stored separately.
+	// A result whose NEXT still asks for work (a technical-writer correction after a PASS, say) is kept: a PASS can carry a handoff.
 	for (let i = 0; text.length > CHECKPOINT_MAX && i < kept.length - 1; i++) {
-		kept[i] = "- Earlier exchange: [… notes folded]";
+		const pending = kept[i].split("\n").filter((line) => { const next = /^ {2}Result: .*? \| NEXT (.*?) \| /.exec(line)?.[1]; return next !== undefined && !/^done\b/i.test(next.trim()); });
+		kept[i] = ["- Earlier exchange: [… notes folded]", ...pending].join("\n");
 		text = [CHECKPOINT_HEAD, ...kept].join("\n");
 	}
 	return text.length > CHECKPOINT_MAX ? `${text.slice(0, CHECKPOINT_MAX)} [… older turns folded]` : text;

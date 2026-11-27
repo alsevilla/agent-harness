@@ -255,17 +255,21 @@ test("reported risks survive repeated folds even when old checkpoint notes excee
 });
 
 test("a required writer handoff survives when older exchange notes are discarded", async () => {
-	const request = setup({});
-	const [launch, report] = launched("docs", 1);
-	const next = "NEXT: technical-writer update README.md to use --output";
-	report.content[0].text = `STATUS: BLOCKED - code checks passed\n${next}\nRISKS: none\nEVIDENCE: /w/_evidence/t1/REPORT.md`;
-	const history = [user("Change the CLI."), launch, report];
-	for (let n = 0; n < 110; n++) history.push(user("Continue."), reply("notes ".repeat(100)));
-	history.push(user("Finish."));
-	requestMainFold();
-	const checkpoint = (await request(history)).find((m) => m.customType === CHECKPOINT_TYPE);
-	assert.ok(checkpoint?.content.includes("notes folded"));
-	assert.ok(checkpoint.content.includes(next));
+	// A PASS can carry a handoff: a worker whose code checks passed names the technical-writer correction in NEXT (a non-PASS STATUS
+	// would stop a shape chain before QA and review). Folding keeps that result; a PASS whose NEXT is done is folded like any note.
+	for (const [next, kept] of [["NEXT: technical-writer update README.md to use --output", true], ["NEXT: done", false]] as const) {
+		const request = setup({});
+		const [launch, report] = launched("docs", 1);
+		report.content[0].text = `STATUS: PASS - code checks passed\n${next}\nRISKS: none\nEVIDENCE: /w/_evidence/t1/REPORT.md`;
+		const history = [user("Change the CLI."), launch, report];
+		for (let n = 0; n < 110; n++) history.push(user("Continue."), reply("notes ".repeat(100)));
+		history.push(user("Finish."));
+		requestMainFold();
+		const checkpoint = (await request(history)).find((m) => m.customType === CHECKPOINT_TYPE);
+		assert.ok(checkpoint?.content.includes("notes folded"));
+		assert.equal(checkpoint.content.includes("STATUS PASS - code checks passed"), kept, next);
+		if (kept) assert.ok(checkpoint.content.includes("NEXT technical-writer update README.md to use --output"));
+	}
 });
 
 // Pi also writes a branchSummary after /tree navigation with a summary; like a compaction summary, a fold must not drop it.

@@ -379,3 +379,13 @@ test("PR check wait: an empty first answer is retried within a bound, and errors
 	at("is reported as that error, quoted, not as missing checks, and is not retried as an empty answer");
 	assert.ok(!ship.includes('A repository without checks is reported as "no checks configured"'), "the old verdict is gone");
 });
+
+// Review of the reuse PR: a stale README is a docs handoff, not a blocker. A non-PASS STATUS stops a shape chain (shape.ts) before QA
+// and review run, so the worker keeps its code verdict and names the technical-writer correction in NEXT.
+test("stale docs keep the code verdict and go to technical-writer through NEXT; scout keeps its scope limit", () => {
+	const rules = flat(read("agent/shared/worker-rules.md"));
+	assert.ok(rules.includes("For stale or missing instructions, keep the STATUS your code checks support and put `technical-writer`, the page and the correction in NEXT; main routes it before delivery"));
+	assert.ok(!/stale or missing instructions, return BLOCKED/.test(rules));
+	for (const role of ["backend-worker", "database-worker", "frontend-worker", "general-worker", "platform-worker"]) assert.ok(flat(read(`agent/agents/${role}.md`)).includes("keep the STATUS your code checks support"), role);
+	assert.ok(flat(read("agent/agents/scout.md")).includes("Inspect only task-relevant paths and preserve candidate boundaries."));
+});

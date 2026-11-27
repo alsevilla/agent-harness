@@ -64,7 +64,7 @@ Main forwards verified findings to the worker who needs them. Selective sharing 
 - The three Copilot hooks share a size-limited JSON reader. Each hook owns its field validation and exit status. [Parnas, CACM 1972](https://doi.org/10.1145/361598.361623)
 - When error handling changes, trigger the failure and verify the resulting state. For example, check that a failed save leaves the previous value readable when the contract requires it. [Yuan et al., OSDI 2014](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan)
 - When changing a stored format, test the reader or migration against data from a supported earlier version. [Understanding and Detecting Software Upgrade Failures in Distributed Systems, SOSP 2021](https://yonglezh-purdue.github.io/files/sosp21-upgrade.pdf)
-- For stale instructions, return BLOCKED and name the page and tested correction in NEXT. Main routes the edit to `technical-writer` for the same candidate.
+- For stale instructions, keep the STATUS the code checks support and name `technical-writer`, the page and tested correction in NEXT. Main routes the edit to `technical-writer` for the same candidate before delivery.
 
 A study of AI-generated PRs measured how often code and docs changed together. That measure cannot tell which changes needed documentation. A separate study found stale code references that persisted for years. [Documentation Drift in AI-Generated Pull Requests](https://arxiv.org/abs/2610.27381) · [Detecting outdated code element references in software repository documentation](https://doi.org/10.1007/s10664-023-10397-6)
 
